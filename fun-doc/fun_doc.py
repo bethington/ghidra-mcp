@@ -1064,6 +1064,11 @@ _STATE_DIRECT_FIELDS = (
     "name_source",
     "name_source_binary",
     "name_confidence",
+    # OpenD2 conformance port pipeline (Sec 14 of EMULATION_CONFORMANCE_PLAN.md)
+    "port_status",
+    "port_attempts",
+    "port_draft_path",
+    "port_last_result",
 )
 
 
@@ -7168,6 +7173,27 @@ def process_function(
         }
         _append_run_log(entry)
 
+        # DOC-axis write-back (opt-in, NON-FATAL): on a completed function-doc
+        # run, stamp the Ghidra DOC_ maturity rung from the score, so the DOC
+        # axis auto-advances like CONF_ does on live proofs (writeback-source-of-
+        # truth). Mutually exclusive rungs handled by set_doc_level. Gated by
+        # FUNDOC_DOC_TAGS=1 so existing runs are unaffected. See the D2MOO
+        # conformance/CONFORMANCE_TAXONOMY.md.
+        if (os.environ.get("FUNDOC_DOC_TAGS") == "1" and mode == "functions"
+                and logged_result == "completed"):
+            try:
+                import port_live_prove as _plp
+                from pathlib import Path as _P
+                if audit_score_after is not None and audit_score_after >= 95:
+                    _lvl = "DOC_VERIFIED"   # cleared the verify/audit pass
+                elif final_score is not None and final_score >= 80:
+                    _lvl = "DOC_REVIEWED"   # good_enough documentation
+                else:
+                    _lvl = "DOC_DRAFT"      # first-pass, below threshold
+                _plp.set_doc_level(address, _lvl, program=_P(program).name)
+            except Exception:
+                pass
+
     def _finish(
         return_value, *, logged_result=None, score_after=None, reason=None, error=None
     ):
@@ -9936,6 +9962,292 @@ def run_globals_worker_pass(
                 "count_reached" if processed >= count else "exhausted"
             )
     summary["processed"] = processed
+    return summary
+
+
+# ============================================================================
+# OpenD2 conformance port pipeline -- Stage 2 ("port") + Stage 3 ("prove") of
+# the document -> port -> prove pipeline (OpenD2/docs/EMULATION_CONFORMANCE_
+# PLAN.md Sec 14). Stage 1 (document) is the existing worker above. These two
+# functions are the analog of process_global/run_globals_worker_pass for the
+# PORT worker mode -- see web.py's WorkerManager._run_worker_port.
+#
+# Scope note: reuses "FULL" mode's configured model per provider rather than
+# introducing a distinct "PORT" model-mode key across SUPPORTED_MODEL_MODES/
+# priority_queue.json's provider_models schema -- a reasonable simplification
+# for this Phase-1 rollout, revisit if PORT-specific model tuning is wanted.
+# ============================================================================
+
+def process_port_candidate(program, address, func_name, *, provider, model=None,
+                            max_turns=15, worker_id=None, max_fix_attempts=3):
+    """Stage 2/3 worker for ONE function: classify -> draft -> mint vectors
+    -> prove (bounded retry on harness failure). `address` is bare hex (no
+    0x prefix), matching fun_doc's function-state key convention.
+
+    Returns one of:
+        "proven_pending_review" -- harness passed; staged in OpenD2's
+                                    Tools/d2conform/_generated_candidates/,
+                                    NOT auto-merged into Shared/, NOT
+                                    committed -- a human reviews and
+                                    promotes it.
+        "harness_failed"        -- exhausted retries, still failing.
+        "stateful_skip"         -- classify_function said "stateful" (out
+                                    of Phase 1 scope -- needs the live-trace
+                                    oracle via the manual d2-port-function
+                                    skill instead). No LLM call made.
+        "unknown_skip"          -- decompile fetch failed.
+        "malformed_response"    -- provider never returned parseable blocks.
+        "no_vectors"            -- /emulate_function couldn't mint any
+                                    vectors from the model's proposed layout.
+        "blocked"               -- quota pause / provider error.
+
+    Always appends one row to runs.jsonl with mode="port". Persists
+    port_status/port_attempts/port_draft_path/port_last_result via
+    update_function_state.
+    """
+    import port_pipeline as pp
+
+    run_id = str(uuid.uuid4())[:8]
+    started_at = datetime.now()
+    key = f"{program}::{address}"
+    prog_name = Path(program).name
+
+    def _log(result, **extra):
+        _append_run_log({
+            "run_id": run_id, "timestamp": started_at.isoformat(),
+            "worker_id": worker_id, "mode": "port",
+            "program": program, "address": address, "name": func_name,
+            "provider": provider, "model": model, "result": result,
+            **extra,
+        })
+
+    decompiled = ghidra_get(
+        "/decompile_function", params={"address": f"0x{address}", "program": program}
+    )
+    if not decompiled or _is_error_response(decompiled):
+        update_function_state(key, {"port_status": "unknown_skip",
+                                     "port_last_result": "decompile fetch failed"})
+        _log("unknown_skip")
+        return "unknown_skip"
+
+    classification = pp.classify_function(decompiled)
+    if classification != "leaf":
+        # Phase 1 scope: stateful functions need the live-trace/in-process
+        # oracle, which isn't reliably automatable yet (WOW64 hardening in
+        # progress) -- leave these to the manual d2-port-function skill.
+        update_function_state(key, {"port_status": "stateful_skip"})
+        _log("stateful_skip", classification=classification)
+        return "stateful_skip"
+
+    if not model:
+        try:
+            model = get_configured_model(provider, "FULL")
+        except Exception:
+            model = None
+
+    bus_emit("port_drafted", {
+        "key": key, "name": func_name, "address": address,
+        "program": prog_name, "program_path": program, "status": "drafting",
+    })
+
+    prompt = pp.build_port_prompt(func_name, address, program, decompiled)
+    text, meta = invoke_claude(
+        prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
+    )
+
+    if (meta or {}).get("quota_paused"):
+        update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
+        _log("blocked", reason="quota_paused")
+        return "blocked"
+
+    header, dispatch, spec = pp.parse_port_response_full(text or "")
+    if not header:
+        update_function_state(key, {
+            "port_status": "malformed_response", "port_attempts": 1,
+            "port_last_result": "no parseable code blocks in provider response",
+        })
+        _log("malformed_response")
+        return "malformed_response"
+
+    module = Path(program).stem
+    symbol = spec["fn"]
+    vectors, mint_errors = pp.mint_vectors(
+        program, address, spec["fn"], spec["param_layout"], spec["input_sets"]
+    )
+    if not vectors:
+        update_function_state(key, {
+            "port_status": "no_vectors",
+            "port_last_result": "; ".join(mint_errors[:3]) or "no vectors minted",
+        })
+        _log("no_vectors", errors=mint_errors[:10])
+        return "no_vectors"
+
+    bus_emit("port_vectors_minted", {
+        "key": key, "name": func_name, "count": len(vectors), "errors": len(mint_errors),
+    })
+
+    system_name = pp.pascal_to_snake_case(symbol)
+    pp.write_pending_vectors(system_name, vectors)
+
+    draft_paths = pp.write_draft(module, symbol, header, dispatch, vectors)
+    harness = pp.run_harness()
+    attempts = 1
+
+    while not harness["ok"] and attempts < max_fix_attempts:
+        fix_prompt = pp.build_port_fix_prompt(
+            func_name, address, program, decompiled, header, dispatch, harness["output"]
+        )
+        text, meta = invoke_claude(
+            fix_prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
+        )
+        if (meta or {}).get("quota_paused"):
+            update_function_state(key, {
+                "port_status": "blocked", "port_attempts": attempts,
+                "port_last_result": "quota_paused mid-retry",
+            })
+            _log("blocked", reason="quota_paused_retry", attempts=attempts)
+            return "blocked"
+
+        new_header, new_dispatch = pp.parse_port_response(text or "")
+        if not new_header:
+            break  # malformed fix response -- stop retrying, report the last real harness result
+        header, dispatch = new_header, new_dispatch
+        draft_paths = pp.write_draft(module, symbol, header, dispatch, vectors)
+        harness = pp.run_harness(configure=False)
+        attempts += 1
+
+    bus_emit("port_harness_result", {
+        "key": key, "name": func_name, "ok": harness["ok"],
+        "passed": harness["passed"], "total": harness["total"], "attempts": attempts,
+    })
+
+    # WS-6b: OPT-IN live proof against the running game (D2MOO's D2Debugger
+    # oracle on :8790, GRADUATED_CONFORMANCE_PIPELINE_PLAN.md). This is strictly
+    # STRONGER than the static /emulate_function harness (real function, real
+    # process) but ADDITIVE and NON-FATAL: it never downgrades a statically
+    # proven candidate -- it only stamps `port_live_status` (proven_live /
+    # live_prove_failed / unsupported_abi / error / skipped). Gated by
+    # FUNDOC_LIVE_PROVE=1 so existing OpenD2 static runs are unaffected.
+    live_status = "skipped"
+    if harness["ok"] and os.environ.get("FUNDOC_LIVE_PROVE") == "1":
+        plp = None
+        try:
+            import port_live_prove as plp
+        except Exception as e:  # module/env not available -- never fail the candidate
+            _log("live_prove_skip", reason=f"import failed: {e}")
+        if plp is not None:
+            try:
+                live = plp.run_live_prove(
+                    header, symbol, address, spec["param_layout"], spec["input_sets"]
+                )
+                live_status = "proven_live" if live["ok"] else "live_prove_failed"
+                bus_emit("port_live_prove_result", {
+                    "key": key, "name": func_name, "ok": live["ok"],
+                    "passed": live.get("passed"), "total": live.get("total"),
+                })
+                _log("live_prove", ok=live["ok"], passed=live.get("passed"),
+                     total=live.get("total"), output=(live.get("output") or "")[-1000:])
+            except plp.UnsupportedLiveABI as e:
+                live_status = "unsupported_abi"
+                _log("live_prove_skip", reason=str(e))
+            except Exception as e:
+                live_status = "error"
+                _log("live_prove_error", error=str(e))
+
+    if harness["ok"]:
+        update_function_state(key, {
+            "port_status": "proven_pending_review", "port_attempts": attempts,
+            "port_draft_path": draft_paths["header_path"],
+            "port_last_result": f"{harness['passed']}/{harness['total']} passed",
+            "port_live_status": live_status,
+        })
+        bus_emit("port_proven_pending_review", {
+            "key": key, "name": func_name, "header_path": draft_paths["header_path"],
+        })
+        _log("proven_pending_review", attempts=attempts,
+             passed=harness["passed"], total=harness["total"])
+        return "proven_pending_review"
+
+    update_function_state(key, {
+        "port_status": "harness_failed", "port_attempts": attempts,
+        "port_draft_path": draft_paths["header_path"],
+        "port_last_result": (harness["output"] or "")[-500:],
+    })
+    _log("harness_failed", attempts=attempts, output=(harness["output"] or "")[-2000:])
+    return "harness_failed"
+
+
+def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
+                          stop_flag, conformance_protected=None,
+                          on_progress=None, on_started=None):
+    """Orchestrate a PORT worker run: processes up to `count` Stage-2/3
+    candidates on `active_binary`. Unlike the globals worker, PORT does NOT
+    rotate across binaries -- EMULATION_CONFORMANCE_PLAN.md Sec 15 is
+    explicit that porting proceeds one binary at a time (D2Common first),
+    so a drained/empty binary just ends the run rather than picking a new
+    target. Returns a summary dict for the caller to log/emit.
+
+    `stop_flag` is a threading.Event the WorkerManager sets to interrupt.
+    `on_progress` is invoked after each candidate with
+        (program, address, result, processed, count).
+    `on_started` is invoked before each candidate with (program, address, name).
+    """
+    import port_pipeline as pp
+
+    summary = {"processed": 0, "totals": {}, "stopped_reason": None}
+    if conformance_protected is None:
+        conformance_protected = load_conformance_protected()
+
+    state = load_state()
+    # Over-fetch: some candidates skip as "stateful" without counting toward
+    # `count`, so a tight limit could starve the loop before it finds enough
+    # real (leaf) work.
+    candidates = pp.select_port_candidates(
+        state["functions"], conformance_protected, active_binary=active_binary,
+        limit=max(count, 1) * 5,
+    )
+    if not candidates:
+        summary["stopped_reason"] = "no_eligible_candidates"
+        return summary
+
+    processed = 0
+    for cand in candidates:
+        if stop_flag.is_set():
+            summary["stopped_reason"] = "user_stop"
+            break
+        if processed >= count:
+            summary["stopped_reason"] = "count_reached"
+            break
+
+        func = cand["func"]
+        program = cand["program"]
+        address = func.get("address")
+        func_name = func.get("name") or f"FUN_{address}"
+
+        if on_started:
+            try:
+                on_started(program, address, func_name)
+            except Exception:
+                pass
+
+        result = process_port_candidate(
+            program, address, func_name, provider=provider, model=model, worker_id=worker_id
+        )
+        summary["totals"][result] = summary["totals"].get(result, 0) + 1
+        if result != "stateful_skip":
+            processed += 1
+        if on_progress:
+            try:
+                on_progress(program, address, result, processed, count)
+            except Exception:
+                pass
+        if result == "blocked":
+            summary["stopped_reason"] = "blocked"
+            break
+
+    summary["processed"] = processed
+    if summary["stopped_reason"] is None:
+        summary["stopped_reason"] = "count_reached" if processed >= count else "exhausted"
     return summary
 
 
