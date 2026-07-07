@@ -264,6 +264,8 @@ def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
     spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
     res = _invoke_prove(spec_path, build=build)
+    res["spec"] = spec  # additive: lets a caller (e.g. shadow_promote.py) classify
+                        # the ABI shape without recomputing translate_layout_to_spec
     if res.get("ok"):
         # Write-back to the source of truth on every successful proof.
         res["writeback"] = record_proof(name, address, spec, res)

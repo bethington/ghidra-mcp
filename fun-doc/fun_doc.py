@@ -10129,6 +10129,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     # live_prove_failed / unsupported_abi / error / skipped). Gated by
     # FUNDOC_LIVE_PROVE=1 so existing OpenD2 static runs are unaffected.
     live_status = "skipped"
+    oracle_spec = None
     if harness["ok"] and os.environ.get("FUNDOC_LIVE_PROVE") == "1":
         plp = None
         try:
@@ -10140,6 +10141,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 live = plp.run_live_prove(
                     header, symbol, address, spec["param_layout"], spec["input_sets"]
                 )
+                oracle_spec = live.get("spec")  # for shadow_promote.py below (WS-6c)
                 live_status = "proven_live" if live["ok"] else "live_prove_failed"
                 bus_emit("port_live_prove_result", {
                     "key": key, "name": func_name, "ok": live["ok"],
@@ -10154,12 +10156,39 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 live_status = "error"
                 _log("live_prove_error", error=str(e))
 
+    # WS-6c: OPT-IN shadow-dispatcher promotion (D2COMMON_FULL_SHADOW_PLAN.md).
+    # A function that just passed CONF_LIVE (the one-shot oracle proof above) can
+    # be staged as a live SHADOW DISPATCHER -- compared against EVERY real call
+    # the game makes, at volume, on the path to CONF_BATTLETESTED (closed out by
+    # battletest_promoter.py watching the shadow counters separately). Additive
+    # and non-fatal, same contract as the live-prove gate above: never downgrades
+    # or fails the candidate. Gated by FUNDOC_SHADOW_PROMOTE=1 so it never runs
+    # unless explicitly enabled. Only STAGES (manifest + regenerated header) --
+    # building D2Common.dll and restarting the game is a separate, explicit,
+    # batched step so this loop can never kill the user's running game.
+    shadow_status = "skipped"
+    if (live_status == "proven_live" and oracle_spec is not None
+            and os.environ.get("FUNDOC_SHADOW_PROMOTE") == "1"):
+        try:
+            import shadow_promote as sp
+            promo = sp.maybe_promote(func_name, address, oracle_spec, decompiled)
+            shadow_status = "staged" if promo.get("promoted") else f"deferred: {promo.get('reason')}"
+            bus_emit("shadow_promote_result", {
+                "key": key, "name": func_name, "promoted": promo.get("promoted"),
+                "reason": promo.get("reason"),
+            })
+            _log("shadow_promote", **promo)
+        except Exception as e:  # never fail the candidate over a promotion bug
+            shadow_status = f"error: {e}"
+            _log("shadow_promote_error", error=str(e))
+
     if harness["ok"]:
         update_function_state(key, {
             "port_status": "proven_pending_review", "port_attempts": attempts,
             "port_draft_path": draft_paths["header_path"],
             "port_last_result": f"{harness['passed']}/{harness['total']} passed",
             "port_live_status": live_status,
+            "port_shadow_status": shadow_status,
         })
         bus_emit("port_proven_pending_review", {
             "key": key, "name": func_name, "header_path": draft_paths["header_path"],
@@ -10179,46 +10208,63 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
 
 def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                           stop_flag, conformance_protected=None,
-                          on_progress=None, on_started=None):
-    """Orchestrate a PORT worker run: processes up to `count` Stage-2/3
-    candidates on `active_binary`. Unlike the globals worker, PORT does NOT
-    rotate across binaries -- EMULATION_CONFORMANCE_PLAN.md Sec 15 is
-    explicit that porting proceeds one binary at a time (D2Common first),
-    so a drained/empty binary just ends the run rather than picking a new
-    target. Returns a summary dict for the caller to log/emit.
+                          on_progress=None, on_started=None,
+                          continuous=False, poll_interval=30, battletest_poll=None):
+    """Orchestrate a PORT worker run: processes Stage-2/3 candidates on
+    `active_binary`. Unlike the globals worker, PORT does NOT rotate across
+    binaries -- EMULATION_CONFORMANCE_PLAN.md Sec 15 is explicit that porting
+    proceeds one binary at a time (D2Common first), so a drained/empty binary
+    just ends the run rather than picking a new target (unless `continuous`).
+    Returns a summary dict for the caller to log/emit.
 
     `stop_flag` is a threading.Event the WorkerManager sets to interrupt.
     `on_progress` is invoked after each candidate with
         (program, address, result, processed, count).
     `on_started` is invoked before each candidate with (program, address, name).
+
+    `continuous` (default False, matching the existing one-shot behavior
+    exactly): when True, mirrors the functions-mode worker's continuous loop
+    (`while not stop_flag.is_set() and (continuous or processed < count)`) --
+    `count` is ignored as a stop condition and the pass keeps re-selecting
+    candidates (freshly, via `load_state()`, so newly-available/newly-promoted
+    functions are picked up) until `stop_flag` is set. When the candidate pool
+    is momentarily empty, it sleeps in 1s increments (stop_flag-responsive) up
+    to `poll_interval` seconds before re-checking, rather than busy-looping.
+    This is "the workers pick up a function... shadow the original... move to
+    the next" loop -- see D2COMMON_FULL_SHADOW_PLAN.md and shadow_promote.py.
+
+    `battletest_poll` (default: mirrors `continuous`): best-effort, non-fatal
+    call to battletest_promoter.poll_and_promote() once per outer iteration --
+    the "shadow the original function to verify it" half of the loop that
+    watches ALREADY-STAGED shadow dispatchers for real-gameplay zero-divergence
+    evidence and promotes CONF_LIVE -> CONF_BATTLETESTED. Independent of
+    FUNDOC_SHADOW_PROMOTE (which only STAGES new dispatchers); this just polls
+    counters on ones already deployed, so it's safe to enable even before a
+    human has built+deployed a shadow-dispatcher batch (it simply finds
+    nothing to promote yet).
     """
     import port_pipeline as pp
+
+    if battletest_poll is None:
+        battletest_poll = continuous
 
     summary = {"processed": 0, "totals": {}, "stopped_reason": None}
     if conformance_protected is None:
         conformance_protected = load_conformance_protected()
 
-    state = load_state()
-    # Over-fetch: some candidates skip as "stateful" without counting toward
-    # `count`, so a tight limit could starve the loop before it finds enough
-    # real (leaf) work.
-    candidates = pp.select_port_candidates(
-        state["functions"], conformance_protected, active_binary=active_binary,
-        limit=max(count, 1) * 5,
-    )
-    if not candidates:
-        summary["stopped_reason"] = "no_eligible_candidates"
-        return summary
+    def _poll_battletest():
+        if not battletest_poll:
+            return
+        try:
+            import battletest_promoter as btp
+            result = btp.poll_and_promote()
+            if result.get("promoted"):
+                bus_emit("battletest_promoted", {"promoted": result["promoted"]})
+                _log("battletest_promoted", **result)
+        except Exception as e:  # never fail the worker pass over this
+            _log("battletest_promote_error", error=str(e))
 
-    processed = 0
-    for cand in candidates:
-        if stop_flag.is_set():
-            summary["stopped_reason"] = "user_stop"
-            break
-        if processed >= count:
-            summary["stopped_reason"] = "count_reached"
-            break
-
+    def _process_one(cand, processed):
         func = cand["func"]
         program = cand["program"]
         address = func.get("address")
@@ -10241,13 +10287,77 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 on_progress(program, address, result, processed, count)
             except Exception:
                 pass
-        if result == "blocked":
-            summary["stopped_reason"] = "blocked"
+        return result, processed
+
+    processed = 0
+
+    if not continuous:
+        # Existing bounded behavior, UNCHANGED (zero risk to current callers).
+        state = load_state()
+        # Over-fetch: some candidates skip as "stateful" without counting
+        # toward `count`, so a tight limit could starve the loop before it
+        # finds enough real (leaf) work.
+        candidates = pp.select_port_candidates(
+            state["functions"], conformance_protected, active_binary=active_binary,
+            limit=max(count, 1) * 5,
+        )
+        if not candidates:
+            summary["stopped_reason"] = "no_eligible_candidates"
+            return summary
+
+        for cand in candidates:
+            if stop_flag.is_set():
+                summary["stopped_reason"] = "user_stop"
+                break
+            if processed >= count:
+                summary["stopped_reason"] = "count_reached"
+                break
+            result, processed = _process_one(cand, processed)
+            if result == "blocked":
+                summary["stopped_reason"] = "blocked"
+                break
+
+        summary["processed"] = processed
+        if summary["stopped_reason"] is None:
+            summary["stopped_reason"] = "count_reached" if processed >= count else "exhausted"
+        return summary
+
+    # Continuous mode: re-select candidates each time the pool is drained;
+    # sleep (stop_flag-responsive) rather than exit when nothing is eligible
+    # right now (e.g. everything already staged, waiting on a shadow batch).
+    while not stop_flag.is_set():
+        state = load_state()
+        candidates = pp.select_port_candidates(
+            state["functions"], conformance_protected, active_binary=active_binary,
+            limit=50,
+        )
+        if not candidates:
+            _poll_battletest()
+            for _ in range(poll_interval):
+                if stop_flag.is_set():
+                    break
+                time.sleep(1)
+            continue
+
+        drained_this_round = True
+        for cand in candidates:
+            if stop_flag.is_set():
+                summary["stopped_reason"] = "user_stop"
+                break
+            result, processed = _process_one(cand, processed)
+            if result == "blocked":
+                summary["stopped_reason"] = "blocked"
+                drained_this_round = False
+                break
+        _poll_battletest()
+        if summary["stopped_reason"] in ("user_stop", "blocked"):
+            break
+        if not drained_this_round:
             break
 
     summary["processed"] = processed
     if summary["stopped_reason"] is None:
-        summary["stopped_reason"] = "count_reached" if processed >= count else "exhausted"
+        summary["stopped_reason"] = "stop_flag"
     return summary
 
 
