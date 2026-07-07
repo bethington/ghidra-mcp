@@ -43,6 +43,8 @@ CANDIDATES_DIR = D2MOO_REPO / "conformance" / "reimpl_provider" / "candidates"
 VECTORS_DIR = D2MOO_REPO / "conformance" / "vectors"
 PROVE_SCRIPT = D2MOO_REPO / "conformance" / "tools" / "prove_candidate.py"
 PROVEN_REGISTRY = D2MOO_REPO / "conformance" / "proven_functions.jsonl"
+RESOLVE_TABLE = D2MOO_REPO / "D2.Detours.patches" / "1.13c" / "D2Common_ResolveTable.gen.h"
+LIVE_EXAMPLE = CANDIDATES_DIR / "datatable_rowcount.cpp"  # proven resolver-based reimpl
 ORACLE_URL = os.environ.get("D2DBG_MCP_URL", "http://127.0.0.1:8790")
 # Ghidra plugin REST server (same one port_pipeline.py uses) -- source of truth
 # for the RE. Every proof writes back here (writeback-source-of-truth principle).
@@ -58,7 +60,12 @@ class UnsupportedLiveABI(Exception):
 
 
 def _int(v) -> int:
-    return int(str(v), 0) if isinstance(v, str) else int(v)
+    if not isinstance(v, str):
+        return int(v)
+    try:
+        return int(v, 0)          # "0x1a4" / "123"
+    except ValueError:
+        return int(v, 16)         # bare hex "6fd51250" (fun_doc's address convention)
 
 
 def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
@@ -120,6 +127,181 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
 
 def _fail(stage: str, msg: str, output: str = "") -> dict:
     return {"ok": False, "passed": 0, "total": 0, "stage": stage, "error": msg, "output": output}
+
+
+# ---------------------------------------------------------------------------
+# LIVE-path drafting: a resolver-based D2MOO reimpl for a "global_leaf" function
+# (reads named game globals -> not statically provable, but provable LIVE because
+# the running game has the globals populated). classify_function tags these
+# "global_leaf"; process_port_candidate routes them here instead of the static
+# OpenD2 harness. The reimpl reads globals BY NAME via D2MOO_Resolve (the injected
+# verified-address resolver), exactly like the proven datatable_rowcount.cpp.
+# ---------------------------------------------------------------------------
+_GLOBAL_NAME_RE = re.compile(r'"(g_[A-Za-z_]\w*)"')
+
+
+def resolvable_globals() -> list:
+    """The g_* global names D2MOO_Resolve knows (from the generated resolve
+    table). A live reimpl may only reference these; anything else must be added
+    to conformance/tools/gen_resolve_table.py first."""
+    try:
+        text = RESOLVE_TABLE.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return sorted(set(_GLOBAL_NAME_RE.findall(text)))
+
+
+def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> str:
+    globals_list = resolvable_globals()
+    try:
+        example = LIVE_EXAMPLE.read_text(encoding="utf-8")
+    except OSError:
+        example = "(example unavailable)"
+    addr = f"0x{_int(address):x}"
+    parts = []
+    parts.append(
+        "OUTPUT CONTRACT (a machine parses your reply; a human never sees it): reply with "
+        "EXACTLY TWO fenced blocks and nothing that matters outside them -- BLOCK 1 ```cpp (the "
+        "reimpl), BLOCK 2 ```json (the register layout + input_sets). Tag them literally ```cpp "
+        "and ```json. No third block, no split code blocks, no trailing prose.")
+    parts.append("")
+    parts.append("## Task: reimplement a Diablo II function for LIVE conformance proving")
+    parts.append(
+        "You are writing a D2MOO 'reimpl provider' version of this Ghidra-analyzed PD2-S12 function. "
+        "It will be PROVEN by calling BOTH the ORIGINAL (in the live running game) and YOUR reimpl "
+        "with identical inputs and comparing results -- so it must reproduce the decompiled algorithm "
+        "EXACTLY (every offset, magic constant, integer width, and edge case).")
+    parts.append(
+        "This function reads GLOBAL game state, so it cannot be proven statically. Your reimpl must "
+        "read the SAME global from the running game via the injected resolver D2MOO_Resolve -- NOT a "
+        "hardcoded address, NOT an extern.")
+    parts.append("")
+    parts.append(f"Function: {func_name} at {addr}   (D2Common.dll)")
+    parts.append("")
+    parts.append("## Decompiled source (the spec -- includes the plate comment)")
+    parts.append("```")
+    parts.append(str(decompiled_text))
+    parts.append("```")
+    parts.append("")
+    parts.append("## REQUIRED reimpl shape")
+    parts.append(
+        "- `#include \"../provider_runtime.h\"` and a `// D2MOO_REIMPL_EXPORT: " + func_name + "` marker.\n"
+        "- `extern \"C\"` with the right return type + calling convention (see below) + integer widths.\n"
+        "- Resolve each global by NAME. Ghidra's `_g_Foo` resolves as `\"g_Foo\"` (drop a leading "
+        "underscore). D2MOO_Resolve ALWAYS returns the ADDRESS OF THE SYMBOL (i.e. &g_Foo).\n"
+        "- MECHANICAL RULE for using a resolved global -- do EXACTLY this, do not improvise extra "
+        "dereferences:\n"
+        "    STEP 1: compute a base pointer ONCE at the top of the function.\n"
+        "       * If the symbol is a POINTER VARIABLE (name starts `g_p`, or Ghidra types it `T*`): the "
+        "decompile's bare `_g_pFoo` is the pointer's VALUE, so deref the resolved address ONCE:\n"
+        "           `char* base = (char*)*(void**)D2MOO_Resolve(\"g_pFoo\");`\n"
+        "       * Otherwise (data/array/struct base: `g_dw`, `g_an`, `g_<Struct>`): use the return directly:\n"
+        "           `char* base = (char*)D2MOO_Resolve(\"g_dwFoo\");`\n"
+        "    STEP 2: translate the decompile LITERALLY, replacing every `_g_Foo` with `base` and keeping "
+        "each cast/offset EXACTLY as written. `*(int *)(_g_pFoo + 0xNN)` -> `*(int*)(base + 0xNN)`; "
+        "`*(int *)(_g_pFoo + 0xMM)` -> `*(int*)(base + 0xMM)`. Add NO dereference beyond the single one in "
+        "STEP 1, and remove none. Guard null: if the resolve (or the deref) is null, return an obvious "
+        "wrong-value sentinel.\n"
+        "  (Tell for getting STEP 1 wrong: the proof matches on out-of-range/negative inputs but FAILS on "
+        "valid ones.)\n"
+        "- If D2MOO_Resolve returns null (resolver missing), return an obvious wrong-value sentinel so a "
+        "misconfig fails loudly rather than matching by accident.\n"
+        "- Read-only: never mutate global state. No STL. Plain C-ish C++.\n"
+        "- NEVER call a compiler-internal helper (__alldiv/__aulldiv/__allmul/...) by name -- write the "
+        "plain operator on the correct fixed-width type and let the compiler emit it.\n"
+        "- CALLING CONVENTION: if EVERY input is on the stack, declare it `__stdcall`; if ANY input is in "
+        "a register (the plate says e.g. 'passed in EAX/ECX/ESI'), declare it `__fastcall` and list the "
+        "parameters in logical order. The prover marshals the original's real (possibly non-standard) "
+        "register ABI for you -- you only need your reimpl's declared convention to match this rule.")
+    parts.append("")
+    parts.append("Resolvable global names (use ONLY these; if you need one not listed, put a `// NEEDS "
+                 "GLOBAL: <name>` comment and it will be skipped until added):")
+    parts.append(", ".join(globals_list) or "(none found)")
+    parts.append("")
+    parts.append("## Example -- a PROVEN reimpl of exactly this resolver-based shape")
+    parts.append("```cpp")
+    parts.append(example)
+    parts.append("```")
+    parts.append("")
+    parts.append("## Output")
+    parts.append("BLOCK 1 -- ```cpp: the complete reimpl (include + marker + function, all in one block).")
+    parts.append(
+        "BLOCK 2 -- ```json: the register layout + input_sets. Read the plate comment's register mapping "
+        "(implicit EAX/ECX/ESI/EDX + any stack args). Shape:")
+    parts.append("```json")
+    parts.append(json.dumps({
+        "fn": func_name,
+        "param_layout": {
+            "inputs": [{"name": "example_index", "register": "EAX", "signed": True}],
+            "outputs": [{"name": "ret", "register": "EAX", "signed": False}],
+        },
+        "input_sets": [{"example_index": 0}, {"example_index": 1}, {"example_index": -1}],
+    }, indent=2))
+    parts.append("```")
+    parts.append(
+        "input_sets: cover 0, 1, a few valid indices, out-of-range (returns null/0), and negatives -- "
+        "at least 10-15 cases. The return is often a POINTER (an absolute game address); the oracle "
+        "compares it as a 32-bit value, and orig vs reimpl agree because both read the same live global.")
+    return "\n".join(parts)
+
+
+def build_live_fix_prompt(func_name: str, decompiled_text: str, prior_reimpl: str,
+                          prove_output: str) -> str:
+    parts = []
+    parts.append(
+        "OUTPUT CONTRACT: reply with EXACTLY TWO fenced blocks -- BLOCK 1 ```cpp (the corrected "
+        "reimpl), BLOCK 2 ```json (the SAME register layout + input_sets as before). Nothing else.")
+    parts.append("")
+    parts.append(f"## Your reimpl of {func_name} did not prove against the live game. Fix it.")
+    parts.append(
+        "The oracle called BOTH the original (in the running game) and your reimpl with each input and "
+        "compared. Read the result carefully:")
+    parts.append("```")
+    parts.append((prove_output or "(no output)")[-2500:])
+    parts.append("```")
+    parts.append(
+        "IMPORTANT diagnostic: if it MATCHES on out-of-range/negative inputs (the null path) but FAILS "
+        "on valid in-range ones, you dereferenced a resolved global one level too FEW or too MANY -- "
+        "re-check the pointer-vs-base STEP 1 rule (a `g_p*` pointer variable needs "
+        "`base = *(void**)D2MOO_Resolve(\"g_p...\")`).")
+    parts.append("")
+    parts.append("## Decompiled source (the spec)")
+    parts.append("```")
+    parts.append(str(decompiled_text))
+    parts.append("```")
+    parts.append("## Your previous reimpl")
+    parts.append("```cpp")
+    parts.append(prior_reimpl)
+    parts.append("```")
+    parts.append(
+        "Output the corrected ```cpp reimpl and the ```json layout+input_sets. Keep the include and the "
+        "// D2MOO_REIMPL_EXPORT marker.")
+    return "\n".join(parts)
+
+
+def parse_live_response(text: str):
+    """Extract (reimpl_cpp, param_layout, input_sets) from a build_live_draft_prompt
+    reply (1 cpp block + 1 json block). Returns (None, None, None) on any failure."""
+    import port_pipeline as pp  # reuse the tolerant fenced-block splitter
+    blocks = pp._fenced_blocks(text or "")
+    cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
+    js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
+    if not cpp or not js:
+        return None, None, None
+    try:
+        spec = json.loads(js[0])
+    except json.JSONDecodeError:
+        return None, None, None
+    layout = spec.get("param_layout")
+    input_sets = spec.get("input_sets")
+    if not isinstance(layout, dict) or not isinstance(input_sets, list) or not input_sets:
+        return None, None, None
+    if "inputs" not in layout or "outputs" not in layout:
+        return None, None, None
+    reimpl = cpp[0].strip() + "\n"
+    if 'provider_runtime.h' not in reimpl:  # ensure the resolver header is present
+        reimpl = '#include "../provider_runtime.h"\n' + reimpl
+    return reimpl, layout, input_sets
 
 
 def write_candidate(reimpl_cpp: str, name: str) -> Path:

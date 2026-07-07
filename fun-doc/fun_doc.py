@@ -10150,6 +10150,130 @@ def run_globals_worker_pass(
 # for this Phase-1 rollout, revisit if PORT-specific model tuning is wanted.
 # ============================================================================
 
+def process_global_leaf_live(program, address, func_name, decompiled, *,
+                             provider, model=None, max_turns=15, worker_id=None,
+                             max_fix_attempts=3):
+    """LIVE-prove path for a 'global_leaf' function (reads named game globals ->
+    not statically provable, but provable against the RUNNING game via the D2MOO
+    resolver). Drafts a resolver-based reimpl (D2MOO_Resolve for globals), then
+    proves it against the live D2Debugger oracle. No OpenD2 static harness.
+
+    Returns:
+      "proven_live_pending_review" -- proved bit-exact live; staged in D2MOO's
+                                      candidates/, CONF_LIVE tagged, registered.
+      "live_prove_failed"          -- reimpl drafted but did not prove.
+      "malformed_response"         -- no parseable blocks after retries.
+      "unsupported_abi"            -- register layout outside the oracle marshaller.
+      "blocked"                    -- quota pause.
+    """
+    import port_pipeline as pp
+    try:
+        import port_live_prove as plp
+    except Exception as e:
+        update_function_state(f"{program}::{address}", {
+            "port_status": "error", "port_last_result": f"live module import: {e}"})
+        return "error"
+
+    run_id = str(uuid.uuid4())[:8]
+    started_at = datetime.now()
+    key = f"{program}::{address}"
+
+    def _log(result, **extra):
+        _append_run_log({
+            "run_id": run_id, "timestamp": started_at.isoformat(),
+            "worker_id": worker_id, "mode": "port_live",
+            "program": program, "address": address, "name": func_name,
+            "provider": provider, "model": model, "result": result, **extra,
+        })
+
+    if not model:
+        try:
+            model = get_configured_model(provider, "FULL")
+        except Exception:
+            model = None
+
+    bus_emit("port_drafted", {
+        "key": key, "name": func_name, "address": address,
+        "program": Path(program).name, "program_path": program, "status": "drafting (live)",
+    })
+
+    prompt = plp.build_live_draft_prompt(func_name, address, decompiled)
+    reimpl = layout = input_sets = None
+    attempts = 0
+    while attempts < max(1, max_fix_attempts):
+        attempts += 1
+        text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
+                                   provider=provider, complexity_tier=None)
+        if (meta or {}).get("quota_paused"):
+            update_function_state(key, {"port_status": "blocked",
+                                        "port_last_result": "quota_paused"})
+            _log("blocked", reason="quota_paused")
+            return "blocked"
+        reimpl, layout, input_sets = plp.parse_live_response(text or "")
+        if reimpl:
+            break
+        _log("malformed_response_retry", attempt=attempts)
+
+    if not reimpl:
+        update_function_state(key, {"port_status": "malformed_response",
+                                    "port_attempts": attempts,
+                                    "port_last_result": "no parseable live-draft blocks"})
+        _log("malformed_response", attempts=attempts)
+        return "malformed_response"
+
+    # Prove, with a bounded fix-retry loop: a first-attempt reimpl that drafts
+    # cleanly but proves FALSE (e.g. a pointer-vs-base deref slip) gets the live
+    # oracle's divergence fed back so the model can self-correct -- the live
+    # analogue of the static path's harness fix-loop.
+    live = None
+    prove_attempts = 0
+    while prove_attempts < max(1, max_fix_attempts):
+        prove_attempts += 1
+        try:
+            live = plp.run_live_prove(reimpl, func_name, address, layout, input_sets)
+        except plp.UnsupportedLiveABI as e:
+            update_function_state(key, {"port_status": "unsupported_abi",
+                                        "port_last_result": str(e)})
+            _log("unsupported_abi", reason=str(e))
+            return "unsupported_abi"
+        except Exception as e:
+            update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
+            _log("error", error=str(e))
+            return "error"
+        if live.get("ok") or prove_attempts >= max(1, max_fix_attempts):
+            break
+        # diverged -> feed the oracle output back and re-draft once more
+        fix_prompt = plp.build_live_fix_prompt(func_name, decompiled, reimpl, live.get("output", ""))
+        text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
+                                   provider=provider, complexity_tier=None)
+        if (meta or {}).get("quota_paused"):
+            break
+        new_reimpl, new_layout, new_inputs = plp.parse_live_response(text or "")
+        if not new_reimpl:
+            break  # malformed fix -> stop, report the last real prove result
+        reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
+        _log("live_prove_fix_retry", attempt=prove_attempts)
+
+    if live.get("ok"):
+        update_function_state(key, {
+            "port_status": "proven_live_pending_review", "port_attempts": attempts,
+            "port_live_status": "proven_live",
+            "port_last_result": f"live {live.get('passed')}/{live.get('total')}"})
+        bus_emit("port_live_prove_result", {
+            "key": key, "name": func_name, "ok": True,
+            "passed": live.get("passed"), "total": live.get("total")})
+        _log("proven_live_pending_review", passed=live.get("passed"),
+             total=live.get("total"))
+        return "proven_live_pending_review"
+
+    update_function_state(key, {
+        "port_status": "live_prove_failed", "port_attempts": attempts,
+        "port_last_result": (live.get("output") or live.get("error") or "")[-500:]})
+    _log("live_prove_failed", output=(live.get("output") or "")[-2000:],
+         error=live.get("error"))
+    return "live_prove_failed"
+
+
 def process_port_candidate(program, address, func_name, *, provider, model=None,
                             max_turns=15, worker_id=None, max_fix_attempts=3):
     """Stage 2/3 worker for ONE function: classify -> draft -> mint vectors
@@ -10203,13 +10327,27 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         return "unknown_skip"
 
     classification = pp.classify_function(decompiled)
-    if classification != "leaf":
-        # Phase 1 scope: stateful functions need the live-trace/in-process
-        # oracle, which isn't reliably automatable yet (WOW64 hardening in
-        # progress) -- leave these to the manual d2-port-function skill.
+    if classification == "stateful":
+        # Struct-pointer params / deep pointer chains / unnamed DAT_ globals --
+        # need a live captured game object, out of the automatable scope for now
+        # (leave to the manual d2-port-function skill).
         update_function_state(key, {"port_status": "stateful_skip"})
         _log("stateful_skip", classification=classification)
         return "stateful_skip"
+    if classification == "global_leaf":
+        # Reads NAMED globals -> not statically provable, but provable LIVE against
+        # the running game via the D2MOO resolver. Needs the live oracle
+        # (FUNDOC_LIVE_PROVE=1); without it these can't be proven at all -> skip.
+        if os.environ.get("FUNDOC_LIVE_PROVE") != "1":
+            update_function_state(key, {
+                "port_status": "stateful_skip",
+                "port_last_result": "global_leaf: needs FUNDOC_LIVE_PROVE=1 (live oracle)"})
+            _log("stateful_skip", classification=classification, reason="live_prove_disabled")
+            return "stateful_skip"
+        return process_global_leaf_live(
+            program, address, func_name, decompiled,
+            provider=provider, model=model, worker_id=worker_id,
+            max_fix_attempts=max_fix_attempts)
 
     if not model:
         try:
