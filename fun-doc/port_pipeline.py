@@ -145,6 +145,15 @@ _STRUCT_ACCESS_RE = re.compile(r"->\s*\w+")
 _POINTER_PARAM_RE = re.compile(r"(?:^|,)\s*(\w+)\s*\*+\s*\w+\s*(?=,|$)", re.MULTILINE)
 _POINTER_LOCAL_LINE_RE = re.compile(r"^\s*(?:\w+\s+)?(\w+)\s*\*+\s*\w+\s*;\s*$", re.MULTILINE)
 _C_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+# DOUBLE dereference: `*(TYPE *)(*var ...)` -- reading a POINTER out of another
+# pointer and dereferencing it. That's a struct-with-pointers / pointer-to-pointer
+# chain (e.g. Room.pSubRooms[i]), which the static /emulate_function harness can't
+# build -> stateful, even when the base pointer is typed int*/void* so the
+# pointer-base-type check below never fires. Found by hand 2026-07-07:
+# FindRoomByCoordinates (Room* typed as int*, `*(int *)(*in_EAX + i*4)`) sailed
+# through as "leaf", got drafted, and failed the harness -- a wasted cycle that
+# recurs on every Room*/Unit* accessor Ghidra types as a bare int*.
+_DEEP_DEREF_RE = re.compile(r"\*\s*\(\s*\w+\s*\*+\s*\)\s*\(\s*\*")
 
 
 def _strip_comments(text):
@@ -230,6 +239,8 @@ def classify_function(decompiled_text, variables=None):
         return "stateful"
     if _STRUCT_ACCESS_RE.search(text):
         return "stateful"
+    if _DEEP_DEREF_RE.search(text):
+        return "stateful"  # pointer-to-pointer / struct-with-pointers chain
 
     # Pointer-type check is scoped to where declarations actually appear
     # (signature parameter list + standalone local-decl lines), NOT the
@@ -807,6 +818,19 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
     sections.append("## Task: port a Diablo II function into OpenD2 (Stage 2 of document -> port -> prove)")
     sections.append("")
     sections.append(
+        "OUTPUT CONTRACT (read first -- a machine parses your reply, a human never sees it): "
+        "reply with EXACTLY THREE fenced code blocks and NOTHING that matters outside them, "
+        "in THIS order:\n"
+        "  BLOCK 1  ```cpp   -- the ENTIRE header-only port: the function AND every helper it "
+        "needs, all in this ONE block (never split code across multiple cpp blocks).\n"
+        "  BLOCK 2  ```cpp   -- the single draft_runner dispatch snippet.\n"
+        "  BLOCK 3  ```json  -- the vector spec.\n"
+        "Tag them literally ```cpp / ```cpp / ```json (NOT ```c++, ```C, or untagged). Produce "
+        "exactly two cpp blocks and exactly one json block -- no more, no fewer. If you must think, "
+        "do it briefly BEFORE block 1; put nothing between or after the blocks. Getting this shape "
+        "wrong wastes the whole attempt.")
+    sections.append("")
+    sections.append(
         "You are drafting an OpenD2 C++ port of a Ghidra-analyzed PD2-S12 function. This draft "
         "will be PROVEN or REJECTED by an automated harness that replays golden vectors minted "
         "from the original binary -- your draft is a hypothesis, not the final word. Port the "
@@ -855,7 +879,9 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
     sections.append("")
 
     sections.append("## Output format -- exactly three fenced code blocks, nothing else")
-    sections.append("1. A ```cpp block: the complete header-only port (the function + any tiny helpers it needs).")
+    sections.append(
+        "1. A ```cpp block: the complete header-only port. Put the function AND all helpers it "
+        "needs INSIDE this single block -- do NOT open a second cpp block for helpers.")
     sections.append(
         "2. A ```cpp block: a draft_runner.cpp dispatch snippet in this EXACT shape (see "
         "Tools/d2conform/d2conform.cpp's run_case for the pattern):"
@@ -893,8 +919,14 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
     )
     sections.append("")
     sections.append(
-        "Do not include any other prose, explanation, or markdown outside the three code blocks -- "
-        "the caller parses them mechanically via parse_port_response_full()."
+        "Reminder -- the parser is mechanical (parse_port_response_full). These specific mistakes "
+        "make your ENTIRE reply unusable, so double-check before you send:\n"
+        "  - splitting the port across more than one cpp block (all code goes in block 1);\n"
+        "  - tagging a block ```c++ / ```C / ```C++ or leaving it untagged instead of ```cpp;\n"
+        "  - tagging the vector spec anything other than ```json, or wrapping it in ```cpp;\n"
+        "  - emitting more or fewer than exactly two cpp blocks + one json block;\n"
+        "  - trailing prose or a fourth block after the json.\n"
+        "Output the three blocks and stop."
     )
     return "\n".join(sections)
 
@@ -939,12 +971,23 @@ def build_port_fix_prompt(func_name, address, program, decompiled_text,
     sections.append("```")
     sections.append("")
     sections.append(
-        "## Output format -- exactly two fenced ```cpp code blocks (header, then dispatch), nothing else."
+        "## Output format -- exactly TWO fenced ```cpp blocks, nothing that matters outside them: "
+        "BLOCK 1 = the full corrected header (function + all helpers in this one block), BLOCK 2 = "
+        "the dispatch snippet. Tag both literally ```cpp (never ```c++/```C/untagged). Do NOT emit "
+        "a json block on a fix (the vectors are frozen). A machine parses this; wrong shape wastes "
+        "the retry."
     )
     return "\n".join(sections)
 
 
-_CODE_BLOCK_RE = re.compile(r"```(\w*)\s*\n(.*?)```", re.DOTALL)
+# Lang tag capture allows `+`/`#`/`.`/`-` so a ```c++ / ```c# fence is captured at
+# all (the old `\w*` couldn't match the `+`, silently DROPPING the whole block and
+# turning a perfectly good draft into a "malformed_response" -- a real flakiness
+# source with models that tag C++ as `c++`). Normalization below maps the whole
+# C/C++ family onto "cpp".
+_CODE_BLOCK_RE = re.compile(r"```([\w+#.\-]*)[ \t]*\r?\n(.*?)```", re.DOTALL)
+_CPP_LANGS = {"", "cpp", "c++", "cxx", "cc", "c", "hpp", "hxx", "hh", "h", "cplusplus"}
+_JSON_LANGS = {"json", "jsonc", "json5"}
 
 
 def _fenced_blocks(response_text):
@@ -956,8 +999,8 @@ def parse_port_response(response_text):
     """Extract (header_content, dispatch_body) from a build_port_fix_prompt
     response (2 blocks: header, dispatch -- no vector spec on a retry, since
     vectors must not change once minted). Returns (None, None) if fewer than
-    two ```cpp blocks are found."""
-    cpp_blocks = [content for lang, content in _fenced_blocks(response_text) if lang in ("", "cpp")]
+    two cpp-family blocks are found."""
+    cpp_blocks = [content for lang, content in _fenced_blocks(response_text) if lang in _CPP_LANGS]
     if len(cpp_blocks) < 2:
         return None, None
     return cpp_blocks[0].strip() + "\n", cpp_blocks[1].strip()
@@ -971,8 +1014,8 @@ def parse_port_response_full(response_text):
     blocks, or a vector spec missing required keys -- so callers treat it
     uniformly as "retry the draft", not a partial success."""
     blocks = _fenced_blocks(response_text)
-    cpp_blocks = [content for lang, content in blocks if lang in ("", "cpp")]
-    json_blocks = [content for lang, content in blocks if lang == "json"]
+    cpp_blocks = [content for lang, content in blocks if lang in _CPP_LANGS]
+    json_blocks = [content for lang, content in blocks if lang in _JSON_LANGS]
     if len(cpp_blocks) < 2 or not json_blocks:
         return None, None, None
     try:
