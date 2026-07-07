@@ -709,6 +709,28 @@ def run_harness(*, configure=True, build_timeout=180, run_timeout=30):
 
 _BINARY_PORT_PRIORITY = {"D2Common.dll": 0, "D2Game.dll": 1, "D2Client.dll": 2}
 
+# Library / C-runtime / FLIRT-matched functions that are NOT D2 game logic and must
+# never be port candidates -- they're linked-in CRT/STL, not something to reimplement.
+# Found by hand 2026-07-07: a --count 20 batch wasted cycles on FID_conflict:_memcpy,
+# FID_conflict:_atoi, __cinit, doexit, STL template instantiations, etc. -- they score
+# HIGH (a FLIRT match gives them a real name) so they sail through the score>=80 gate.
+# The `library_code` flag doesn't catch them (detector missed them), but the NAME is a
+# dead giveaway. D2's own exports are PREFIX_Name / CamelCase and never start with '_'.
+_KNOWN_CRT_NAMES = frozenset({"doexit", "mainret", "_initterm", "_cinit", "atexit"})
+
+
+def _looks_like_library_or_runtime(name):
+    if not name:
+        return False
+    if name[0] == "_":                       # _initterm, __cinit, _Tidy, _ftol, _memcpy
+        return True
+    for p in ("FID_", "FUN_", "thunk_", "j_"):
+        if name.startswith(p):               # FLIRT matches, unnamed, thunks
+            return True
+    if "<" in name or ">" in name:           # STL template instantiations
+        return True
+    return name in _KNOWN_CRT_NAMES
+
 # port_status values that mean "already resolved -- do NOT re-select". Found by
 # hand 2026-07-07: without this, select_port_candidates returns the SAME
 # deterministically-sorted top-N every call, so a continuous loop re-processed
@@ -756,7 +778,7 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
     for key, func in funcs.items():
         if func.get("is_thunk") or func.get("is_external"):
             continue
-        if func.get("library_code"):
+        if func.get("library_code") or _looks_like_library_or_runtime(func.get("name")):
             continue
         if key in conformance_protected:
             continue
