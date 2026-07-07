@@ -130,6 +130,12 @@ def _ghidra_post(endpoint, data=None, params=None, timeout=30):
 #                      reimpl shape + a live-only path (see the note in
 #                      classify_function); until then they are honestly stateful.
 _GLOBAL_ACCESS_RE = re.compile(r"\bDAT_[0-9a-fA-F]+\b|\b_?g_[A-Za-z_]\w*\b")
+# Split the two global forms: a NAMED global (g_*/_g_*) is resolvable by name via
+# the D2MOO live resolver (D2MOO_Resolve) -> the function is provable LIVE against
+# the running game even though it can't be proven statically. A DAT_<hex> global is
+# an unnamed raw address NOT in the resolver -> still hard-stateful.
+_DAT_GLOBAL_RE = re.compile(r"\bDAT_[0-9a-fA-F]+\b")
+_NAMED_GLOBAL_RE = re.compile(r"\b_?g_[A-Za-z_]\w*\b")
 _STRUCT_ACCESS_RE = re.compile(r"->\s*\w+")
 # `TYPE *name` (a pointer declaration) and `a * b` (a multiplication
 # expression) are IDENTICAL at the token level -- "word, *, word" -- so a
@@ -235,10 +241,11 @@ def classify_function(decompiled_text, variables=None):
         return "unknown"
 
     text = _strip_comments(str(decompiled_text))
-    if _GLOBAL_ACCESS_RE.search(text):
-        return "stateful"
+    # HARD-stateful signals (not provable statically AND not simply live-resolvable):
+    if _DAT_GLOBAL_RE.search(text):
+        return "stateful"  # unnamed raw-address global -- not in the name resolver
     if _STRUCT_ACCESS_RE.search(text):
-        return "stateful"
+        return "stateful"  # `->` struct navigation
     if _DEEP_DEREF_RE.search(text):
         return "stateful"  # pointer-to-pointer / struct-with-pointers chain
 
@@ -267,6 +274,12 @@ def classify_function(decompiled_text, variables=None):
                     if base_type not in _SCALAR_POINTER_BASE_TYPES:
                         return "stateful"
 
+    # No hard-stateful signal. If the only "state" it touches is a NAMED global
+    # (g_*/_g_*), it's provable LIVE via the D2MOO resolver (D2MOO_Resolve gives
+    # the real running-game address) -- a distinct class the live-prove path
+    # handles, not a static-harness candidate. Otherwise it's a pure leaf.
+    if _NAMED_GLOBAL_RE.search(text):
+        return "global_leaf"
     return "leaf"
 
 
@@ -705,13 +718,16 @@ _BINARY_PORT_PRIORITY = {"D2Common.dll": 0, "D2Game.dll": 1, "D2Client.dll": 2}
 # a terminal function (e.g. after a prompt/generator fix), clear its port_status
 # in state -- see scripts or the --retry-failed path.
 _PORT_TERMINAL_STATUSES = frozenset({
-    "proven_pending_review",  # succeeded, awaiting human promotion
-    "stateful_skip",          # classified out of static-harness scope (deterministic)
-    "harness_failed",         # exhausted the bounded fix-retry loop
-    "malformed_response",     # provider never returned parseable blocks after retries
-    "no_vectors",             # /emulate_function couldn't mint any vectors
-    "unknown_skip",           # decompile fetch failed
-    "error",                  # unexpected pipeline exception (guarded per-candidate)
+    "proven_pending_review",       # static harness succeeded, awaiting human promotion
+    "proven_live_pending_review",  # LIVE oracle proof succeeded, awaiting human promotion
+    "stateful_skip",               # classified out of scope (deterministic)
+    "harness_failed",              # exhausted the bounded fix-retry loop
+    "live_prove_failed",           # live-path reimpl drafted but didn't prove
+    "unsupported_abi",             # register layout outside the oracle marshaller
+    "malformed_response",          # provider never returned parseable blocks after retries
+    "no_vectors",                  # /emulate_function couldn't mint any vectors
+    "unknown_skip",                # decompile fetch failed
+    "error",                       # unexpected pipeline exception (guarded per-candidate)
 })
 
 
