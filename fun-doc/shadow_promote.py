@@ -71,10 +71,21 @@ def classify_dispatcher_shape(spec: dict) -> str:
     """spec (port_live_prove.translate_layout_to_spec's output) -> generator
     Class letter, or raises DeferPromotion if this shape isn't safe/meaningful
     to promote given the CURRENT generator (Class A only; see module docstring)."""
-    if spec.get("orig_regs"):
+    orig_regs = spec.get("orig_regs")
+    if orig_regs:
+        # Class D: register-explicit ABI. The generator's v1 naked thunk supports
+        # the single-EAX-input, u32/pointer-return pattern (the DATATBLS_* accessors).
+        # Anything else (multi-register, ESI/EDI inputs, stack args, non-u32 return)
+        # still defers.
+        args = spec.get("args", [])
+        ret = spec.get("ret")
+        if (list(orig_regs.keys()) == ["EAX"] and len(args) == 1
+                and ret in ("u32", "i32") and spec.get("compare") == ["ret"]
+                and all(a.get("kind") in (None, "i32") for a in args)):
+            return "D"
         raise DeferPromotion(
-            "register-explicit ABI (orig_regs) -- shadow generator Class D "
-            "(naked-thunk register marshalling) not implemented yet")
+            f"register-explicit ABI {orig_regs} outside Class D v1 (single EAX "
+            f"input, u32 return) -- multi-register/stack marshalling not implemented")
     if spec.get("ret") in (None, "void") or not spec.get("compare"):
         raise DeferPromotion(
             "void/uncaptured return -- this spec's oracle proof (EAX-only) "
@@ -154,7 +165,13 @@ def maybe_promote(name: str, address, spec: dict, decompiled_text: str = "") -> 
         return {"promoted": False, "reason": f"error: {e}", "class": None}
 
     try:
-        addr_int = int(str(address), 0) if isinstance(address, str) else int(address)
+        if isinstance(address, str):
+            try:
+                addr_int = int(address, 0)      # "0x6fd51250"
+            except ValueError:
+                addr_int = int(address, 16)     # bare hex "6fd51250" (fun_doc convention)
+        else:
+            addr_int = int(address)
         offset = addr_int - _D2COMMON_BASE
         if offset < 0:
             return {"promoted": False, "reason": f"address below D2Common base: {address}", "class": None}
