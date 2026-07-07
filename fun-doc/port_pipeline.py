@@ -115,7 +115,21 @@ def _ghidra_post(endpoint, data=None, params=None, timeout=30):
 # constructed from scalar inputs -- that's the real "deep pointer chain"
 # the plan means. Distinguish by base type: plain scalar/blob pointer types
 # are fine; anything else is treated as a struct pointer -> stateful.
-_GLOBAL_ACCESS_RE = re.compile(r"\bDAT_[0-9a-fA-F]+\b")
+# Global access -> stateful (out of the STATIC emulation harness's scope: it
+# can't populate a global's memory + the struct it points to). Two forms:
+#   DAT_<hex>       -- Ghidra's auto-named data globals
+#   _g_* / g_*      -- NAMED globals (e.g. _g_pDataTables, the data-tables root
+#                      that every DATATBLS_* accessor dereferences). Found by
+#                      hand 2026-07-07: the DAT_-only regex let these named
+#                      globals through as "leaf", so the pipeline drafted them,
+#                      minted (unusable) vectors, and only discovered the problem
+#                      at STATIC-harness link time ("unresolved external symbol
+#                      _g_pDataTables") -- three wasted LLM calls + builds per
+#                      function. These are provable LIVE (the running game has
+#                      the global populated), but that needs the runtime-resolver
+#                      reimpl shape + a live-only path (see the note in
+#                      classify_function); until then they are honestly stateful.
+_GLOBAL_ACCESS_RE = re.compile(r"\bDAT_[0-9a-fA-F]+\b|\b_?g_[A-Za-z_]\w*\b")
 _STRUCT_ACCESS_RE = re.compile(r"->\s*\w+")
 # `TYPE *name` (a pointer declaration) and `a * b` (a multiplication
 # expression) are IDENTICAL at the token level -- "word, *, word" -- so a
@@ -185,7 +199,8 @@ def classify_function(decompiled_text, variables=None):
     as stateful, i.e. do not auto-port).
 
     Heuristic (deliberately conservative -- see module docstring):
-    - Any DAT_<addr> global reference in the decompile -> stateful.
+    - Any DAT_<addr> OR named g_*/_g_* global reference in the decompile
+      -> stateful.
     - Any `->` struct-field navigation -> stateful (deep pointer chains,
       per the d2-port-function skill's Step 3).
     - Any pointer parameter/local whose base type is NOT a known
@@ -193,6 +208,19 @@ def classify_function(decompiled_text, variables=None):
       Room*) -> stateful. A scalar/blob pointer (uint*, ulonglong*, an
       in/out seed or accumulator the caller owns) does NOT disqualify.
     - Otherwise -> leaf.
+
+    NOTE (future work, 2026-07-07): the named-global class (e.g. every
+    DATATBLS_* accessor dereferencing _g_pDataTables) is skipped as
+    "stateful" here because the STATIC /emulate_function harness can't
+    populate a global + the struct it points to. But this class IS
+    provable LIVE against the running game (the global is populated there)
+    -- exactly how the D2MOO conformance work proves GetDataTableRowEntryCount
+    by hand. Automating it needs (a) a reimpl draft that resolves the global
+    at runtime via the injected resolver (D2MOO_Resolve), not an OpenD2-style
+    `extern _g_pDataTables`, and (b) a live-prove-ONLY path that skips the
+    static harness for this class. Until both exist, skipping is the honest
+    behavior (better than burning LLM calls + builds on a guaranteed static
+    link failure).
     """
     if not decompiled_text or decompiled_text.startswith("<ghidra fetch failed"):
         return "unknown"
@@ -278,7 +306,13 @@ def mint_vectors(program, address, fn_name, param_layout, input_sets, *, max_ste
                 errors.append(f"case {case!r} missing input '{inp['name']}'")
                 registers = None
                 break
-            registers[inp["register"]] = f"0x{case[inp['name']] & 0xFFFFFFFF:x}"
+            # The model's input_sets sometimes use hex STRINGS for
+            # pointer-looking values (e.g. "0x10000000") rather than a plain
+            # int -- _hex_to_int (already used for the OUTPUT side below)
+            # normalizes either form. Found by hand 2026-07-07: an int-only
+            # `&` here raised an unhandled TypeError that killed the entire
+            # worker pass, not just this one candidate.
+            registers[inp["register"]] = f"0x{_hex_to_int(case[inp['name']]) & 0xFFFFFFFF:x}"
         if registers is None:
             continue
 
@@ -651,9 +685,28 @@ def run_harness(*, configure=True, build_timeout=180, run_timeout=30):
 
 _BINARY_PORT_PRIORITY = {"D2Common.dll": 0, "D2Game.dll": 1, "D2Client.dll": 2}
 
+# port_status values that mean "already resolved -- do NOT re-select". Found by
+# hand 2026-07-07: without this, select_port_candidates returns the SAME
+# deterministically-sorted top-N every call, so a continuous loop re-processed
+# the identical 3 functions every batch and never advanced to new ones. Terminal
+# outcomes are excluded so the loop moves forward; `blocked` (quota/transient)
+# is intentionally NOT terminal so it retries later. To deliberately re-attempt
+# a terminal function (e.g. after a prompt/generator fix), clear its port_status
+# in state -- see scripts or the --retry-failed path.
+_PORT_TERMINAL_STATUSES = frozenset({
+    "proven_pending_review",  # succeeded, awaiting human promotion
+    "stateful_skip",          # classified out of static-harness scope (deterministic)
+    "harness_failed",         # exhausted the bounded fix-retry loop
+    "malformed_response",     # provider never returned parseable blocks after retries
+    "no_vectors",             # /emulate_function couldn't mint any vectors
+    "unknown_skip",           # decompile fetch failed
+    "error",                  # unexpected pipeline exception (guarded per-candidate)
+})
+
 
 def select_port_candidates(funcs, conformance_protected, active_binary=None,
-                            good_enough_score=80, limit=20):
+                            good_enough_score=80, limit=20,
+                            include_terminal=False):
     """Select functions eligible for Stage 2 (port) work.
 
     `funcs`: the same {key: func_dict} state fun_doc.select_candidates
@@ -680,15 +733,25 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
             continue
         if key in conformance_protected:
             continue
-        program = func.get("program_name", "") or ""
-        if active_binary and program != active_binary:
+        binary_name = func.get("program_name", "") or ""
+        if active_binary and binary_name != active_binary:
             continue
 
         score = func.get("effective_score", func.get("score", 0)) or 0
         if score < good_enough_score:
             continue  # Stage 1 not finished yet -- not ready for Stage 2
 
-        binary_name = program.rsplit("/", 1)[-1] if "/" in program else program
+        if not include_terminal and func.get("port_status") in _PORT_TERMINAL_STATUSES:
+            continue  # already resolved -- don't re-select (loop must advance)
+
+        # "program" must be the full project path (func["program"], e.g.
+        # /Mods/PD2-S12/D2Common.dll), NOT the bare binary name: the PORT
+        # worker keys update_function_state with f"{program}::{address}", and
+        # only the full path matches fun_doc's state key. Found live
+        # 2026-07-07: emitting program_name here made every port_status write
+        # upsert a nameless, scoreless skeleton row (D2Common.dll::<addr>)
+        # while the real row never advanced past re-selection.
+        program = func.get("program") or binary_name
         out.append({
             "key": key,
             "func": func,
@@ -779,6 +842,15 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
     sections.append(
         "- Reproduce in-place side effects (e.g. seed-state mutation via a pointer/reference "
         "parameter) -- the harness checks mutated state, not just the return value."
+    )
+    sections.append(
+        "- NEVER call a COMPILER-INTERNAL runtime helper by name. The decompiler shows "
+        "`__alldiv`/`__aulldiv`/`__allmul`/`__allrem`/`__allshl`/`__allshr` etc. because MSVC "
+        "EMITS those for 64-bit `/ % * << >>` on 32-bit x86 -- they are NOT callable identifiers "
+        "(you'll get `error C3861: identifier not found`). Write the plain C++ operator on the "
+        "correct fixed-width type instead and let the compiler emit the helper: e.g. a 64-bit "
+        "signed divide is `(int32_t)((int64_t)a * (int64_t)b / (int64_t)divisor)`, NOT "
+        "`__alldiv(lo, hi, ...)`."
     )
     sections.append("")
 

@@ -2369,9 +2369,9 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     if binary_filter:
         # When scanning one binary, report stats for that binary + total state
         binary_total = len(all_functions)
-        binary_done = sum(1 for f in all_functions.values() if f["score"] >= 90)
+        binary_done = sum(1 for f in all_functions.values() if (f.get("score") or 0) >= 90)
         state_total = len(state["functions"])
-        state_done = sum(1 for f in state["functions"].values() if f["score"] >= 90)
+        state_done = sum(1 for f in state["functions"].values() if (f.get("score") or 0) >= 90)
         print(
             f"\nScan complete: {binary_filter} — {binary_total} functions, {binary_done} done (>= 90%)"
         )
@@ -2390,7 +2390,7 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
         )
     else:
         total = len(all_functions)
-        done = sum(1 for f in all_functions.values() if f["score"] >= 90)
+        done = sum(1 for f in all_functions.values() if (f.get("score") or 0) >= 90)
         if is_incremental:
             removed = len(existing) - total_kept - total_rescored - total_new
             print(
@@ -6536,9 +6536,13 @@ def print_status(state):
         print("No functions in state. Run --scan first.")
         return
 
-    done = sum(1 for f in funcs.values() if f["score"] >= 90)
-    fixable = sum(1 for f in funcs.values() if 70 <= f["score"] < 90)
-    needs_work = sum(1 for f in funcs.values() if f["score"] < 70)
+    # Freshly discovered rows (scan/port-pipeline inserts) may not be scored
+    # yet — the SQL backend surfaces those as dicts without a "score" key.
+    scored = [f for f in funcs.values() if f.get("score") is not None]
+    unscored = total - len(scored)
+    done = sum(1 for f in scored if f["score"] >= 90)
+    fixable = sum(1 for f in scored if 70 <= f["score"] < 90)
+    needs_work = sum(1 for f in scored if f["score"] < 70)
     pct = (done / total * 100) if total > 0 else 0
 
     # Score distribution
@@ -6555,7 +6559,7 @@ def print_status(state):
         "10-19": 0,
         "0-9": 0,
     }
-    for f in funcs.values():
+    for f in scored:
         s = f["score"]
         if s >= 100:
             buckets["100"] += 1
@@ -6585,7 +6589,7 @@ def print_status(state):
     for f in funcs.values():
         prog = f.get("program_name", "unknown")
         by_program[prog]["total"] += 1
-        if f["score"] >= 90:
+        if (f.get("score") or 0) >= 90:
             by_program[prog]["done"] += 1
 
     folder = state.get("project_folder", "unknown")
@@ -6596,8 +6600,9 @@ def print_status(state):
     print(f"  Project: {folder}")
     print(f"  Last scan: {last_scan}")
     print(f"{'=' * 60}")
+    unscored_note = f"  |  Unscored: {unscored}" if unscored else ""
     print(
-        f"\n  Total: {total}  |  Done: {done} ({pct:.1f}%)  |  Fix: {fixable}  |  Remaining: {needs_work}"
+        f"\n  Total: {total}  |  Done: {done} ({pct:.1f}%)  |  Fix: {fixable}  |  Remaining: {needs_work}{unscored_note}"
     )
     print()
 
@@ -8849,6 +8854,30 @@ def main():
         default=None,
         help="Path to state JSON file (default: state.json next to this script)",
     )
+    parser.add_argument(
+        "--port", action="store_true",
+        help="Port mode: run Stage-2/3 port+prove candidates (drafts a D2MOO "
+             "reimpl, static-harness-proves it, live-oracle-proves it against "
+             "the running game, and stages it as a shadow dispatcher). Use "
+             "--count for a bounded batch (default) or --continuous to keep "
+             "re-selecting candidates until Ctrl+C.",
+    )
+    parser.add_argument(
+        "--continuous", action="store_true",
+        help="With --port: keep processing indefinitely (re-selects candidates "
+             "when the pool drains, polls the battle-test promoter each round) "
+             "instead of stopping after --count.",
+    )
+    parser.add_argument(
+        "--no-live-prove", action="store_true",
+        help="With --port: skip the live-oracle proof against the running game "
+             "(static harness only). Live-prove is ON by default for --port.",
+    )
+    parser.add_argument(
+        "--no-shadow-promote", action="store_true",
+        help="With --port: skip staging newly live-proven functions as shadow "
+             "dispatchers. Shadow-promote is ON by default for --port.",
+    )
 
     args = parser.parse_args()
 
@@ -9210,6 +9239,36 @@ def main():
         end_session(state)
         save_state(state)
         print_status(state)
+        return
+
+    # --port: Stage-2/3 port+prove candidates (D2COMMON_FULL_SHADOW_PLAN.md's
+    # fun-doc-driven scaling loop). Live-prove + shadow-promote default ON here
+    # (the whole point of running this from the CLI); --no-live-prove /
+    # --no-shadow-promote opt back out to the static-harness-only behavior.
+    if args.port:
+        import threading
+
+        if not args.no_live_prove:
+            os.environ["FUNDOC_LIVE_PROVE"] = "1"
+        if not args.no_shadow_promote:
+            os.environ["FUNDOC_SHADOW_PROMOTE"] = "1"
+
+        def _on_started(program, address, func_name):
+            print(f"  -> {func_name} ({program} {address})")
+
+        def _on_progress(program, address, result, processed, count):
+            print(f"     {result}  [{processed}/{count if not args.continuous else '∞'}]")
+
+        summary = run_port_worker_pass(
+            worker_id="cli", active_binary=active_binary,
+            provider=args.provider or AI_PROVIDER, model=args.model,
+            count=args.count, stop_flag=threading.Event(),
+            on_started=_on_started, on_progress=_on_progress,
+            continuous=args.continuous,
+        )
+        print(f"\nDone: processed={summary['processed']} "
+              f"stopped_reason={summary['stopped_reason']}")
+        print(f"Totals: {summary['totals']}")
         return
 
     # --auto: process next best functions
@@ -10163,23 +10222,36 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         "program": prog_name, "program_path": program, "status": "drafting",
     })
 
+    # Found by hand 2026-07-07: an unparseable initial draft was often FLAKY,
+    # not systemic -- re-running the identical prompt against the identical
+    # provider immediately produced a clean, well-formed response. The harness
+    # fix-loop below already retries on compile/vector failures; the initial
+    # draft had NO retry at all, so a single bad roll of the dice ended the
+    # candidate permanently. Bounded retry here for the same reason.
     prompt = pp.build_port_prompt(func_name, address, program, decompiled)
-    text, meta = invoke_claude(
-        prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
-    )
+    header = dispatch = spec = None
+    draft_attempts = 0
+    max_draft_attempts = max(1, max_fix_attempts)
+    while draft_attempts < max_draft_attempts:
+        draft_attempts += 1
+        text, meta = invoke_claude(
+            prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
+        )
+        if (meta or {}).get("quota_paused"):
+            update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
+            _log("blocked", reason="quota_paused")
+            return "blocked"
+        header, dispatch, spec = pp.parse_port_response_full(text or "")
+        if header:
+            break
+        _log("malformed_response_retry", attempt=draft_attempts, output=(text or "")[-500:])
 
-    if (meta or {}).get("quota_paused"):
-        update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
-        _log("blocked", reason="quota_paused")
-        return "blocked"
-
-    header, dispatch, spec = pp.parse_port_response_full(text or "")
     if not header:
         update_function_state(key, {
-            "port_status": "malformed_response", "port_attempts": 1,
-            "port_last_result": "no parseable code blocks in provider response",
+            "port_status": "malformed_response", "port_attempts": draft_attempts,
+            "port_last_result": f"no parseable code blocks after {draft_attempts} attempt(s)",
         })
-        _log("malformed_response")
+        _log("malformed_response", attempts=draft_attempts)
         return "malformed_response"
 
     module = Path(program).stem
@@ -10389,9 +10461,27 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
             except Exception:
                 pass
 
-        result = process_port_candidate(
-            program, address, func_name, provider=provider, model=model, worker_id=worker_id
-        )
+        # Found by hand 2026-07-07: an unexpected exception deep in one
+        # candidate's pipeline (e.g. a malformed model response tripping a
+        # type-coercion bug) propagated all the way out of run_port_worker_pass
+        # and killed the ENTIRE batch/continuous loop, not just that candidate.
+        # A worker that's meant to process many functions unattended must not
+        # let one bad function take the rest down with it.
+        try:
+            result = process_port_candidate(
+                program, address, func_name, provider=provider, model=model, worker_id=worker_id
+            )
+        except Exception as e:
+            key = f"{program}::{address}"
+            update_function_state(key, {
+                "port_status": "error", "port_last_result": f"{type(e).__name__}: {e}",
+            })
+            _append_run_log({
+                "timestamp": datetime.now().isoformat(), "mode": "port",
+                "program": program, "address": address, "name": func_name,
+                "worker_id": worker_id, "result": "error", "error": f"{type(e).__name__}: {e}",
+            })
+            result = "error"
         summary["totals"][result] = summary["totals"].get(result, 0) + 1
         if result != "stateful_skip":
             processed += 1
