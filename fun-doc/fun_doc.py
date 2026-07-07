@@ -10146,11 +10146,13 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         try:
             live = plp.run_live_prove(reimpl, func_name, address, layout, input_sets)
         except plp.UnsupportedLiveABI as e:
+            plp.remove_candidate(func_name)
             update_function_state(key, {"port_status": "unsupported_abi",
                                         "port_last_result": str(e)})
             _log("unsupported_abi", reason=str(e))
             return "unsupported_abi"
         except Exception as e:
+            plp.remove_candidate(func_name)
             update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
             _log("error", error=str(e))
             return "error"
@@ -10180,6 +10182,11 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
              total=live.get("total"))
         return "proven_live_pending_review"
 
+    # Failed to prove -> REMOVE the candidate. A failed reimpl is often also a
+    # non-compiling one (undefined type, etc.), and one broken candidates/*.cpp
+    # poisons the single provider DLL build for EVERY other function. Nothing of
+    # value is staged; its content survives in the run log.
+    plp.remove_candidate(func_name)
     update_function_state(key, {
         "port_status": "live_prove_failed", "port_attempts": attempts,
         "port_last_result": (live.get("output") or live.get("error") or "")[-500:]})

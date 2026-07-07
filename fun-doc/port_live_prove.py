@@ -186,7 +186,11 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
     parts.append("## REQUIRED reimpl shape")
     parts.append(
         "- `#include \"../provider_runtime.h\"` and a `// D2MOO_REIMPL_EXPORT: " + func_name + "` marker.\n"
-        "- `extern \"C\"` with the right return type + calling convention (see below) + integer widths.\n"
+        "- `extern \"C\"` with the right calling convention (see below) + integer widths.\n"
+        "- TYPES: use ONLY plain C types the provider already has. Return `void*` for ANY pointer "
+        "return (a record/struct pointer, an array element pointer, etc.) -- do NOT name a Ghidra struct "
+        "type like `SomeTxtRecord*` / `MonStatsTxtRec*`: those are NOT defined in the provider and will "
+        "not compile (`error C2143`). Use `int`/`unsigned int`/`char`/`short`/`void*` and nothing else.\n"
         "- Resolve each global by NAME. Ghidra's `_g_Foo` resolves as `\"g_Foo\"` (drop a leading "
         "underscore). D2MOO_Resolve ALWAYS returns the ADDRESS OF THE SYMBOL (i.e. &g_Foo).\n"
         "- MECHANICAL RULE for using a resolved global -- do EXACTLY this, do not improvise extra "
@@ -355,6 +359,23 @@ def parse_live_response(text: str):
     if 'provider_runtime.h' not in reimpl:  # ensure the resolver header is present
         reimpl = '#include "../provider_runtime.h"\n' + reimpl
     return reimpl, layout, input_sets
+
+
+def remove_candidate(name: str) -> None:
+    """Delete a candidate's .cpp + spec. CRITICAL for the automated loop: a
+    candidate that fails to PROVE is also often a candidate that fails to COMPILE
+    (e.g. an undefined Ghidra type name), and every candidates/*.cpp is compiled
+    into the ONE provider DLL -- so one broken file poisons the build for EVERY
+    other function (found by hand 2026-07-07: a --count 20 batch cascaded into
+    all-failures after one bad reimpl landed). A failed reimpl has no value staged,
+    so remove it; its content is preserved in the run log if needed. Best-effort."""
+    for p in (CANDIDATES_DIR / f"{name}.cpp",
+              VECTORS_DIR / f"{name}.spec.json",
+              VECTORS_DIR / f"{name}.adversarial.spec.json"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
 
 def write_candidate(reimpl_cpp: str, name: str) -> Path:
