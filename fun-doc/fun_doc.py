@@ -10221,6 +10221,33 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         _log("malformed_response", attempts=attempts)
         return "malformed_response"
 
+    # Rung V1 vetting (SHIPPING_PROMOTION_PLAN.md): fold in INDEPENDENT adversarial
+    # vectors. A separate model call that sees ONLY the decompile (never the reimpl)
+    # generates hard boundary/sweep/extreme inputs; merging them into the proof set
+    # means the reimpl must pass cases its own author may have dodged (kills the
+    # "the model tested what it implemented" self-consistency bias). Any divergence
+    # flows through the same fix-retry loop below. Best-effort + on by default for
+    # the live path; FUNDOC_ADVERSARIAL_VET=0 to disable.
+    input_names = [i.get("name") for i in (layout.get("inputs") or []) if i.get("name")]
+    if input_names and os.environ.get("FUNDOC_ADVERSARIAL_VET", "1") == "1":
+        try:
+            adv_prompt = plp.build_adversarial_vectors_prompt(func_name, decompiled, input_names)
+            atext, _ = invoke_claude(adv_prompt, model=model, max_turns=max_turns,
+                                     provider=provider, complexity_tier=None)
+            adv_inputs = plp.parse_adversarial_vectors(atext, input_names)
+            if adv_inputs:
+                seen, merged = set(), []
+                for s in list(input_sets) + adv_inputs:
+                    k = tuple(sorted((str(kk), str(vv)) for kk, vv in s.items()))
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    merged.append(s)
+                input_sets = merged[:80]  # bound oracle time
+                _log("adversarial_vectors_added", added=len(adv_inputs), total=len(input_sets))
+        except Exception as e:
+            _log("adversarial_vectors_skip", error=str(e))
+
     # Prove, with a bounded fix-retry loop: a first-attempt reimpl that drafts
     # cleanly but proves FALSE (e.g. a pointer-vs-base deref slip) gets the live
     # oracle's divergence fed back so the model can self-correct -- the live

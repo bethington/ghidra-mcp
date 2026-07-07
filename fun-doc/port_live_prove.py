@@ -245,6 +245,59 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
     return "\n".join(parts)
 
 
+def build_adversarial_vectors_prompt(func_name: str, decompiled_text: str,
+                                     input_names: list) -> str:
+    """QA/adversary prompt: generate a hard input-set purely from the DECOMPILED
+    ORIGINAL (never shown the reimpl), to catch a subtly-wrong reimplementation
+    the author's own vectors would miss. Rung V1 of SHIPPING_PROMOTION_PLAN.md."""
+    parts = []
+    parts.append("OUTPUT CONTRACT: reply with EXACTLY ONE ```json block and nothing else: "
+                 '{"input_sets": [ {..}, {..} ]}.')
+    parts.append("")
+    parts.append(f"## You are QA. Try to BREAK a reimplementation of {func_name} with adversarial inputs.")
+    parts.append(
+        "Below is the DECOMPILED ORIGINAL. You will NOT see the reimplementation -- derive inputs purely "
+        "from what the ORIGINAL does, to maximize the chance of exposing a subtly-wrong reimpl. Cover: "
+        "EVERY branch boundary the code compares against and +/-1 around it; a DENSE sweep of the valid "
+        "input range; and the extremes 0, 1, -1, INT_MIN (-2147483648), INT_MAX (2147483647), and powers "
+        "of two. Aim for 30-50 input_sets.")
+    parts.append("")
+    parts.append("## Decompiled original (the spec)")
+    parts.append("```")
+    parts.append(str(decompiled_text))
+    parts.append("```")
+    parts.append("Input field names -- use EXACTLY these keys in every input_set: " + ", ".join(input_names))
+    parts.append("```json")
+    parts.append(json.dumps({"input_sets": [
+        {n: 0 for n in input_names}, {n: 1 for n in input_names}, {n: -1 for n in input_names},
+    ]}, indent=2))
+    parts.append("```")
+    return "\n".join(parts)
+
+
+def parse_adversarial_vectors(text: str, input_names: list) -> list:
+    """Extract input_sets from a build_adversarial_vectors_prompt reply. Returns []
+    on any failure (vetting is best-effort -- a bad adversary reply just means no
+    extra coverage that round, never a broken proof)."""
+    import port_pipeline as pp
+    blocks = pp._fenced_blocks(text or "")
+    js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
+    if not js:
+        return []
+    try:
+        obj = json.loads(js[0])
+    except json.JSONDecodeError:
+        return []
+    sets = obj.get("input_sets") if isinstance(obj, dict) else obj
+    if not isinstance(sets, list):
+        return []
+    out = []
+    for s in sets:
+        if isinstance(s, dict) and all(n in s for n in input_names):
+            out.append({n: s[n] for n in input_names})
+    return out
+
+
 def build_live_fix_prompt(func_name: str, decompiled_text: str, prior_reimpl: str,
                           prove_output: str) -> str:
     parts = []
