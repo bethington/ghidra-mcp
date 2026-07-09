@@ -160,6 +160,78 @@ _C_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 # through as "leaf", got drafted, and failed the harness -- a wasted cycle that
 # recurs on every Room*/Unit* accessor Ghidra types as a bare int*.
 _DEEP_DEREF_RE = re.compile(r"\*\s*\(\s*\w+\s*\*+\s*\)\s*\(\s*\*")
+# A pointer Ghidra types as a bare SCALAR (int*/short*/void*) that is actually a
+# LIVE-STRUCT base: indexed at a NONZERO offset (`pUnit[0xc]`, `pUnit[4]`) or
+# cast-double-dereferenced (`**(short **)pItemCode`). The scalar-pointer allowlist
+# wrongly calls these "pure leaf", so they dead-end in the static /emulate harness
+# (no_vectors / harness_failed) -- yet they are TRIVIAL live-pointer getters,
+# provable via SHADOW (the game passes the real pointer; original+reimpl both read
+# it and compare). Distinct from "stateful" (complex / delegating / global-reading)
+# because the body is a simple field read. Class = "shadow_leaf". Found 2026-07-07
+# running the hot backlog: GetPathFieldByUnitType (pUnit[0xc], 617M hits) and
+# DATATBLS_GetItemDataByCode (**(short**)p, 334M hits) both wasted static cycles.
+_STRUCT_PTR_INDEX_RE = re.compile(r"\b\w+\s*\[\s*(?:0x0*[1-9a-fA-F][0-9a-fA-F]*|[1-9]\d*)\s*\]")
+_CAST_DOUBLE_DEREF_RE = re.compile(r"\*\s*\*\s*\(\s*\w+\s*\*\s*\*\s*\)")
+# Clean double-deref of a variable in UNARY position (`return **p;`, `= **p`,
+# `(**p`) -- the cast-free form. Once a param's type is corrected to T** (e.g. the
+# write-back that fixed DATATBLS_GetItemDataByCode short*->short**), Ghidra drops
+# the `**(short**)` cast and emits a bare `**p`, which _CAST_DOUBLE_DEREF_RE misses.
+# Anchored to a unary lead-in so `a ** b` (a * (*b)) can't false-match.
+_CLEAN_DOUBLE_DEREF_RE = re.compile(r"(?:^|return|[=(,)])\s*\*\s*\*\s*\w")
+# A param Ghidra typed as a BARE scalar integer (plain `int`, not `int*`) that the
+# BODY uses as a live-STRUCT base -- `*(T *)(param + off)`, `*(T *)param`, or
+# `param[idx]`. Ghidra frequently types a struct pointer as plain `int` on
+# single-field getters (found 2026-07-08: PATH_GetDynamicX `int pPath` /
+# `*(dword *)(pPath + 0xc)` sailed through as "leaf" and dead-ended in the static
+# harness). _POINTER_PARAM_RE requires a `*` in the decl, so it misses these; this
+# recovers them into shadow_leaf, where they prove trivially via the handle path.
+_SCALAR_PARAM_DECL_RE = re.compile(
+    r"(?:^|[,(])\s*(?:const\s+)?"
+    r"(?:int|uint|dword|long|ulong|__int32|uint32_t|int32_t|intptr_t|uintptr_t)\s+"
+    r"(\w+)\s*(?=[,)]|$)")
+
+
+def _scalar_params_used_as_ptr(params_text, body):
+    """Names of BARE-scalar params the body dereferences as a pointer base (cast
+    `*(T *)(name...` / `*(T *)name`) or indexes as an array base (`name[idx]`).
+    These are struct pointers Ghidra under-typed as `int`."""
+    names = []
+    for m in _SCALAR_PARAM_DECL_RE.finditer(params_text):
+        name = m.group(1)
+        esc = re.escape(name)
+        # cast-and-deref: *(TYPE *) [(] name ...   -- name is the pointer base
+        cast_deref = re.search(r"\*\s*\(\s*\w[\w ]*\*+\s*\)\s*\(?\s*" + esc + r"\b", body)
+        # array-base index at a nonzero offset: name[0xNN] / name[1..]
+        arr_index = re.search(esc + r"\s*\[\s*(?:0x0*[1-9a-fA-F]|[1-9])", body)
+        if cast_deref or arr_index:
+            names.append(name)
+    return names
+
+# --- handle_leaf gate: a READ-ONLY live-object getter provable via the oracle
+# capture path (a real captured object passed to orig+reimpl). It takes exactly one
+# pointer, reads its fields, touches NO globals, calls NO real delegates, and
+# MUTATES nothing through the pointer. These are the biggest hot-path class, marked
+# "stateful" today only because Ghidra types the pointer as a named struct. ---
+_CALL_ID_RE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+# Calls that DON'T disqualify: control flow, abort/exit helpers (null-guard paths),
+# and decompiler intrinsics (CONCAT/SUB/ZEXT/... are bit ops, not real functions).
+_SAFE_CALL_RE = re.compile(
+    r"^(if|while|for|switch|return|sizeof|do|GetReturnAddress|CleanupAndAbort|"
+    r"_?exit|abort|assert\w*|CONCAT\d+|SUB\d+|ZEXT\d+|SEXT\d+|CARRY\d+|SBORROW\d+)$")
+# A WRITE through a pointer/struct: `p->f =`, `*p =`, `a[i] =`, `*(T*)(..) =`.
+# CRITICAL SAFETY GATE -- a fn that mutates the pointed-to object must NEVER be
+# handle-proven: passing a live captured game object would CORRUPT it. `==` excluded.
+_PTR_WRITE_RE = re.compile(r"(?:->\s*\w+|\]|\*\s*\([^;{}]*\)|\*\s*\w+)\s*=(?!=)")
+
+
+def _has_delegate_call(body):
+    """True if `body` calls any function that is NOT control-flow / an abort helper
+    / a decompiler intrinsic -- i.e. a real delegate a passthrough reimpl can't
+    reproduce from field reads alone."""
+    for m in _CALL_ID_RE.finditer(body):
+        if not _SAFE_CALL_RE.match(m.group(1)):
+            return True
+    return False
 
 
 def _strip_comments(text):
@@ -208,10 +280,14 @@ _SCALAR_POINTER_BASE_TYPES = {
 
 
 def classify_function(decompiled_text, variables=None):
-    """Classify a function as "leaf" (pure/leaf, provable via static
-    emulation) or "stateful" (needs a live-trace oracle, out of Phase 1
-    scope). Returns "leaf" | "stateful" | "unknown" (fetch failure -- treat
-    as stateful, i.e. do not auto-port).
+    """Classify a function for the port pipeline. Returns:
+      "leaf"        -- pure/leaf, provable via static /emulate_function.
+      "global_leaf" -- reads only NAMED globals, provable LIVE via the resolver.
+      "shadow_leaf" -- trivial LIVE-POINTER getter (a scalar-typed pointer used as
+                       a struct base): not statically emulable, provable via SHADOW
+                       (the game passes the real pointer). The hot-path getter class.
+      "stateful"    -- complex/struct-pointer/delegating; out of auto-port scope.
+      "unknown"     -- decompile fetch failed; treat as do-not-auto-port.
 
     Heuristic (deliberately conservative -- see module docstring):
     - Any DAT_<addr> OR named g_*/_g_* global reference in the decompile
@@ -241,6 +317,52 @@ def classify_function(decompiled_text, variables=None):
         return "unknown"
 
     text = _strip_comments(str(decompiled_text))
+    # Pointer-type checks are scoped to where declarations actually appear
+    # (signature params + standalone local-decl lines), NOT the whole text -- a
+    # whole-text scan can't tell `TYPE *name` (declaration) from `a * b`
+    # (multiplication). See _extract_signature_params/_POINTER_LOCAL_LINE_RE.
+    header, _, body = text.partition("{")
+    params_text = _extract_signature_params(header)
+    has_ptr_param = bool(_POINTER_PARAM_RE.search(params_text))
+
+    # handle_leaf FIRST -- a READ-ONLY live-object getter: EXACTLY ONE pointer arg,
+    # reads its fields (struct access), touches NO globals, calls NO real delegate,
+    # and writes NOTHING through the pointer. Provable via the oracle handle path (a
+    # real captured object passed to orig+reimpl -- the GetPathFieldByUnitType /
+    # UNIT_GetMode mechanism). Checked BEFORE the stateful guards, which a struct
+    # getter would otherwise trip (`->` / named-struct param), because it is the
+    # biggest hot-path class and IS provable. SAFETY: the no-write gate is REQUIRED
+    # -- handle-proving a mutator would corrupt the live captured game object.
+    struct_access = bool(_STRUCT_ACCESS_RE.search(body) or _STRUCT_PTR_INDEX_RE.search(body)
+                         or _CAST_DOUBLE_DEREF_RE.search(body) or _CLEAN_DOUBLE_DEREF_RE.search(body))
+    # A single live-pointer param can be either a declared pointer (`T *p`) OR a
+    # bare scalar Ghidra under-typed (`int p` used as `*(T*)(p+off)`). Count both so
+    # the under-typed getters (PATH_GetDynamicX etc.) reach shadow_leaf instead of
+    # dead-ending in the static harness.
+    declared_ptr_params = _POINTER_PARAM_RE.findall(params_text)
+    scalar_ptr_params = _scalar_params_used_as_ptr(params_text, body)
+    total_ptr_params = len(declared_ptr_params) + len(scalar_ptr_params)
+    if (total_ptr_params == 1 and (struct_access or scalar_ptr_params)
+            and not _DAT_GLOBAL_RE.search(text) and not _NAMED_GLOBAL_RE.search(text)
+            and not _has_delegate_call(body) and not _PTR_WRITE_RE.search(body)):
+        return "shadow_leaf"
+
+    # NAMED-GLOBAL TABLE GETTER (before the ->/deep-deref guards): a function that
+    # reads a NAMED global (g_*/_g_*), takes NO live-object pointer param (only scalar/
+    # index args), and does NOT delegate, is provable LIVE via the resolver regardless
+    # of Ghidra TYPING. Its `->`/deep derefs are on a pointer COMPUTED from the named
+    # global + a scalar index (`records[idx]->field`) -- fully resolvable, NOT a captured-
+    # object chain (which needs a pointer PARAM). Without this, typing a record ptr
+    # (`rec->field` -> `->`) mis-routes it to stateful while the structurally-identical
+    # UNTYPED getter reaches global_leaf. (DATATBLS batch 2026-07-08: GetItemTypeFieldE
+    # global_leaf+proved vs identical GetItemTypeField10 stateful-skipped, only because
+    # its record ptr was typed -> `->`.) Gated: named global, no unnamed DAT_, no pointer
+    # param at all, no delegate -> the derefs can only be global/scalar-derived.
+    if (_NAMED_GLOBAL_RE.search(text) and not _DAT_GLOBAL_RE.search(text)
+            and not has_ptr_param and not scalar_ptr_params
+            and not _has_delegate_call(body)):
+        return "global_leaf"
+
     # HARD-stateful signals (not provable statically AND not simply live-resolvable):
     if _DAT_GLOBAL_RE.search(text):
         return "stateful"  # unnamed raw-address global -- not in the name resolver
@@ -249,13 +371,6 @@ def classify_function(decompiled_text, variables=None):
     if _DEEP_DEREF_RE.search(text):
         return "stateful"  # pointer-to-pointer / struct-with-pointers chain
 
-    # Pointer-type check is scoped to where declarations actually appear
-    # (signature parameter list + standalone local-decl lines), NOT the
-    # whole text -- a whole-text scan can't tell `TYPE *name` (declaration)
-    # apart from `a * b` (multiplication); both are "word * word" at the
-    # token level. See _extract_signature_params/_POINTER_LOCAL_LINE_RE.
-    header, _, body = text.partition("{")
-    params_text = _extract_signature_params(header)
     for m in _POINTER_PARAM_RE.finditer(params_text):
         base_type = m.group(1).lower().replace("const", "").strip()
         if base_type not in _SCALAR_POINTER_BASE_TYPES:
@@ -273,6 +388,10 @@ def classify_function(decompiled_text, variables=None):
                     base_type = dtype.split("*")[0].strip().lower()
                     if base_type not in _SCALAR_POINTER_BASE_TYPES:
                         return "stateful"
+
+    # (The live-pointer GETTER class 'shadow_leaf' is decided EARLY, above, with the
+    # full read-only/no-global/no-delegate safety gate -- it must precede the
+    # stateful guards a struct getter would otherwise trip.)
 
     # No hard-stateful signal. If the only "state" it touches is a NAMED global
     # (g_*/_g_*), it's provable LIVE via the D2MOO resolver (D2MOO_Resolve gives

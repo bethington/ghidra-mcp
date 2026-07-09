@@ -107,20 +107,62 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS, program: str = "D2Commo
         r = by_key.get(key)
         if r is None:
             continue  # not a fun-doc/hand-tracked function; nothing to update
-        r["shadow_hits"] = d.get("hits", 0)
-        r["shadow_divergences"] = d.get("divergences", 0)
+        hits, divs = d.get("hits", 0), d.get("divergences", 0)
+        r["shadow_hits"] = hits
+        r["shadow_divergences"] = divs
         r["shadow_mode"] = d.get("modeName")
+        # WINDOWED rate since the last epoch. A hot-reloaded fix (verify_shadow_fix /
+        # --set-epoch) records the counters at fix time as shadow_epoch_*; we then
+        # judge the DELTA, so a fixed function promotes on its own without a game
+        # restart to clear the pre-fix (poisoned) cumulative divergences. Default
+        # epoch 0/0 == lifetime totals (unchanged behavior for never-reset rows).
+        eh = r.get("shadow_epoch_hits", 0)
+        ed = r.get("shadow_epoch_divergences", 0)
+        dhits, ddivs = hits - eh, divs - ed
         is_shadow = d.get("modeName") == "shadow"
-        if (is_shadow and d.get("divergences", 0) == 0 and d.get("hits", 0) >= min_hits
+        if (is_shadow and ddivs == 0 and dhits >= min_hits and not r.get("weak_proof")
                 and r.get("conf") != "CONF_BATTLETESTED"):
             tag_result = _set_battletested(addr_hex, program=program)
             if tag_result.get("status") == "success" or "already_present" in str(tag_result):
                 r["conf"] = "CONF_BATTLETESTED"
                 r["battletested_date"] = time.strftime("%Y-%m-%d")
-                promoted.append({"name": d["name"], "hits": d["hits"]})
+                if eh or ed:
+                    r["battletested_windowed"] = f"{dhits} clean hits since epoch (post-fix)"
+                promoted.append({"name": d["name"], "hits": dhits})
 
     _save_registry(rows)
     return {"ok": True, "promoted": promoted, "dispatchers_seen": len(disp.get("dispatchers", []))}
+
+
+def set_shadow_epoch(name: str, *, program: str = "D2Common.dll") -> dict:
+    """Record the CURRENT live (hits, divergences) as this function's epoch baseline
+    in the registry, so poll_and_promote judges only NEW calls. Call right after a
+    hot-reloaded reimpl fix -- the pre-fix cumulative divergences are poisoned; the
+    epoch draws a clean line so a correct fix promotes without a game restart."""
+    try:
+        disp = _http_get_json(ORACLE_URL, "/dispatchers")
+    except OSError as e:
+        return {"ok": False, "error": f"D2Debugger unreachable: {e}"}
+    cur = None
+    for d in disp.get("dispatchers", []):
+        if d["name"] == name:
+            cur = d
+            break
+    if cur is None:
+        return {"ok": False, "error": f"{name} is not a live dispatcher"}
+    rows = _load_registry()
+    hit = False
+    for r in rows:
+        if r.get("name") == name:
+            r["shadow_epoch_hits"] = cur.get("hits", 0)
+            r["shadow_epoch_divergences"] = cur.get("divergences", 0)
+            r["shadow_epoch_date"] = time.strftime("%Y-%m-%d")
+            hit = True
+    if not hit:
+        return {"ok": False, "error": f"{name} not in registry"}
+    _save_registry(rows)
+    return {"ok": True, "name": name, "epoch_hits": cur.get("hits", 0),
+            "epoch_divergences": cur.get("divergences", 0)}
 
 
 def loop(interval: int = 60, *, stop_flag=None) -> None:
@@ -146,8 +188,13 @@ if __name__ == "__main__":
     ap.add_argument("--loop", action="store_true", help="poll continuously instead of once")
     ap.add_argument("--interval", type=int, default=60, help="seconds between polls in --loop mode")
     ap.add_argument("--min-hits", type=int, default=BATTLE_MIN_HITS)
+    ap.add_argument("--set-epoch", metavar="NAME",
+                    help="record NAME's current shadow counters as its epoch baseline "
+                         "(after a hot-reloaded fix -- promote on NEW clean calls, no restart)")
     args = ap.parse_args()
-    if args.loop:
+    if args.set_epoch:
+        print(json.dumps(set_shadow_epoch(args.set_epoch), indent=2))
+    elif args.loop:
         loop(args.interval)
     else:
         print(json.dumps(poll_and_promote(min_hits=args.min_hits), indent=2))

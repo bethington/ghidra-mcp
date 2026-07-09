@@ -733,6 +733,20 @@
         <!-- Conformance / implementation workbench (hidden by default) -->
         <div class="panel" id="conformancePanel" style="display: none;">
             <div class="panel-header">
+                <h2>Port Pipeline &mdash; Stage 2/3 (needs your review)</h2>
+                <span style="color: var(--text-muted); font-size: 0.65rem;">
+                    Auto-drafted &amp; harness-proven candidates. NEVER auto-committed to OpenD2 &mdash; a proven draft sits in <code>_generated_candidates/</code> until you move it into <code>Shared/</code> and commit it yourself.
+                </span>
+            </div>
+            <div class="panel-content" id="portPipelineContent">
+                <div style="text-align: center; color: var(--text-muted); padding: 1rem;">Loading pipeline candidates...</div>
+            </div>
+            <div class="panel-content" id="portDraftViewer" style="display: none;">
+                <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px; color: var(--text-muted); margin-bottom:2px;" id="portDraftTitle"></div>
+                <pre id="portDraftContent" style="background: var(--bg-medium); border:1px solid var(--border-dark); padding:0.5rem; font-size:0.62rem; line-height:1.3; max-height:50vh; overflow:auto; white-space:pre; margin:0; font-family: var(--font-mono);"></pre>
+            </div>
+
+            <div class="panel-header" style="margin-top: 0.5rem;">
                 <h2>Implementation Coverage</h2>
                 <span style="color: var(--text-muted); font-size: 0.65rem;">
                     PD2-S12 Ghidra functions ported to OpenD2 (via <code>@PD2S12</code> links). PROVEN = conformance-tested. Click a symbol for the side-by-side view.
@@ -2553,7 +2567,62 @@
             if (graphPanel) graphPanel.style.display = view === 'graph' ? '' : 'none';
             if (confPanel) confPanel.style.display = view === 'conformance' ? '' : 'none';
             if (view === 'graph') loadCallGraphLayers();
-            if (view === 'conformance') loadConformance();
+            if (view === 'conformance') { loadPortPipeline(); loadConformance(); }
+        }
+
+        const PORT_STATUS_STYLE = {
+            proven_pending_review: { color: 'var(--color-set)', label: 'PROVEN — pending review' },
+            harness_failed:        { color: 'var(--accent-red-light)', label: 'harness failed' },
+            no_vectors:            { color: 'var(--accent-red-light)', label: 'no vectors minted' },
+            malformed_response:    { color: 'var(--accent-red-light)', label: 'malformed response' },
+            blocked:                { color: 'var(--text-muted)', label: 'blocked (quota)' },
+            stateful_skip:          { color: 'var(--text-muted)', label: 'skipped (stateful)' },
+            unknown_skip:           { color: 'var(--text-muted)', label: 'skipped (fetch failed)' },
+        };
+
+        async function loadPortPipeline() {
+            const el = document.getElementById('portPipelineContent');
+            if (!el) return;
+            try {
+                const data = await (await fetch('/api/conformance/pipeline')).json();
+                const cands = data.candidates || [];
+                if (!cands.length) {
+                    el.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:1rem;">No port-pipeline candidates yet. Enable a PORT worker (per-binary, opt-in) to start drafting.</div>';
+                    return;
+                }
+                let html = '<table class="data-table"><thead><tr><th>Function</th><th>Program</th><th>Status</th><th>Attempts</th><th>Last Result</th></tr></thead><tbody>';
+                for (const c of cands) {
+                    const st = PORT_STATUS_STYLE[c.port_status] || { color: 'var(--text-muted)', label: c.port_status };
+                    const clickable = c.port_draft_path ? `onclick="showPortDraft('${escapeHtml(c.key)}','${escapeHtml(c.port_draft_path)}')" style="cursor:pointer;"` : '';
+                    html += `<tr class="func-row" ${clickable}>
+                        <td class="mono">${escapeHtml(c.name || c.address)}</td>
+                        <td class="mono" style="color: var(--text-muted);">${escapeHtml(c.program_name || '')}</td>
+                        <td class="mono" style="color:${st.color}; font-weight:600;">${escapeHtml(st.label)}</td>
+                        <td class="mono">${c.port_attempts || 0}</td>
+                        <td class="mono" style="color: var(--text-muted); font-size:0.6rem;">${escapeHtml(c.port_last_result || '')}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table>';
+                el.innerHTML = html;
+            } catch (e) {
+                el.innerHTML = `<div style="color: var(--accent-red-light); padding:0.5rem;">Error loading pipeline: ${e.message}</div>`;
+            }
+        }
+
+        async function showPortDraft(key, draftPath) {
+            const viewer = document.getElementById('portDraftViewer');
+            const title = document.getElementById('portDraftTitle');
+            const content = document.getElementById('portDraftContent');
+            if (!viewer || !content) return;
+            viewer.style.display = '';
+            title.textContent = `${key} — ${draftPath}`;
+            content.textContent = 'Loading…';
+            try {
+                const d = await (await fetch(`/api/conformance/draft_content?path=${encodeURIComponent(draftPath)}`)).json();
+                content.textContent = d.error ? `Error: ${d.error}` : d.content;
+            } catch (e) {
+                content.textContent = 'Error: ' + e.message;
+            }
         }
 
         async function loadConformance() {

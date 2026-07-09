@@ -581,6 +581,24 @@ def main() -> int:
             print(f"[skip] {nm}: no conformance/vectors/*.spec.json declares this name")
             results.append({"name": nm, "status": "no-spec"})
             continue
+        # ABORT-CLASS HARD SKIP (2026-07-08): a registry row (or its spec) flagged
+        # abort_class has a FATAL out-of-range path -- _exit/CleanupAndAbort, an
+        # uncatchable kill, not a recoverable wild read. The model-envelope logic
+        # below is a soft guard; for these functions no widening is acceptable at
+        # all, and even dense in-envelope sweeps add nothing beyond the original
+        # proof (their envelope IS the proof set). Static registry flag beats a
+        # model judgment call. (GetAnimSequenceRecord killed the bridge 3x.)
+        row = by_name.get(nm) or {}
+        spec_flag = False
+        try:
+            spec_flag = bool(json.loads(specs[nm].read_text(encoding="utf-8")).get("abort_class"))
+        except Exception:
+            pass
+        if row.get("abort_class") or spec_flag:
+            print(f"[skip] {nm}: ABORT CLASS (fatal out-of-range path) -- V1 sweep "
+                  f"forbidden; evidence rung is V2 shadow instead")
+            results.append({"name": nm, "status": "abort-class-skip"})
+            continue
         print(f"[v1] {nm}")
         try:
             out = reprove(nm, specs[nm], use_model=args.model, row=by_name.get(nm))

@@ -61,6 +61,45 @@ def main():
         print("  FAIL: unlinked function should report implemented=False without erroring")
         ok = False
 
+    # 4) port pipeline candidates (Stage 2/3 -- fun-doc's own port_status
+    # tracking, distinct from the committed-@PD2S12-marker coverage above)
+    r = client.get("/api/conformance/pipeline")
+    pipe = r.get_json() or {}
+    cands = pipe.get("candidates") or []
+    print("[pipeline]   status=%s candidates=%d" % (r.status_code, len(cands)))
+    if r.status_code != 200:
+        print("  FAIL: /api/conformance/pipeline should always return 200")
+        ok = False
+    proven = [c for c in cands if c.get("port_status") == "proven_pending_review"]
+    if proven:
+        c = proven[0]
+        print("  proven_pending_review: %s attempts=%s result=%s"
+              % (c.get("name"), c.get("port_attempts"), c.get("port_last_result")))
+        if not c.get("port_draft_path"):
+            print("  FAIL: proven_pending_review candidate missing port_draft_path")
+            ok = False
+        else:
+            # 5) draft content viewer for that candidate
+            r2 = client.get("/api/conformance/draft_content",
+                             query_string={"path": c["port_draft_path"]})
+            draft = r2.get_json() or {}
+            print("[draft]      status=%s content_len=%d"
+                  % (r2.status_code, len(draft.get("content") or "")))
+            if r2.status_code != 200 or "namespace D2Lib" not in (draft.get("content") or ""):
+                print("  FAIL: expected the staged header's real content")
+                ok = False
+
+            # 6) draft content viewer rejects a path outside the staging dir
+            r3 = client.get("/api/conformance/draft_content",
+                             query_string={"path": r"C:\Windows\win.ini"})
+            print("[draft-esc]  status=%s (expect 403)" % r3.status_code)
+            if r3.status_code != 403:
+                print("  FAIL: path outside _generated_candidates/ must be rejected")
+                ok = False
+    else:
+        print("  (no proven_pending_review candidate staged right now -- run the PORT worker "
+              "or process_port_candidate() manually to exercise checks 5-6)")
+
     print("\nSELFTEST %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 

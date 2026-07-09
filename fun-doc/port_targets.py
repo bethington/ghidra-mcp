@@ -1,0 +1,304 @@
+"""port_targets.py -- port a SPECIFIC list of functions (by address), in order.
+
+The `fun_doc.py --port` auto-selector (port_pipeline.select_port_candidates) only
+picks functions that are ALREADY Stage-1 documented (score>=80) and sorts them
+leaf-first by address -- so it sweeps low-address library/string leaves, NOT the
+hot backlog. It also has no way to aim at a target list.
+
+This driver bypasses the selector and calls fun_doc.process_port_candidate
+DIRECTLY for each target address (that function takes an explicit address and does
+its own classify -> draft -> prove, so it does not need pre-documentation and is
+not gated by the score>=80 filter). It reads the profiler's hot backlog
+(conformance/profiler/hot_backlog.json) by default, or an explicit --names /
+--addresses list.
+
+SAFETY: it skips library/runtime-looking names (the STRCHR_/STR* string scanners
+whose raw char* arg crashed the oracle marshaller during a blind batch). Genuine
+game-logic getters take an int index (safe scalar vectors) or a unit pointer
+(classified "stateful" -> skipped, no oracle call), so targeting the hot backlog
+is inherently safer than the auto-selector's low-address string picks.
+
+Usage (from fun-doc/, venv active, game live on :8790):
+    python port_targets.py --backlog --count 5
+    python port_targets.py --names GetPathFieldByUnitType,DATATBLS_GetItemDataByCode
+    python port_targets.py --backlog --plan               # PRE-FLIGHT: partition, no proving
+    python port_targets.py --backlog --plan --wire-globals  # + stage missing globals
+
+--plan (2026-07-08): the pre-flight partitioner. The July batch restarted the game
+THREE times because needs (missing resolver globals, abort-class vector safety, a
+delegate) were discovered serially, one failure at a time. The planner sweeps every
+target FIRST -- decompile + disassembly, mechanical ABI (abi_static), abort-path
+detection, resolver-global gap check against the generated resolve table -- and
+partitions the batch into:
+    provable-now / needs-globals(+rebuild+restart) / delegate-rung / abort-class /
+    register-explicit / not-a-leaf
+so ALL resolve-table wiring lands in ONE rebuild + ONE restart, abort-class fns get
+in-envelope vectors from the start, and nothing is discovered by crashing.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+from pathlib import Path
+
+import fun_doc
+import port_pipeline as pp
+import abi_static
+
+D2MOO_REPO = Path(os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"))
+BACKLOG = D2MOO_REPO / "conformance" / "profiler" / "hot_backlog.json"
+RESOLVE_GEN = D2MOO_REPO / "D2.Detours.patches" / "1.13c" / "D2Common_ResolveTable.gen.h"
+PENDING_GLOBALS = D2MOO_REPO / "conformance" / "tools" / "pending_globals.json"
+D2COMMON_BASE = 0x6FD50000
+# fun-doc keys/looks up functions under the Ghidra program PATH, not the bare name.
+PROGRAM_PATH = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
+
+
+def _targets_from_backlog(count: int) -> list[dict]:
+    if not BACKLOG.exists():
+        raise SystemExit(f"[fatal] no backlog at {BACKLOG} -- run profiler_feed.py first")
+    data = json.loads(BACKLOG.read_text(encoding="utf-8"))
+    rows = data.get("backlog", data if isinstance(data, list) else [])
+    return rows[:count]
+
+
+def _addr_hex(row: dict) -> str:
+    """Bare lowercase hex address (no 0x) -- fun_doc's state-key convention."""
+    if row.get("address"):
+        return str(row["address"]).replace("0x", "").lower()
+    return f"{D2COMMON_BASE + int(row['offset']):x}"
+
+
+def _resolved_addrs() -> set:
+    """Addresses already in the generated resolve table (what the live resolver
+    can serve). Names aren't enough: the planner checks by ADDRESS so a global the
+    disasm derefs is 'wired' regardless of what we called it."""
+    try:
+        text = RESOLVE_GEN.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return {int(m.group(1), 16) for m in re.finditer(r"0x([0-9a-fA-F]+)u", text)}
+
+
+def _proven_names() -> set:
+    """Names already CONF_LIVE+ in the registry -- a plan should surface these as
+    done, not re-partition them (post-proof Ghidra write-backs retype params, which
+    legitimately changes their classify_function answer)."""
+    reg = D2MOO_REPO / "conformance" / "proven_functions.jsonl"
+    try:
+        return {json.loads(l)["name"] for l in reg.read_text(encoding="utf-8").splitlines()
+                if l.strip()}
+    except OSError:
+        return set()
+
+
+def _internal_caller_count(addr_hex: str) -> int | None:
+    """Count INTERNAL callers of a function from Ghidra xrefs. An export with ONLY
+    'Entry Point [EXTERNAL]' (0 internal callers) is almost certainly INLINED at
+    every call site -> the running game never invokes the standalone export -> it
+    can NEVER reach CONF_BATTLETESTED via shadow (nothing to observe). Flagging that
+    up front avoids wasting a shadow-stage + rebuild + restart + dispatcher slot on
+    a function that will sit at 0 hits forever; route it to the offline CONF_
+    REGRESSION freeze instead (its terminal rung). NOTE: this is a HINT -- xrefs
+    can't see CROSS-DLL callers (D2Game etc. calling a D2Common export), so the
+    empirical shadow hit count remains the final arbiter. Returns None on fetch
+    failure (treat as unknown, not zero)."""
+    res = fun_doc.ghidra_get("/get_function_xrefs",
+                             params={"address": f"0x{addr_hex}", "program": PROGRAM_PATH})
+    if res is None or fun_doc._is_error_response(res):
+        return None
+    text = res.get("result", "") if isinstance(res, dict) else str(res)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # each line is one xref; internal = not the export entry-point / external table
+    internal = [ln for ln in lines
+                if "[EXTERNAL]" not in ln and "Entry Point" not in ln]
+    return len(internal)
+
+
+def plan_targets(rows: list, *, wire_globals: bool = False) -> dict:
+    """PRE-FLIGHT: partition targets by what they need BEFORE any prove runs.
+    Read-only against Ghidra; never touches the oracle. See module docstring."""
+    wired = _resolved_addrs()
+    proven = _proven_names()
+    plan = {"already_proven": [], "provable_now": [], "needs_globals": [], "delegate": [],
+            "abort_class": [], "register_explicit": [], "not_leaf": [],
+            "shadow_unreachable_risk": [], "fetch_failed": []}
+    pending: dict = {}
+    for r in rows:
+        name, addr = r["name"], _addr_hex(r)
+        if name in proven:
+            plan["already_proven"].append({"name": name, "addr": addr})
+            continue
+        dec = fun_doc.ghidra_get("/decompile_function",
+                                 params={"address": f"0x{addr}", "program": PROGRAM_PATH})
+        dis = fun_doc.ghidra_get("/disassemble_function",
+                                 params={"address": f"0x{addr}", "program": PROGRAM_PATH})
+        if not dec or fun_doc._is_error_response(dec):
+            plan["fetch_failed"].append({"name": name, "addr": addr})
+            continue
+        cls = pp.classify_function(dec)
+        abi = abi_static.derive_abi(str(dis)) if dis and not fun_doc._is_error_response(dis) else None
+        abort = abi_static.detect_abort_path(str(dec))
+        missing = [g for g in (abi or {}).get("data_globals", []) if g not in wired]
+        # SHADOW-REACHABILITY HINT: a getter-class export with 0 internal callers is
+        # likely inlined everywhere -> shadow can never observe it -> CONF_BATTLETESTED
+        # unreachable; its terminal is the offline CONF_REGRESSION freeze. (Hint only;
+        # cross-DLL callers are invisible here -> shadow hits are the final arbiter.)
+        internal_callers = _internal_caller_count(addr)
+        shadow_risk = (internal_callers == 0 and cls in ("shadow_leaf", "leaf"))
+        entry = {"name": name, "addr": addr, "class": cls,
+                 "abi": {k: abi[k] for k in ("ret_imm", "slots", "used_slots",
+                                              "reg_args", "callconv", "approx")} if abi else None,
+                 "abort_class": abort,
+                 "internal_callers": internal_callers,
+                 "shadow_risk": shadow_risk,
+                 "calls": (abi or {}).get("calls", []),
+                 "missing_globals": [f"0x{g:x}" for g in missing]}
+        if shadow_risk:
+            plan["shadow_unreachable_risk"].append(entry)
+        # partition priority: the property that changes HOW you may prove it wins
+        if abort:
+            plan["abort_class"].append(entry)     # in-envelope vectors ONLY, no V1
+        if abi and abi["callconv"] == "register_explicit":
+            plan["register_explicit"].append(entry)
+        if (abi or {}).get("calls"):
+            plan["delegate"].append(entry)        # delegate-rung: resolve + call through
+        if missing:
+            plan["needs_globals"].append(entry)
+            for g in missing:
+                pending.setdefault(f"g_dat_{g:x}", g)
+        if not abort and not missing and not (abi or {}).get("calls") \
+                and (abi is None or abi["callconv"] != "register_explicit"):
+            plan["provable_now"].append(entry)
+        elif (abi or {}).get("calls") and cls in ("stateful",):
+            plan["not_leaf"].append(entry)
+
+    if wire_globals and pending:
+        # Stage every missing global for ONE rebuild+restart. Auto-names are
+        # PLACEHOLDERS (g_dat_<hex>) -- rename in pending_globals.json before the
+        # rebuild if the semantic name is known; gen_resolve_table merges the file.
+        existing = {}
+        if PENDING_GLOBALS.exists():
+            existing = json.loads(PENDING_GLOBALS.read_text(encoding="utf-8"))
+        for n, a in pending.items():
+            existing.setdefault(n, f"0x{a:x}")
+        PENDING_GLOBALS.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+        print(f"[wire-globals] staged {len(pending)} address(es) -> {PENDING_GLOBALS}")
+        print("               review the auto-names, then: gen_resolve_table.py + rebuild "
+              "D2Common patch + ONE game restart activates all of them")
+    return plan
+
+
+def print_plan(plan: dict) -> None:
+    order = [("already_proven", "ALREADY PROVEN (CONF_LIVE+ in the registry)"),
+             ("provable_now", "PROVABLE NOW (no wiring, no restart)"),
+             ("needs_globals", "NEEDS GLOBALS (wire -> ONE rebuild+restart for all)"),
+             ("delegate", "DELEGATE-RUNG (calls a subroutine: resolve callee + call through)"),
+             ("abort_class", "ABORT CLASS (fatal out-of-range: in-envelope vectors, NO V1)"),
+             ("register_explicit", "REGISTER-EXPLICIT (orig_regs marshal path)"),
+             ("not_leaf", "NOT A LEAF (stateful + delegates -- manual)"),
+             ("shadow_unreachable_risk", "SHADOW-UNREACHABLE RISK (0 internal callers = likely "
+              "inlined; oracle-provable but will NOT battletest -> freeze offline as CONF_REGRESSION)"),
+             ("fetch_failed", "FETCH FAILED")]
+    print("=" * 72)
+    print("PRE-FLIGHT PLAN (no oracle calls made)")
+    print("=" * 72)
+    for k, title in order:
+        rows = plan.get(k, [])
+        if not rows:
+            continue
+        print(f"\n-- {title} --")
+        for e in rows:
+            abi = e.get("abi") or {}
+            bits = []
+            if abi:
+                bits.append(f"{abi.get('callconv')}/{abi.get('slots')} slot(s)")
+            if e.get("missing_globals"):
+                bits.append("globals: " + ",".join(e["missing_globals"]))
+            if e.get("calls"):
+                bits.append(f"{len(e['calls'])} callee(s)")
+            print(f"  {e['name']:<38} @{e['addr']}  {'; '.join(bits)}")
+    print()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--backlog", action="store_true", help="target the profiler hot backlog")
+    ap.add_argument("--count", type=int, default=5, help="how many backlog entries to port")
+    ap.add_argument("--names", help="comma-separated function names (needs backlog for addrs)")
+    ap.add_argument("--provider", default=os.environ.get("AI_PROVIDER"))
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--include-library", action="store_true",
+                    help="don't skip library/string-looking names (unsafe: oracle-crash risk)")
+    ap.add_argument("--plan", action="store_true",
+                    help="PRE-FLIGHT ONLY: partition targets (ABI/abort/globals/delegates), "
+                         "print the plan, prove nothing")
+    ap.add_argument("--wire-globals", action="store_true",
+                    help="with --plan: stage missing resolver globals into pending_globals.json")
+    args = ap.parse_args()
+
+    # live-prove + doc-tags + shadow-promote ON, matching `fun_doc.py --port`.
+    os.environ.setdefault("FUNDOC_LIVE_PROVE", "1")
+    os.environ.setdefault("FUNDOC_DOC_TAGS", "1")
+    os.environ.setdefault("FUNDOC_SHADOW_PROMOTE", "1")
+
+    rows = _targets_from_backlog(10000)          # load all available backlog rows
+    if args.names:
+        want = [n.strip() for n in args.names.split(",")]
+        by_name = {r["name"]: r for r in rows}
+        missing = [n for n in want if n not in by_name]
+        if missing:
+            print(f"[warn] not in backlog (regenerate profiler_feed with a larger --top): {missing}")
+        rows = [by_name[n] for n in want if n in by_name]
+    else:
+        rows = rows[:args.count]
+
+    if args.plan:
+        plan = plan_targets(rows, wire_globals=args.wire_globals)
+        print_plan(plan)
+        out = D2MOO_REPO / "conformance" / "profiler" / "port_plan.json"
+        out.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+        print(f"[plan] written to {out}")
+        return 0
+
+    import port_live_prove as plp
+    results = []
+    for r in rows:
+        name = r["name"]
+        if not args.include_library and pp._looks_like_library_or_runtime(name):
+            print(f"[skip] {name}: library/runtime-looking name (oracle-crash risk)")
+            results.append((name, "skipped-library"))
+            continue
+        addr = _addr_hex(r)
+        print(f"\n=== port {name} @ 0x{addr}  ({r.get('hits', '?')} hits) ===")
+        try:
+            res = fun_doc.process_port_candidate(
+                PROGRAM_PATH, addr, name,
+                provider=args.provider or fun_doc.AI_PROVIDER, model=args.model,
+                worker_id="port_targets")
+        except Exception as e:  # never let one target kill the batch
+            res = f"error: {type(e).__name__}: {e}"
+        print(f"    -> {res}")
+        results.append((name, res))
+        # ORACLE-DEATH GUARD: if the bridge died during this target, every further
+        # prove is guaranteed to fail (and would burn LLM drafts against a dead
+        # server). Halt, NAME the killer, leave the rest of the batch untouched.
+        if "oracle" in str(res) or not plp.check_oracle_alive():
+            if not plp.check_oracle_alive():
+                print(f"\n[HALT] the oracle bridge died while porting {name} -- "
+                      f"remaining targets skipped (relaunch the game, then re-run; "
+                      f"suspect an abort-class/ABI issue in {name})")
+                results.append(("(batch halted)", f"oracle_died_during {name}"))
+                break
+
+    print("\n" + "=" * 60)
+    for name, res in results:
+        print(f"  {res:<40} {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

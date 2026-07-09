@@ -53,6 +53,11 @@ class WorkerManager:
         # so a second launch on the same binary is rejected with a clear
         # error rather than silently fighting the first worker for writes.
         self._globals_active_binaries = set()
+        # Per-binary lock for PORT workers (Stage 2/3 conformance pipeline),
+        # same rationale as _globals_active_binaries above -- mirrors it
+        # rather than sharing it since port and globals work are unrelated
+        # write streams (port never touches Ghidra function names/comments).
+        self._port_active_binaries = set()
         self._bus.on("provider_timeout", self._handle_provider_timeout)
         self._watchdog_stop = threading.Event()
         self._watchdog_thread = threading.Thread(
@@ -216,6 +221,11 @@ class WorkerManager:
         # message rather than launching a worker that can't pick a target.
         if mode == "globals" and not binary:
             raise ValueError("Globals worker requires a binary — select one in the header.")
+        # PORT worker also requires a binary: EMULATION_CONFORMANCE_PLAN.md
+        # Sec 15 ports one binary at a time (D2Common first) by design —
+        # there's no sensible "all binaries" PORT run.
+        if mode == "port" and not binary:
+            raise ValueError("Port worker requires a binary — select one in the header.")
         with self._lock:
             active = {
                 wid: w
@@ -238,6 +248,13 @@ class WorkerManager:
                 )
             if mode == "globals":
                 self._globals_active_binaries.add(binary)
+            if mode == "port" and binary in self._port_active_binaries:
+                raise ValueError(
+                    f"A port worker is already running on {binary}. "
+                    "Wait for it to finish or stop it first."
+                )
+            if mode == "port":
+                self._port_active_binaries.add(binary)
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
@@ -401,11 +418,15 @@ class WorkerManager:
 
     def _run_worker(self, worker_id):
         """Worker loop entry point. Dispatches to the function-worker
-        pipeline (default) or the globals-worker pipeline based on the
-        `mode` field captured at start_worker time."""
+        pipeline (default), the globals-worker pipeline, or the PORT
+        (OpenD2 conformance) pipeline based on the `mode` field captured at
+        start_worker time."""
         worker = self._workers.get(worker_id)
         if worker and worker.get("mode") == "globals":
             self._run_worker_globals(worker_id)
+            return
+        if worker and worker.get("mode") == "port":
+            self._run_worker_port(worker_id)
             return
         self._run_worker_functions(worker_id)
 
@@ -1043,6 +1064,97 @@ class WorkerManager:
                 },
             )
 
+    def _run_worker_port(self, worker_id):
+        """PORT (OpenD2 conformance) worker loop. Drafts + proves Stage 2/3
+        candidates on the selected binary via port_pipeline.py + fun_doc's
+        run_port_worker_pass. Per-binary lock is handled in start_worker /
+        this method's finally block (mirrors _run_worker_globals exactly)."""
+        from event_bus import set_worker_id
+
+        set_worker_id(worker_id)
+        worker = self._workers[worker_id]
+        try:
+            from fun_doc import run_port_worker_pass
+
+            worker["status"] = "running"
+            self._set_phase(worker_id, "port_running")
+            self._emit_status()
+            self._bus.emit(
+                "worker_started",
+                {
+                    "worker_id": worker_id,
+                    "mode": "port",
+                    "provider": worker["provider"],
+                    "count": worker["count"],
+                    "binary": worker.get("binary"),
+                    "restored": worker.get("restored", False),
+                },
+            )
+
+            def _on_progress(program, address, result, processed, total):
+                bucket = "completed" if result == "proven_pending_review" else (
+                    "skipped" if result in ("stateful_skip", "malformed_response", "no_vectors") else "failed"
+                )
+                worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+                self._emit_status()
+
+            def _on_started(program, address, name):
+                worker["progress"]["current"] = {
+                    "key": f"{program}::{address}",
+                    "name": name or address,
+                    "address": address,
+                    "program": Path(program).name,
+                }
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+                self._emit_status()
+
+            summary = run_port_worker_pass(
+                worker_id=worker_id,
+                active_binary=worker.get("binary"),
+                provider=worker["provider"],
+                model=worker.get("model"),
+                count=int(worker.get("count") or 1),
+                stop_flag=worker["stop_flag"],
+                on_progress=_on_progress,
+                on_started=_on_started,
+            )
+            if summary.get("stopped_reason") == "no_eligible_candidates":
+                worker["exit_reason"] = "no_eligible_candidates"
+            print(
+                f"  [port-worker {worker_id}] done: {summary['processed']} processed "
+                f"(reason={summary.get('stopped_reason')}) totals={summary.get('totals')}",
+                flush=True,
+            )
+        except Exception as e:
+            self._bus.emit(
+                "worker_stopped",
+                {"worker_id": worker_id, "reason": f"error: {e}"},
+            )
+        finally:
+            worker["status"] = (
+                "finished" if not worker["stop_flag"].is_set() else "stopped"
+            )
+            worker["restore_on_restart"] = False
+            worker["finished_at"] = datetime.now().isoformat()
+            worker["progress"]["current"] = None
+            with self._lock:
+                if worker.get("binary"):
+                    self._port_active_binaries.discard(worker["binary"])
+                self._persist_active_workers()
+            self._emit_status()
+            self._bus.emit(
+                "worker_stopped",
+                {
+                    "worker_id": worker_id,
+                    "reason": worker["status"],
+                    "mode": "port",
+                    "progress": dict(worker["progress"]),
+                },
+            )
+
     def _emit_status(self):
         self._socketio.emit("worker_status", self.get_status())
 
@@ -1124,6 +1236,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         "global_started",
         "global_complete",
         "globals_binary_advanced",
+        "port_drafted",
+        "port_vectors_minted",
+        "port_harness_result",
+        "port_proven_pending_review",
         "tool_result",
         "model_text",
         "score_update",
@@ -1730,11 +1846,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "queue_meta": queue_meta,
             }
         fixable_lo = max(good_enough - 20, 0)
-        done = sum(1 for f in scoreable.values() if f["score"] >= good_enough)
+        # Missing "score" (row not yet scored — e.g. fresh scan/port-pipeline
+        # inserts) counts as 0 here; the per-function "unscored" flag below
+        # tells the frontend it means "unknown", not "0% done".
+        done = sum(1 for f in scoreable.values() if (f.get("score") or 0) >= good_enough)
         fixable_count = sum(
-            1 for f in scoreable.values() if fixable_lo <= f["score"] < good_enough
+            1 for f in scoreable.values() if fixable_lo <= (f.get("score") or 0) < good_enough
         )
-        needs_work = sum(1 for f in scoreable.values() if f["score"] < fixable_lo)
+        needs_work = sum(1 for f in scoreable.values() if (f.get("score") or 0) < fixable_lo)
         pct = (done / total * 100) if total > 0 else 0
         audited = sum(1 for f in scoreable.values() if f.get("audit_count", 0) > 0)
         escalated = sum(
@@ -1754,7 +1873,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "0-9": 0,
         }
         for f in scoreable.values():
-            s = f["score"]
+            s = f.get("score") or 0
             if s >= 100:
                 buckets["100"] += 1
             elif s >= 90:
@@ -1781,7 +1900,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         for f in scoreable.values():
             prog = f.get("program_name", "unknown")
             by_program[prog]["total"] += 1
-            if f["score"] >= good_enough:
+            if (f.get("score") or 0) >= good_enough:
                 by_program[prog]["done"] += 1
             else:
                 by_program[prog]["remaining"] += 1
@@ -1796,7 +1915,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     "name": func["name"],
                     "address": func["address"],
                     "program": func.get("program_name", ""),
-                    "score": func["score"],
+                    "score": func.get("score") or 0,
                     "fixable": round(func.get("fixable", 0), 1),
                     "callers": func.get("caller_count", 0),
                     "is_leaf": func.get("is_leaf", False),
@@ -3106,6 +3225,73 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return jsonify(cw.coverage_summary())
         except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
             return jsonify({"error": str(exc), "total_ported": 0, "by_program": {}})
+
+    @app.route("/api/conformance/pipeline", methods=["GET"])
+    def conformance_pipeline():
+        """Port pipeline (Stage 2/3) candidates currently in flight --
+        drafted, vectors minted, harness failed, or proven-pending-review.
+
+        Distinct from /api/conformance/coverage: coverage reflects OpenD2's
+        COMMITTED @PD2S12 markers (source of truth = the OpenD2 repo).
+        This reflects fun-doc's own port_status tracking for candidates a
+        human has NOT yet reviewed/promoted into Shared/ -- the automated
+        pipeline never writes @PD2S12 markers itself (see port_pipeline.py's
+        module docstring: it stages and proves, a human integrates)."""
+        try:
+            state = load_state()
+            candidates = []
+            for key, func in state.get("functions", {}).items():
+                status = func.get("port_status")
+                if not status:
+                    continue
+                candidates.append({
+                    "key": key,
+                    "program": func.get("program"),
+                    "program_name": func.get("program_name"),
+                    "address": func.get("address"),
+                    "name": func.get("name"),
+                    "port_status": status,
+                    "port_attempts": func.get("port_attempts", 0),
+                    "port_draft_path": func.get("port_draft_path"),
+                    "port_last_result": func.get("port_last_result"),
+                })
+            # Surface what needs your attention first: a ready-to-review
+            # proven draft, then failures worth investigating, then
+            # in-flight/blocked states.
+            order = {
+                "proven_pending_review": 0,
+                "harness_failed": 1,
+                "no_vectors": 2,
+                "malformed_response": 2,
+                "blocked": 3,
+            }
+            candidates.sort(key=lambda c: order.get(c["port_status"], 9))
+            return jsonify({"candidates": candidates})
+        except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
+            return jsonify({"error": str(exc), "candidates": []})
+
+    @app.route("/api/conformance/draft_content", methods=["GET"])
+    def conformance_draft_content():
+        """Read a staged draft header's raw content for review, given the
+        port_draft_path from /api/conformance/pipeline. Path-restricted to
+        OpenD2's _generated_candidates/ staging dir -- never serves an
+        arbitrary filesystem path even if a stale/tampered port_draft_path
+        somehow pointed elsewhere."""
+        raw_path = request.args.get("path", "")
+        if not raw_path:
+            return jsonify({"error": "path required"}), 400
+        try:
+            import port_pipeline as pp
+
+            candidate = Path(raw_path).resolve()
+            allowed_root = pp.GENERATED_CANDIDATES_DIR.resolve()
+            if allowed_root not in candidate.parents and candidate != allowed_root:
+                return jsonify({"error": "path outside the staged-candidates directory"}), 403
+            if not candidate.exists():
+                return jsonify({"error": "file not found (may have been overwritten by a newer candidate)"}), 404
+            return jsonify({"path": str(candidate), "content": candidate.read_text(encoding="utf-8")})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/conformance/sidebyside", methods=["GET"])
     def conformance_sidebyside():
