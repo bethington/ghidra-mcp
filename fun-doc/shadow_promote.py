@@ -35,16 +35,21 @@ Standalone (imports nothing from fun_doc), like port_pipeline.py / port_live_pro
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
+
+GHIDRA_HTTP = os.environ.get("GHIDRA_MCP_URL", "http://127.0.0.1:8089").rstrip("/")
 
 D2MOO_REPO = Path(os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"))
 MANIFEST_PATH = D2MOO_REPO / "conformance" / "shadow_manifest.json"
 GEN_SCRIPT = D2MOO_REPO / "conformance" / "tools" / "gen_shadow_dispatch.py"
+REGISTRY_PATH = D2MOO_REPO / "conformance" / "proven_functions.jsonl"
 BUILD_TREE = os.environ.get("FUNDOC_D2MOO_BUILD_TREE", str(D2MOO_REPO / "build-1.13c"))
 
 _D2COMMON_BASE = 0x6FD50000
@@ -65,6 +70,57 @@ class DeferPromotion(Exception):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+def check_shadow_reachable(address, program: str = "D2Common.dll") -> None:
+    """Raise DeferPromotion if the function has ZERO internal callers -- an export
+    the compiler inlined at every call site is NEVER invoked at runtime, so a shadow
+    dispatcher for it sits at 0 hits forever and can't reach CONF_BATTLETESTED. Route
+    it to the offline CONF_REGRESSION freeze instead of wasting a stage+rebuild+
+    restart+dispatcher slot (2026-07-08: 5 PATH getters discovered this way AFTER
+    staging). HINT only -- cross-DLL callers are invisible; the shadow hit count is
+    the final arbiter, so this only fires on a confident 0. Best-effort: any fetch
+    failure -> no block (let the empirical hit count decide)."""
+    addr = f"0x{address:x}" if isinstance(address, int) else str(address)
+    try:
+        u = urllib.parse.urlparse(GHIDRA_HTTP)
+        c = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=10)
+        c.request("GET", "/get_function_xrefs?" + urllib.parse.urlencode(
+            {"address": addr, "program": program}))
+        raw = c.getresponse().read().decode("utf-8", "replace")
+        c.close()
+    except OSError:
+        return
+    try:
+        obj = json.loads(raw)
+        text = obj.get("result", "") if isinstance(obj, dict) else str(obj)
+    except json.JSONDecodeError:
+        text = raw
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    internal = [ln for ln in lines if "[EXTERNAL]" not in ln and "Entry Point" not in ln]
+    if lines and not internal:
+        raise DeferPromotion(
+            "shadow-unreachable: 0 internal callers (export-only, inlined at call sites) "
+            "-> never invoked at runtime; freeze offline as CONF_REGRESSION instead of "
+            "shadow-staging")
+
+
+def check_weak_proof(name: str) -> None:
+    """Raise DeferPromotion if the registry row for `name` carries a `weak_proof`
+    flag -- a CONF_LIVE proof the oracle stamped DEGENERATE (the original returned
+    an identical value on every vector, so a wrong reimpl matched by luck; see
+    port_live_prove._degenerate_capture_note). Promoting one to a shadow dispatcher
+    on that basis is how STAT_GetActiveSkillFieldC 'passed 8/8' then diverged ~99%
+    under real gameplay. Best-effort: no registry -> no block."""
+    try:
+        for line in REGISTRY_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if r.get("name") == name and r.get("weak_proof"):
+                raise DeferPromotion(f"weak proof (degenerate capture): {r['weak_proof']}")
+    except (OSError, json.JSONDecodeError):
+        return
 
 
 def classify_dispatcher_shape(spec: dict) -> str:
@@ -157,6 +213,8 @@ def maybe_promote(name: str, address, spec: dict, decompiled_text: str = "") -> 
     Best-effort and non-fatal, matching port_live_prove.py's write-back contract
     -- a promotion failure must never fail the underlying proof."""
     try:
+        check_weak_proof(name)               # degenerate-capture proofs must not auto-promote
+        check_shadow_reachable(address)      # export-only/inlined -> freeze offline, don't shadow-stage
         check_hazards(decompiled_text)
         cls = classify_dispatcher_shape(spec)
     except DeferPromotion as e:

@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Iterable, Iterator, Optional
 
 from sqlalchemy import (
+    bindparam,
     delete,
     func,
     insert,
@@ -80,6 +81,11 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "library_code",
     "library_code_at",
     "library_code_reasons",
+    # OpenD2 conformance port pipeline (Sec 14 of EMULATION_CONFORMANCE_PLAN.md)
+    "port_status",
+    "port_attempts",
+    "port_draft_path",
+    "port_last_result",
 }
 
 
@@ -223,6 +229,19 @@ class Repository:
                 )
             ).all()
         return {(pp, addr): row_id for row_id, pp, addr in rows}
+
+    def list_binary_names(self) -> list[str]:
+        """Distinct ``binary_name`` values across all workflow rows.
+
+        One indexed DISTINCT scan — lets the dashboard know every scanned
+        binary without materializing the whole table (which is what a
+        binary-filtered ``list_functions`` call deliberately avoids).
+        """
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(self.t_workflow.c.binary_name).distinct()
+            ).all()
+        return sorted({r[0] for r in rows if r[0]})
 
     def list_functions(
         self,
@@ -487,92 +506,146 @@ class Repository:
         return int(existing[0])
 
     def _bulk_upsert_workflow(self, conn, records: list[dict]) -> None:
-        # Two-pass for portability: SELECT existing keys, then INSERT new and
-        # UPDATE existing in two batched statements. Slower than a single
-        # ON CONFLICT but works identically on both backends and migration
-        # runs once anyway.
-        keys = [(r["program_path"], r["address"]) for r in records]
-        # Build a lookup of existing ids keyed by (program_path, address).
-        existing_ids: dict[tuple[str, str], int] = {}
-        # Batch the IN clause across (program_path, address) pairs. SQL has no
-        # great way to do composite IN portably, so we filter by the union of
-        # program_paths first then narrow client-side.
-        program_paths = list({pp for pp, _ in keys})
-        if program_paths:
-            rows = conn.execute(
-                select(
-                    self.t_workflow.c.id,
-                    self.t_workflow.c.program_path,
-                    self.t_workflow.c.address,
-                ).where(self.t_workflow.c.program_path.in_(program_paths))
-            ).all()
-            for row_id, pp, addr in rows:
-                existing_ids[(pp, addr)] = row_id
-        to_insert: list[dict] = []
-        to_update: list[tuple[int, dict]] = []
+        """Batched INSERT ... ON CONFLICT (program_path, address) DO UPDATE.
+
+        Records are grouped by key-set before dispatch: a partial row only
+        updates the columns it actually carries (preserving upsert-not-REPLACE
+        semantics — see test_storage_common.py), and multi-row VALUES needs
+        uniform keys per statement anyway. ``id`` and ``created_at`` are never
+        overwritten on conflict.
+
+        This replaced a two-pass SELECT + one-UPDATE-statement-per-row
+        implementation written for the one-shot migration. save_state()
+        inherited it as a hot path, which put a ~50 s wall on every
+        full-state save of a 60K-row store (measured 2026-07-09 — the
+        dashboard's binary-switch stall).
+        """
+        # Columns the INSERT half of ON CONFLICT cannot leave out (NOT NULL,
+        # no default). Records missing any of these are partial updates and
+        # take the batched-UPDATE path below instead.
+        required = {
+            c.name
+            for c in self.t_workflow.columns
+            if not c.nullable
+            and c.default is None
+            and c.server_default is None
+            and not c.primary_key
+        }
+        groups: dict[frozenset, list[dict]] = {}
         for r in records:
-            row_id = existing_ids.get((r["program_path"], r["address"]))
-            if row_id is None:
-                to_insert.append(r)
-            else:
-                patch = {k: v for k, v in r.items() if k != "created_at"}
-                to_update.append((row_id, patch))
-        if to_insert:
-            # SQLAlchemy executemany requires every dict to share the same
-            # keys; partial rows raise InvalidRequestError. Normalize by
-            # filling missing keys with None so a heterogeneous batch (the
-            # common case at migration time) inserts cleanly.
-            all_keys: set[str] = set()
-            for r in to_insert:
-                all_keys.update(r.keys())
-            normalized = [
-                {k: r.get(k) for k in all_keys} for r in to_insert
+            groups.setdefault(frozenset(r), []).append(r)
+        for keyset, rows in groups.items():
+            if required <= keyset:
+                self._dialect_upsert(
+                    conn,
+                    self.t_workflow,
+                    rows,
+                    conflict_cols=["program_path", "address"],
+                    update_cols=[k for k in keyset if k != "created_at"],
+                )
+                continue
+            # Partial rows: one executemany UPDATE keyed on the natural key.
+            # A partial record for a nonexistent row is a no-op (previously
+            # the INSERT attempt raised IntegrityError on the missing
+            # required columns — neither behavior creates the row).
+            update_keys = [
+                k
+                for k in keyset
+                if k not in ("program_path", "address", "id", "created_at")
             ]
-            conn.execute(insert(self.t_workflow), normalized)
-        for row_id, patch in to_update:
-            conn.execute(
+            if not update_keys:
+                continue
+            stmt = (
                 update(self.t_workflow)
-                .where(self.t_workflow.c.id == row_id)
-                .values(**patch)
+                .where(
+                    (self.t_workflow.c.program_path == bindparam("b_program_path"))
+                    & (self.t_workflow.c.address == bindparam("b_address"))
+                )
+                .values({k: bindparam(k) for k in update_keys})
+            )
+            conn.execute(
+                stmt,
+                [
+                    {
+                        "b_program_path": r["program_path"],
+                        "b_address": r["address"],
+                        **{k: r.get(k) for k in update_keys},
+                    }
+                    for r in rows
+                ],
             )
 
+    def bulk_upsert_sessions(self, records: list[dict]) -> int:
+        """Upsert many session rows in one transaction.
+
+        save_state() used to call upsert_session() per archived session —
+        one commit (and on SQLite one fsync) each. Returns rows written.
+        """
+        recs = [
+            {
+                "id": r["id"],
+                "started_at": r.get("started_at"),
+                "ended_at": r.get("ended_at"),
+                "payload": r.get("payload"),
+            }
+            for r in records
+        ]
+        if not recs:
+            return 0
+        with self._engine.begin() as conn:
+            self._dialect_upsert(conn, self.t_sessions, recs, conflict_cols=["id"])
+        return len(recs)
+
     def _dialect_upsert(self, conn, table, records: list[dict], *,
-                         conflict_cols: list[str]) -> None:
+                         conflict_cols: list[str],
+                         update_cols: Optional[list[str]] = None) -> None:
         """Dialect-aware INSERT...ON CONFLICT DO UPDATE.
 
         Both Postgres and SQLite (≥3.24) support the same syntax through
         SQLAlchemy's dialect-specific ``insert`` constructs. We pick the
         right one based on the engine's dialect name.
+
+        ``update_cols`` limits which columns the conflict branch overwrites;
+        None keeps the historical behavior (every table column except the
+        conflict keys and ``id`` — for full-row records only, since columns
+        absent from the INSERT resolve to NULL via ``excluded``). Every
+        record in one call must share the same key set (executemany
+        requirement); ``_bulk_upsert_workflow`` groups by key-set upstream.
         """
         if not records:
             return
+        if update_cols is None:
+            update_names = [
+                c.name for c in table.columns
+                if c.name not in conflict_cols and c.name != "id"
+            ]
+        else:
+            update_names = [
+                c for c in update_cols if c not in conflict_cols and c != "id"
+            ]
         dialect = self._engine.dialect.name
-        if dialect == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
+        if dialect in ("postgresql", "sqlite"):
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as d_insert
+            else:
+                from sqlalchemy.dialects.sqlite import insert as d_insert
 
-            stmt = pg_insert(table).values(records)
-            update_cols = {
-                c.name: stmt.excluded[c.name]
-                for c in table.columns
-                if c.name not in conflict_cols and c.name != "id"
-            }
-            stmt = stmt.on_conflict_do_update(
-                index_elements=conflict_cols, set_=update_cols
-            )
-            conn.execute(stmt)
-        elif dialect == "sqlite":
-            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-            stmt = sqlite_insert(table).values(records)
-            update_cols = {
-                c.name: stmt.excluded[c.name]
-                for c in table.columns
-                if c.name not in conflict_cols and c.name != "id"
-            }
-            stmt = stmt.on_conflict_do_update(
-                index_elements=conflict_cols, set_=update_cols
-            )
-            conn.execute(stmt)
+            # executemany form: compile the ON CONFLICT statement once and
+            # hand the driver the full param list. ~5x faster at 60K rows
+            # than literal multi-row VALUES, whose per-statement compile of
+            # ~30K bind params dominated. Column list comes from the first
+            # record; the caller guarantees uniform key sets per call.
+            cols = list(records[0])
+            stmt = d_insert(table).values({c: bindparam(c) for c in cols})
+            if update_names:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=conflict_cols,
+                    set_={n: stmt.excluded[n] for n in update_names},
+                )
+            else:
+                # Record carries only the key columns — nothing to update.
+                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
+            conn.execute(stmt, records)
         else:
             # Fallback: SELECT then INSERT or UPDATE (slower, but portable).
             for r in records:
@@ -584,7 +657,11 @@ class Repository:
                 if existing is None:
                     conn.execute(insert(table).values(**r))
                 else:
-                    conn.execute(update(table).where(pk_filter).values(**r))
+                    patch = {k: v for k, v in r.items() if k in update_names}
+                    if patch:
+                        conn.execute(
+                            update(table).where(pk_filter).values(**patch)
+                        )
 
 
 def _utcnow() -> datetime:

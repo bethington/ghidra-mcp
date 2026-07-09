@@ -1208,7 +1208,7 @@ def _derive_version(program_path):
     return None
 
 
-def _state_dict_from_repo(repo):
+def _state_dict_from_repo(repo, binary_name=None):
     """Materialize the legacy state dict from the SQL backend.
 
     Builds the same shape as load_state()'s old return value: project_folder,
@@ -1221,6 +1221,13 @@ def _state_dict_from_repo(repo):
     rows). On SQLite that's ~300 ms; on Postgres locally ~150 ms. Previously
     the dashboard read the entire state.json (~30 MB) on each refresh, so
     this is a strict improvement.
+
+    ``binary_name`` pushes the dashboard's active-binary filter into SQL:
+    only that binary's rows are materialized into ``functions``. Callers
+    that mutate and save the whole state must NOT pass it — a filtered
+    snapshot round-tripped through save_state() would only rewrite the
+    filtered rows (safe), but code that diffs "every function" against it
+    would treat the other binaries as missing.
     """
     meta = repo.get_meta()
     state = {
@@ -1243,7 +1250,7 @@ def _state_dict_from_repo(repo):
         if sess and isinstance(sess.get("payload"), dict):
             state["current_session"] = sess["payload"]
     # Functions
-    for row in repo.list_functions():
+    for row in repo.list_functions(binary_name=binary_name):
         program_path = row.get("program_path") or ""
         address = row.get("address") or ""
         state["functions"][f"{program_path}::{address}"] = _row_to_state_func(row)
@@ -1258,13 +1265,18 @@ def _ts_to_iso(value):
     return str(value)
 
 
-def load_state():
+def load_state(*, binary_name=None):
     """Load state from the SQL backend.
 
     SQL backend is the only runtime path. Returns the same dict shape
     callers have always expected:
         {project_folder, last_scan, active_binary, current_session,
          sessions: list, functions: {key: record}}
+
+    ``binary_name`` restricts ``functions`` to one binary, with the filter
+    pushed into SQL (a full materialization costs ~3 s on a 60K-row store).
+    Read-only consumers only — see the _state_dict_from_repo docstring for
+    why mutate-and-save callers must load unfiltered.
 
     The state.json fallback below is now test-only scaffolding (reached
     only when the test fixture flips ``_storage_repo_failed = True``).
@@ -1276,8 +1288,20 @@ def load_state():
     repo = _get_storage_repo()
     if repo is not None:
         with _state_lock:
-            return _state_dict_from_repo(repo)
+            return _state_dict_from_repo(repo, binary_name=binary_name)
 
+    state = _load_state_legacy()
+    if binary_name:
+        funcs = state.get("functions") or {}
+        state["functions"] = {
+            k: v
+            for k, v in funcs.items()
+            if (v or {}).get("program_name") == binary_name
+        }
+    return state
+
+
+def _load_state_legacy():
     # ---- Legacy state.json fallback ------------------------------------
     # Kept verbatim from the pre-migration implementation. Reached only
     # when the storage layer is unavailable; safe to delete after the
@@ -1310,6 +1334,84 @@ def load_state():
         f"state.json is corrupt and backup is missing or corrupt: {last_err}. "
         f"Run the recovery logic in fun_doc.py to truncate at the last clean "
         f"function entry, or delete state.json to start fresh."
+    )
+
+
+def get_state_meta():
+    """Meta-only snapshot: {project_folder, last_scan, active_binary}.
+
+    One single-row SELECT — never materializes the functions table
+    (load_state() costs ~3 s on a 60K-row store). Use this wherever only
+    the top-level pointers are needed.
+    """
+    repo = _get_storage_repo()
+    if repo is not None:
+        meta = repo.get_meta()
+        return {
+            "project_folder": meta.get("project_folder")
+            or _default_state()["project_folder"],
+            "last_scan": _ts_to_iso(meta.get("last_scan")),
+            "active_binary": meta.get("active_binary"),
+        }
+    state = _load_state_legacy()
+    return {
+        k: state.get(k) for k in ("project_folder", "last_scan", "active_binary")
+    }
+
+
+_META_SETTABLE_FIELDS = frozenset({"active_binary", "project_folder"})
+
+
+def set_state_meta(**fields):
+    """Targeted write of top-level state pointers. Pass None to clear.
+
+    This is the switch-binary/switch-folder path. It must NEVER go through
+    save_state(): the legacy 'pass me everything' contract bulk-upserts the
+    entire functions table, which was measured at ~50 s on a 60K-row store —
+    the dashboard's binary-switch stall. A meta pointer is one UPDATE on the
+    singleton meta row. (Same pattern as finalize_worker_session.)
+    """
+    unknown = set(fields) - _META_SETTABLE_FIELDS
+    if unknown:
+        raise ValueError(
+            f"set_state_meta: unsupported field(s) {sorted(unknown)}; "
+            f"allowed: {sorted(_META_SETTABLE_FIELDS)}"
+        )
+    if not fields:
+        return
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            repo.set_meta(**fields)
+        bus_emit("state_changed")
+        return
+    # Legacy state.json fallback (test-only scaffolding, same as load_state).
+    with _state_lock:
+        state = _load_state_legacy()
+        for k, v in fields.items():
+            if v is None:
+                state.pop(k, None)
+            else:
+                state[k] = v
+        _atomic_write_state(state)
+    bus_emit("state_changed")
+
+
+def list_scanned_binaries():
+    """Distinct program names present in the workflow store.
+
+    One DISTINCT query — lets a binary-filtered dashboard load still offer
+    every scanned binary in the header dropdown.
+    """
+    repo = _get_storage_repo()
+    if repo is not None:
+        return repo.list_binary_names()
+    state = _load_state_legacy()
+    return sorted(
+        {
+            (f or {}).get("program_name") or "unknown"
+            for f in (state.get("functions") or {}).values()
+        }
     )
 
 
@@ -1408,19 +1510,30 @@ def _persist_state_to_repo(repo, state):
         current_session=cur_id,
         active_binary=state.get("active_binary"),
     )
-    # Archived sessions
+    # Archived sessions — batched into one transaction (per-session
+    # upsert_session calls meant one commit+fsync each, ~337 at last count).
+    session_rows = []
+    seen_sids = set()
     for sess in state.get("sessions") or []:
         if not isinstance(sess, dict):
             continue
         sid = sess.get("id") or sess.get("started") or sess.get("date")
         if not sid:
             continue
-        repo.upsert_session(
-            str(sid),
-            started_at=_parse_state_ts(sess.get("started")),
-            ended_at=_parse_state_ts(sess.get("ended")),
-            payload=sess,
+        sid = str(sid)
+        if sid in seen_sids:
+            continue  # ON CONFLICT can't touch the same row twice per stmt
+        seen_sids.add(sid)
+        session_rows.append(
+            {
+                "id": sid,
+                "started_at": _parse_state_ts(sess.get("started")),
+                "ended_at": _parse_state_ts(sess.get("ended")),
+                "payload": sess,
+            }
         )
+    if session_rows:
+        repo.bulk_upsert_sessions(session_rows)
     # Functions: bulk upsert. Convert each record dict to a row dict.
     funcs = state.get("functions") or {}
     if funcs:
@@ -9324,10 +9437,103 @@ def _audit_global_via_http(prog_path, address):
     return resp
 
 
-def _list_global_addresses(prog_path):
-    """Page through `/list_globals` and return the list of `0x<hex>`
-    addresses. Mirrors web.py's `_list_globals_for_program` so the worker
-    sees the same set the scorer sees."""
+def _audit_global_with_retry(prog_path, address, attempts=3, backoff_seconds=2.0):
+    """`audit_global` with retry on a None response. A transient HTTP
+    timeout on the *post*-audit used to classify a finished provider run
+    as `audit_fail`, discarding the whole run's classification (1,530
+    occurrences through 2026-06). One or two retries with a short backoff
+    recover nearly all of those."""
+    for attempt in range(attempts):
+        audit = _audit_global_via_http(prog_path, address)
+        if audit is not None:
+            return audit
+        if attempt < attempts - 1:
+            time.sleep(backoff_seconds * (attempt + 1))
+    return None
+
+
+# ---- globals clean-cache -------------------------------------------------
+# Persistent set of addresses the worker has already confirmed clean
+# (already_clean / os_canonical / function_label skips, and completions).
+# Without it, every worker pass re-enumerates and re-audits EVERY global in
+# the binary — production data showed a single clean dialog global being
+# re-dispatched 19 times over six weeks. Entries expire after a TTL so
+# external edits (or regressions) are eventually re-checked; the scorer's
+# independent hourly walk still sees the true state regardless.
+
+GLOBALS_CLEAN_CACHE_FILE_NAME = "globals_clean_cache.json"
+GLOBALS_CLEAN_CACHE_TTL_SECONDS = 7 * 86400
+
+
+def _load_globals_clean_cache(base_dir=None):
+    path = Path(base_dir or SCRIPT_DIR) / GLOBALS_CLEAN_CACHE_FILE_NAME
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {"version": 1, "programs": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("programs"), dict):
+        return {"version": 1, "programs": {}}
+    return data
+
+
+def _save_globals_clean_cache(cache, base_dir=None):
+    path = Path(base_dir or SCRIPT_DIR) / GLOBALS_CLEAN_CACHE_FILE_NAME
+    tmp = path.with_suffix(".json.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=1)
+        tmp.replace(path)
+    except OSError as exc:
+        print(
+            f"  [globals-worker] clean-cache save failed: {exc}",
+            flush=True,
+        )
+
+
+def _clean_cache_is_fresh(
+    cache, prog_path, address, ttl_seconds=GLOBALS_CLEAN_CACHE_TTL_SECONDS
+):
+    entry = ((cache.get("programs") or {}).get(prog_path) or {}).get(address)
+    if not entry:
+        return False
+    try:
+        age = (datetime.now() - datetime.fromisoformat(entry)).total_seconds()
+    except (ValueError, TypeError):
+        return False
+    return 0 <= age < ttl_seconds
+
+
+def _clean_cache_mark(cache, prog_path, address):
+    cache.setdefault("programs", {}).setdefault(prog_path, {})[
+        address
+    ] = datetime.now().isoformat()
+
+
+# Placeholder / offset-derived name detector — names like
+# `g_dwMissileAudioRec_0x94`, `g_dwUiPanelField90`, `g_pUnk20`. These are
+# sanctioned as *last-resort* placeholders by step-globals.md, but each one
+# is a cleanup candidate once the owning struct gets a real field name, so
+# runs that produce them are flagged in runs.jsonl for later analytics.
+_GLOBAL_PLACEHOLDER_NAME_RE = re.compile(
+    # `(?<![0-9])0x` — a digit before `0x` means a dimension like 640x480,
+    # not a hex offset.
+    r"((?<![0-9])0x[0-9a-fA-F]{2,}|Field[0-9A-Fa-f]{1,4}$|Unk(nown)?[0-9A-Fa-f]*$|_[0-9a-f]{3,8}$)"
+)
+
+
+def _name_is_placeholder(name):
+    if not name:
+        return False
+    return bool(_GLOBAL_PLACEHOLDER_NAME_RE.search(name))
+
+
+def _list_global_entries(prog_path):
+    """Page through `/list_globals` and return
+    `[{"address": "0x<hex>", "name": <str|None>}, ...]`. Mirrors web.py's
+    `_list_globals_for_program` so the worker sees the same set the scorer
+    sees. Names feed the per-binary duplicate-name index; addresses feed
+    the dispatch loop."""
     page_size = 500
     max_pages = 200
     line_re = re.compile(r"@\s+([0-9a-fA-F]{4,})\b")
@@ -9358,38 +9564,48 @@ def _list_global_addresses(prog_path):
                 for line in resp.splitlines():
                     m = line_re.search(line)
                     if m:
-                        page_entries.append(f"0x{m.group(1)}")
-        if isinstance(resp, dict):
-            items = (
-                resp.get("items")
-                or resp.get("globals")
-                or resp.get("results")
-                or []
-            )
+                        name = line[: m.start()].strip().rstrip("@").strip() or None
+                        page_entries.append(
+                            {"address": f"0x{m.group(1)}", "name": name}
+                        )
+        if isinstance(resp, dict) or isinstance(resp, list):
+            items = resp
+            if isinstance(resp, dict):
+                items = (
+                    resp.get("items")
+                    or resp.get("globals")
+                    or resp.get("results")
+                    or []
+                )
             for item in items:
                 if isinstance(item, dict):
                     addr = item.get("address") or item.get("addr")
                     if addr:
                         page_entries.append(
-                            addr if str(addr).startswith("0x") else f"0x{addr}"
-                        )
-        elif isinstance(resp, list):
-            for item in resp:
-                if isinstance(item, dict):
-                    addr = item.get("address") or item.get("addr")
-                    if addr:
-                        page_entries.append(
-                            addr if str(addr).startswith("0x") else f"0x{addr}"
+                            {
+                                "address": (
+                                    addr
+                                    if str(addr).startswith("0x")
+                                    else f"0x{addr}"
+                                ),
+                                "name": item.get("name") or item.get("label"),
+                            }
                         )
         new_count = 0
-        for addr in page_entries:
+        for entry in page_entries:
+            addr = entry["address"]
             if addr not in seen:
                 seen.add(addr)
-                out.append(addr)
+                out.append(entry)
                 new_count += 1
         if new_count == 0 or len(page_entries) < page_size:
             break
     return out
+
+
+def _list_global_addresses(prog_path):
+    """Address-only view of `_list_global_entries` (legacy callers)."""
+    return [e["address"] for e in _list_global_entries(prog_path)]
 
 
 def _invalidate_global_inventory(prog_path):
@@ -9483,6 +9699,7 @@ def process_global(
     max_turns=None,
     worker_id=None,
     on_started=None,
+    used_names=None,
 ):
     """Process a single global address. Returns one of:
         "completed"  — issues went from N>0 to 0
@@ -9497,7 +9714,13 @@ def process_global(
     `model` resolution: if the caller doesn't pass an explicit model,
     we look up the dashboard-configured FULL-mode model for the given
     provider (same fallback function workers use). This avoids the
-    "No model configured" error when the dashboard hands None through."""
+    "No model configured" error when the dashboard hands None through.
+
+    `used_names` (optional) is the caller's mutable name→address index for
+    this binary. When provided, a rename that collides with an existing
+    symbol at a different address triggers ONE corrective provider turn,
+    and the index is updated in place with the final name so later globals
+    in the same pass see it."""
     run_id = str(uuid.uuid4())[:8]
     started_at = datetime.now()
 
@@ -9518,7 +9741,7 @@ def process_global(
         except Exception:
             max_turns = 25
 
-    audit_before = _audit_global_via_http(prog_path, address)
+    audit_before = _audit_global_with_retry(prog_path, address)
     if audit_before is None:
         _append_run_log(
             {
@@ -9670,9 +9893,16 @@ def process_global(
     quota_paused = bool((meta or {}).get("quota_paused"))
     provider_error = (meta or {}).get("provider_error") or None
 
+    # Running token/tool-call totals — the duplicate-name corrective retry
+    # below adds a second provider turn whose usage must be accounted in
+    # the same run-log row.
+    tool_calls_total = (meta or {}).get("tool_calls")
+    input_tokens_total = (meta or {}).get("input_tokens")
+    output_tokens_total = (meta or {}).get("output_tokens")
+
     # Post-audit (always — even on provider error, so we know if anything
     # partial landed on Ghidra side).
-    audit_after = _audit_global_via_http(prog_path, address)
+    audit_after = _audit_global_with_retry(prog_path, address)
     if audit_after is None:
         _append_run_log(
             {
@@ -9716,6 +9946,99 @@ def process_global(
 
     issues_after = list(audit_after.get("issues") or [])
     name_after = audit_after.get("name") or name_before
+
+    # ---- duplicate-name guard (post-write) ----
+    # A 2026-07 audit of runs.jsonl found 824 names applied at 2+ addresses
+    # within the same binary (worst: g_dwLastError at 60 addresses in
+    # D2Client.dll) — duplicates make decompiler output ambiguous and
+    # poison the write-back mapping. When the caller supplies the binary's
+    # name index, a colliding rename gets ONE corrective provider turn.
+    def _duplicate_target(candidate_name):
+        if not used_names or not candidate_name:
+            return None
+        other = used_names.get(candidate_name)
+        if other and other != address:
+            return other
+        return None
+
+    duplicate_retry = False
+    duplicate_of = (
+        _duplicate_target(name_after) if name_after != name_before else None
+    )
+    if duplicate_of and not quota_paused and not provider_error:
+        duplicate_retry = True
+        print(
+            f"  [globals-worker] duplicate name {name_after!r} already exists "
+            f"at {duplicate_of} — corrective retry",
+            flush=True,
+        )
+        correction = (
+            f"\n\n---\n\n## CORRECTION REQUIRED — duplicate name\n\n"
+            f"You renamed the global at `{address}` to `{name_after}`, but a "
+            f"symbol with that exact name already exists at `{duplicate_of}` "
+            f"in this program. Duplicate names make decompiler output "
+            f"ambiguous and are not allowed.\n\n"
+            f"Rename `{address}` (ONLY this address — do not touch "
+            f"`{duplicate_of}`) to a name that is unique in this program and "
+            f"more specific about THIS global's purpose. Decompile one or two "
+            f"of its xref callers to pin down its role; scope the descriptor "
+            f"by subsystem and role rather than a generic word. Then use "
+            f"`rename_or_label(program=\"{prog_path}\", address=\"{address}\", "
+            f"name=<new unique name>)` and re-audit."
+        )
+        _text2, meta2 = invoke_claude(
+            _build_global_prompt(prog_path, address, audit_after) + correction,
+            model=model,
+            max_turns=max_turns,
+            provider=provider,
+            complexity_tier=None,
+        )
+
+        def _acc(a, b):
+            if a is None:
+                return b
+            if b is None:
+                return a
+            return a + b
+
+        tool_calls_total = _acc(tool_calls_total, (meta2 or {}).get("tool_calls"))
+        input_tokens_total = _acc(
+            input_tokens_total, (meta2 or {}).get("input_tokens")
+        )
+        output_tokens_total = _acc(
+            output_tokens_total, (meta2 or {}).get("output_tokens")
+        )
+        quota_paused = quota_paused or bool((meta2 or {}).get("quota_paused"))
+        provider_error = (
+            provider_error or (meta2 or {}).get("provider_error") or None
+        )
+        audit_retry = _audit_global_with_retry(prog_path, address)
+        if audit_retry is not None:
+            audit_after = audit_retry
+            issues_after = list(audit_after.get("issues") or [])
+            name_after = audit_after.get("name") or name_after
+        duplicate_of = (
+            _duplicate_target(name_after) if name_after != name_before else None
+        )
+        if duplicate_of:
+            print(
+                f"  [globals-worker] duplicate persists after retry: "
+                f"{name_after!r} also at {duplicate_of}",
+                flush=True,
+            )
+
+    # Keep the caller's name index current so later globals in this pass
+    # are checked against names this run just created (in-pass duplicates
+    # were the main pile-up mechanism).
+    if used_names is not None and name_after:
+        if name_before and used_names.get(name_before) == address:
+            used_names.pop(name_before, None)
+        if name_after not in used_names:
+            used_names[name_after] = address
+
+    placeholder_name = bool(
+        name_after != name_before and _name_is_placeholder(name_after)
+    )
     fixed_count = max(0, len(issues_before) - len(issues_after))
 
     # Severity-tiered completion (per design Q1=A): soft issues like
@@ -9782,13 +10105,17 @@ def process_global(
             "issues_before": issues_before,
             "issues_after": issues_after,
             "fixed_count": fixed_count,
-            "tool_calls": (meta or {}).get("tool_calls"),
+            "tool_calls": tool_calls_total,
             "tool_calls_known": (meta or {}).get("tool_calls_known"),
-            "input_tokens": (meta or {}).get("input_tokens"),
-            "output_tokens": (meta or {}).get("output_tokens"),
+            "input_tokens": input_tokens_total,
+            "output_tokens": output_tokens_total,
             "provider_error": provider_error,
             "quota_paused": quota_paused,
             "quota_paused_until": (meta or {}).get("quota_paused_until"),
+            "duplicate_name": bool(duplicate_of),
+            "duplicate_of": duplicate_of,
+            "duplicate_retry": duplicate_retry,
+            "placeholder_name": placeholder_name,
         }
     )
 
@@ -9812,6 +10139,33 @@ def process_global(
         },
     )
     return result
+
+
+# Save the program every N result-bearing runs. The globals path
+# historically never saved at all — every rename/type/plate lived only in
+# Ghidra's in-memory program until something else saved it, and a Ghidra
+# close/crash silently discarded hours of provider work (traced at
+# D2Client.dll 0x6fbd55d8: a good rename evaporated within 3 hours and the
+# nondeterministic retry landed a worse one). Function workers always saved;
+# this brings the globals path to parity.
+GLOBALS_SAVE_EVERY = 10
+
+
+def _save_globals_worker_program(prog_path):
+    """Best-effort `/save_program` after globals-worker writes. Never
+    raises — a failed save is logged and the next checkpoint retries."""
+    try:
+        ghidra_post("/save_program", params={"program": prog_path}, timeout=120)
+        print(
+            f"  [globals-worker] saved {Path(prog_path).name}",
+            flush=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — save must not kill the pass
+        print(
+            f"  [globals-worker] save_program failed for {prog_path}: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
 
 
 def _pick_next_globals_binary(programs, exclude_binaries):
@@ -9881,6 +10235,7 @@ def run_globals_worker_pass(
             "skipped": 0,
             "blocked": 0,
             "audit_fail": 0,
+            "cache_skipped": 0,
         },
         "stopped": False,
         "stopped_reason": None,
@@ -9889,6 +10244,9 @@ def run_globals_worker_pass(
     processed = 0
     current_binary = initial_binary
     visited_paths = set()
+    clean_cache = _load_globals_clean_cache()
+    cache_dirty = False
+    writes_since_save = 0
 
     # Continuous mode (the dashboard's "Auto" toggle) means run until the
     # binary is drained — and then keep going to the next most-needy binary
@@ -9909,7 +10267,8 @@ def run_globals_worker_pass(
             f"  [globals-worker {worker_id}] {prog_name}: enumerating globals",
             flush=True,
         )
-        addresses = _list_global_addresses(current_binary)
+        entries = _list_global_entries(current_binary)
+        addresses = [e["address"] for e in entries]
         if not addresses:
             print(
                 f"  [globals-worker {worker_id}] {prog_name}: list_globals "
@@ -9927,6 +10286,34 @@ def run_globals_worker_pass(
                 else None
             )
             continue
+
+        # Name index for the duplicate-name guard: existing symbol names in
+        # this binary, first address wins. process_global mutates it as
+        # renames land so in-pass collisions are caught too.
+        used_names = {}
+        for e in entries:
+            nm = e.get("name")
+            if nm and nm not in used_names:
+                used_names[nm] = e["address"]
+
+        # Clean-cache filter: drop addresses this worker already confirmed
+        # clean within the TTL. Before this, every pass re-audited every
+        # global in the binary — 40% of all historic dispatches were
+        # redundant skips.
+        cached_set = {
+            a
+            for a in addresses
+            if _clean_cache_is_fresh(clean_cache, current_binary, a)
+        }
+        if cached_set:
+            summary["totals"]["cache_skipped"] += len(cached_set)
+            addresses = [a for a in addresses if a not in cached_set]
+            print(
+                f"  [globals-worker {worker_id}] {prog_name}: "
+                f"{len(cached_set)} clean-cached globals skipped, "
+                f"{len(addresses)} to check",
+                flush=True,
+            )
 
         binary_done = False
         for address in addresses:
@@ -9947,12 +10334,33 @@ def run_globals_worker_pass(
                 model=model,
                 worker_id=worker_id,
                 on_started=on_started,
+                used_names=used_names,
             )
             summary["totals"][result] = summary["totals"].get(result, 0) + 1
             # `skipped` results don't count toward the cap — they're cheap
             # filter passes, not real work.
             if result != "skipped":
                 processed += 1
+            # Clean-cache: skipped (already_clean / OS-canonical / function
+            # label) and completed globals stay clean until the TTL expires
+            # — don't re-audit them next pass.
+            if result in ("completed", "skipped"):
+                _clean_cache_mark(clean_cache, current_binary, address)
+                cache_dirty = True
+            # Checkpoint-save so a Ghidra crash mid-binary can't discard
+            # more than GLOBALS_SAVE_EVERY runs of provider work. `blocked`
+            # is included: a provider can error *after* its writes landed.
+            if result in (
+                "completed",
+                "improved",
+                "lateral_change",
+                "regressed",
+                "blocked",
+            ):
+                writes_since_save += 1
+                if writes_since_save >= GLOBALS_SAVE_EVERY:
+                    _save_globals_worker_program(current_binary)
+                    writes_since_save = 0
             if on_progress:
                 try:
                     on_progress(current_binary, address, result, processed, count)
@@ -9968,6 +10376,16 @@ def run_globals_worker_pass(
         else:
             # Loop completed naturally — exhausted this binary's globals.
             binary_done = True
+
+        # Final checkpoint for this binary: flush unsaved writes and persist
+        # the clean cache before moving on (also covers user_stop/blocked
+        # exits, which break out of the loop to here).
+        if writes_since_save > 0:
+            _save_globals_worker_program(current_binary)
+            writes_since_save = 0
+        if cache_dirty:
+            _save_globals_clean_cache(clean_cache)
+            cache_dirty = False
 
         # Invalidate this binary's cached inventory so the scorer re-walks it
         # and the dashboard reflects the worker's writes.
@@ -10039,7 +10457,7 @@ def run_globals_worker_pass(
 
 def process_global_leaf_live(program, address, func_name, decompiled, *,
                              provider, model=None, max_turns=15, worker_id=None,
-                             max_fix_attempts=3):
+                             max_fix_attempts=3, static_abi=None, abort_class=False):
     """LIVE-prove path for a 'global_leaf' function (reads named game globals ->
     not statically provable, but provable against the RUNNING game via the D2MOO
     resolver). Drafts a resolver-based reimpl (D2MOO_Resolve for globals), then
@@ -10085,21 +10503,69 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     })
 
     prompt = plp.build_live_draft_prompt(func_name, address, decompiled)
+    try:
+        import abi_static
+        if static_abi or abort_class:
+            # authoritative ABI facts from the disassembly + abort-class safety rule
+            prompt += "\n\n" + abi_static.abi_prompt_block(static_abi, abort_class)
+        # GLOBAL-RESOLVE + CALL-THROUGH hints: a global_leaf reimpl MUST reach game
+        # globals (and any callee) via D2MOO_Resolve, never a direct extern/call (the
+        # #1 build_candidate failure for this class -- the model drafts `_g_pDataTables`
+        # or `GetX(id)` directly -> unresolved external -> build fails). Inject the exact
+        # verified names + the resolve pattern from the disasm. 2026-07-08.
+        _dis = ghidra_get("/disassemble_function",
+                          params={"address": f"0x{address}", "program": program})
+        if _dis and not _is_error_response(_dis):
+            _globs = abi_static.resolvable_globals(str(_dis))
+            if _globs:
+                prompt += abi_static.global_resolve_prompt_block(_globs)
+                _log("global_resolve_hint_injected", globals=[n for _a, n in _globs])
+            _callees = abi_static.resolvable_callees(str(_dis))
+            if _callees:
+                prompt += abi_static.callthrough_prompt_block(_callees)
+    except Exception:
+        pass
     reimpl = layout = input_sets = None
     attempts = 0
-    while attempts < max(1, max_fix_attempts):
-        attempts += 1
-        text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
-                                   provider=provider, complexity_tier=None)
-        if (meta or {}).get("quota_paused"):
-            update_function_state(key, {"port_status": "blocked",
-                                        "port_last_result": "quota_paused"})
-            _log("blocked", reason="quota_paused")
-            return "blocked"
-        reimpl, layout, input_sets = plp.parse_live_response(text or "")
-        if reimpl:
-            break
-        _log("malformed_response_retry", attempt=attempts)
+
+    # GLOBAL-TABLE SHORT-CIRCUIT: the dominant DATATBLS getter shape
+    # (`g_table->records[idx*stride]->field`) translates MECHANICALLY from the disasm
+    # -- resolve the global BY NAME, deref, bound-check, index, raw-cast. The MODEL
+    # oscillates on the resolve-deref chain (proves one, mismatches its twin); the
+    # translation is deterministic + bit-exact. Prove with index vectors, no model.
+    try:
+        import abi_static
+        _dis = ghidra_get("/disassemble_function",
+                          params={"address": f"0x{address}", "program": program})
+        if _dis and not _is_error_response(_dis):
+            gt = abi_static.translate_global_table_getter_to_c(func_name, str(_dis))
+            if gt.get("ok"):
+                reimpl = gt["code"]
+                layout = {"inputs": [{"name": "idx", "signed": True}],
+                          "outputs": [{"name": "ret", "register": "EAX",
+                                       "signed": gt["ret"].startswith("i")}]}
+                input_sets = [{"idx": i} for i in
+                              (0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144)]
+                attempts = 1
+                _log("global_table_translated", global_=gt.get("global"),
+                     stride=gt.get("stride"), field_off=gt.get("field_off"), ret=gt.get("ret"))
+    except Exception as e:
+        _log("global_table_skip", error=str(e))
+
+    if not reimpl:
+        while attempts < max(1, max_fix_attempts):
+            attempts += 1
+            text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
+                                       provider=provider, complexity_tier=None)
+            if (meta or {}).get("quota_paused"):
+                update_function_state(key, {"port_status": "blocked",
+                                            "port_last_result": "quota_paused"})
+                _log("blocked", reason="quota_paused")
+                return "blocked"
+            reimpl, layout, input_sets = plp.parse_live_response(text or "")
+            if reimpl:
+                break
+            _log("malformed_response_retry", attempt=attempts)
 
     if not reimpl:
         update_function_state(key, {"port_status": "malformed_response",
@@ -10107,6 +10573,19 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                                     "port_last_result": "no parseable live-draft blocks"})
         _log("malformed_response", attempts=attempts)
         return "malformed_response"
+
+    # OVERRIDE the drafted layout with the statically derived ABI: the disasm's
+    # RET n / register facts beat any model guess (a guessed ECX/fastcall on a
+    # stack-arg getter burned 3 prove rounds before this). Also pads unused slots
+    # so the marshal pushes exactly what the callee cleans.
+    try:
+        import abi_static
+        layout, input_sets, abi_notes = abi_static.apply_static_abi(
+            layout, input_sets, static_abi)
+        if abi_notes:
+            _log("static_abi_override", notes=abi_notes)
+    except Exception:
+        pass
 
     # Rung V1 vetting (SHIPPING_PROMOTION_PLAN.md): fold in INDEPENDENT adversarial
     # vectors. A separate model call that sees ONLY the decompile (never the reimpl)
@@ -10116,7 +10595,12 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     # flows through the same fix-retry loop below. Best-effort + on by default for
     # the live path; FUNDOC_ADVERSARIAL_VET=0 to disable.
     input_names = [i.get("name") for i in (layout.get("inputs") or []) if i.get("name")]
-    if input_names and os.environ.get("FUNDOC_ADVERSARIAL_VET", "1") == "1":
+    if abort_class:
+        # ABORT CLASS: the out-of-range branch is FATAL (_exit/CleanupAndAbort) --
+        # adversarial widening would kill the game/bridge (it did, 3x, on
+        # GetAnimSequenceRecord). Skip the vet and CLAMP vectors to the safe envelope.
+        _log("adversarial_vet_skipped", reason="abort_class")
+    elif input_names and os.environ.get("FUNDOC_ADVERSARIAL_VET", "1") == "1":
         try:
             adv_prompt = plp.build_adversarial_vectors_prompt(func_name, decompiled, input_names)
             atext, _ = invoke_claude(adv_prompt, model=model, max_turns=max_turns,
@@ -10139,12 +10623,21 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     # cleanly but proves FALSE (e.g. a pointer-vs-base deref slip) gets the live
     # oracle's divergence fed back so the model can self-correct -- the live
     # analogue of the static path's harness fix-loop.
+    if abort_class:
+        try:
+            import abi_static
+            input_sets, dropped = abi_static.clamp_abort_vectors(input_sets)
+            _log("abort_vectors_clamped", dropped=dropped, kept=len(input_sets))
+        except Exception:
+            pass
+
     live = None
     prove_attempts = 0
     while prove_attempts < max(1, max_fix_attempts):
         prove_attempts += 1
         try:
-            live = plp.run_live_prove(reimpl, func_name, address, layout, input_sets)
+            live = plp.run_live_prove(reimpl, func_name, address, layout, input_sets,
+                                      abort_class=abort_class)
         except plp.UnsupportedLiveABI as e:
             plp.remove_candidate(func_name)
             update_function_state(key, {"port_status": "unsupported_abi",
@@ -10168,6 +10661,13 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         if not new_reimpl:
             break  # malformed fix -> stop, report the last real prove result
         reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
+        try:  # the fix draft gets the same ABI override + abort clamp as the first
+            import abi_static
+            layout, input_sets, _n = abi_static.apply_static_abi(layout, input_sets, static_abi)
+            if abort_class:
+                input_sets, _d = abi_static.clamp_abort_vectors(input_sets)
+        except Exception:
+            pass
         _log("live_prove_fix_retry", attempt=prove_attempts)
 
     if live.get("ok"):
@@ -10187,12 +10687,986 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     # poisons the single provider DLL build for EVERY other function. Nothing of
     # value is staged; its content survives in the run log.
     plp.remove_candidate(func_name)
+    fstage = live.get("failure_stage") or "prove"
+    fdetail = live.get("failure_detail") or ""
     update_function_state(key, {
         "port_status": "live_prove_failed", "port_attempts": attempts,
-        "port_last_result": (live.get("output") or live.get("error") or "")[-500:]})
-    _log("live_prove_failed", output=(live.get("output") or "")[-2000:],
-         error=live.get("error"))
-    return "live_prove_failed"
+        "port_failure_stage": fstage,
+        "port_last_result": (fdetail or live.get("output") or live.get("error") or "")[-500:]})
+    _log("live_prove_failed", failure_stage=fstage, failure_detail=fdetail[:500],
+         output=(live.get("output") or "")[-2000:], error=live.get("error"))
+    return f"live_prove_failed[{fstage}]"
+
+
+# ---------------------------------------------------------------------------
+# POST-PROOF NAME AUDIT (write-back discipline, CONFORMANCE_TAXONOMY.md
+# "Renaming: ground-truth-to-ground-truth, else FLAG"). A proof grounds a
+# function's BEHAVIOR + ABI, NOT its name -- so after a proof we check the name
+# and apply the guidance CONSERVATIVELY: auto-rename ONLY a generic auto-name
+# (FUN_/Ordinal_/...); a REAL name that contradicts the proven behavior is FLAGGED
+# for human review, never overwritten with a model guess (annotate-don't-overwrite).
+# ---------------------------------------------------------------------------
+_AUTO_NAME_RE = re.compile(r"^(FUN_|Ordinal_|SUB_|LAB_|UNK_|DAT_)", re.IGNORECASE)
+
+
+def _is_auto_name(name):
+    """A generic decompiler/exporter auto-name with no semantic basis -- free to
+    replace with a behavior-derived name (evidence rank bottom, per the taxonomy)."""
+    return bool(_AUTO_NAME_RE.match(name or ""))
+
+
+def _reconcile_registry_name(address, new_name, old_name):
+    """After an auto-rename, keep proven_functions.jsonl in sync (Ghidra just became
+    the truth for this address -- the known 'adopt-ghidra' direction). Updates the row
+    by address, keeps ghidra_prev_name. Best-effort. The standalone
+    conformance/tools/check_consistency.py handles the ambiguous / downstream cases."""
+    try:
+        reg = (Path(os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"))
+               / "conformance" / "proven_functions.jsonl")
+        if not reg.exists():
+            return
+        addr_norm = ("0x" + str(address).lower().lstrip("0x"))
+        out, changed = [], False
+        for line in reg.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                out.append(line)
+                continue
+            if str(row.get("address", "")).lower() == addr_norm and row.get("name") == old_name:
+                row["ghidra_prev_name"] = row.get("ghidra_prev_name", old_name)
+                row["name"] = new_name
+                changed = True
+            out.append(json.dumps(row))
+        if changed:
+            reg.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001 -- registry sync must never break a proof
+        pass
+
+
+def _extract_first_json(text):
+    """First balanced top-level JSON object out of a model reply (tolerates fences/prose)."""
+    if not text:
+        return None
+    s = text.strip()
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", s, re.DOTALL)
+    if m:
+        s = m.group(1)
+    start = s.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(s[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def build_name_audit_prompt(func_name, decompiled):
+    return (
+        "You are auditing a Ghidra function NAME against its now-PROVEN behavior. A bit-exact "
+        "conformance proof just confirmed what this function DOES (its return value + the exact "
+        "fields it reads). Decide whether the current name is accurate, under a STRICT evidence rule.\n\n"
+        f"Current name: {func_name}\n\n"
+        "Decompiled (proven) behavior:\n```\n" + str(decompiled) + "\n```\n\n"
+        "RULES:\n"
+        "- A proof grounds BEHAVIOR, not the name. Propose a rename ONLY when you have GROUND-TRUTH "
+        "evidence for a better name: a string constant the function references, a clearly-named callee "
+        "it invokes, or UNAMBIGUOUS domain behavior. A plausible-but-unverified guess is NOT grounds.\n"
+        "- Exactly one verdict:\n"
+        "  * \"keep\": the current name accurately describes the proven behavior.\n"
+        "  * \"rename\": the current name is CONTRADICTED by the proven behavior (it implies behavior the "
+        "function does NOT have), OR is a generic auto-name (FUN_/Ordinal_/SUB_/LAB_), AND you can derive "
+        "a clear, convention-fitting name FROM THE PROVEN BEHAVIOR. Put it in proposed_name. This need NOT "
+        "be the final canonical name -- an accurate behavior-derived name beats a contradicted one.\n"
+        "  * \"flag\": the name is wrong/misleading but you CANNOT derive an adequate replacement from the "
+        "behavior alone (too generic to name, or the correct name needs external evidence -- a referenced "
+        "string, an xref, or the D2MOO canonical name).\n"
+        "- Naming convention: SUBSYSTEM_ActionThing (e.g. UNIT_GetMode, DATATBLS_GetSkillsTxtRecord).\n\n"
+        "Output ONLY strict JSON, no prose: "
+        "{\"verdict\":\"keep|rename|flag\",\"proposed_name\":\"<name or empty>\",\"reason\":\"<one sentence>\"}"
+    )
+
+
+def _ghidra_audit_flag(program_name, address, text, marker="[AUDIT"):
+    """Prepend an idempotent [AUDIT] note to the plate. `marker` is the per-concern
+    phrase whose presence means 'already flagged this concern' -- distinct markers
+    (name vs type) let both coexist without one suppressing the other. Best-effort."""
+    try:
+        cur = ghidra_get("/get_plate_comment",
+                         params={"address": f"0x{address}", "program": program_name})
+        existing = cur.get("comment") if isinstance(cur, dict) else (cur or "")
+        if marker in (existing or ""):
+            return "already-flagged"
+        body = text + ("\n\n" + existing if existing else "")
+        ghidra_post("/set_plate_comment",
+                    data={"address": f"0x{address}", "comment": body, "program": program_name})
+        return "flagged"
+    except Exception as e:  # noqa: BLE001
+        return f"error:{e}"
+
+
+def _post_proof_name_audit(program_name, address, func_name, decompiled, *, provider, model, log):
+    """After a proof grounds BEHAVIOR, check the Ghidra NAME and apply the write-back
+    guidance CONSERVATIVELY. Auto-rename ONLY a generic auto-name; a contradicting REAL
+    name is FLAGGED, never overwritten with a model guess. Opt out: FUNDOC_NAME_AUDIT=0.
+    Best-effort -- never affects the proof result."""
+    if os.environ.get("FUNDOC_NAME_AUDIT", "1") != "1":
+        return
+    try:
+        text, meta = invoke_claude(build_name_audit_prompt(func_name, decompiled),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("name_audit_skip", reason="no JSON verdict")
+            return
+        verdict = str(obj.get("verdict", "")).lower().strip()
+        proposed = str(obj.get("proposed_name") or "").strip()
+        reason = str(obj.get("reason") or "").strip()
+        if verdict == "keep":
+            log("name_audit_keep", name=func_name)
+            return
+        if verdict == "rename" and proposed and proposed != func_name:
+            # The proof CONTRADICTS the current name and yields a better, convention-
+            # fitting name -> overwrite the weaker guess (the existing name is itself
+            # an unvalidated decompiler-era guess; a proof-grounded name outranks it).
+            # RECOVERABLE + refinable: the old name is preserved in a trail note (keyed
+            # by ADDRESS, survives the rename), so a wrong call is revertible and a
+            # later canonical (string/xref/D2MOO) can still refine it. Auto-names take
+            # the same path -- they just always qualify.
+            r = ghidra_post("/rename_function_by_address",
+                            data={"function_address": f"0x{address}", "new_name": proposed},
+                            params={"program": program_name})
+            renamed = not (isinstance(r, dict) and r.get("error"))
+            if renamed:
+                _reconcile_registry_name(address, proposed, func_name)  # registry follows (known dir)
+                trail = (f"[RENAMED {datetime.now().date().isoformat()}] {func_name} -> {proposed} "
+                         f"(proof-derived: the prior name was contradicted by the proven behavior -- "
+                         f"{reason}). Not necessarily canonical -- verify vs a string/xref/D2MOO name; "
+                         f"regenerate the resolve/profiler snapshots if this fn is name-resolved.")
+                _ghidra_audit_flag(program_name, address, trail, marker=f"{func_name} -> {proposed}")
+                ghidra_post("/save_program", data={"program": program_name})
+            log("name_audit_rename", old=func_name, new=proposed, applied=renamed,
+                auto=_is_auto_name(func_name))
+            return
+        # verdict == flag, OR a rename with no derivable name ->
+        # annotate: wrong but no proof-derivable replacement (needs external evidence).
+        note = (f"[AUDIT {datetime.now().date().isoformat()}] Post-proof name check: {reason} "
+                + (f"Suggested (UNVERIFIED, needs ground truth): {proposed}. " if proposed else "")
+                + "Behavior is proven (CONF_LIVE) but the name was NOT auto-changed -- verify against "
+                + "a referenced string / xref / D2MOO canonical name before renaming.")
+        st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof name check")
+        if st == "flagged":
+            ghidra_post("/save_program", data={"program": program_name})
+        log("name_audit_flag", name=func_name, proposed=proposed, status=st, reason=reason)
+    except Exception as e:  # noqa: BLE001  -- a doc audit must never break a proof
+        log("name_audit_error", error=str(e))
+
+
+def build_type_audit_prompt(func_name, decompiled, reimpl_cpp):
+    return (
+        "You are auditing a Ghidra function's PARAMETER TYPES against its now-PROVEN behavior. A "
+        "bit-exact conformance proof just confirmed exactly how this function reads its arguments "
+        "(the offsets, widths, and dereference depth had to be right to match). Report ONLY parameter-"
+        "type corrections the PROVEN behavior grounds -- nothing speculative.\n\n"
+        f"Function: {func_name}\n\n"
+        "Ghidra decompile (declared param types + proven body usage):\n```\n" + str(decompiled) + "\n```\n\n"
+        "The proven reimplementation (uses void* + raw offset casts):\n```cpp\n" + str(reimpl_cpp) + "\n```\n\n"
+        "The reimpl's declared calling convention + return type are also PROVEN (they had to match).\n"
+        "RULES (a proof grounds ABI + widths + pointer depth, NOT semantic names or exact struct "
+        "type identity):\n"
+        "- \"fix\": ANY of -- a parameter dereferenced MORE pointer levels than its declared type "
+        "(declared `T*` but body does `**(T**)p` -> `T**`); a read WIDTH contradicting the declared scalar "
+        "type; a RETURN type/width/signedness contradicting the proven return (e.g. a 1-byte return "
+        "declared `int`, or a pointer return declared `int`); or a CALLING CONVENTION differing from the "
+        "proven one. Provide the FULL corrected C prototype (and corrected_callconv if the convention is "
+        "wrong). Unambiguous, proof-backed ground truth.\n"
+        "- \"flag\": a scalar-typed pointer (int*/short*) is used purely as a STRUCT base (indexed at "
+        "offsets / `->`) so it is really a struct pointer, but you cannot name the EXACT struct with ground "
+        "truth. Describe it; do NOT invent a struct type name.\n"
+        "- \"ok\": the declared prototype (params, return, convention) is consistent with the proven usage.\n"
+        "- NEVER rename variables or parameters here, and NEVER invent a struct type name for \"fix\".\n\n"
+        "Output ONLY strict JSON: {\"verdict\":\"ok|fix|flag\",\"corrected_prototype\":\"<full prototype or "
+        "empty>\",\"corrected_callconv\":\"<stdcall|fastcall|cdecl|thiscall or empty>\",\"reason\":\"<one sentence>\"}"
+    )
+
+
+def _post_proof_type_audit(program_name, address, func_name, decompiled, reimpl_cpp, *,
+                           provider, model, log):
+    """After a proof grounds field OFFSETS + WIDTHS + pointer DEPTH, check the Ghidra
+    PARAMETER TYPES. Auto-CORRECT only the unambiguous proof-backed case (a param
+    dereferenced deeper than its declared pointer level, e.g. short* -> short**);
+    FLAG struct-ness where the exact type is uncertain. Never touches local-variable
+    names/types (the doc workflow owns those). Opt out FUNDOC_TYPE_AUDIT=0. Best-effort."""
+    if os.environ.get("FUNDOC_TYPE_AUDIT", "1") != "1":
+        return
+    try:
+        text, meta = invoke_claude(build_type_audit_prompt(func_name, decompiled, reimpl_cpp),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("type_audit_skip", reason="no JSON verdict")
+            return
+        verdict = str(obj.get("verdict", "")).lower().strip()
+        proto = str(obj.get("corrected_prototype") or "").strip()
+        callconv = str(obj.get("corrected_callconv") or "").strip().lower()
+        reason = str(obj.get("reason") or "").strip()
+        if verdict == "ok":
+            log("type_audit_ok", name=func_name)
+            return
+        if verdict == "fix" and proto and "(" in proto and ")" in proto:
+            # Proof-backed ABI correction (pointer level / width / return / convention).
+            # Ghidra rejects a malformed prototype, so this is bounded; ground truth.
+            data = {"function_address": f"0x{address}", "prototype": proto}
+            if callconv in ("stdcall", "fastcall", "cdecl", "thiscall"):
+                data["calling_convention"] = f"__{callconv}"
+            r = ghidra_post("/set_function_prototype", data=data,
+                            params={"program": program_name})
+            ok = not (isinstance(r, dict) and r.get("error"))
+            if ok:
+                ghidra_post("/save_program", data={"program": program_name})
+            log("type_audit_fix", name=func_name, prototype=proto, applied=ok, reason=reason)
+            return
+        # flag (or a "fix" we won't auto-apply) -> annotate for review.
+        note = (f"[AUDIT {datetime.now().date().isoformat()}] Post-proof type check: {reason} "
+                + (f"Suggested prototype (verify): {proto}. " if proto else "")
+                + "Behavior/offsets proven (CONF_LIVE); parameter type NOT auto-changed -- confirm the "
+                + "exact struct/type before applying.")
+        st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof type check")
+        if st == "flagged":
+            ghidra_post("/save_program", data={"program": program_name})
+        log("type_audit_flag", name=func_name, status=st, reason=reason)
+    except Exception as e:  # noqa: BLE001 -- must never break a proof
+        log("type_audit_error", error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# STRUCT-FIELD LEDGER (the compounding asset). Every proof confirms offset->width
+# ->role of the game struct its pointer arg points to. That knowledge otherwise
+# evaporates into a void* reimpl; here it ACCUMULATES into a per-struct ledger, so
+# proving many unit getters reconstructs D2UnitStrc etc. with proof-backed fields.
+# Ledger only (not auto-applied to Ghidra structs) -- safe, conflict-detecting; a
+# separate gated step can later apply conflict-free high-confidence fields.
+# ---------------------------------------------------------------------------
+_STRUCT_LEDGER_PATH = os.path.join(
+    os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"),
+    "conformance", "struct_field_ledger.json")
+
+
+def build_struct_field_prompt(func_name, decompiled):
+    return (
+        "A conformance proof just confirmed EXACTLY how this function reads the game-object struct "
+        "its pointer argument points to. Extract the struct FIELDS the PROVEN behavior reads -- "
+        "GROUND TRUTH ONLY, nothing speculative.\n\n"
+        f"Function: {func_name}\n\n"
+        "Decompile (proven):\n```\n" + str(decompiled) + "\n```\n\n"
+        "Report the fields of the struct the PRIMARY pointer argument points to that this function "
+        "ACTUALLY reads. For each field: byte OFFSET (hex), WIDTH in bytes (1/2/4/8), KIND "
+        "(int|uint|byte|short|ptr|enum), and a short ROLE. Include a field ONLY if the proven code "
+        "reads it; invent nothing.\n"
+        "Give the struct a STABLE key: the DECLARED pointer type if it is a named struct (e.g. "
+        "UnitAny, D2StatListStrc); if declared as a bare scalar pointer (int*/short*), use your best "
+        "domain name (e.g. 'UnitAny' when it dispatches on unit-type at +0x0).\n\n"
+        "Output ONLY strict JSON: "
+        "{\"struct_key\":\"<name>\",\"fields\":[{\"offset\":\"0xNN\",\"width\":N,\"kind\":\"...\",\"role\":\"...\"}]}"
+    )
+
+
+def _accumulate_struct_fields(program_name, address, func_name, decompiled, *, provider, model, log):
+    """Extract the proof-confirmed struct fields and MERGE into the struct-field
+    ledger (conformance/struct_field_ledger.json), keyed by struct. Confirms
+    matching fields (adds the source), records CONFLICTS (same offset, different
+    width/kind). Opt out FUNDOC_STRUCT_LEDGER=0. Best-effort -- never breaks a proof."""
+    if os.environ.get("FUNDOC_STRUCT_LEDGER", "1") != "1":
+        return
+    try:
+        text, meta = invoke_claude(build_struct_field_prompt(func_name, decompiled),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("struct_ledger_skip", reason="no JSON")
+            return
+        struct_key = str(obj.get("struct_key") or "").strip()
+        fields = obj.get("fields")
+        if not struct_key or not isinstance(fields, list) or not fields:
+            log("struct_ledger_skip", reason="no struct_key/fields")
+            return
+        led = {}
+        if os.path.exists(_STRUCT_LEDGER_PATH):
+            try:
+                led = json.load(open(_STRUCT_LEDGER_PATH, encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                led = {}
+        structs = led.setdefault("structs", {})
+        s = structs.setdefault(struct_key, {"fields": {}, "conflicts": []})
+        src = f"{func_name}@0x{address}"
+        added = confirmed = conflicts = 0
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            off = str(f.get("offset", "")).lower().strip()
+            if not off.startswith("0x"):
+                continue
+            width = int(f.get("width") or 0)
+            kind = str(f.get("kind") or "").lower().strip()
+            role = str(f.get("role") or "").strip()
+            cur = s["fields"].get(off)
+            # A proof grounds WIDTH + pointer-ness; the finer KIND (enum vs uint) is
+            # interpretive, so only WIDTH or ptr-vs-scalar disagreement is a real
+            # conflict. On agreement, keep the MORE SPECIFIC kind (enum/byte/short/ptr
+            # over generic int/uint).
+            generic = {"int", "uint", ""}
+            if cur is None:
+                s["fields"][off] = {"width": width, "kind": kind, "role": role, "sources": [src]}
+                added += 1
+            elif cur.get("width") == width and (cur.get("kind") == "ptr") == (kind == "ptr"):
+                if src not in cur["sources"]:
+                    cur["sources"].append(src)
+                if cur.get("kind") in generic and kind not in generic:
+                    cur["kind"] = kind      # upgrade to the more specific interpretation
+                confirmed += 1
+            else:
+                s["conflicts"].append({"offset": off,
+                                       "have": {"width": cur.get("width"), "kind": cur.get("kind")},
+                                       "new": {"width": width, "kind": kind}, "source": src})
+                conflicts += 1
+        # keep fields sorted by numeric offset for readability
+        s["fields"] = dict(sorted(s["fields"].items(), key=lambda kv: int(kv[0], 16)))
+        os.makedirs(os.path.dirname(_STRUCT_LEDGER_PATH), exist_ok=True)
+        with open(_STRUCT_LEDGER_PATH, "w", encoding="utf-8") as fp:
+            json.dump(led, fp, indent=2)
+        log("struct_ledger", struct=struct_key, added=added, confirmed=confirmed, conflicts=conflicts)
+    except Exception as e:  # noqa: BLE001
+        log("struct_ledger_error", error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ENUM / CONSTANT LEDGER (the compounding companion to the struct-field ledger).
+# Every proof confirms the magic constants a function dispatches on; those form
+# enums (unit-type 0-6, stat-list guard 0x1020304, skill ids). Accumulate them
+# cross-function so the meaning of each constant is proof-confirmed by many callers.
+# ---------------------------------------------------------------------------
+_ENUM_LEDGER_PATH = os.path.join(
+    os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"),
+    "conformance", "enum_ledger.json")
+
+
+def build_enum_prompt(func_name, decompiled):
+    return (
+        "A conformance proof just confirmed this function's behavior, including the MAGIC CONSTANTS it "
+        "compares against / dispatches on. Extract the enumerated constants -- GROUND TRUTH from the "
+        "proven code only.\n\n"
+        f"Function: {func_name}\n\n"
+        "Decompile (proven):\n```\n" + str(decompiled) + "\n```\n\n"
+        "Identify ENUM families: a set of small integer constants a single field is compared against that "
+        "clearly form an enumeration (e.g. a unit-type field compared to 0,1,2,4,5 -> a UnitType enum). "
+        "Give each family a stable NAME, the FIELD it discriminates (byte offset if determinable), and the "
+        "{value,label} pairs the proven code establishes. Also list standalone magic CONSTANTS (e.g. a "
+        "validity guard 0x1020304) with their role. Include ONLY what the proven code uses; invent nothing, "
+        "and do NOT guess labels you cannot justify from the code (use \"?\" if unknown).\n\n"
+        "Output ONLY strict JSON: {\"enums\":[{\"name\":\"UnitType\",\"field\":\"+0x00 dwType\",\"values\":"
+        "[{\"value\":0,\"label\":\"Player\"}]}],\"constants\":[{\"value\":\"0x1020304\",\"role\":\"...\"}]}"
+    )
+
+
+def _accumulate_enums(program_name, address, func_name, decompiled, *, provider, model, log):
+    """Extract proof-confirmed enum families + magic constants and MERGE into the
+    enum ledger (conformance/enum_ledger.json). Cross-confirms values across
+    functions; conflicts on same value/different label. Opt out FUNDOC_ENUM_LEDGER=0."""
+    if os.environ.get("FUNDOC_ENUM_LEDGER", "1") != "1":
+        return
+    try:
+        text, meta = invoke_claude(build_enum_prompt(func_name, decompiled),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("enum_ledger_skip", reason="no JSON")
+            return
+        led = {}
+        if os.path.exists(_ENUM_LEDGER_PATH):
+            try:
+                led = json.load(open(_ENUM_LEDGER_PATH, encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                led = {}
+        enums = led.setdefault("enums", {})
+        consts = led.setdefault("constants", {})
+        src = f"{func_name}@0x{address}"
+        added = confirmed = conflicts = 0
+        for e in obj.get("enums") or []:
+            if not isinstance(e, dict):
+                continue
+            name = str(e.get("name") or "").strip()
+            if not name:
+                continue
+            fam = enums.setdefault(name, {"field": str(e.get("field") or ""), "values": {}, "conflicts": []})
+            for v in e.get("values") or []:
+                if not isinstance(v, dict) or "value" not in v:
+                    continue
+                key = str(v.get("value"))
+                label = str(v.get("label") or "?").strip()
+                cur = fam["values"].get(key)
+                if cur is None:
+                    fam["values"][key] = {"label": label, "sources": [src]}
+                    added += 1
+                elif cur["label"] == label or label == "?" or cur["label"] == "?":
+                    if label != "?" and cur["label"] == "?":
+                        cur["label"] = label      # upgrade unknown -> known
+                    if src not in cur["sources"]:
+                        cur["sources"].append(src)
+                    confirmed += 1
+                else:
+                    fam["conflicts"].append({"value": key, "have": cur["label"], "new": label, "source": src})
+                    conflicts += 1
+        for c in obj.get("constants") or []:
+            if not isinstance(c, dict) or "value" not in c:
+                continue
+            key = str(c.get("value"))
+            role = str(c.get("role") or "").strip()
+            cc = consts.setdefault(key, {"role": role, "sources": []})
+            if src not in cc["sources"]:
+                cc["sources"].append(src)
+        os.makedirs(os.path.dirname(_ENUM_LEDGER_PATH), exist_ok=True)
+        with open(_ENUM_LEDGER_PATH, "w", encoding="utf-8") as fp:
+            json.dump(led, fp, indent=2)
+        log("enum_ledger", added=added, confirmed=confirmed, conflicts=conflicts)
+    except Exception as e:  # noqa: BLE001
+        log("enum_ledger_error", error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# PROOF BRANCH COVERAGE. A proof that passed 8/8 on 8 live objects LOOKS strong,
+# but if all 8 were the same unit type it only exercised ONE branch. The oracle now
+# reports each captured object's dispatch field (dwType at +0) per vector; here we
+# check whether the observed values actually exercised the function's branches, and
+# FLAG uncovered paths (an all-pass proof that skipped a branch is oversold).
+# ---------------------------------------------------------------------------
+def build_coverage_prompt(func_name, decompiled, dispatch_values):
+    seen = sorted(set(v for v in dispatch_values if v is not None))
+    return (
+        "A conformance proof ran this function against several LIVE game objects and passed on all of "
+        "them. Assess BRANCH COVERAGE: did the proof actually exercise all the function's distinct "
+        "branches, or only some?\n\n"
+        f"Function: {func_name}\n\n"
+        "Decompile:\n```\n" + str(decompiled) + "\n```\n\n"
+        f"The proof ran on live objects whose DISPATCH FIELD (typically dwType at +0x00) took these "
+        f"distinct values: {seen} (raw per-vector: {dispatch_values}).\n\n"
+        "Identify the function's distinct BRANCHES keyed on that dispatch field. For each, state whether "
+        "the observed values EXERCISED it. Report branches NOT covered -- an uncovered branch means the "
+        "all-pass result did NOT actually test that path. Sub-conditions the dispatch field alone cannot "
+        "resolve (e.g. a NULL-sub-struct check) -> put in 'unknown'.\n\n"
+        "Output ONLY strict JSON: {\"covered\":[\"...\"],\"uncovered\":[\"...\"],\"unknown\":[\"...\"],"
+        "\"summary\":\"<one sentence>\"}"
+    )
+
+
+def _post_proof_coverage(program_name, address, func_name, decompiled, dispatch_values,
+                         *, provider, model, log):
+    """Check whether the proof's live objects exercised every branch; FLAG uncovered
+    paths so an all-pass proof isn't mistaken for full coverage. Opt out
+    FUNDOC_COVERAGE_AUDIT=0. Best-effort."""
+    if os.environ.get("FUNDOC_COVERAGE_AUDIT", "1") != "1" or not dispatch_values:
+        return
+    try:
+        text, meta = invoke_claude(build_coverage_prompt(func_name, decompiled, dispatch_values),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("coverage_skip", reason="no JSON")
+            return
+        uncovered = obj.get("uncovered") or []
+        summary = str(obj.get("summary") or "").strip()
+        seen = sorted(set(v for v in dispatch_values if v is not None))
+        if uncovered:
+            note = (f"[AUDIT {datetime.now().date().isoformat()}] Post-proof coverage: {summary} "
+                    f"UNCOVERED branch(es): {'; '.join(str(u) for u in uncovered)}. Dispatch values seen: "
+                    f"{seen}. The all-pass proof did NOT exercise these paths -- capture objects that hit "
+                    f"them (e.g. other unit types) to strengthen it.")
+            st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof coverage")
+            if st == "flagged":
+                ghidra_post("/save_program", data={"program": program_name})
+            log("coverage_flag", uncovered=len(uncovered), seen=seen, status=st)
+        else:
+            log("coverage_full", seen=seen)
+    except Exception as e:  # noqa: BLE001
+        log("coverage_error", error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# PLATE ACCURACY. The name audit checks the NAME; this checks the plate's
+# ALGORITHM PROSE against the proven behavior -- catching a stale/wrong description
+# (e.g. "returns X" when the proof shows Y). Flags a FACTUAL contradiction with the
+# correction; does NOT auto-rewrite prose (annotate-don't-overwrite -- a human edits
+# the sentence, but the falsehood is now marked so it can't silently survive).
+# ---------------------------------------------------------------------------
+def build_plate_audit_prompt(func_name, plate, decompiled):
+    return (
+        "A conformance proof just confirmed this function's exact behavior. Check whether the existing "
+        "Ghidra PLATE COMMENT's description of what the function DOES still matches the proven behavior. "
+        "IGNORE [AUDIT]/[CONFORMANCE] meta-notes and status tags -- assess only the ALGORITHM/behavior prose.\n\n"
+        f"Function: {func_name}\n\n"
+        "Current plate comment:\n```\n" + str(plate) + "\n```\n\n"
+        "Proven behavior (decompile):\n```\n" + str(decompiled) + "\n```\n\n"
+        "Report ONLY a FACTUAL discrepancy the proof establishes -- a statement in the plate that "
+        "CONTRADICTS the proven behavior (wrong return, wrong offset, wrong condition/dispatch). Do NOT "
+        "flag stylistic differences, missing detail, or plausible-but-unconfirmed prose.\n"
+        "Verdict: \"accurate\" (no contradiction) or \"discrepancy\" (a specific false statement).\n"
+        "If discrepancy, ALSO return corrected_plate: the COMPLETE plate comment with ONLY the false "
+        "statement(s) fixed and EVERYTHING ELSE preserved VERBATIM -- all other prose, AND every "
+        "[AUDIT]/[CONFORMANCE] meta-note line, unchanged and in the same order. Change the minimum.\n\n"
+        "Output ONLY strict JSON: {\"verdict\":\"accurate|discrepancy\",\"plate_says\":\"<the wrong claim>\","
+        "\"proven\":\"<what actually happens>\",\"correction\":\"<one corrected sentence>\","
+        "\"corrected_plate\":\"<full corrected plate, or empty>\"}"
+    )
+
+
+def _post_proof_plate_audit(program_name, address, func_name, decompiled, *, provider, model, log):
+    """Check the plate's algorithm prose against the proven behavior; FLAG a factual
+    contradiction (with the correction) so a falsehood can't silently survive. Does
+    not auto-rewrite prose. Opt out FUNDOC_PLATE_AUDIT=0. Best-effort."""
+    if os.environ.get("FUNDOC_PLATE_AUDIT", "1") != "1":
+        return
+    try:
+        cur = ghidra_get("/get_plate_comment",
+                         params={"address": f"0x{address}", "program": program_name})
+        plate = cur.get("comment") if isinstance(cur, dict) else (cur or "")
+        if not plate:
+            return
+        text, meta = invoke_claude(build_plate_audit_prompt(func_name, plate, decompiled),
+                                   model=model, max_turns=2, provider=provider, complexity_tier=None)
+        obj = _extract_first_json(text or "")
+        if not isinstance(obj, dict):
+            log("plate_audit_skip", reason="no JSON")
+            return
+        if str(obj.get("verdict", "")).lower().strip() != "discrepancy":
+            log("plate_audit_ok", name=func_name)
+            return
+        says = str(obj.get("plate_says") or "").strip()
+        proven = str(obj.get("proven") or "").strip()
+        correction = str(obj.get("correction") or "").strip()
+        corrected = str(obj.get("corrected_plate") or "").strip()
+        # The proof gives us the CORRECT behavioral statement, so a surgical fix beats
+        # leaving the falsehood in place. Guard against collateral damage: the rewrite
+        # must PRESERVE every [AUDIT]/[CONFORMANCE] meta-note and not be truncated --
+        # else fall back to a flag. (The trail note keeps the old wrong claim, so the
+        # edit is traceable/revertible.)
+        def _mk(s):
+            return (s or "").count("[AUDIT") + (s or "").count("[CONFORMANCE")
+        if corrected and _mk(corrected) >= _mk(plate) and len(corrected) >= int(0.6 * len(plate)):
+            trail = (f"[CORRECTED {datetime.now().date().isoformat()}] proof-backed plate fix -- was: "
+                     f"\"{says}\"; now: {correction}\n\n")
+            ghidra_post("/set_plate_comment",
+                        data={"address": f"0x{address}", "comment": trail + corrected,
+                              "program": program_name})
+            ghidra_post("/save_program", data={"program": program_name})
+            log("plate_audit_correct", name=func_name, fix=correction[:80])
+            return
+        # Couldn't safely rewrite (missing/unsafe corrected_plate) -> flag with the fix.
+        note = (f"[AUDIT {datetime.now().date().isoformat()}] Post-proof plate check: the plate states "
+                f"\"{says}\" but the PROVEN behavior is: {proven}. Correction: {correction} "
+                f"(behavior proven CONF_LIVE; prose not auto-edited this pass -- fix the wrong statement).")
+        st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof plate check")
+        if st == "flagged":
+            ghidra_post("/save_program", data={"program": program_name})
+        log("plate_audit_flag", name=func_name, status=st)
+    except Exception as e:  # noqa: BLE001
+        log("plate_audit_error", error=str(e))
+
+
+_TYPE_DISPATCH_RE = re.compile(r"\bdwType\b|\bswitch\b|\bfor\b|\bwhile\b|\bcase\b")
+
+
+def _is_trivial_getter(reimpl, decompiled):
+    """A pure field getter -- one/few fixed-offset reads, no type-dispatch, loop, or
+    enum-ish switch. Such a function has NOTHING for the enum ledger and at most one
+    field for the struct ledger, so those two LLM-backed audits are pure waste on it
+    (2026-07-08: a mechanically-translated `return p->pGfxInfo` still spent 6 audit
+    calls / 58K tokens). Mechanically-translated reimpls are trivial by construction."""
+    if "MECHANICALLY TRANSLATED" in (reimpl or ""):
+        return True
+    if _TYPE_DISPATCH_RE.search(decompiled or ""):
+        return False
+    b = reimpl or ""
+    return b.count("return") <= 2 and "for" not in b and "while" not in b
+
+
+def _run_post_proof_audits(program, address, func_name, decompiled, reimpl, live, *,
+                           provider, model, log):
+    """Post-proof write-back suite, GATED on proof strength + triviality (2026-07-08).
+
+    A DEGENERATE proof (weak_proof: the original returned an identical value on every
+    vector) proved NOTHING -- a wrong offset would have matched too. Running the
+    confident name/type/plate MUTATION audits on it writes decompile-derived guesses
+    into the shared RE database while LABELING them 'proof-derived' (observed: a rename
+    rode on an all-zeros proof). So on a weak proof we DEFER the whole suite -- the
+    weak_proof flag already asks for a diverse re-prove; the audits run for real then.
+
+    On a strong proof we run the full suite, but SKIP the struct + enum ledgers for a
+    trivial getter (nothing to accumulate) -- cutting ~2 of the ~6 audit LLM calls."""
+    if live.get("weak_proof"):
+        log("post_proof_audits_deferred", reason="weak_proof (degenerate capture): a rename/"
+            "retype/plate-rewrite off this proof would be decompile-guessing labeled as proven; "
+            "re-prove against diverse objects first")
+        return
+    prog_name = Path(program).name
+    _post_proof_name_audit(prog_name, address, func_name, decompiled,
+                           provider=provider, model=model, log=log)
+    _post_proof_type_audit(prog_name, address, func_name, decompiled, reimpl,
+                           provider=provider, model=model, log=log)
+    if _is_trivial_getter(reimpl, decompiled):
+        log("ledgers_skipped_trivial", detail="pure field getter: no struct/enum knowledge to accumulate")
+    else:
+        _accumulate_struct_fields(prog_name, address, func_name, decompiled,
+                                  provider=provider, model=model, log=log)
+        _accumulate_enums(prog_name, address, func_name, decompiled,
+                          provider=provider, model=model, log=log)
+    _post_proof_coverage(prog_name, address, func_name, decompiled,
+                         live.get("dispatch_values"), provider=provider, model=model, log=log)
+    _post_proof_plate_audit(prog_name, address, func_name, decompiled,
+                            provider=provider, model=model, log=log)
+
+
+def process_handle_leaf_live(program, address, func_name, decompiled, *,
+                             provider, model=None, max_turns=15, worker_id=None,
+                             max_fix_attempts=3, static_abi=None, abort_class=False):
+    """LIVE-prove path for a 'shadow_leaf' function -- a getter that takes a POINTER
+    to a live game object (unit/record/struct) + optional scalars. Not statically
+    emulable, but provable via the oracle HANDLE path: a real captured live object
+    is passed to BOTH the original and the reimpl and the results compared (the
+    UNIT_GetMode mechanism, generalized). Drafts a void*-handle reimpl, then proves.
+
+    Returns proven_live_pending_review | live_prove_failed | malformed_response |
+    unsupported_abi | blocked | error -- same vocabulary as process_global_leaf_live.
+    """
+    import port_live_prove as plp
+
+    run_id = str(uuid.uuid4())[:8]
+    started_at = datetime.now()
+    key = f"{program}::{address}"
+
+    def _log(result, **extra):
+        _append_run_log({
+            "run_id": run_id, "timestamp": started_at.isoformat(),
+            "worker_id": worker_id, "mode": "port_handle",
+            "program": program, "address": address, "name": func_name,
+            "provider": provider, "model": model, "result": result, **extra,
+        })
+
+    if not model:
+        try:
+            model = get_configured_model(provider, "FULL")
+        except Exception:
+            model = None
+
+    prompt = plp.build_handle_draft_prompt(func_name, address, decompiled)
+    try:
+        import abi_static
+        if static_abi or abort_class:
+            prompt += "\n\n" + abi_static.abi_prompt_block(static_abi, abort_class)
+    except Exception:
+        pass
+
+    def _apply_handle_abi(lay):
+        """Force the handle layout's callconv/slot-count from the disassembly.
+        Handle layout shape: {handle_arg, scalar_args, callconv, ret}. The handle
+        occupies slot 0; RET n says how many TOTAL slots the callee cleans, so any
+        remainder beyond declared scalars is padded (the RET 0xC / 3-slot
+        DATATBLS_GetItemDataByCode discovery -- an under-declared slot count
+        corrupts the caller's stack and SEH-faults the oracle)."""
+        pads = []
+        if not (static_abi and static_abi.get("slots")) or not isinstance(lay, dict):
+            return lay, pads
+        cc = static_abi["callconv"]
+        if cc == "stdcall" and str(lay.get("callconv", "")).lower() != "stdcall":
+            _log("static_abi_override", note=f"callconv {lay.get('callconv')} -> stdcall (RET n, no reg reads)")
+            lay["callconv"] = "stdcall"
+        scal = list(lay.get("scalar_args") or [])
+        want = static_abi["slots"] - 1 - len(scal)     # slot 0 = the handle
+        if cc == "stdcall" and want > 0:
+            pads = [f"unused{len(scal) + 1 + k}" for k in range(want)]
+            lay["scalar_args"] = scal + pads
+            _log("static_abi_override",
+                 note=f"padded {want} unused slot(s) {pads} (RET 0x{static_abi['ret_imm']:x})")
+        return lay, pads
+
+    # MECHANICAL SHORT-CIRCUIT (abi_static.translate_getter_to_c): a pure pointer-
+    # deref getter is 2-5 MOV instructions -> translate the DISASM straight to C, no
+    # model, no guesswork. This is exactly the class that diverged ~99% when drafted
+    # from the decompile PROSE (2026-07-08: `pStateLinkedList[1].pStateHead` became
+    # invented struct math). If the disasm isn't a linear getter (branch/arith/call),
+    # fall through to the model -- and INJECT the disasm so the model drafts from
+    # ground truth rather than the misleading struct[i].field prose.
+    reimpl = layout = input_sets = None
+    attempts = 0
+    mech = None
+    try:
+        import abi_static
+        disasm = ghidra_get("/disassemble_function",
+                            params={"address": f"0x{address}", "program": program})
+        if disasm and not _is_error_response(disasm):
+            mech = abi_static.translate_getter_to_c(func_name, str(disasm))
+            if not mech.get("ok"):
+                prompt += ("\n\n## GROUND-TRUTH DISASSEMBLY -- translate THIS, not the decompile "
+                           "prose (Ghidra renders a single pointer walk as `struct[i].field`, which "
+                           "misleads into bogus struct-size/index math):\n```\n" + str(disasm) + "\n```")
+                # If the function calls a resolvable D2Common fn, the model must reach it
+                # via D2MOO_Resolve (a direct call = unresolved external = whole-build fail,
+                # observed live: the model drafted GetItemDataRecord(id) directly). Inject
+                # the call-through pattern so a model-drafted delegate can actually build.
+                _callees = abi_static.resolvable_callees(str(disasm))
+                if _callees:
+                    prompt += abi_static.callthrough_prompt_block(_callees)
+                    _log("callthrough_hint_injected", callees=[n for _a, n in _callees])
+                _log("mech_translate_defer", reason=mech.get("reason"))
+    except Exception as e:  # translation is an aid, never a blocker
+        _log("mech_translate_skip", error=str(e))
+
+    # DELEGATE SHORT-CIRCUIT: when the flat translator defers, the getter may still be
+    # a mechanical DELEGATE -- `param -> [gate] -> load field -> CALL a resolvable
+    # D2Common fn -> read result field -> return`. translate_delegate_getter_to_c emits
+    # a CALL-THROUGH reimpl (resolves the callee BY NAME, calls the REAL game fn, so its
+    # globals are the game's real globals). Proven IN-GAME via a discriminating multi-
+    # index synth (run_delegate_prove). Abort-class delegates keep the handle path (a
+    # handle-abort-hazard). 2026-07-08.
+    if not (mech and mech.get("ok")) and not abort_class:
+        try:
+            if disasm and not _is_error_response(disasm):
+                deleg = abi_static.translate_delegate_getter_to_c(func_name, str(disasm))
+                if deleg.get("ok"):
+                    _log("delegate_translated", callee=deleg.get("callee"),
+                         arg_off=deleg.get("arg_off"), result_off=deleg.get("result_off"))
+                    try:
+                        live = plp.run_delegate_prove(
+                            deleg["code"], func_name, address, ret=deleg["ret"],
+                            arg_off=deleg["arg_off"], type_gates=deleg.get("type_gates"))
+                    except Exception as e:
+                        plp.remove_candidate(func_name)
+                        update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
+                        _log("error", error=str(e))
+                        return "error"
+                    _log("delegate_proved" if live.get("ok") else "delegate_failed",
+                         passed=live.get("passed"), total=live.get("total"),
+                         distinct=live.get("orig_distinct"), reason=live.get("failure_stage"))
+                    if live.get("ok"):
+                        update_function_state(key, {
+                            "port_status": "proven_live_pending_review", "port_attempts": 1,
+                            "port_live_status": "proven_delegate",
+                            "port_last_result": f"delegate {live.get('passed')}/{live.get('total')} "
+                                                f"(call-through {deleg.get('callee')}, discriminating)"})
+                        _run_post_proof_audits(program, address, func_name, decompiled,
+                                               deleg["code"], live, provider=provider,
+                                               model=model, log=_log)
+                        return "proven_live_pending_review"
+                    # weak/uniform or mismatch -> fall through to the model handle path
+                    plp.remove_candidate(func_name)
+        except Exception as e:
+            _log("delegate_translate_skip", error=str(e))
+
+    if mech and mech.get("ok"):
+        reimpl = mech["code"]
+        layout = {"handle_arg": "p", "scalar_args": [], "callconv": "stdcall", "ret": mech["ret"]}
+        input_sets = [{}]
+        attempts = 1
+        _log("mech_translated", chain=mech.get("chain"), ret=mech.get("ret"),
+             detail=mech.get("reason"))
+    else:
+        while attempts < max(1, max_fix_attempts):
+            attempts += 1
+            text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
+                                       provider=provider, complexity_tier=None)
+            if (meta or {}).get("quota_paused"):
+                update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
+                _log("blocked", reason="quota_paused")
+                return "blocked"
+            reimpl, layout, input_sets = plp.parse_handle_response(text or "")
+            if reimpl:
+                layout, _pads = _apply_handle_abi(layout)
+                break
+            _log("malformed_response_retry", attempt=attempts)
+
+    if not reimpl:
+        update_function_state(key, {"port_status": "malformed_response", "port_attempts": attempts,
+                                    "port_last_result": "no parseable handle-draft blocks"})
+        _log("malformed_response", attempts=attempts)
+        return "malformed_response"
+
+    # FLAT getter (single fixed-offset read, no sub-pointer deref) -> prove via the
+    # oracle's SYNTHETIC DISCRIMINATING object instead of a live capture. A live idle-
+    # town capture is all-zeros for most fields -> a wrong offset matches by luck ->
+    # weak_proof. The synth object makes every offset return a UNIQUE value, so the
+    # proof actually discriminates the offset -> a STRONG proof for exactly the flat-
+    # getter class the translator emits. Gated on (a) chain length 1 -- a synth byte is
+    # not a valid pointer, so a sub-deref getter would fault; and (b) NOT abort_class --
+    # the synth pattern is arbitrary and could trip a fatal precondition check (dwType/
+    # bounds), so abort-class getters keep the handle path where the game's own VALIDATED
+    # captured objects satisfy the precondition. 2026-07-08.
+    # Gated non-abort (the arbitrary pattern could trip a fatal precondition check).
+    # chain 1 (flat read) -> synth (flat discriminating buffer); chain 2 (read a
+    # pointer at O1, deref, read field at O2) -> synth2 (primary-of-pointers -> a
+    # discriminating secondary, so a wrong FIELD offset mismatches). Both kill the
+    # town-capture weak_proof for the mechanically-translated getter.
+    _chain = len(mech.get("chain") or []) if (mech and mech.get("ok")) else 0
+    _synth_kind = None if abort_class else {1: "synth", 2: "synth2"}.get(_chain)
+    if _synth_kind:
+        try:
+            _runner = plp.run_synth_prove if _synth_kind == "synth" else plp.run_synth2_prove
+            # pass any disasm-derived type-gates (e.g. `dwType==4`) so the oracle patches
+            # the synth object to SATISFY the precondition -> the getter takes its success
+            # path and reads the discriminating field (else both sides bail -> degenerate).
+            live = _runner(reimpl, func_name, address, ret=mech["ret"],
+                           gates=mech.get("type_gates"))
+        except Exception as e:
+            plp.remove_candidate(func_name)
+            update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
+            _log("error", error=str(e))
+            return "error"
+        _log(f"{_synth_kind}_proved" if live.get("ok") else f"{_synth_kind}_failed",
+             passed=live.get("passed"), total=live.get("total"))
+        if live.get("ok"):
+            update_function_state(key, {
+                "port_status": "proven_live_pending_review", "port_attempts": 1,
+                "port_live_status": f"proven_{_synth_kind}",
+                "port_last_result": f"{_synth_kind} {live.get('passed')}/{live.get('total')} (discriminating)"})
+            _run_post_proof_audits(program, address, func_name, decompiled, reimpl, live,
+                                   provider=provider, model=model, log=_log)
+            return "proven_live_pending_review"
+        # synth mismatch => the MECHANICAL translation is wrong (rare) -> re-draft via
+        # the model as a fallback rather than trusting a bad translation.
+        _log(f"{_synth_kind}_mismatch_fallback", detail=(live.get("output") or "")[-300:])
+        reimpl = layout = input_sets = None
+        prompt += ("\n\n## The mechanical translation did NOT match the original on a discriminating "
+                   "synthetic object -- re-derive the offset(s) carefully from the disassembly above.")
+        for _a in range(max(1, max_fix_attempts)):
+            text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
+                                       provider=provider, complexity_tier=None)
+            if (meta or {}).get("quota_paused"):
+                update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
+                return "blocked"
+            reimpl, layout, input_sets = plp.parse_handle_response(text or "")
+            if reimpl:
+                layout, _pads = _apply_handle_abi(layout)
+                break
+        if not reimpl:
+            update_function_state(key, {"port_status": "malformed_response",
+                                        "port_last_result": "synth fallback: no parseable draft"})
+            return "malformed_response"
+
+    live = None
+    prove_attempts = 0
+    best = plp.BestDraft()          # keep the highest-scoring draft across retries
+    hiccups = 0
+    while prove_attempts < max(1, max_fix_attempts):
+        prove_attempts += 1
+        try:
+            live = plp.run_handle_prove(reimpl, func_name, address, layout, input_sets)
+        except Exception as e:  # bad spec / oracle down -> clean up, report
+            plp.remove_candidate(func_name)
+            update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
+            _log("error", error=str(e))
+            return "error"
+        best.offer(reimpl, layout, input_sets, live)
+        if live.get("ok") or prove_attempts >= max(1, max_fix_attempts):
+            break
+        fix_prompt = plp.build_handle_fix_prompt(func_name, decompiled, reimpl, live.get("output", ""))
+        text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
+                                   provider=provider, complexity_tier=None)
+        outcome = plp.provider_outcome(text, meta)
+        if outcome == "quota":
+            break
+        if outcome == "hiccup":
+            # PROVIDER misbehaved (timeout/empty) -- NOT a bad reimpl. Retry the fix
+            # without consuming a prove attempt, keeping the current best draft.
+            hiccups += 1
+            prove_attempts -= 1
+            _log("provider_hiccup_retry", attempt=prove_attempts, hiccups=hiccups)
+            if hiccups <= max(1, max_fix_attempts):
+                continue
+            break
+        new_reimpl, new_layout, new_inputs = plp.parse_handle_response(text or "")
+        if not new_reimpl:
+            break
+        new_layout, _pads = _apply_handle_abi(new_layout)   # fix drafts too
+        reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
+        _log("handle_prove_fix_retry", attempt=prove_attempts)
+
+    # Never let a provider hiccup or a worse re-draft lose an earlier better attempt.
+    if not live.get("ok") and best.have() and best.score > ((1 if live.get("ok") else 0),
+                                                             live.get("passed") or 0):
+        reimpl, layout, input_sets, live = best.reimpl, best.layout, best.input_sets, best.result
+
+    if live.get("ok"):
+        update_function_state(key, {
+            "port_status": "proven_live_pending_review", "port_attempts": attempts,
+            "port_live_status": "proven_live",
+            "port_last_result": f"handle-live {live.get('passed')}/{live.get('total')}"})
+        _log("proven_live_pending_review", passed=live.get("passed"), total=live.get("total"))
+        # Write proof-discovered facts back to Ghidra -- GATED on proof strength +
+        # triviality (see _run_post_proof_audits): a degenerate proof defers the suite,
+        # a trivial getter skips the struct/enum ledgers.
+        _run_post_proof_audits(program, address, func_name, decompiled, reimpl, live,
+                               provider=provider, model=model, log=_log)
+        return "proven_live_pending_review"
+
+    plp.remove_candidate(func_name)
+    fstage = live.get("failure_stage") or "prove"
+    fdetail = live.get("failure_detail") or ""
+    if hiccups:
+        # the provider misbehaved during the fix loop -> the retries were degraded,
+        # not necessarily the reimpl. Surface it so a flaky provider isn't read as a
+        # wrong function.
+        fstage = "provider_degraded"
+        fdetail = (f"{hiccups} provider hiccup(s) during the fix loop -- retries were degraded; "
+                   f"re-run when the provider is healthy. Last prove: {fdetail}")
+    update_function_state(key, {
+        "port_status": "live_prove_failed", "port_attempts": attempts,
+        "port_failure_stage": fstage,
+        "port_last_result": (fdetail or live.get("output") or live.get("error") or "")[-500:]})
+    _log("live_prove_failed", failure_stage=fstage, failure_detail=fdetail[:500],
+         output=(live.get("output") or "")[-2000:], error=live.get("error"))
+    return f"live_prove_failed[{fstage}]"
+
+
+def _writeback_shadow_leaf_note(program_name, address):
+    """WRITE-BACK a shadow_leaf finding to Ghidra as a plate-comment note (the
+    source-of-truth principle: a mis-typed live-struct pointer discovered while
+    porting belongs in the RE database). Marker-guarded so it's idempotent;
+    additive so it never clobbers existing docs; best-effort so it never fails a
+    port. Where a specific type correction is unambiguous (e.g. a double-deref
+    `**(T**)p` proves the param is `T**` not `T*`), fix the prototype by hand /
+    via set_function_prototype -- this note flags every case for that review."""
+    marker = "shadow_leaf (live-pointer getter)"  # present in both manual + auto notes
+    try:
+        cur = ghidra_get("/get_plate_comment",
+                         params={"address": f"0x{address}", "program": program_name})
+        existing = ""
+        if isinstance(cur, dict):
+            existing = cur.get("comment") or ""
+        elif isinstance(cur, str):
+            existing = cur
+        if marker in existing:
+            return  # already noted -- idempotent
+        # NB: keep the '*' '/' adjacency OUT of this text -- a literal `*/` inside a
+        # Ghidra plate comment prematurely closes the /* */ block, corrupting the
+        # decompile's comment-strip + signature parse (found the hard way, PATH_
+        # GetUnitPathModeByte mis-classified after an earlier note said 'int*/short*').
+        note = (f"[CONFORMANCE] {marker}: a scalar-typed pointer param "
+                f"(Ghidra int* or short*) is used as a live-STRUCT base -- indexed at a "
+                f"nonzero offset or double-dereferenced -- NOT a scalar in/out value. "
+                f"Not statically emulable; SHADOW-provable against the running game. "
+                f"If a double-deref proves an extra pointer level, correct the prototype.")
+        body = note + ("\n\n" + existing if existing else "")
+        ghidra_post("/set_plate_comment",
+                    {"address": f"0x{address}", "comment": body, "program": program_name})
+    except Exception:
+        pass
 
 
 def process_port_candidate(program, address, func_name, *, provider, model=None,
@@ -10247,8 +11721,53 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         _log("unknown_skip")
         return "unknown_skip"
 
+    # MECHANICAL ABI + SAFETY facts (abi_static, 2026-07-08): RET n / [ESP+x] /
+    # register reads state the callconv + slot count outright -- the model no
+    # longer gets a vote on them (a guessed fastcall and an under-declared RET 0xC
+    # both burned proofs before this). detect_abort_path flags functions whose
+    # out-of-range branch KILLS the process -> vectors must stay in-envelope.
+    static_abi = None
+    try:
+        import abi_static
+        disasm = ghidra_get("/disassemble_function",
+                            params={"address": f"0x{address}", "program": program})
+        if disasm and not _is_error_response(disasm):
+            static_abi = abi_static.derive_abi(str(disasm))
+            _log("static_abi", abi={k: v for k, v in static_abi.items() if k != "notes"},
+                 notes=static_abi.get("notes"))
+    except Exception as e:  # derivation is an aid, never a blocker
+        _log("static_abi_skip", error=str(e))
+    abort_class = False
+    try:
+        import abi_static
+        abort_class = abi_static.detect_abort_path(str(decompiled))
+        if abort_class:
+            _log("abort_class_detected")
+    except Exception:
+        pass
+
     classification = pp.classify_function(decompiled)
     if classification == "stateful":
+        # DELEGATE pre-check: "stateful" often just means "calls a subroutine". If that
+        # call is to a RESOLVABLE D2Common fn and the shape is a mechanical call-through
+        # delegate (param -> [gate] -> load field -> CALL -> read result), route it to
+        # the live handle-leaf path -- its delegate short-circuit proves it via call-
+        # through (resolve + call the REAL fn). Needs the live oracle (in-game). 2026-07-08.
+        if os.environ.get("FUNDOC_LIVE_PROVE") == "1" and not abort_class:
+            try:
+                import abi_static
+                _dis = ghidra_get("/disassemble_function",
+                                  params={"address": f"0x{address}", "program": program})
+                if (_dis and not _is_error_response(_dis)
+                        and abi_static.translate_delegate_getter_to_c(func_name, str(_dis)).get("ok")):
+                    _log("delegate_route", classification=classification)
+                    return process_handle_leaf_live(
+                        program, address, func_name, decompiled,
+                        provider=provider, model=model, worker_id=worker_id,
+                        max_fix_attempts=max_fix_attempts,
+                        static_abi=static_abi, abort_class=abort_class)
+            except Exception as e:
+                _log("delegate_route_skip", error=str(e))
         # Struct-pointer params / deep pointer chains / unnamed DAT_ globals --
         # need a live captured game object, out of the automatable scope for now
         # (leave to the manual d2-port-function skill).
@@ -10268,7 +11787,66 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         return process_global_leaf_live(
             program, address, func_name, decompiled,
             provider=provider, model=model, worker_id=worker_id,
-            max_fix_attempts=max_fix_attempts)
+            max_fix_attempts=max_fix_attempts,
+            static_abi=static_abi, abort_class=abort_class)
+
+    if classification == "shadow_leaf":
+        # A trivial LIVE-POINTER getter (scalar-typed pointer used as a struct
+        # base, e.g. GetPathFieldByUnitType `pUnit[0xc]`). Not statically emulable
+        # (the static harness would only waste an LLM+build cycle -> no_vectors),
+        # but SHADOW-provable: the game passes the real pointer, original+reimpl
+        # both read it and compare, and these getters are hot + NON-inlined so they
+        # battletest fast. Record to the shadow backlog for staging as a shadow
+        # dispatcher (the auto-draft+stage path is the next build); don't burn the
+        # static harness here.
+        try:
+            repo = Path(os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"))
+            bl = repo / "conformance" / "profiler" / "shadow_leaf_backlog.jsonl"
+            bl.parent.mkdir(parents=True, exist_ok=True)
+            with open(bl, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"program": program, "address": address,
+                                    "name": func_name}) + "\n")
+        except OSError:
+            pass
+        # WRITE-BACK to Ghidra (source-of-truth principle): the discovery that a
+        # scalar-typed pointer is really a live-struct pointer must live in the RE
+        # database, not just our classifier. Prepend a marker-guarded (idempotent)
+        # note to the plate comment. Best-effort -- never fails the port.
+        _writeback_shadow_leaf_note(prog_name, address)
+        # HANDLE ABORT HAZARD (2026-07-08, CONFIRMED LIVE CRASH -- STAT_GetUnitCalculatedStat):
+        # a handle-getter whose abort path is gated on the CAPTURED OBJECT's dwType
+        # (not a numeric index) is UNSAFE to auto-prove -- the oracle round-robins
+        # DISTINCT captured object types for branch-coverage diversity, and for THIS
+        # class that diversity itself feeds the wrong type into an uncatchable abort
+        # (_exit -- a real "Halt" dialog, not an SEH-recoverable fault; it force-
+        # terminated the game process). No numeric clamp can fix this (the hazard is
+        # the object's TYPE, not a value); refuse until the capture mechanism supports
+        # pinning to a single known-safe object type.
+        try:
+            import abi_static
+            if abi_static.detect_handle_abort_hazard(decompiled):
+                update_function_state(key, {
+                    "port_status": "handle_abort_hazard_skip",
+                    "port_last_result": "type-gated fatal abort on the captured object's dwType -- "
+                                        "unsafe for round-robin handle-prove capture; see plate comment"})
+                _log("handle_abort_hazard_skip", classification=classification)
+                return "handle_abort_hazard_skip"
+        except Exception:
+            pass
+        # With the live oracle, PROVE it now via the handle path (a real captured
+        # live object passed to both original + reimpl -- the UNIT_GetMode
+        # mechanism). Without it, just leave it queued in the shadow backlog.
+        if os.environ.get("FUNDOC_LIVE_PROVE") == "1":
+            return process_handle_leaf_live(
+                program, address, func_name, decompiled,
+                provider=provider, model=model, worker_id=worker_id,
+                max_fix_attempts=max_fix_attempts,
+                static_abi=static_abi, abort_class=abort_class)
+        update_function_state(key, {
+            "port_status": "shadow_leaf_pending",
+            "port_last_result": "live-pointer getter: shadow-provable; recorded to shadow_leaf_backlog"})
+        _log("shadow_leaf_pending", classification=classification)
+        return "shadow_leaf_pending"
 
     if not model:
         try:

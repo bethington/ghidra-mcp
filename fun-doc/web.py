@@ -53,6 +53,11 @@ class WorkerManager:
         # so a second launch on the same binary is rejected with a clear
         # error rather than silently fighting the first worker for writes.
         self._globals_active_binaries = set()
+        # Per-binary lock for PORT workers (Stage 2/3 conformance pipeline),
+        # same rationale as _globals_active_binaries above -- mirrors it
+        # rather than sharing it since port and globals work are unrelated
+        # write streams (port never touches Ghidra function names/comments).
+        self._port_active_binaries = set()
         self._bus.on("provider_timeout", self._handle_provider_timeout)
         self._watchdog_stop = threading.Event()
         self._watchdog_thread = threading.Thread(
@@ -216,6 +221,11 @@ class WorkerManager:
         # message rather than launching a worker that can't pick a target.
         if mode == "globals" and not binary:
             raise ValueError("Globals worker requires a binary — select one in the header.")
+        # PORT worker also requires a binary: EMULATION_CONFORMANCE_PLAN.md
+        # Sec 15 ports one binary at a time (D2Common first) by design —
+        # there's no sensible "all binaries" PORT run.
+        if mode == "port" and not binary:
+            raise ValueError("Port worker requires a binary — select one in the header.")
         with self._lock:
             active = {
                 wid: w
@@ -238,6 +248,13 @@ class WorkerManager:
                 )
             if mode == "globals":
                 self._globals_active_binaries.add(binary)
+            if mode == "port" and binary in self._port_active_binaries:
+                raise ValueError(
+                    f"A port worker is already running on {binary}. "
+                    "Wait for it to finish or stop it first."
+                )
+            if mode == "port":
+                self._port_active_binaries.add(binary)
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
@@ -401,11 +418,15 @@ class WorkerManager:
 
     def _run_worker(self, worker_id):
         """Worker loop entry point. Dispatches to the function-worker
-        pipeline (default) or the globals-worker pipeline based on the
-        `mode` field captured at start_worker time."""
+        pipeline (default), the globals-worker pipeline, or the PORT
+        (OpenD2 conformance) pipeline based on the `mode` field captured at
+        start_worker time."""
         worker = self._workers.get(worker_id)
         if worker and worker.get("mode") == "globals":
             self._run_worker_globals(worker_id)
+            return
+        if worker and worker.get("mode") == "port":
+            self._run_worker_port(worker_id)
             return
         self._run_worker_functions(worker_id)
 
@@ -1043,6 +1064,97 @@ class WorkerManager:
                 },
             )
 
+    def _run_worker_port(self, worker_id):
+        """PORT (OpenD2 conformance) worker loop. Drafts + proves Stage 2/3
+        candidates on the selected binary via port_pipeline.py + fun_doc's
+        run_port_worker_pass. Per-binary lock is handled in start_worker /
+        this method's finally block (mirrors _run_worker_globals exactly)."""
+        from event_bus import set_worker_id
+
+        set_worker_id(worker_id)
+        worker = self._workers[worker_id]
+        try:
+            from fun_doc import run_port_worker_pass
+
+            worker["status"] = "running"
+            self._set_phase(worker_id, "port_running")
+            self._emit_status()
+            self._bus.emit(
+                "worker_started",
+                {
+                    "worker_id": worker_id,
+                    "mode": "port",
+                    "provider": worker["provider"],
+                    "count": worker["count"],
+                    "binary": worker.get("binary"),
+                    "restored": worker.get("restored", False),
+                },
+            )
+
+            def _on_progress(program, address, result, processed, total):
+                bucket = "completed" if result == "proven_pending_review" else (
+                    "skipped" if result in ("stateful_skip", "malformed_response", "no_vectors") else "failed"
+                )
+                worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+                self._emit_status()
+
+            def _on_started(program, address, name):
+                worker["progress"]["current"] = {
+                    "key": f"{program}::{address}",
+                    "name": name or address,
+                    "address": address,
+                    "program": Path(program).name,
+                }
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+                self._emit_status()
+
+            summary = run_port_worker_pass(
+                worker_id=worker_id,
+                active_binary=worker.get("binary"),
+                provider=worker["provider"],
+                model=worker.get("model"),
+                count=int(worker.get("count") or 1),
+                stop_flag=worker["stop_flag"],
+                on_progress=_on_progress,
+                on_started=_on_started,
+            )
+            if summary.get("stopped_reason") == "no_eligible_candidates":
+                worker["exit_reason"] = "no_eligible_candidates"
+            print(
+                f"  [port-worker {worker_id}] done: {summary['processed']} processed "
+                f"(reason={summary.get('stopped_reason')}) totals={summary.get('totals')}",
+                flush=True,
+            )
+        except Exception as e:
+            self._bus.emit(
+                "worker_stopped",
+                {"worker_id": worker_id, "reason": f"error: {e}"},
+            )
+        finally:
+            worker["status"] = (
+                "finished" if not worker["stop_flag"].is_set() else "stopped"
+            )
+            worker["restore_on_restart"] = False
+            worker["finished_at"] = datetime.now().isoformat()
+            worker["progress"]["current"] = None
+            with self._lock:
+                if worker.get("binary"):
+                    self._port_active_binaries.discard(worker["binary"])
+                self._persist_active_workers()
+            self._emit_status()
+            self._bus.emit(
+                "worker_stopped",
+                {
+                    "worker_id": worker_id,
+                    "reason": worker["status"],
+                    "mode": "port",
+                    "progress": dict(worker["progress"]),
+                },
+            )
+
     def _emit_status(self):
         self._socketio.emit("worker_status", self.get_status())
 
@@ -1124,6 +1236,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         "global_started",
         "global_complete",
         "globals_binary_advanced",
+        "port_drafted",
+        "port_vectors_minted",
+        "port_harness_result",
+        "port_proven_pending_review",
         "tool_result",
         "model_text",
         "score_update",
@@ -1168,7 +1284,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     # --- Data loading helpers ---
 
-    def load_state():
+    def load_state(*, binary_name=None):
         """Delegate to fun_doc.load_state — backed by the storage repository
         (Postgres or SQLite per the configured backend). The retry +
         raise-on-corrupt semantics live in fun_doc itself; duplicating them
@@ -1176,29 +1292,79 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         web.py's old implementation silently returned an empty stub on race
         conditions which was then written back over the real state.json."""
         from fun_doc import load_state as _fd_load_state
-        return _fd_load_state()
+        return _fd_load_state(binary_name=binary_name)
 
-    def _save_state_inline(state):
-        """Delegate to fun_doc.save_state — backed by the storage repository.
-        Refuses to overwrite a populated state.json with an empty-functions
-        dict, which is the failure mode that nuked ~110 MB of state on
-        2026-05-03 (a load_state race returned an empty stub that this
-        function then persisted). The guardrail only fires for users
-        mid-migration — once state.json is renamed to .migrated-<ISO>,
-        sf.exists() is false and the repo backend's own integrity checks
-        take over."""
-        from fun_doc import save_state as _fd_save_state
+    def _load_dashboard_state():
+        """State snapshot for the read-only stats paths.
 
-        sf = app.config["STATE_FILE"]
-        new_func_count = len(state.get("functions") or {})
-        if new_func_count == 0 and sf.exists() and sf.stat().st_size > 1024:
-            raise RuntimeError(
-                f"_save_state_inline refused: would overwrite "
-                f"{sf.stat().st_size:,}-byte state.json with empty-functions "
-                "stub. Caller likely raced load_state and is about to clobber "
-                "real data. Investigate the call site."
-            )
-        _fd_save_state(state)
+        When an active binary is set, the functions load is filtered to
+        that binary in SQL (a full materialization costs ~3 s on a 60K-row
+        store; one binary is a few hundred ms). compute_stats() gets every
+        scanned binary for the header dropdown via list_scanned_binaries()
+        instead of deriving it from the (now filtered) functions dict.
+        """
+        from fun_doc import get_state_meta, load_state as _fd_load_state
+
+        active = (get_state_meta() or {}).get("active_binary")
+        return _fd_load_state(binary_name=active) if active else _fd_load_state()
+
+    # --- Stats snapshot cache -------------------------------------------
+    # A dashboard page load computes stats three times back-to-back (SSR
+    # route, the new socket's initial_state, the first /api/stats refresh),
+    # each paying a full state materialization. Cache the computed stats
+    # dict briefly; bus events that imply data changed invalidate it, and
+    # the TTL bounds staleness from writers outside this process (CLI runs)
+    # whose bus events never reach us.
+    _stats_cache = {"stats": None, "ts": 0.0, "version": 0}
+    _stats_cache_lock = threading.Lock()  # cheap guard; never held during compute
+    _stats_compute_lock = threading.Lock()  # serializes recomputes
+    _STATS_CACHE_TTL = 2.0  # seconds
+
+    def _invalidate_stats_cache(_data=None):
+        with _stats_cache_lock:
+            _stats_cache["stats"] = None
+            _stats_cache["version"] += 1
+
+    for _evt in (
+        "state_changed",
+        "queue_changed",
+        "scan_complete",
+        "run_logged",
+        "score_update",
+        "function_complete",
+        "global_complete",
+    ):
+        bus.on(_evt, _invalidate_stats_cache)
+
+    def get_stats_snapshot():
+        """Cached compute_stats() for read-only consumers.
+
+        The returned dict is SHARED between callers — treat it as frozen;
+        copy before mutating (see api_stats).
+        """
+        with _stats_cache_lock:
+            if (
+                _stats_cache["stats"] is not None
+                and time.monotonic() - _stats_cache["ts"] < _STATS_CACHE_TTL
+            ):
+                return _stats_cache["stats"]
+        with _stats_compute_lock:
+            with _stats_cache_lock:
+                # Re-check: another request may have filled it while we waited.
+                if (
+                    _stats_cache["stats"] is not None
+                    and time.monotonic() - _stats_cache["ts"] < _STATS_CACHE_TTL
+                ):
+                    return _stats_cache["stats"]
+                version = _stats_cache["version"]
+            stats = compute_stats(_load_dashboard_state())
+            with _stats_cache_lock:
+                # Skip caching if a write invalidated mid-compute — the
+                # snapshot may predate the write.
+                if _stats_cache["version"] == version:
+                    _stats_cache["stats"] = stats
+                    _stats_cache["ts"] = time.monotonic()
+            return stats
 
     def load_queue():
         from fun_doc import load_priority_queue
@@ -1617,12 +1783,20 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     def compute_stats(state):
         all_funcs = state.get("functions", {})
         active_binary = state.get("active_binary")
-        # Available binaries: merge Ghidra project files + already-scanned
+        # Available binaries: merge Ghidra project files + already-scanned.
+        # Scanned names come from a DISTINCT query, not the functions dict —
+        # _load_dashboard_state() may have filtered the dict to the active
+        # binary, and the dropdown must still list every scanned binary.
         folder = state.get("project_folder", "/")
         project_binaries = _fetch_project_binaries(folder)
-        scanned_binaries = sorted(
-            set(f.get("program_name", "unknown") for f in all_funcs.values())
-        )
+        try:
+            from fun_doc import list_scanned_binaries
+
+            scanned_binaries = list_scanned_binaries()
+        except Exception:
+            scanned_binaries = sorted(
+                set(f.get("program_name", "unknown") for f in all_funcs.values())
+            )
         available_binaries = sorted(set(project_binaries + scanned_binaries))
         # Filter to active binary if set
         if active_binary:
@@ -1672,11 +1846,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "queue_meta": queue_meta,
             }
         fixable_lo = max(good_enough - 20, 0)
-        done = sum(1 for f in scoreable.values() if f["score"] >= good_enough)
+        # Missing "score" (row not yet scored — e.g. fresh scan/port-pipeline
+        # inserts) counts as 0 here; the per-function "unscored" flag below
+        # tells the frontend it means "unknown", not "0% done".
+        done = sum(1 for f in scoreable.values() if (f.get("score") or 0) >= good_enough)
         fixable_count = sum(
-            1 for f in scoreable.values() if fixable_lo <= f["score"] < good_enough
+            1 for f in scoreable.values() if fixable_lo <= (f.get("score") or 0) < good_enough
         )
-        needs_work = sum(1 for f in scoreable.values() if f["score"] < fixable_lo)
+        needs_work = sum(1 for f in scoreable.values() if (f.get("score") or 0) < fixable_lo)
         pct = (done / total * 100) if total > 0 else 0
         audited = sum(1 for f in scoreable.values() if f.get("audit_count", 0) > 0)
         escalated = sum(
@@ -1696,7 +1873,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "0-9": 0,
         }
         for f in scoreable.values():
-            s = f["score"]
+            s = f.get("score") or 0
             if s >= 100:
                 buckets["100"] += 1
             elif s >= 90:
@@ -1723,7 +1900,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         for f in scoreable.values():
             prog = f.get("program_name", "unknown")
             by_program[prog]["total"] += 1
-            if f["score"] >= good_enough:
+            if (f.get("score") or 0) >= good_enough:
                 by_program[prog]["done"] += 1
             else:
                 by_program[prog]["remaining"] += 1
@@ -1738,7 +1915,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     "name": func["name"],
                     "address": func["address"],
                     "program": func.get("program_name", ""),
-                    "score": func["score"],
+                    "score": func.get("score") or 0,
                     "fixable": round(func.get("fixable", 0), 1),
                     "callers": func.get("caller_count", 0),
                     "is_leaf": func.get("is_leaf", False),
@@ -1801,9 +1978,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @socketio.on("connect")
     def handle_connect():
-        state = load_state()
-        stats = compute_stats(state)
-        sio_emit("initial_state", stats)
+        sio_emit("initial_state", get_stats_snapshot())
 
     _scan_thread = None
 
@@ -1853,7 +2028,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     def _project_folder():
         try:
-            return load_state().get("project_folder")
+            from fun_doc import get_state_meta
+
+            return get_state_meta().get("project_folder")
         except Exception:
             return None
 
@@ -1863,7 +2040,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         to backfill the user's active binary first before walking the
         rest of the project tree."""
         try:
-            return load_state().get("active_binary")
+            from fun_doc import get_state_meta
+
+            return get_state_meta().get("active_binary")
         except Exception:
             return None
 
@@ -2096,14 +2275,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/")
     def dashboard():
-        state = load_state()
-        stats = compute_stats(state)
-        return render_template("dashboard.html", stats=stats)
+        return render_template("dashboard.html", stats=get_stats_snapshot())
 
     @app.route("/api/stats")
     def api_stats():
-        state = load_state()
-        stats = compute_stats(state)
+        # Shallow copy — the snapshot dict is shared with other consumers,
+        # so pop() on it directly would strip all_functions from the SSR
+        # render that shares the cache entry.
+        stats = dict(get_stats_snapshot())
         stats.pop("all_functions", None)
         return jsonify(stats)
 
@@ -2744,7 +2923,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError:
             limit = 5000
         sort = request.args.get("sort", "score")
-        state = load_state()
+        # Push the program filter into SQL — this route fires on every
+        # dashboard repaint, and a full-state load costs ~3 s at 60K rows.
+        state = load_state(binary_name=program) if program else load_state()
         all_funcs = state.get("functions", {})
         queue = load_queue()
         good_enough = queue.get("config", {}).get("good_enough_score", 80)
@@ -3017,21 +3198,18 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/context", methods=["GET"])
     def get_context():
-        state = load_state()
-        folder = state.get("project_folder", "/")
+        # Meta + DISTINCT query only — no functions materialization.
+        from fun_doc import get_state_meta, list_scanned_binaries
+
+        meta = get_state_meta()
+        folder = meta.get("project_folder") or "/"
         # Merge: project files from Ghidra + any binaries already scanned
         project_binaries = _fetch_project_binaries(folder)
-        scanned_binaries = sorted(
-            set(
-                f.get("program_name", "unknown")
-                for f in state.get("functions", {}).values()
-            )
-        )
-        all_binaries = sorted(set(project_binaries + scanned_binaries))
+        all_binaries = sorted(set(project_binaries + list_scanned_binaries()))
         return jsonify(
             {
                 "project_folder": folder,
-                "active_binary": state.get("active_binary"),
+                "active_binary": meta.get("active_binary"),
                 "available_binaries": all_binaries,
             }
         )
@@ -3047,6 +3225,73 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return jsonify(cw.coverage_summary())
         except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
             return jsonify({"error": str(exc), "total_ported": 0, "by_program": {}})
+
+    @app.route("/api/conformance/pipeline", methods=["GET"])
+    def conformance_pipeline():
+        """Port pipeline (Stage 2/3) candidates currently in flight --
+        drafted, vectors minted, harness failed, or proven-pending-review.
+
+        Distinct from /api/conformance/coverage: coverage reflects OpenD2's
+        COMMITTED @PD2S12 markers (source of truth = the OpenD2 repo).
+        This reflects fun-doc's own port_status tracking for candidates a
+        human has NOT yet reviewed/promoted into Shared/ -- the automated
+        pipeline never writes @PD2S12 markers itself (see port_pipeline.py's
+        module docstring: it stages and proves, a human integrates)."""
+        try:
+            state = load_state()
+            candidates = []
+            for key, func in state.get("functions", {}).items():
+                status = func.get("port_status")
+                if not status:
+                    continue
+                candidates.append({
+                    "key": key,
+                    "program": func.get("program"),
+                    "program_name": func.get("program_name"),
+                    "address": func.get("address"),
+                    "name": func.get("name"),
+                    "port_status": status,
+                    "port_attempts": func.get("port_attempts", 0),
+                    "port_draft_path": func.get("port_draft_path"),
+                    "port_last_result": func.get("port_last_result"),
+                })
+            # Surface what needs your attention first: a ready-to-review
+            # proven draft, then failures worth investigating, then
+            # in-flight/blocked states.
+            order = {
+                "proven_pending_review": 0,
+                "harness_failed": 1,
+                "no_vectors": 2,
+                "malformed_response": 2,
+                "blocked": 3,
+            }
+            candidates.sort(key=lambda c: order.get(c["port_status"], 9))
+            return jsonify({"candidates": candidates})
+        except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
+            return jsonify({"error": str(exc), "candidates": []})
+
+    @app.route("/api/conformance/draft_content", methods=["GET"])
+    def conformance_draft_content():
+        """Read a staged draft header's raw content for review, given the
+        port_draft_path from /api/conformance/pipeline. Path-restricted to
+        OpenD2's _generated_candidates/ staging dir -- never serves an
+        arbitrary filesystem path even if a stale/tampered port_draft_path
+        somehow pointed elsewhere."""
+        raw_path = request.args.get("path", "")
+        if not raw_path:
+            return jsonify({"error": "path required"}), 400
+        try:
+            import port_pipeline as pp
+
+            candidate = Path(raw_path).resolve()
+            allowed_root = pp.GENERATED_CANDIDATES_DIR.resolve()
+            if allowed_root not in candidate.parents and candidate != allowed_root:
+                return jsonify({"error": "path outside the staged-candidates directory"}), 403
+            if not candidate.exists():
+                return jsonify({"error": "file not found (may have been overwritten by a newer candidate)"}), 404
+            return jsonify({"path": str(candidate), "content": candidate.read_text(encoding="utf-8")})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/conformance/sidebyside", methods=["GET"])
     def conformance_sidebyside():
@@ -3066,26 +3311,28 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/context/binary", methods=["POST"])
     def set_active_binary():
+        # Meta-only write. This used to load_state() + _save_state_inline(),
+        # i.e. read AND bulk-upsert every functions_workflow row (~52 s on a
+        # 60K-row store) just to flip one pointer — the binary-switch stall.
+        from fun_doc import set_state_meta
+
         data = request.json
-        binary = data.get("binary")  # None or "" to clear filter
-        state = load_state()
-        if binary:
-            state["active_binary"] = binary
-        else:
-            state.pop("active_binary", None)
-        _save_state_inline(state)
+        binary = data.get("binary") or None  # None or "" to clear filter
+        set_state_meta(active_binary=binary)
+        _invalidate_stats_cache()
         socketio.emit("state_changed")
-        return jsonify({"ok": True, "active_binary": state.get("active_binary")})
+        return jsonify({"ok": True, "active_binary": binary})
 
     @app.route("/api/context/folder", methods=["POST"])
     def set_project_folder():
+        from fun_doc import set_state_meta
+
         data = request.json
         folder = data.get("folder")
         if not folder:
             return jsonify({"error": "folder required"}), 400
-        state = load_state()
-        state["project_folder"] = folder
-        _save_state_inline(state)
+        set_state_meta(project_folder=folder)
+        _invalidate_stats_cache()
         socketio.emit("state_changed")
         return jsonify({"ok": True, "project_folder": folder})
 
@@ -3143,7 +3390,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         """
         from fun_doc import _callee_readiness
 
-        state = load_state()
+        # Filtered load — this route fires from every refreshStats() via
+        # populateLayerDropdown(), so a full-state materialization here
+        # doubles every dashboard repaint.
+        state = _load_dashboard_state()
         active_binary = state.get("active_binary")
         all_funcs = state.get("functions", {})
         queue = load_queue()
@@ -3332,8 +3582,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception:
             pass
         try:
-            state = load_state()
-            folder = state.get("project_folder") or "/"
+            from fun_doc import get_state_meta
+
+            folder = get_state_meta().get("project_folder") or "/"
             _fetch_project_binaries(folder)
         except Exception:
             pass

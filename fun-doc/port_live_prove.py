@@ -126,7 +126,116 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
 
 
 def _fail(stage: str, msg: str, output: str = "") -> dict:
-    return {"ok": False, "passed": 0, "total": 0, "stage": stage, "error": msg, "output": output}
+    return {"ok": False, "passed": 0, "total": 0, "stage": stage, "error": msg, "output": output,
+            "failure_stage": stage, "failure_detail": msg}
+
+
+# ---------------------------------------------------------------------------
+# FAILURE TAXONOMY (2026-07-08). A bare "live_prove_failed" used to conflate five
+# unrelated causes -- candidate compile error, compile-cascade from a SIBLING
+# candidate, wrong-callconv marshal fault, oracle/bridge death, and a genuine
+# mismatch -- and each cost a manual reconstruction to tell apart. Every prove
+# result now carries failure_stage + failure_detail:
+#   build_candidate        -- THIS candidate does not compile (detail = its errors)
+#   build_provider_cascade -- a SIBLING candidate broke the shared provider build
+#                             (self-healed when possible; see build_provider_attributed)
+#   oracle_unreachable     -- :8790 was down before we started
+#   oracle_died_during     -- :8790 was alive, this function's vectors killed it
+#   marshal_fault          -- SEH-caught fault inside the oracle (bad ABI/pointer)
+#   mismatch               -- real divergence: orig != reimpl on >=1 vector
+#   prove_timeout / prove  -- prover subprocess timeout / unclassified
+# ---------------------------------------------------------------------------
+def check_oracle_alive(timeout: float = 3.0) -> bool:
+    """GET /status on the oracle; False on any failure. Cheap; call after a failed
+    prove to distinguish 'this function killed the bridge' from 'it diverged'."""
+    u = urllib.parse.urlparse(ORACLE_URL)
+    try:
+        conn = http.client.HTTPConnection(u.hostname, u.port or 8790, timeout=timeout)
+        conn.request("GET", "/status")
+        ok = conn.getresponse().status == 200
+        conn.close()
+        return ok
+    except OSError:
+        return False
+
+
+_CANDIDATE_ERR_RE = re.compile(r"candidates[\\/](\w+)\.cpp\((\d+)[,)]")
+_MSVC_ERR_LINE_RE = re.compile(r"error [A-Z]+\d+.*")
+
+
+def _classify_prove_failure(out: str) -> tuple:
+    """(failure_stage, detail) from prover output. Call check_oracle_alive
+    separately to upgrade to oracle_died_during."""
+    o = out or ""
+    if "not reachable" in o or "refused" in o.lower() or "ConnectionRefused" in o:
+        return "oracle_unreachable", "D2Debugger :8790 unreachable"
+    if "handler-exception" in o:
+        return "marshal_fault", ("SEH fault inside the oracle handler -- usually a wrong "
+                                 "callconv/slot-count (check RET n) or a bad pointer arg")
+    if "error C" in o or "fatal error" in o:
+        errs = "; ".join(m.group(0) for m in _MSVC_ERR_LINE_RE.finditer(o))[:400]
+        return "build_provider", errs or "compile error in provider build"
+    if "DIVERGED" in o or "MISMATCH" in o.upper():
+        return "mismatch", "original != reimpl on >=1 vector (see output)"
+    return "prove", (o.strip().splitlines() or ["no output"])[-1][:200]
+
+
+def build_provider_attributed(current_name: str, *, config: str = "Release",
+                              max_heal: int = 4) -> dict:
+    """Build + stage the reimpl provider with FAILURE ATTRIBUTION and SELF-HEALING.
+
+    All candidates/*.cpp compile into ONE provider DLL, so one broken candidate
+    poisons the build for every other function and the failure lands on whichever
+    function happened to be proving (the compile-cascade class: a CORRECT
+    GetUnitPathCoordY was failed 3x by sibling/type issues before this existed).
+
+    This wrapper parses MSBuild errors for `candidates\\<name>.cpp`:
+      * offender == current_name -> {ok:False, stage:'build_candidate', detail:errors}
+        (the caller's own draft is broken -- feed detail to the fix loop)
+      * offender is a SIBLING    -> remove the stale broken sibling (a failed
+        candidate has no staged value; its content lives in run logs), log it,
+        and REBUILD -- healing the cascade instead of misattributing it.
+    Returns {ok, stage, detail, healed:[names]}."""
+    healed: list = []
+    build_dir = str(D2MOO_REPO / "build-1.13c")
+    for _round in range(max_heal + 1):
+        # reconfigure first: CONFIGURE_DEPENDS re-globs candidates + regens the .def
+        subprocess.run(["cmake", "-S", str(D2MOO_REPO), "-B", build_dir],
+                       capture_output=True, text=True)
+        proc = subprocess.run(
+            ["cmake", "--build", build_dir, "--config", config,
+             "--target", "D2MOO_ReimplProvider"],
+            capture_output=True, text=True)
+        out = proc.stdout + proc.stderr
+        if proc.returncode == 0:
+            built = os.path.join(build_dir, "source", "D2Debugger", config,
+                                 "D2MOO_ReimplProvider.dll")
+            if not os.path.exists(built):
+                for dirpath, _, files in os.walk(build_dir):
+                    if ("D2MOO_ReimplProvider.dll" in files
+                            and os.sep + "patch" + os.sep not in dirpath):
+                        built = os.path.join(dirpath, "D2MOO_ReimplProvider.dll")
+                        break
+            import shutil
+            shutil.copyfile(built, os.path.join(build_dir, "patch", "D2MOO_ReimplProvider.dll"))
+            return {"ok": True, "stage": "build", "detail": "", "healed": healed}
+
+        offenders = sorted({m.group(1) for m in _CANDIDATE_ERR_RE.finditer(out)})
+        errs = "; ".join(m.group(0) for m in _MSVC_ERR_LINE_RE.finditer(out))[:500]
+        if current_name in offenders:
+            return {"ok": False, "stage": "build_candidate",
+                    "detail": errs or "candidate compile error", "healed": healed}
+        siblings = [n for n in offenders if n != current_name]
+        if not siblings:
+            return {"ok": False, "stage": "build_provider",
+                    "detail": errs or out[-500:], "healed": healed}
+        for n in siblings:
+            print(f"[build-heal] removing broken sibling candidate {n}.cpp "
+                  f"(it was poisoning the shared provider build)")
+            remove_candidate(n)
+            healed.append(n)
+    return {"ok": False, "stage": "build_provider",
+            "detail": f"still failing after healing {healed}", "healed": healed}
 
 
 # ---------------------------------------------------------------------------
@@ -210,13 +319,22 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
         "valid ones.)\n"
         "- If D2MOO_Resolve returns null (resolver missing), return an obvious wrong-value sentinel so a "
         "misconfig fails loudly rather than matching by accident.\n"
+        "- The decompile's FATAL/abort branch (e.g. `if (_g_pFoo == 0) { GetReturnAddress(); "
+        "CleanupAndAbort(); _exit(-1); }`) calls helpers that are NOT defined in the provider and will "
+        "NOT compile (error C3861). NEVER emit `GetReturnAddress`/`CleanupAndAbort`/`_exit`/`FID_conflict:*` "
+        "or ANY function the decompile names -- for such a not-initialized/abort branch just `return 0;` "
+        "(the oracle exercises valid in-range inputs, so that branch only has to compile).\n"
         "- Read-only: never mutate global state. No STL. Plain C-ish C++.\n"
         "- NEVER call a compiler-internal helper (__alldiv/__aulldiv/__allmul/...) by name -- write the "
         "plain operator on the correct fixed-width type and let the compiler emit it.\n"
-        "- CALLING CONVENTION: if EVERY input is on the stack, declare it `__stdcall`; if ANY input is in "
-        "a register (the plate says e.g. 'passed in EAX/ECX/ESI'), declare it `__fastcall` and list the "
-        "parameters in logical order. The prover marshals the original's real (possibly non-standard) "
-        "register ABI for you -- you only need your reimpl's declared convention to match this rule.")
+        "- CALLING CONVENTION: DEFAULT to `__stdcall` with EVERY arg on the STACK -- that is the norm for "
+        "these D2Common data-table getters (arg read from `[ESP+n]`, callee-cleaned `RET n`). Set the "
+        "param_layout input `register` to `\"stack\"`, NOT `\"ECX\"`/`\"EAX\"`. Only declare `__fastcall` / a "
+        "register input if the PLATE COMMENT EXPLICITLY says an arg is passed in a register (e.g. 'nIndex in "
+        "ECX', 'seed in ESI'). A bare `func(int x)` signature with no such note is `__stdcall` on the stack "
+        "-- do NOT infer ECX/fastcall from the signature alone (a wrong guess makes the original read its "
+        "arg from the wrong place and the proof fails). The prover marshals the original's real (possibly "
+        "non-standard) register ABI for you -- you only need your reimpl's declared convention to match this rule.")
     parts.append("")
     parts.append("Resolvable global names (use ONLY these; if you need one not listed, put a `// NEEDS "
                  "GLOBAL: <name>` comment and it will be skipped until added):")
@@ -247,6 +365,453 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
         "at least 10-15 cases. The return is often a POINTER (an absolute game address); the oracle "
         "compares it as a 32-bit value, and orig vs reimpl agree because both read the same live global.")
     return "\n".join(parts)
+
+
+def build_handle_draft_prompt(func_name: str, address, decompiled_text: str) -> str:
+    """Draft prompt for a LIVE-POINTER GETTER (classify_function 'shadow_leaf'):
+    the function takes a pointer to a heap-allocated live game object (unit/record/
+    struct) + optional scalar args, and reads fields. Proven by calling BOTH the
+    original and the reimpl with the SAME captured live pointer (oracle arg kind
+    'handle') and comparing -- so no resolver, no static emulation; the pointer is
+    passed in, not looked up."""
+    addr = f"0x{_int(address):x}"
+    p = []
+    p.append("OUTPUT CONTRACT (a machine parses your reply): reply with EXACTLY TWO fenced blocks -- "
+             "BLOCK 1 ```cpp (the reimpl), BLOCK 2 ```json (param_layout + input_sets). Tag them "
+             "literally ```cpp and ```json. Nothing else that matters outside them.")
+    p.append("")
+    p.append("## Task: reimplement a Diablo II LIVE-POINTER getter for handle conformance proving")
+    p.append(
+        "This function takes a POINTER to a live game object the running game allocated on the heap "
+        "(a unit / record / struct -- Ghidra often types it as a bare int*/short*). It will be PROVEN "
+        "by calling BOTH the ORIGINAL and YOUR reimpl with the SAME captured live pointer and comparing "
+        "the result, so reproduce the decompiled field reads EXACTLY -- every offset, cast, width, branch.")
+    p.append("")
+    p.append(f"Function: {func_name} at {addr}   (D2Common.dll)")
+    p.append("")
+    p.append("## Decompiled source (the spec)")
+    p.append("```")
+    p.append(str(decompiled_text))
+    p.append("```")
+    p.append("")
+    p.append("## REQUIRED reimpl shape")
+    p.append(
+        "- `#include \"../provider_runtime.h\"` and a `// D2MOO_REIMPL_EXPORT: " + func_name + "` marker.\n"
+        "- `extern \"C\"` with the SAME calling convention as the original: a SINGLE pointer arg passed on "
+        "the stack -> `__stdcall`; a pointer passed in ECX -> `__fastcall`.\n"
+        "- TYPES: use ONLY plain C types -- `int`/`unsigned int`/`short`/`unsigned short`/`char`/"
+        "`unsigned char`/`void*`. Do NOT use `uint`/`ushort`/`byte`/`undefined4` (Ghidra spellings) or "
+        "`DWORD`/`WORD`/`BYTE` (Win32 spellings) even though the decompile shows them -- rewrite each as "
+        "its plain-C equivalent (`uint`->`unsigned int`, `DWORD`->`unsigned int`, `byte`->`unsigned char`).\n"
+        "- Take the live object pointer as `void*` -- do NOT name a Ghidra struct type (UnitAny*, Room*, "
+        "etc.); those are not defined in the provider and won't compile. Read fields by casting + offset, "
+        "EXACTLY as the decompile does. Translate literally: `pUnit[0xc]` (an int* index) -> "
+        "`((int*)p)[0xc]`; `*(int *)(pUnit + 0x40)` -> `*(int*)((char*)p + 0x40)`; `**(short **)p` -> "
+        "`*(*(short**)p)`. Preserve every offset, cast, and integer width; add/remove NO dereference.\n"
+        "- NULL-guard the pointer with a plain `if (p == nullptr) return 0;`. The decompile may show the "
+        "null path calling helpers like `GetReturnAddress()`, `CleanupAndAbort()`, `_exit(-1)`, "
+        "`FID_conflict:*`, or `__report_*` -- those are NOT defined in the provider and will NOT compile "
+        "(error C3861). NEVER emit them: the oracle never passes null, so the null branch only has to "
+        "compile -- just `return 0;`. Likewise call NO function the decompile names unless it is a plain "
+        "arithmetic operator you can inline.\n"
+        "- Additional SCALAR args (indices/ids) come AFTER the pointer in declared order, as plain "
+        "int/unsigned int.\n"
+        "- Read-only; never mutate. No STL. Never call a compiler-internal helper (__alldiv/...) by name.")
+    p.append("")
+    p.append("## Output")
+    p.append("BLOCK 1 -- ```cpp: the complete reimpl (include + marker + function).")
+    p.append("BLOCK 2 -- ```json:")
+    p.append("```json")
+    p.append(json.dumps({
+        "fn": func_name,
+        "param_layout": {
+            "handle_arg": "pUnit",
+            "scalar_args": [],
+            "callconv": "stdcall",
+            "ret": "i32",
+        },
+        "input_sets": [{}],
+    }, indent=2))
+    p.append("```")
+    p.append(
+        "param_layout.handle_arg = the live-pointer param name; scalar_args = names of any additional int "
+        "args in order; callconv = stdcall (ptr on stack) or fastcall (ptr in ecx); ret = i32|u32|void|u8. "
+        "IMPORTANT: if the original returns a BYTE (a CONCAT31 decompiler artifact -- the upper 3 bytes are "
+        "pointer-derived garbage, only the low byte is meaningful), set ret=\"u8\" and return JUST the byte; "
+        "the oracle masks to the low 8 bits so it matches. "
+        "input_sets: one dict per proof case keyed by scalar_args (cover 0/1/-1/boundaries); if the ONLY "
+        "input is the live pointer, use [{}] -- the oracle supplies the captured object.")
+    return "\n".join(p)
+
+
+def build_handle_fix_prompt(func_name: str, decompiled_text: str, prior_reimpl: str,
+                            prove_output: str) -> str:
+    p = []
+    p.append("OUTPUT CONTRACT: reply with EXACTLY TWO fenced blocks -- BLOCK 1 ```cpp (corrected reimpl), "
+             "BLOCK 2 ```json (SAME param_layout + input_sets). Nothing else.")
+    p.append("")
+    p.append(f"## Your reimpl of {func_name} did not prove against the live captured object. Fix it.")
+    p.append("The oracle called BOTH the original and your reimpl with the SAME live pointer and compared:")
+    p.append("```")
+    p.append((prove_output or "(no output)")[-2500:])
+    p.append("```")
+    p.append("Re-check every offset/cast/width against the decompile; a single wrong offset or an extra/"
+             "missing dereference flips the result.")
+    p.append("## Decompiled source (the spec)")
+    p.append("```")
+    p.append(str(decompiled_text))
+    p.append("```")
+    p.append("## Your previous reimpl")
+    p.append("```cpp")
+    p.append(prior_reimpl)
+    p.append("```")
+    p.append("Output the corrected ```cpp + the ```json layout. Keep the include and the "
+             "// D2MOO_REIMPL_EXPORT marker.")
+    return "\n".join(p)
+
+
+_HEX_LITERAL_RE = re.compile(r'(?<![\w"])0[xX][0-9a-fA-F]+')
+
+
+def _is_provider_reimpl(cpp: str) -> bool:
+    """A PROVIDER candidate must define an `extern "C"` exported function -- that is
+    what the generated .def exports and what the DLL must resolve. Reject an OpenD2
+    STATIC-HARNESS draft (`namespace D2Lib { inline T fn(){...} }`), which has NO
+    extern-C symbol: written as a provider candidate it makes the .def export a symbol
+    the DLL never defines -> LNK2001 -> the WHOLE provider build fails for every
+    function (found 2026-07-08: SKILLS_GetSkillNodeRecord poisoned the build). Treating
+    such a draft as malformed here keeps it out of the provider dir entirely."""
+    c = cpp or ""
+    return 'extern "C"' in c and "namespace D2Lib" not in c
+
+
+def _json_loads_lenient(s: str):
+    """json.loads, but first rewrite bare hex integer literals (0x7FFFFFFF) to
+    decimal. The model habitually puts hex in input_sets (0x80000000, 0x7FFFFFFF)
+    even though JSON has no hex literals, which makes json.loads reject the WHOLE
+    block -> a correct reimpl gets scored malformed_response (found 2026-07-08:
+    GetAnimSequenceRecord drew hex in all 3 attempts). The lookbehind avoids
+    touching hex inside quoted strings/identifiers. Raises JSONDecodeError like
+    json.loads on anything still malformed."""
+    return json.loads(_HEX_LITERAL_RE.sub(lambda m: str(int(m.group(0), 16)), s or ""))
+
+
+def parse_handle_response(text: str):
+    """(reimpl_cpp, param_layout, input_sets) from a build_handle_draft_prompt reply.
+    (None,None,None) on any failure. param_layout must have handle_arg + callconv."""
+    import port_pipeline as pp
+    blocks = pp._fenced_blocks(text or "")
+    cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
+    js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
+    if not cpp or not js:
+        return None, None, None
+    try:
+        spec = _json_loads_lenient(js[0])
+    except json.JSONDecodeError:
+        return None, None, None
+    layout = spec.get("param_layout")
+    input_sets = spec.get("input_sets")
+    if not isinstance(layout, dict) or not layout.get("handle_arg"):
+        return None, None, None
+    if not isinstance(input_sets, list) or not input_sets:
+        input_sets = [{}]
+    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
+        return None, None, None
+    reimpl = cpp[0].strip() + "\n"
+    if 'provider_runtime.h' not in reimpl:
+        reimpl = '#include "../provider_runtime.h"\n' + reimpl
+    return reimpl, layout, input_sets
+
+
+def build_handle_spec(name: str, address, param_layout: dict) -> dict:
+    """fun-doc handle param_layout -> oracle spec: arg0 = the captured live object
+    (kind 'handle'), followed by scalar args (kind 'i32') the vectors fill."""
+    cc = str(param_layout.get("callconv", "stdcall")).lower()
+    if cc not in ("stdcall", "fastcall", "cdecl", "thiscall"):
+        cc = "stdcall"
+    ret = str(param_layout.get("ret", "i32")).lower()
+    if ret not in ("i32", "u32", "void", "u8", "i8"):   # u8/i8: byte getters (CONCAT31 artifact)
+        ret = "i32"
+    args = [{"id": param_layout["handle_arg"], "kind": "handle"}]
+    for s in param_layout.get("scalar_args", []) or []:
+        args.append({"id": str(s), "kind": "i32"})
+    return {
+        "name": name, "addr": _int(address), "callconv": cc, "ret": ret,
+        "args": args, "compare": [] if ret == "void" else ["ret"],
+        "onGameThread": True,  # the object is live game state -- call on the game thread
+    }
+
+
+_GATE_W = {"b": 1, "w": 2, "d": 4}
+
+
+def _gate_spec(gates):
+    """abi_static type_gates [(depth,off,imm,w_char)] -> oracle spec [{depth,off,imm,w}]."""
+    return [{"depth": d, "off": o, "imm": i, "w": _GATE_W.get(w, 4)}
+            for (d, o, i, w) in (gates or [])]
+
+
+def run_synth_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+                    struct_size: int = 256, gates=None, build: bool = True) -> dict:
+    """Prove a FLAT getter (a single fixed-offset read, no sub-pointer deref) via the
+    oracle's SYNTHETIC DISCRIMINATING object (arg kind 'synth', 2026-07-08). The oracle
+    passes both the original and the reimpl a scratch buffer whose every byte is unique
+    to its offset, so a getter reading a fixed field returns a value UNIQUE to that
+    offset -- a wrong-offset reimpl MISMATCHES the original. This kills the degenerate
+    all-zeros false positive that idle-town live captures produce (a weak_proof), giving
+    a STRONG proof for exactly the flat-getter class the mechanical translator emits.
+
+    CALLER MUST ensure the getter is FLAT -- a synth byte is not a valid pointer, so a
+    sub-deref getter would fault. (chain length 1 from abi_static.translate_getter_to_c.)"""
+    parg = {"id": "p", "kind": "synth", "bytes": struct_size}
+    gspec = _gate_spec(gates)
+    if gspec:
+        parg["gates"] = gspec
+    spec = {"name": name, "addr": _int(address), "callconv": "stdcall",
+            "ret": ret if ret in ("u8", "i8", "u16", "i16", "u32", "i32") else "u32",
+            "args": [parg],
+            "compare": ["ret"],
+            "vectors": [{}]}
+    write_candidate(reimpl_cpp, name)
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    spec_path = VECTORS_DIR / f"{name}.spec.json"
+    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    if build:
+        b = build_provider_attributed(name)
+        if not b["ok"]:
+            res = _fail(b["stage"], b["detail"])
+            res["spec"] = spec
+            return res
+    res = _invoke_prove(spec_path, build=False)
+    res["spec"] = spec
+    res["proof_kind"] = "synth"          # a discriminating proof -- never weak
+    if res.get("ok"):
+        res["writeback"] = record_proof(name, address, spec, res)
+    return res
+
+
+def run_synth2_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+                     gates=None, build: bool = True) -> dict:
+    """Prove a 2-LEVEL getter (read a pointer at O1, deref, read the field at O2 --
+    no third level) via the oracle's NESTED discriminating object (arg kind
+    'synth2', 2026-07-08). The primary buffer is an array of pointers all pointing at
+    a shared secondary buffer whose byte[o]=(o*13+0x37) is unique per offset, so the
+    getter returns pattern(O2) and a wrong FIELD offset MISMATCHES the original. This
+    lifts the degenerate-town-capture weak_proof for the 2-level getter class -- the
+    majority of struct getters -- which flat synth can't reach.
+
+    CALLER MUST ensure the getter is exactly 2-level (chain length 2 from
+    abi_static.translate_getter_to_c); a 3rd deref would read the pattern as a
+    pointer and fault."""
+    parg = {"id": "p", "kind": "synth2", "bytes": 256}
+    gspec = _gate_spec(gates)
+    if gspec:
+        parg["gates"] = gspec
+    spec = {"name": name, "addr": _int(address), "callconv": "stdcall",
+            "ret": ret if ret in ("u8", "i8", "u16", "i16", "u32", "i32") else "u32",
+            "args": [parg],
+            "compare": ["ret"], "vectors": [{}]}
+    write_candidate(reimpl_cpp, name)
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    spec_path = VECTORS_DIR / f"{name}.spec.json"
+    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    if build:
+        b = build_provider_attributed(name)
+        if not b["ok"]:
+            res = _fail(b["stage"], b["detail"])
+            res["spec"] = spec
+            return res
+    res = _invoke_prove(spec_path, build=False)
+    res["spec"] = spec
+    res["proof_kind"] = "synth2"        # discriminates the field offset -- never weak
+    if res.get("ok"):
+        res["writeback"] = record_proof(name, address, spec, res)
+    return res
+
+
+_DELEGATE_INDICES = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
+
+
+def run_delegate_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+                       arg_off: int, type_gates=None, indices=None,
+                       build: bool = True) -> dict:
+    """Prove a DELEGATE call-through getter (abi_static.translate_delegate_getter_to_c):
+    it resolves + calls a REAL D2Common function, so the callee's data-globals must be
+    LOADED -> this only works IN-GAME (at the title screen the callee's tables are NULL
+    and every vector degenerates). Strategy: a MULTI-INDEX gated synth -- patch the
+    dwType gate(s) + the callee's arg field to each of several record INDICES, so the
+    real callee returns a real (different) record per index. STRONG iff the reimpl
+    matches the original on EVERY index AND the original's value VARIES across indices
+    (a UNIFORM original = the read field is constant -> a wrong offset would match too ->
+    can't discriminate -> weak_proof, not strong). This variance check is the delegate
+    analogue of _degenerate_capture_note (single-vector synth can't see it)."""
+    idxs = indices or _DELEGATE_INDICES
+    base_gates = _gate_spec([(0, g[0], g[1], g[2]) for g in (type_gates or [])])
+    rr = ret if ret in ("u8", "i8", "u16", "i16", "u32", "i32") else "u32"
+    write_candidate(reimpl_cpp, name)
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    if build:
+        b = build_provider_attributed(name)
+        if not b["ok"]:
+            r = _fail(b["stage"], b["detail"]); r["proof_kind"] = "delegate"; return r
+
+    npass = 0
+    orig_vals = set()
+    last = None
+    for i in idxs:
+        parg = {"id": "p", "kind": "synth", "bytes": 256,
+                "gates": base_gates + [{"depth": 0, "off": arg_off, "imm": i, "w": 4}]}
+        spec = {"name": name, "addr": _int(address), "callconv": "stdcall", "ret": rr,
+                "args": [parg], "compare": ["ret"], "vectors": [{}]}
+        sp = VECTORS_DIR / f"{name}.spec.json"
+        sp.write_text(json.dumps(spec) + "\n", encoding="utf-8")
+        r = _invoke_prove(sp, build=False)
+        last = r
+        if r.get("ok"):
+            npass += 1
+        ov = (r.get("oracle") or {}).get("results") or []
+        for row in ov:
+            rr_ = row.get("ret")
+            if isinstance(rr_, dict) and "o" in rr_:
+                orig_vals.add(rr_["o"])
+        # oracle death mid-sweep -> stop (don't burn the rest against a dead bridge)
+        if r.get("failure_stage") == "oracle_died_during":
+            break
+
+    res = {"passed": npass, "total": len(idxs), "stage": "prove",
+           "output": (last or {}).get("output", ""), "spec": spec,
+           "proof_kind": "delegate_call_through", "orig_distinct": len(orig_vals)}
+    if npass == len(idxs) and len(orig_vals) > 1:
+        res["ok"] = True
+        res["writeback"] = record_proof(name, address, spec, res)
+        res["note"] = f"delegate call-through; discriminating multi-index ({npass}/{len(idxs)}, orig varies)"
+    elif npass == len(idxs) and len(orig_vals) <= 1:
+        res["ok"] = False
+        res["failure_stage"] = "weak_uniform"
+        res["failure_detail"] = ("delegate matched all indices but the ORIGINAL returned a "
+                                 "single value on every index (uniform field) -> non-discriminating")
+    else:
+        res["ok"] = False
+        res["failure_stage"] = (last or {}).get("failure_stage", "mismatch")
+        res["failure_detail"] = f"delegate matched only {npass}/{len(idxs)} indices"
+    return res
+
+
+def run_handle_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
+                     input_sets: list, *, build: bool = True) -> dict:
+    """Prove a live-pointer getter against the running game via the oracle handle
+    path (a real captured object is passed to both original and reimpl). Same
+    {ok,passed,total,output,...} shape as run_live_prove."""
+    spec = build_handle_spec(name, address, param_layout)
+    # scalar-arg vectors only; the handle arg is filled by the oracle from capture.
+    # For a HANDLE-ONLY getter, emit N empty vectors: the oracle snapshots
+    # D2Capture_LastUnit() once PER vector, and the game thread advances the captured
+    # object between iterations, so N vectors prove against up to N DISTINCT live
+    # objects (guards the "matched by luck on one object" risk) and confirm
+    # determinism. With scalar args, sweep those instead.
+    HANDLE_ONLY_VECTORS = 8
+    scalar_ids = [a["id"] for a in spec["args"] if a["kind"] == "i32"]
+    spec["vectors"] = ([{k: case.get(k, 0) for k in scalar_ids} for case in input_sets]
+                       if scalar_ids else [{} for _ in range(HANDLE_ONLY_VECTORS)])
+    write_candidate(reimpl_cpp, name)
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    spec_path = VECTORS_DIR / f"{name}.spec.json"
+    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    if build:
+        # attributed + self-healing build: a broken SIBLING candidate is healed
+        # instead of failing THIS (possibly correct) reimpl; our own compile
+        # errors come back as build_candidate with the real compiler message.
+        b = build_provider_attributed(name)
+        if not b["ok"]:
+            res = _fail(b["stage"], b["detail"])
+            res["spec"] = spec
+            return res
+    res = _invoke_prove(spec_path, build=False)
+    res["spec"] = spec
+    # Surface the per-vector dispatch-field probe (dwType of each captured object)
+    # for the post-proof BRANCH-COVERAGE analysis.
+    oracle = res.get("oracle")
+    if oracle and isinstance(oracle.get("results"), list):
+        res["dispatch_values"] = [r["probe"][0] for r in oracle["results"]
+                                  if isinstance(r.get("probe"), list) and r["probe"]]
+    res["weak_proof"] = _degenerate_capture_note(oracle)
+    if res.get("ok"):
+        res["writeback"] = record_proof(name, address, spec, res, weak_proof=res["weak_proof"])
+    return res
+
+
+def _degenerate_capture_note(oracle) -> str | None:
+    """A handle proof is DEGENERATE if the ORIGINAL returned the SAME value on every
+    vector -- then a wrong-offset reimpl matches by luck (all-zeros) and earns a
+    FALSE CONF_LIVE. Exactly how STAT_GetActiveSkillFieldC / SKILLS_GetActiveSkillAnimData
+    passed 8/8 on idle-town captures yet diverged ~99% under shadow (2026-07-08). If
+    every original return is identical (esp. 0), flag it so the row can't silently
+    promote/freeze until DIVERSE objects (dispatch values) are seen. Returns a note
+    or None."""
+    if not oracle or not isinstance(oracle.get("results"), list):
+        return None
+    results = oracle["results"]
+    orig_rets = [r["ret"]["o"] for r in results
+                 if isinstance(r.get("ret"), dict) and "o" in r["ret"]]
+    if len(orig_rets) < 2:
+        return None
+    distinct = set(orig_rets)
+    # distinct captured objects seen (probe dispatch field), if available
+    probes = {r["probe"][0] for r in results if isinstance(r.get("probe"), list) and r["probe"]}
+    if len(distinct) == 1:
+        v = next(iter(distinct))
+        objs = f", only {len(probes)} distinct object(s)" if probes else ""
+        return (f"DEGENERATE CAPTURE: the original returned the SAME value ({v}) on all "
+                f"{len(orig_rets)} vectors{objs} -- a wrong-offset reimpl matches by luck. "
+                f"This CONF_LIVE proof is WEAK; re-prove against DIVERSE objects (or trust "
+                f"shadow/V2) before promoting or freezing.")
+    return None
+
+
+def provider_outcome(text, meta) -> str:
+    """Classify an invoke_claude (text, meta) result so the retry loop can tell a
+    PROVIDER hiccup from a MODEL/reimpl problem -- they need opposite handling:
+      'quota'       -> paused; stop.
+      'hiccup'      -> the PROVIDER misbehaved (empty/None text, or a timeout/error
+                       marker in meta). This is NOT a bad reimpl -- retry the SAME
+                       prompt without consuming the fix budget, and DON'T discard the
+                       last good draft (2026-07-08: a minimax 300s hard-timeout mid-
+                       retry stranded PATH_GetDirection on a wrong u32 attempt after
+                       the correct u8 was already found).
+      'got_text'    -> the provider returned content; parse it normally.
+    """
+    if (meta or {}).get("quota_paused"):
+        return "quota"
+    m = meta or {}
+    if m.get("timeout") or m.get("hard_timeout") or m.get("error") or m.get("stalled"):
+        return "hiccup"
+    if not (text or "").strip():
+        return "hiccup"
+    return "got_text"
+
+
+class BestDraft:
+    """Accumulator that keeps the highest-scoring parseable draft across retries, so
+    a later provider hiccup or a worse re-draft never loses earlier progress. Score =
+    proven (ok) > more vectors passed > first seen."""
+    __slots__ = ("reimpl", "layout", "input_sets", "score", "result")
+
+    def __init__(self):
+        self.reimpl = self.layout = self.input_sets = self.result = None
+        self.score = (-1, -1)
+
+    def offer(self, reimpl, layout, input_sets, result) -> None:
+        if reimpl is None:
+            return
+        ok = 1 if (result or {}).get("ok") else 0
+        passed = (result or {}).get("passed") or 0
+        s = (ok, passed)
+        if s > self.score:
+            self.reimpl, self.layout, self.input_sets = reimpl, layout, input_sets
+            self.result, self.score = result, s
+
+    def have(self) -> bool:
+        return self.reimpl is not None
 
 
 def build_adversarial_vectors_prompt(func_name: str, decompiled_text: str,
@@ -346,7 +911,7 @@ def parse_live_response(text: str):
     if not cpp or not js:
         return None, None, None
     try:
-        spec = json.loads(js[0])
+        spec = _json_loads_lenient(js[0])
     except json.JSONDecodeError:
         return None, None, None
     layout = spec.get("param_layout")
@@ -354,6 +919,8 @@ def parse_live_response(text: str):
     if not isinstance(layout, dict) or not isinstance(input_sets, list) or not input_sets:
         return None, None, None
     if "inputs" not in layout or "outputs" not in layout:
+        return None, None, None
+    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
         return None, None, None
     reimpl = cpp[0].strip() + "\n"
     if 'provider_runtime.h' not in reimpl:  # ensure the resolver header is present
@@ -382,6 +949,13 @@ def write_candidate(reimpl_cpp: str, name: str) -> Path:
     """Drop a drafted D2MOO reimpl into the provider's candidates/ dir. Ensures
     the `// D2MOO_REIMPL_EXPORT: <name>` marker the provider build reads is
     present. Canonical one-file-per-function name avoids duplicate symbols."""
+    # Last line of defense against build poison: refuse a non-extern-C draft LOUDLY
+    # here rather than let it silently break the whole provider .def at the next build.
+    if not _is_provider_reimpl(reimpl_cpp):
+        raise ValueError(
+            f"write_candidate({name}): content is not a provider reimpl (needs an "
+            f'`extern "C"` export, not an OpenD2 `namespace D2Lib` draft) -- refusing to '
+            f"write build poison into the provider candidates dir")
     CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
     body = reimpl_cpp
     if "D2MOO_REIMPL_EXPORT:" not in body:
@@ -395,7 +969,9 @@ def _invoke_prove(spec_path: Path, *, build: bool, timeout: int = 900) -> dict:
     """Run prove_candidate.py --spec and map its result to run_harness's shape."""
     if not PROVE_SCRIPT.exists():
         return _fail("config", f"prover not found: {PROVE_SCRIPT}")
-    cmd = [sys.executable, str(PROVE_SCRIPT), "--spec", str(spec_path), "--url", ORACLE_URL]
+    # --json emits the raw per-vector oracle result (incl. the coverage "probe"),
+    # which we parse back out for branch-coverage analysis without a second call.
+    cmd = [sys.executable, str(PROVE_SCRIPT), "--spec", str(spec_path), "--url", ORACLE_URL, "--json"]
     if build:
         cmd.append("--build")
     try:
@@ -405,14 +981,52 @@ def _invoke_prove(spec_path: Path, *, build: bool, timeout: int = 900) -> dict:
     out = proc.stdout + proc.stderr
     m = re.search(r"(\d+)/(\d+) match", out)
     passed, total = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-    return {
+    res = {
         "ok": proc.returncode == 0,
         "passed": passed,
         "total": total,
         "stage": "prove",
         "error": "" if proc.returncode == 0 else f"prover exit {proc.returncode}",
         "output": out.strip(),
+        "oracle": _extract_oracle_json(out),
     }
+    if not res["ok"]:
+        stage, detail = _classify_prove_failure(out)
+        # upgrade: the bridge was alive when we started (prove ran) but is dead
+        # now -> THIS function's vectors killed it. Name the killer.
+        if stage in ("marshal_fault", "prove", "mismatch") and not check_oracle_alive():
+            stage = "oracle_died_during"
+            detail = (f"the oracle bridge died while proving this function "
+                      f"(likely an abort-class out-of-range vector or an ABI fault); {detail}")
+        res["failure_stage"], res["failure_detail"] = stage, detail
+    return res
+
+
+def _extract_oracle_json(out: str):
+    """Pull the raw oracle result object (the one with a 'results' array) out of
+    prove_candidate.py --json stdout. Returns the dict or None."""
+    i = 0
+    while True:
+        start = out.find("{", i)
+        if start < 0:
+            return None
+        depth = 0
+        for j in range(start, len(out)):
+            if out[j] == "{":
+                depth += 1
+            elif out[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(out[start:j + 1])
+                        if isinstance(obj, dict) and "results" in obj:
+                            return obj
+                    except json.JSONDecodeError:
+                        pass
+                    i = start + 1
+                    break
+        else:
+            return None
 
 
 def _ghidra_post(path: str, data: dict) -> dict:
@@ -467,7 +1081,8 @@ def set_doc_level(address, doc_level: str, *, program: str = "D2Common.dll") -> 
 
 
 def record_proof(name: str, address, spec: dict, result: dict, *,
-                 program: str = "D2Common.dll", conf_level: str = "CONF_LIVE") -> dict:
+                 program: str = "D2Common.dll", conf_level: str = "CONF_LIVE",
+                 abort_class: bool = False, weak_proof: str = None) -> dict:
     """WRITE-BACK (see the writeback-source-of-truth principle). On a successful
     live proof: (1) set the CONF_ rung in Ghidra -- the RE source of truth,
     queryable via search_functions_by_tag -- REMOVING the other (mutually
@@ -496,6 +1111,19 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
             "passed": result.get("passed"), "total": result.get("total"),
             "date": datetime.date.today().isoformat(),
         }
+        if abort_class or spec.get("abort_class"):
+            # out-of-range input is FATAL: V1 adversarial (and any fuzzing tool
+            # reading this registry) must stay in-envelope or skip entirely.
+            row["abort_class"] = True
+        if weak_proof:
+            # DEGENERATE capture -> this CONF_LIVE proof matched by luck; must not
+            # silently promote/freeze. shadow_promote + freeze tooling should honor this.
+            row["weak_proof"] = weak_proof
+        # proof provenance (synth / synth2 / delegate_call_through) + delegate metadata,
+        # so the registry row is self-describing (a delegate row names its callee).
+        for _k in ("proof_kind", "callee", "note"):
+            if result.get(_k) is not None:
+                row[_k] = result[_k]
         PROVEN_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
         with open(PROVEN_REGISTRY, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
@@ -506,25 +1134,42 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
 
 
 def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
-                   input_sets: list, *, build: bool = True) -> dict:
+                   input_sets: list, *, build: bool = True,
+                   abort_class: bool = False) -> dict:
     """Prove a D2MOO reimpl of `name` against the live game. Writes the reimpl
     into the provider, translates fun-doc's layout+cases into an oracle spec,
     and runs the prover. Returns run_harness's {ok,passed,total,output,...}.
-    Raises UnsupportedLiveABI (caller falls back to static) for exotic ABIs."""
+    Raises UnsupportedLiveABI (caller falls back to static) for exotic ABIs.
+
+    abort_class=True stamps the spec with a safety/envelope annotation (the
+    function's out-of-range path is FATAL -- see abi_static.detect_abort_path)
+    and flags the registry row so V1 adversarial sweeps skip it."""
     spec = translate_layout_to_spec(name, address, param_layout)
     spec["vectors"] = [dict(case) for case in input_sets]  # {name:val} == oracle vector
+    if abort_class:
+        spec["safety"] = ("ABORT CLASS: the original's out-of-range path is fatal "
+                          "(_exit/CleanupAndAbort kills the process/bridge). Vectors are "
+                          "strictly in-envelope; do NOT fuzz out-of-range (no V1 widening).")
+        spec["abort_class"] = True
 
     write_candidate(reimpl_cpp, name)
     VECTORS_DIR.mkdir(parents=True, exist_ok=True)
     spec_path = VECTORS_DIR / f"{name}.spec.json"
     spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
-    res = _invoke_prove(spec_path, build=build)
+    if build:
+        b = build_provider_attributed(name)   # attributed + self-healing (see docstring)
+        if not b["ok"]:
+            res = _fail(b["stage"], b["detail"])
+            res["spec"] = spec
+            return res
+    res = _invoke_prove(spec_path, build=False)
     res["spec"] = spec  # additive: lets a caller (e.g. shadow_promote.py) classify
                         # the ABI shape without recomputing translate_layout_to_spec
     if res.get("ok"):
         # Write-back to the source of truth on every successful proof.
-        res["writeback"] = record_proof(name, address, spec, res)
+        res["writeback"] = record_proof(name, address, spec, res,
+                                        abort_class=abort_class)
     return res
 
 
