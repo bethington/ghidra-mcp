@@ -1114,8 +1114,8 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
       (3) append a machine-readable row to conformance/proven_functions.jsonl -- now a
           git-tracked MIRROR of (1)+(2).
     Additive to the DOC_ axis and decompiler comments (never clobbered). Each write is
-    independent best-effort; never raises. (No save_program here -- matches the existing
-    tag write; the open program persists on the next save / sync.)
+    independent best-effort; never raises. Ends with a per-proof save_program (chosen
+    cadence: zero-loss over speed -- every rung/property is persisted immediately).
 
     conf_level defaults to CONF_LIVE (the live-oracle proof). A future battle-test
     promoter passes CONF_BATTLETESTED (earned by zero shadow divergences in real
@@ -1172,6 +1172,15 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
         status["registry"] = str(PROVEN_REGISTRY)
     except OSError as e:
         status["registry"] = f"error: {e}"
+
+    # (4) per-proof save -- persist the tag + property to the .rep immediately. Chosen
+    # cadence: zero-loss over speed. save_program is a full program save, so batches run
+    # slower, but no Ghidra write is ever lost to an unexpected close/crash.
+    try:
+        _ghidra_post("/save_program", {"program": program})
+        status["saved"] = "ok"
+    except OSError as e:
+        status["saved"] = f"error: {e}"
     return status
 
 
