@@ -53,6 +53,13 @@ for _p, _subs in (("EAX", ("AX", "AL", "AH")), ("EBX", ("BX", "BL", "BH")),
 _REG_TOKEN_RE = re.compile(r"\b(E?[ABCD]X|E?[SD]I|E?BP|[ABCD][LH])\b", re.IGNORECASE)
 _ESP_READ_RE = re.compile(r"\[\s*ESP\s*(?:\+\s*(0x[0-9a-fA-F]+|\d+))?\s*\]", re.IGNORECASE)
 _ABS_MEM_RE = re.compile(r"\[\s*(0x[0-9a-fA-F]+)\s*\]")
+# A global used as the DISPLACEMENT of a base+index memory operand --
+# `MOV AL, byte ptr [EAX + 0x6fdef0a8]` -- where 0x6fdef0a8 is an array-base GLOBAL,
+# not a struct field offset. Struct offsets are small (< a few KB); loaded D2Common
+# globals live in the image range (0x6fdxxxxx), so an image-range threshold cleanly
+# separates the two. (Before this, array-base getters were mis-tagged provable_now.)
+_DISP_GLOBAL_RE = re.compile(r"\+\s*(0x[0-9a-fA-F]+)\s*\]")
+_IMAGE_MIN = 0x6f000000
 _IMM_RE = re.compile(r"^(?:0x[0-9a-fA-F]+|-?\d+)$")
 
 _ABORT_DECOMPILE_RE = re.compile(
@@ -148,6 +155,14 @@ def derive_abi(disasm_text: str) -> dict:
         for m in _ABS_MEM_RE.finditer(ops):
             v = int(m.group(1), 16)
             if v not in data_globals:
+                data_globals.append(v)
+
+        # --- global as a base+index displacement: `[reg + 0x<image-range global>]`
+        # (array-base getters, e.g. `MOV AL,[EAX + 0x6fdef0a8]`). The image-range
+        # threshold keeps small struct-field offsets from being mistaken for globals.
+        for m in _DISP_GLOBAL_RE.finditer(ops):
+            v = int(m.group(1), 16)
+            if v >= _IMAGE_MIN and v not in data_globals:
                 data_globals.append(v)
 
         # --- stack arg reads: [ESP] / [ESP+off], adjusted by tracked push depth ---
@@ -1171,6 +1186,20 @@ def _selftest() -> int:
     assert a["ret_imm"] == 4 and a["slots"] == 1 and a["used_slots"] == [0], a
     assert a["callconv"] == "stdcall", a
     assert 0x6fdf0b94 in a["data_globals"] and 0x6fdf0b98 in a["data_globals"], a
+
+    # array-base global as a base+index displacement: `MOV AL,[EAX + 0x6fdef0a8]`.
+    # This is the batch-B planner gap -- DATATBLS_GetBodyLocPropertyByte reads a global
+    # but was mis-tagged provable_now because the bare-`[0x..]` regex never saw it.
+    a = derive_abi("6fd6a2a0: MOVZX EAX,byte ptr [ESP + 0x4]\n"
+                   "6fd6a2a5: MOV AL,byte ptr [EAX + 0x6fdef0a8]\n"
+                   "6fd6a2ab: RET 0x4\n")
+    assert 0x6fdef0a8 in a["data_globals"], a
+    assert a["ret_imm"] == 4 and a["slots"] == 1, a
+    # ...but small struct-field offsets in the same operand form must NOT be caught:
+    b = derive_abi("6fd87ded: MOV EAX,dword ptr [EAX + 0x5c]\n"
+                   "6fd87df4: MOV EAX,dword ptr [EAX + 0x10]\n"
+                   "6fd87df7: RET 0x4\n")
+    assert b["data_globals"] == [], b
 
     a = derive_abi(_CORPUS["ITEMS_LookupItemRecordByCode"])
     assert a["ret_imm"] == 8 and a["slots"] == 2, a
