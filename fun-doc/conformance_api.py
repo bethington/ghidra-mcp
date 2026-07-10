@@ -69,6 +69,15 @@ def _inventory():
     return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
 
 
+@conf_bp.route("/api/conformance/globals")
+def _globals():
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except (TypeError, ValueError):
+        limit = 100
+    return jsonify(cd.globals_inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
+
+
 @conf_bp.route("/api/conformance/function/<addr>")
 def _function(addr):
     return jsonify(cd.function_detail(addr, program=_prog()))

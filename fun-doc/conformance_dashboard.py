@@ -265,6 +265,25 @@ def _bar(scope, rung_order, rung_sets, addr_pool):
     return {"scope": scope, "rungs": rungs, "done": done, "remaining": rem}
 
 
+def globals_inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
+    """Searchable Globals Inventory (sibling of the function inventory): in-scope image
+    globals matching `search`, each with its type, typed-groundwork flag, and DOC rung
+    (from the `Doc` property map -- 'none' until the globals-doc pass runs). Untyped/
+    undocumented globals sort first (most work), then by name."""
+    program = program or PROGRAM
+    doc = _doc_map_rungs(program)
+    s = search.lower()
+    rows = []
+    for g in _global_rows(program):
+        if s and s not in g["name"].lower():
+            continue
+        rows.append({"name": g["name"], "address": g["addr"], "type": g["type"],
+                     "typed": g["typed"], "doc": doc.get(g["addr"], "none")})
+    total = len(rows)
+    rows.sort(key=lambda r: (r["doc"] != "none", r["typed"], r["name"].lower()))
+    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit)}
+
+
 def binaries_progress() -> dict:
     """Per-binary progress for the picker panel: three segmented bars (Fn Doc, Fn Conf,
     Glob Doc) each with in-scope denominator, rung segment counts, and remaining work.

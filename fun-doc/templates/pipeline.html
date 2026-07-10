@@ -141,14 +141,23 @@
   .b-docV { color:var(--set); border-color:var(--set); }
 
   /* ---- inventory ---- */
+  /* functions (has extra CONF column) get more room than globals */
+  .inv-row { display:grid; grid-template-columns:3fr 2fr; gap:.75rem; align-items:start; }
+  @media (max-width:900px){ .inv-row{grid-template-columns:1fr;} }
+  .inv-row .panel { margin-bottom:0; min-width:0; }
   .inv-head { display:flex; gap:.5rem; align-items:center; }
-  .inv-search { flex:1; max-width:280px; }
-  table.inv { width:100%; border-collapse:collapse; margin-top:.5rem; }
+  .inv-search { flex:1; max-width:280px; min-width:80px; }
+  table.inv { width:100%; border-collapse:collapse; margin-top:.5rem; table-layout:fixed; }
+  table.inv td.gtype { font-family:var(--font-mono); font-size:.64rem; color:var(--text-secondary);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.inv td.gtype.untyped { color:var(--text-muted); font-style:italic; }
+  table.inv td.gname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   table.inv th { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); text-align:left; padding:4px 6px; border-bottom:1px solid var(--border-dark); }
   table.inv td { padding:5px 6px; border-bottom:1px solid var(--border-dark); font-size:.7rem; }
   table.inv tr { cursor:pointer; }
   table.inv tr:hover td { background:var(--bg-medium); }
   table.inv .fn { font-family:var(--font-mono); color:var(--text-primary); }
+  table.inv.gtbl tr { cursor:default; }
 
   /* ---- drawer ---- */
   .scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .18s; z-index:40; }
@@ -314,15 +323,27 @@
       </div>
     </div>
 
-    <!-- FUNCTION INVENTORY -->
-    <div class="panel">
-      <div class="panel-header inv-head"><h2 style="margin:0">Function Inventory</h2>
-        <input class="worker-input inv-search" id="invSearch" placeholder="search by name..." oninput="debouncedInv()" style="width:auto">
-        <span class="hint" id="invHint"></span>
+    <!-- INVENTORIES: functions (wider, has CONF) + globals (narrower, no CONF) side by side -->
+    <div class="inv-row">
+      <div class="panel">
+        <div class="panel-header inv-head"><h2 style="margin:0">Function Inventory</h2>
+          <input class="worker-input inv-search" id="invSearch" placeholder="search by name..." oninput="debouncedInv()" style="width:auto">
+          <span class="hint" id="invHint"></span>
+        </div>
+        <div class="panel-content" style="max-height:340px;overflow-y:auto">
+          <table class="inv"><thead><tr><th>Function</th><th>Address</th><th>DOC</th><th>CONF</th></tr></thead>
+          <tbody id="invBody"></tbody></table>
+        </div>
       </div>
-      <div class="panel-content" style="max-height:340px;overflow-y:auto">
-        <table class="inv"><thead><tr><th>Function</th><th>Address</th><th>DOC</th><th>CONF</th></tr></thead>
-        <tbody id="invBody"></tbody></table>
+      <div class="panel">
+        <div class="panel-header inv-head"><h2 style="margin:0">Globals Inventory</h2>
+          <input class="worker-input inv-search" id="globSearch" placeholder="search by name..." oninput="debouncedGlob()" style="width:auto">
+          <span class="hint" id="globHint"></span>
+        </div>
+        <div class="panel-content" style="max-height:340px;overflow-y:auto">
+          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th></tr></thead>
+          <tbody id="globBody"></tbody></table>
+        </div>
       </div>
     </div>
   </div>
@@ -478,6 +499,23 @@
       ||'<div class="worker-empty">none</div>';
   }
   let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
+  const SAMPLE_GLOB={total:2120,shown:5,rows:[
+    {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
+    {name:"g_awSuperUniquesHcIdxLookup",address:"0x6fd9b220",type:"word",typed:false,doc:"none"},
+    {name:"g_pSkillsTxt",address:"0x6fde9f10",type:"SkillsTxt *",typed:true,doc:"DOC_REVIEWED"},
+    {name:"g_pDataTables",address:"0x6fde9e1c",type:"DataTablesContext *",typed:true,doc:"none"},
+    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:false,doc:"none"}]};
+  let globTimer; function debouncedGlob(){ clearTimeout(globTimer); globTimer=setTimeout(loadGlobals,220); }
+  async function loadGlobals(){
+    const q=document.getElementById("globSearch").value;
+    const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200")||SAMPLE_GLOB;
+    document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
+    document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
+      `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
+      `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+
+      `<td>${badge(r.doc)}</td></tr>`).join("")
+      ||'<div class="worker-empty">none</div>';
+  }
   async function loadInv(){
     const q=document.getElementById("invSearch").value;
     const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=100")||SAMPLE.inventory;
@@ -527,7 +565,7 @@
     renderBars(s,m); renderMatrix(m);
     document.getElementById("intakeN").innerHTML=`${(ik.untriaged||0).toLocaleString()} <small>/ ${(ik.in_scope||0).toLocaleString()} in scope &middot; ${ik.excluded_lib||0} excluded</small>`;
     document.getElementById("workerHint").textContent=`last sync ${s.last_sync||'-'}`;
-    renderQueue(); loadInv();
+    renderQueue(); loadInv(); loadGlobals();
   }
 
   // ---------- socket (live-dot + push refresh) ----------
