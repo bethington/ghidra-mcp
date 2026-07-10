@@ -464,6 +464,13 @@ def translate_getter_to_c(name: str, disasm_text: str, *, callconv: str = "stdca
                 if base != "EAX":
                     return {"ok": False, "reason": f"deref base {base}, not the EAX chain"}
                 off = int(mm.group(2), 0) if mm.group(2) else 0
+                if off >= _IMAGE_MIN:
+                    # `[EAX + 0x<image-range>]` is `global_base[index]`, NOT a struct
+                    # field read -- the arg is an INDEX, not a pointer. Defer to the
+                    # global-table translator; treating it as flat makes synth pass a
+                    # fake pointer for the index arg -> marshal_fault.
+                    return {"ok": False, "reason": f"offset 0x{off:x} is an image-range "
+                            "global base -- global-table indexed, not a flat getter"}
                 sl = src.lower()
                 width = ("d" if "dword" in sl else "w" if "word" in sl
                          else "b" if "byte" in sl else None)
@@ -1313,6 +1320,16 @@ uint STAT_GetUnitCalculatedStat(UnitAny *pUnit)
 6f00000d: RET 0x4
 """)
     assert not t["ok"] and "computed address" in t["reason"], t
+
+    # ARRAY-INDEX GLOBAL getter must NOT match as flat: `[EAX + 0x<image-range>]` is
+    # global_base[index] (arg is an INDEX), not a struct field read. Mis-matching it
+    # as flat makes synth pass a fake pointer for the index -> marshal_fault.
+    t = translate_getter_to_c("DATATBLS_GetBodyLocPropertyByte", """
+6fd6a2a0: MOVZX EAX,byte ptr [ESP + 0x4]
+6fd6a2a5: MOV AL,byte ptr [EAX + 0x6fdef0a8]
+6fd6a2ab: RET 0x4
+""")
+    assert not t["ok"] and "image-range global base" in t["reason"], t
 
     # BRANCHY / COMPUTED getters must DEFER to the model (ok=False):
     t = translate_getter_to_c("HaveLightResBonus", """
