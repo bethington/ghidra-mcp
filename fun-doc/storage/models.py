@@ -116,6 +116,13 @@ def build_metadata(schema: str | None = None) -> MetaData:
         # JSONB blobs
         Column("deductions", JSON),
         Column("callees", JSON),
+        # OpenD2 conformance port pipeline (document -> port -> prove, see
+        # EMULATION_CONFORMANCE_PLAN.md Sec 14). Populated only for functions
+        # the PORT worker has touched; NULL/none for everything else.
+        Column("port_status", String),
+        Column("port_attempts", Integer, default=0),
+        Column("port_draft_path", String),
+        Column("port_last_result", String),
         # timestamps
         Column("created_at", DateTime(timezone=True)),
         Column("updated_at", DateTime(timezone=True)),
