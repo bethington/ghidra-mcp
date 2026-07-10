@@ -107,7 +107,7 @@ jobs:
         echo "Installed 15 Ghidra JARs to Maven local repository"
 
     - name: Install uv (Python build + test gate)
-      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
+      uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
       with:
         enable-cache: true
 
