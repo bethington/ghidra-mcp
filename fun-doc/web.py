@@ -1168,7 +1168,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     # --- Data loading helpers ---
 
-    def load_state():
+    def load_state(*, binary_name=None):
         """Delegate to fun_doc.load_state — backed by the storage repository
         (Postgres or SQLite per the configured backend). The retry +
         raise-on-corrupt semantics live in fun_doc itself; duplicating them
@@ -1176,29 +1176,79 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         web.py's old implementation silently returned an empty stub on race
         conditions which was then written back over the real state.json."""
         from fun_doc import load_state as _fd_load_state
-        return _fd_load_state()
+        return _fd_load_state(binary_name=binary_name)
 
-    def _save_state_inline(state):
-        """Delegate to fun_doc.save_state — backed by the storage repository.
-        Refuses to overwrite a populated state.json with an empty-functions
-        dict, which is the failure mode that nuked ~110 MB of state on
-        2026-05-03 (a load_state race returned an empty stub that this
-        function then persisted). The guardrail only fires for users
-        mid-migration — once state.json is renamed to .migrated-<ISO>,
-        sf.exists() is false and the repo backend's own integrity checks
-        take over."""
-        from fun_doc import save_state as _fd_save_state
+    def _load_dashboard_state():
+        """State snapshot for the read-only stats paths.
 
-        sf = app.config["STATE_FILE"]
-        new_func_count = len(state.get("functions") or {})
-        if new_func_count == 0 and sf.exists() and sf.stat().st_size > 1024:
-            raise RuntimeError(
-                f"_save_state_inline refused: would overwrite "
-                f"{sf.stat().st_size:,}-byte state.json with empty-functions "
-                "stub. Caller likely raced load_state and is about to clobber "
-                "real data. Investigate the call site."
-            )
-        _fd_save_state(state)
+        When an active binary is set, the functions load is filtered to
+        that binary in SQL (a full materialization costs ~3 s on a 60K-row
+        store; one binary is a few hundred ms). compute_stats() gets every
+        scanned binary for the header dropdown via list_scanned_binaries()
+        instead of deriving it from the (now filtered) functions dict.
+        """
+        from fun_doc import get_state_meta, load_state as _fd_load_state
+
+        active = (get_state_meta() or {}).get("active_binary")
+        return _fd_load_state(binary_name=active) if active else _fd_load_state()
+
+    # --- Stats snapshot cache -------------------------------------------
+    # A dashboard page load computes stats three times back-to-back (SSR
+    # route, the new socket's initial_state, the first /api/stats refresh),
+    # each paying a full state materialization. Cache the computed stats
+    # dict briefly; bus events that imply data changed invalidate it, and
+    # the TTL bounds staleness from writers outside this process (CLI runs)
+    # whose bus events never reach us.
+    _stats_cache = {"stats": None, "ts": 0.0, "version": 0}
+    _stats_cache_lock = threading.Lock()  # cheap guard; never held during compute
+    _stats_compute_lock = threading.Lock()  # serializes recomputes
+    _STATS_CACHE_TTL = 2.0  # seconds
+
+    def _invalidate_stats_cache(_data=None):
+        with _stats_cache_lock:
+            _stats_cache["stats"] = None
+            _stats_cache["version"] += 1
+
+    for _evt in (
+        "state_changed",
+        "queue_changed",
+        "scan_complete",
+        "run_logged",
+        "score_update",
+        "function_complete",
+        "global_complete",
+    ):
+        bus.on(_evt, _invalidate_stats_cache)
+
+    def get_stats_snapshot():
+        """Cached compute_stats() for read-only consumers.
+
+        The returned dict is SHARED between callers — treat it as frozen;
+        copy before mutating (see api_stats).
+        """
+        with _stats_cache_lock:
+            if (
+                _stats_cache["stats"] is not None
+                and time.monotonic() - _stats_cache["ts"] < _STATS_CACHE_TTL
+            ):
+                return _stats_cache["stats"]
+        with _stats_compute_lock:
+            with _stats_cache_lock:
+                # Re-check: another request may have filled it while we waited.
+                if (
+                    _stats_cache["stats"] is not None
+                    and time.monotonic() - _stats_cache["ts"] < _STATS_CACHE_TTL
+                ):
+                    return _stats_cache["stats"]
+                version = _stats_cache["version"]
+            stats = compute_stats(_load_dashboard_state())
+            with _stats_cache_lock:
+                # Skip caching if a write invalidated mid-compute — the
+                # snapshot may predate the write.
+                if _stats_cache["version"] == version:
+                    _stats_cache["stats"] = stats
+                    _stats_cache["ts"] = time.monotonic()
+            return stats
 
     def load_queue():
         from fun_doc import load_priority_queue
@@ -1617,12 +1667,20 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     def compute_stats(state):
         all_funcs = state.get("functions", {})
         active_binary = state.get("active_binary")
-        # Available binaries: merge Ghidra project files + already-scanned
+        # Available binaries: merge Ghidra project files + already-scanned.
+        # Scanned names come from a DISTINCT query, not the functions dict —
+        # _load_dashboard_state() may have filtered the dict to the active
+        # binary, and the dropdown must still list every scanned binary.
         folder = state.get("project_folder", "/")
         project_binaries = _fetch_project_binaries(folder)
-        scanned_binaries = sorted(
-            set(f.get("program_name", "unknown") for f in all_funcs.values())
-        )
+        try:
+            from fun_doc import list_scanned_binaries
+
+            scanned_binaries = list_scanned_binaries()
+        except Exception:
+            scanned_binaries = sorted(
+                set(f.get("program_name", "unknown") for f in all_funcs.values())
+            )
         available_binaries = sorted(set(project_binaries + scanned_binaries))
         # Filter to active binary if set
         if active_binary:
@@ -1801,9 +1859,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @socketio.on("connect")
     def handle_connect():
-        state = load_state()
-        stats = compute_stats(state)
-        sio_emit("initial_state", stats)
+        sio_emit("initial_state", get_stats_snapshot())
 
     _scan_thread = None
 
@@ -1853,7 +1909,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     def _project_folder():
         try:
-            return load_state().get("project_folder")
+            from fun_doc import get_state_meta
+
+            return get_state_meta().get("project_folder")
         except Exception:
             return None
 
@@ -1863,7 +1921,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         to backfill the user's active binary first before walking the
         rest of the project tree."""
         try:
-            return load_state().get("active_binary")
+            from fun_doc import get_state_meta
+
+            return get_state_meta().get("active_binary")
         except Exception:
             return None
 
@@ -2096,14 +2156,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/")
     def dashboard():
-        state = load_state()
-        stats = compute_stats(state)
-        return render_template("dashboard.html", stats=stats)
+        return render_template("dashboard.html", stats=get_stats_snapshot())
 
     @app.route("/api/stats")
     def api_stats():
-        state = load_state()
-        stats = compute_stats(state)
+        # Shallow copy — the snapshot dict is shared with other consumers,
+        # so pop() on it directly would strip all_functions from the SSR
+        # render that shares the cache entry.
+        stats = dict(get_stats_snapshot())
         stats.pop("all_functions", None)
         return jsonify(stats)
 
@@ -2744,7 +2804,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError:
             limit = 5000
         sort = request.args.get("sort", "score")
-        state = load_state()
+        # Push the program filter into SQL — this route fires on every
+        # dashboard repaint, and a full-state load costs ~3 s at 60K rows.
+        state = load_state(binary_name=program) if program else load_state()
         all_funcs = state.get("functions", {})
         queue = load_queue()
         good_enough = queue.get("config", {}).get("good_enough_score", 80)
@@ -3017,21 +3079,18 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/context", methods=["GET"])
     def get_context():
-        state = load_state()
-        folder = state.get("project_folder", "/")
+        # Meta + DISTINCT query only — no functions materialization.
+        from fun_doc import get_state_meta, list_scanned_binaries
+
+        meta = get_state_meta()
+        folder = meta.get("project_folder") or "/"
         # Merge: project files from Ghidra + any binaries already scanned
         project_binaries = _fetch_project_binaries(folder)
-        scanned_binaries = sorted(
-            set(
-                f.get("program_name", "unknown")
-                for f in state.get("functions", {}).values()
-            )
-        )
-        all_binaries = sorted(set(project_binaries + scanned_binaries))
+        all_binaries = sorted(set(project_binaries + list_scanned_binaries()))
         return jsonify(
             {
                 "project_folder": folder,
-                "active_binary": state.get("active_binary"),
+                "active_binary": meta.get("active_binary"),
                 "available_binaries": all_binaries,
             }
         )
@@ -3066,26 +3125,28 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/context/binary", methods=["POST"])
     def set_active_binary():
+        # Meta-only write. This used to load_state() + _save_state_inline(),
+        # i.e. read AND bulk-upsert every functions_workflow row (~52 s on a
+        # 60K-row store) just to flip one pointer — the binary-switch stall.
+        from fun_doc import set_state_meta
+
         data = request.json
-        binary = data.get("binary")  # None or "" to clear filter
-        state = load_state()
-        if binary:
-            state["active_binary"] = binary
-        else:
-            state.pop("active_binary", None)
-        _save_state_inline(state)
+        binary = data.get("binary") or None  # None or "" to clear filter
+        set_state_meta(active_binary=binary)
+        _invalidate_stats_cache()
         socketio.emit("state_changed")
-        return jsonify({"ok": True, "active_binary": state.get("active_binary")})
+        return jsonify({"ok": True, "active_binary": binary})
 
     @app.route("/api/context/folder", methods=["POST"])
     def set_project_folder():
+        from fun_doc import set_state_meta
+
         data = request.json
         folder = data.get("folder")
         if not folder:
             return jsonify({"error": "folder required"}), 400
-        state = load_state()
-        state["project_folder"] = folder
-        _save_state_inline(state)
+        set_state_meta(project_folder=folder)
+        _invalidate_stats_cache()
         socketio.emit("state_changed")
         return jsonify({"ok": True, "project_folder": folder})
 
@@ -3143,7 +3204,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         """
         from fun_doc import _callee_readiness
 
-        state = load_state()
+        # Filtered load — this route fires from every refreshStats() via
+        # populateLayerDropdown(), so a full-state materialization here
+        # doubles every dashboard repaint.
+        state = _load_dashboard_state()
         active_binary = state.get("active_binary")
         all_funcs = state.get("functions", {})
         queue = load_queue()
@@ -3332,8 +3396,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception:
             pass
         try:
-            state = load_state()
-            folder = state.get("project_folder") or "/"
+            from fun_doc import get_state_meta
+
+            folder = get_state_meta().get("project_folder") or "/"
             _fetch_project_binaries(folder)
         except Exception:
             pass
