@@ -190,6 +190,117 @@ def list_binaries() -> dict:
     return out
 
 
+import re as _re
+
+# A global counts toward "typing groundwork" once it carries a real (non-primitive) type.
+# This is NOT a doc rung -- it's the interim signal shown while the DOC_ rung pass is pending.
+_GLOB_PRIM = _re.compile(
+    r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|"
+    r"bool|float|double|pointer|code|undefined)\s*$", _re.I)
+_GLOB_LINE = _re.compile(
+    r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)")
+_IMG_LO, _IMG_HI = 0x6f000000, 0x70000000  # DLL mapped range; excludes TIB/PEB/stack labels
+# Globals carry the SAME doc rungs as functions, but stored in a per-address property map
+# ("Doc") rather than Ghidra function-tags (which are function-scoped and can't attach to data).
+GLOB_DOC_MAP = "Doc"
+
+
+def _global_rows(program: str) -> list[dict]:
+    """In-scope image globals for a program: {addr, name, type, typed}. Parsed from the
+    free list_globals text (one call, no per-global fanout). Excludes out-of-image OS
+    labels (TIB/PEB) and Ordinal_ export aliases."""
+    txt = _get("/list_globals", program=program, limit=100000)
+    rows = []
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = _GLOB_LINE.match(ln.strip())
+        if not m:
+            continue
+        a = int(m.group("addr"), 16)
+        if not (_IMG_LO <= a < _IMG_HI):
+            continue
+        name = m.group("name")
+        if name.startswith("Ordinal_"):
+            continue
+        t = m.group("type").strip()
+        rows.append({"addr": "0x%08x" % a, "name": name, "type": t,
+                     "typed": not bool(_GLOB_PRIM.match(t))})
+    return rows
+
+
+def _doc_map_rungs(program: str) -> dict:
+    """{address -> DOC_ rung} from the `Doc` property map (globals' doc rungs). Empty until
+    a globals-doc pass writes them -- the honest 'not yet documented' state."""
+    out = {}
+    try:
+        r = _get("/list_properties", map=GLOB_DOC_MAP, program=program)
+        for p in (r.get("properties") or []):
+            a = p.get("address")
+            v = p.get("value")
+            if a and v in DOC_RUNGS:
+                out["0x" + str(a).lower().lstrip("0x").rjust(8, "0")] = v
+    except (OSError, AttributeError):
+        pass
+    return out
+
+
+def _in_scope_fn(program: str, s: dict) -> int | None:
+    """In-scope function count: from the summary option if present, else defined-minus-LIB_."""
+    if s.get("in_scope") is not None:
+        return s["in_scope"]
+    txt = _get("/list_functions", program=program, limit=100000)
+    line = _re.compile(r"\bat\s+([0-9a-fA-F]+)\s*$")
+    defined = {line.search(l.strip()).group(1).lower() for l in
+               (txt if isinstance(txt, str) else "").splitlines() if line.search(l.strip())}
+    lib = set()
+    for t in ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN"):
+        lib |= {a.lstrip("0x") for a in _tag_addrs(t, program)}
+    return len(defined - lib) if defined else None
+
+
+def _bar(scope, rung_order, rung_sets, addr_pool):
+    """Assemble one segmented bar: per-rung counts (over addr_pool), done, remaining."""
+    rungs = {r: sum(1 for a in addr_pool if a in rung_sets[r]) for r in rung_order}
+    done = sum(rungs.values())
+    rem = max(0, scope - done) if scope is not None else None
+    return {"scope": scope, "rungs": rungs, "done": done, "remaining": rem}
+
+
+def binaries_progress() -> dict:
+    """Per-binary progress for the picker panel: three segmented bars (Fn Doc, Fn Conf,
+    Glob Doc) each with in-scope denominator, rung segment counts, and remaining work.
+    Cards sorted most-remaining-first so the binary needing the most work floats to top."""
+    cards = []
+    for b in list_binaries()["binaries"]:
+        prog = b["path"]
+        s = summary(prog)
+        fn_scope = _in_scope_fn(prog, s)
+        doc_sets = {r: _tag_addrs(r, prog) for r in DOC_RUNGS}
+        conf_sets = {r: _tag_addrs(r, prog) for r in CONF_RUNGS}
+        fn_pool = set().union(*doc_sets.values(), *conf_sets.values())
+        fn_doc = _bar(fn_scope, DOC_RUNGS, doc_sets, set().union(*doc_sets.values()))
+        fn_conf = _bar(fn_scope, [r for r in CONF_RUNGS if r != "CONF_DRAFT"] + ["CONF_DRAFT"],
+                       conf_sets, set().union(*conf_sets.values()))
+
+        grows = _global_rows(prog)
+        g_scope = len(grows)
+        g_typed = sum(1 for g in grows if g["typed"])
+        g_doc = _doc_map_rungs(prog)
+        g_rungs = {r: sum(1 for v in g_doc.values() if v == r) for r in DOC_RUNGS}
+        g_done = sum(g_rungs.values())
+        glob_doc = {"scope": g_scope, "rungs": g_rungs, "done": g_done,
+                    "remaining": max(0, g_scope - g_done), "typed": g_typed,
+                    "typed_pct": round(g_typed / g_scope * 100, 1) if g_scope else 0}
+
+        rem_total = sum(x for x in (fn_doc["remaining"], fn_conf["remaining"],
+                                    glob_doc["remaining"]) if x is not None)
+        cards.append({"path": prog, "name": b["name"], "folder": b["folder"],
+                      "fn_scope": fn_scope, "fn_doc": fn_doc, "fn_conf": fn_conf,
+                      "glob_doc": glob_doc, "remaining_total": rem_total})
+    cards.sort(key=lambda c: -c["remaining_total"])
+    return {"binaries": cards, "active": PROGRAM,
+            "doc_rungs": DOC_RUNGS, "conf_rungs": CONF_RUNGS}
+
+
 def _main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)

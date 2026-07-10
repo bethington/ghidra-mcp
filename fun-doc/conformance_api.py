@@ -38,6 +38,13 @@ def _binaries():
     return jsonify(cd.list_binaries())
 
 
+@conf_bp.route("/api/conformance/binaries/progress")
+def _binaries_progress():
+    """All open binaries with per-binary progress (Fn Doc / Fn Conf / Glob Doc segmented
+    bars + remaining), most-remaining-first. Feeds the focus picker. Not program-scoped."""
+    return jsonify(cd.binaries_progress())
+
+
 @conf_bp.route("/api/conformance/summary")
 def _summary():
     return jsonify(cd.summary(program=_prog()))

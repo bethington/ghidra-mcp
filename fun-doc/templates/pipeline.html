@@ -173,15 +173,59 @@
   a { color:var(--gold); }
   :focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
   @media (prefers-reduced-motion:reduce){ * { transition:none !important; } }
+  /* ---- focus button (opens the binary picker) ---- */
+  .focus-btn { display:flex; align-items:center; gap:.5rem; padding:4px 10px; }
+  .focus-btn .fb-name { color:var(--gold); font-weight:600; }
+  .focus-btn .fb-folder { font-size:.6rem; color:var(--text-muted); }
+  .focus-btn .fb-car { color:var(--text-secondary); font-size:.6rem; }
+
+  /* ---- binary picker overlay ---- */
+  .picker-scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(2px);
+    display:none; align-items:flex-start; justify-content:center; z-index:50; padding:3.2rem 1rem 1rem; }
+  .picker-scrim.open { display:flex; }
+  .picker { background:var(--bg-dark); border:1px solid var(--red); border-radius:8px; width:100%;
+    max-width:720px; max-height:86vh; display:flex; flex-direction:column; box-shadow:0 18px 50px rgba(0,0,0,.6); }
+  .picker-head { display:flex; align-items:center; justify-content:space-between; padding:.6rem .9rem;
+    border-bottom:1px solid var(--border-dark); font-size:.78rem; font-weight:600; color:var(--gold);
+    text-transform:uppercase; letter-spacing:.6px; }
+  .picker-sub { text-transform:none; font-weight:400; color:var(--text-muted); letter-spacing:0; }
+  .picker-body { overflow-y:auto; padding:.7rem; display:flex; flex-direction:column; gap:.55rem; }
+  .picker-foot { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; padding:.5rem .9rem;
+    border-top:1px solid var(--border-dark); font-size:.58rem; color:var(--text-secondary); }
+  .picker-foot .picker-note { color:var(--text-muted); flex-basis:100%; }
+
+  /* ---- one binary card ---- */
+  .bcard { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:6px;
+    padding:.6rem .75rem; cursor:pointer; transition:border-color .12s, background .12s; }
+  .bcard:hover { border-color:var(--gold); background:var(--bg-hover); }
+  .bcard.active { border-color:var(--set); }
+  .bcard-top { display:flex; align-items:baseline; justify-content:space-between; gap:.6rem; margin-bottom:.45rem; }
+  .bcard-name { font-family:var(--font-mono); font-size:.82rem; color:var(--text-primary); }
+  .bcard-name .fld { color:var(--text-muted); font-size:.62rem; margin-left:.4rem; }
+  .bcard-name .here { color:var(--set); font-size:.56rem; border:1px solid var(--set); border-radius:3px;
+    padding:0 4px; margin-left:.5rem; text-transform:uppercase; letter-spacing:.5px; }
+  .bcard-rem { font-family:var(--font-mono); font-size:.72rem; color:var(--text-secondary); white-space:nowrap; }
+  .bcard-rem b { color:var(--red-light); }
+  .brow { display:grid; grid-template-columns:58px 1fr 84px; align-items:center; gap:.5rem; margin:3px 0; }
+  .brow .lbl { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); }
+  .brow .seg { display:flex; height:12px; border-radius:3px; overflow:hidden; background:var(--bg-darkest);
+    border:1px solid var(--border-dark); }
+  .brow .seg span { display:block; height:100%; }
+  .brow .val { font-family:var(--font-mono); font-size:.6rem; color:var(--text-muted); text-align:right; }
+  .brow .val b { color:var(--text-primary); }
 </style>
 </head>
 <body>
   <header class="header">
     <span class="header-logo">Fun-Doc Command Center</span>
     <span><span class="live-dot" id="liveDot"></span><span class="mono" id="liveTxt" style="font-size:.62rem;color:var(--text-muted)">offline</span></span>
-    <!-- FOCUS: which binary this dashboard is showing. Everything (tags/maps/rollup) is per-binary. -->
-    <select id="folderSel" onchange="onFolder()" title="Project folder"></select>
-    <select id="binarySel" onchange="onBinary()" title="Binary in focus"></select>
+    <!-- FOCUS: which binary this dashboard is showing. Everything (tags/maps/rollup) is per-binary.
+         Click to open the picker: every binary's remaining work, side by side, before you pick. -->
+    <button class="btn focus-btn" id="focusBtn" onclick="togglePicker()" title="Choose which binary to focus">
+      <span class="fb-name" id="fbName">binary</span>
+      <span class="fb-folder mono" id="fbFolder"></span>
+      <span class="fb-car">&#9662;</span>
+    </button>
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
@@ -198,6 +242,25 @@
     </select>
     <button class="btn" onclick="refreshAll()" title="Refresh">&#8635;</button>
   </header>
+
+  <!-- BINARY PICKER: all binaries, most-remaining-first, each with segmented rung bars. -->
+  <div class="picker-scrim" id="pickerScrim" onclick="if(event.target===this)togglePicker()">
+    <div class="picker">
+      <div class="picker-head">
+        <span>Focus a binary <span class="picker-sub mono">&mdash; sorted by work remaining</span></span>
+        <button class="btn" onclick="togglePicker()">Close</button>
+      </div>
+      <div class="picker-body" id="pickerBody"></div>
+      <div class="picker-foot mono">
+        <span class="lg"><span class="sw" style="background:var(--set)"></span>verified/battletested</span>
+        <span class="lg"><span class="sw" style="background:var(--magic)"></span>reviewed/live</span>
+        <span class="lg"><span class="sw" style="background:var(--rare)"></span>regression</span>
+        <span class="lg"><span class="sw" style="background:var(--crafted)"></span>draft/vectors</span>
+        <span class="lg"><span class="sw" style="background:var(--bg-darkest);border:1px solid var(--border-dark)"></span>remaining</span>
+        <span class="picker-note">Glob Doc rungs start empty until the globals-doc pass runs; the % after it is typing groundwork.</span>
+      </div>
+    </div>
+  </div>
 
   <div class="main">
     <!-- COMPLETION BARS (replaces stat cards) -->
@@ -294,30 +357,75 @@
     const r=await fetch(url); if(!r.ok) throw 0; return await r.json();
   }catch(e){ return null; } }
 
-  function folderOf(p){ const b=BINARIES.find(x=>x.path===p); return b?b.folder:""; }
-  function populateBinaries(){
-    const folder=document.getElementById("folderSel").value;
-    const bins=BINARIES.filter(b=>b.folder===folder);
-    const bsel=document.getElementById("binarySel");
-    bsel.innerHTML=bins.map(b=>`<option value="${b.path}" ${b.path===PROGRAM?'selected':''}>${b.name}</option>`).join("");
-    if(!bins.find(b=>b.path===PROGRAM)) PROGRAM=bins[0]&&bins[0].path;
+  function updFocusBtn(){
+    const b=BINARIES.find(x=>x.path===PROGRAM);
+    document.getElementById("fbName").textContent=b?b.name:"(no binary)";
+    document.getElementById("fbFolder").textContent=b?b.folder:"";
   }
+  // Offline preview fallback -- progress-shaped so the picker renders in the artifact.
+  const SAMPLE_PROG={active:"/Mods/PD2-S12/D2Common.dll",binaries:[
+    {path:"/Mods/PD2-S12/D2Client.dll",name:"D2Client.dll",folder:"/Mods/PD2-S12",fn_scope:4658,remaining_total:12142,
+      fn_doc:{scope:4658,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:4658,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:2826,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:648,typed_pct:22.9}},
+    {path:"/Mods/PD2-S12/D2Game.dll",name:"D2Game.dll",folder:"/Mods/PD2-S12",fn_scope:4734,remaining_total:9924,
+      fn_doc:{scope:4734,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:4734,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:456,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:175,typed_pct:38.4}},
+    {path:"/Mods/PD2-S12/D2Common.dll",name:"D2Common.dll",folder:"/Mods/PD2-S12",fn_scope:2547,remaining_total:7064,
+      fn_doc:{scope:2547,done:31,rungs:{DOC_VERIFIED:6,DOC_REVIEWED:25,DOC_DRAFT:0}},
+      fn_conf:{scope:2547,done:119,rungs:{CONF_REGRESSION:4,CONF_BATTLETESTED:35,CONF_LIVE:80,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:2120,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:697,typed_pct:32.9}},
+    {path:"/Mods/PD2-S12/D2Win.dll",name:"D2Win.dll",folder:"/Mods/PD2-S12",fn_scope:647,remaining_total:1843,
+      fn_doc:{scope:647,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:647,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:549,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:182,typed_pct:33.2}}]};
   async function loadBinaries(){
-    const r=await api("/binaries")||{binaries:[
-      {path:"/Mods/PD2-S12/D2Common.dll",name:"D2Common.dll",folder:"/Mods/PD2-S12"},
-      {path:"/Mods/PD2-S12/D2Client.dll",name:"D2Client.dll",folder:"/Mods/PD2-S12"},
-      {path:"/Mods/PD2-S12/D2Game.dll",name:"D2Game.dll",folder:"/Mods/PD2-S12"},
-      {path:"/testing/D2Common.dll",name:"D2Common.dll",folder:"/testing"}],active:"/Mods/PD2-S12/D2Common.dll"};
+    const r=await api("/binaries/progress")||SAMPLE_PROG;
     BINARIES=r.binaries||[]; PROGRAM=r.active||(BINARIES[0]&&BINARIES[0].path)||null;
-    const folders=[...new Set(BINARIES.map(b=>b.folder))];
-    document.getElementById("folderSel").innerHTML=folders.map(f=>`<option ${f===folderOf(PROGRAM)?'selected':''}>${f}</option>`).join("");
-    populateBinaries();
+    updFocusBtn();
   }
-  function onFolder(){ populateBinaries(); PROGRAM=document.getElementById("binarySel").value; refreshAll(); }
-  function onBinary(){ PROGRAM=document.getElementById("binarySel").value; refreshAll(); }
+  // ---- binary picker ----
+  function togglePicker(){
+    const s=document.getElementById("pickerScrim");
+    const open=!s.classList.contains("open");
+    s.classList.toggle("open",open);
+    if(open) renderPicker();
+  }
+  function segHTML(bar,order){
+    const scope=bar.scope||0; let html="";
+    order.forEach(k=>{ const n=(bar.rungs||{})[k]||0;
+      if(n>0&&scope>0) html+=`<span title="${pretty(k)}: ${n}" style="width:${(n/scope*100).toFixed(2)}%;background:${RUNG_COLOR[k]||'var(--text-muted)'}"></span>`; });
+    return html;   // whatever's left is the empty .seg background = remaining
+  }
+  const DOC_ORDER=["DOC_VERIFIED","DOC_REVIEWED","DOC_DRAFT"];
+  const CONF_ORDER=["CONF_REGRESSION","CONF_BATTLETESTED","CONF_LIVE","CONF_VECTORS","CONF_DRAFT"];
+  function brow(lbl,bar,order,extra){
+    const scope=bar.scope==null?'?':bar.scope.toLocaleString();
+    return `<div class="brow"><span class="lbl">${lbl}</span>`+
+      `<span class="seg">${segHTML(bar,order)}</span>`+
+      `<span class="val"><b>${(bar.done||0).toLocaleString()}</b>/${scope}${extra||''}</span></div>`;
+  }
+  function bcardHTML(c){
+    const active=c.path===PROGRAM;
+    return `<div class="bcard ${active?'active':''}" onclick="pickBinary('${c.path.replace(/'/g,"\\'")}')">
+      <div class="bcard-top">
+        <span class="bcard-name">${c.name}<span class="fld">${c.folder}</span>${active?'<span class="here">focused</span>':''}</span>
+        <span class="bcard-rem">&#9650; <b>${(c.remaining_total||0).toLocaleString()}</b> left</span>
+      </div>
+      ${brow("Fn Doc",c.fn_doc,DOC_ORDER)}
+      ${brow("Fn Conf",c.fn_conf,CONF_ORDER)}
+      ${brow("Glob Doc",c.glob_doc,DOC_ORDER,` &middot; ${c.glob_doc.typed_pct}% typed`)}
+    </div>`;
+  }
+  function renderPicker(){
+    document.getElementById("pickerBody").innerHTML=
+      (BINARIES||[]).map(bcardHTML).join("")||'<div class="worker-empty">No binaries open in Ghidra.</div>';
+  }
+  function pickBinary(path){ PROGRAM=path; updFocusBtn(); togglePicker(); refreshAll(); }
 
   const RUNG_CLASS={CONF_REGRESSION:"b-regr",CONF_BATTLETESTED:"b-battle",CONF_LIVE:"b-live",DOC_REVIEWED:"b-docR",DOC_VERIFIED:"b-docV"};
-  const RUNG_COLOR={CONF_REGRESSION:"var(--rare)",CONF_BATTLETESTED:"var(--set)",CONF_LIVE:"var(--magic)",CONF_VECTORS:"var(--crafted)",none:"var(--text-muted)",
+  const RUNG_COLOR={CONF_REGRESSION:"var(--rare)",CONF_BATTLETESTED:"var(--set)",CONF_LIVE:"var(--magic)",CONF_VECTORS:"var(--crafted)",CONF_DRAFT:"var(--crafted)",none:"var(--text-muted)",
     DOC_VERIFIED:"var(--set)",DOC_REVIEWED:"var(--magic)",DOC_DRAFT:"var(--crafted)",untagged:"var(--text-muted)"};
   const badge=(v)=>`<span class="badge ${RUNG_CLASS[v]||'b-none'}">${v==='none'?'&middot;none':v.replace('CONF_','').replace('DOC_','')}</span>`;
   const pretty=(v)=>v.replace('CONF_','').replace('DOC_','');
