@@ -77,8 +77,14 @@
   .panel-content { padding:.7rem .8rem; }
 
   /* ---- completion bars (replaces the stat cards) ---- */
-  .bars { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
-  @media (max-width:820px){ .bars{grid-template-columns:1fr;} }
+  .bars { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
+  @media (max-width:980px){ .bars{grid-template-columns:1fr;} }
+  /* globals bar: faint typed-groundwork underlay (hatched) with solid DOC rungs on top */
+  #globBar { position:relative; }
+  .glob-underlay { position:absolute; left:0; top:0; bottom:0; z-index:0; border-radius:3px 0 0 3px;
+    background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 6px); opacity:.55; }
+  #globBar .rung { position:relative; z-index:1; }
+  .glob-sw { background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 4px) !important; opacity:.9; }
   .bar-lab { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
   .bar-lab .t { font-family:var(--font-mono); font-size:.62rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-secondary); }
   .bar-lab .p { font-family:var(--font-mono); font-size:.75rem; color:var(--text-primary); }
@@ -275,14 +281,19 @@
     <div class="panel"><div class="panel-content">
       <div class="bars">
         <div>
-          <div class="bar-lab"><span class="t">Documentation</span><span class="p" id="docPct">-</span></div>
+          <div class="bar-lab"><span class="t">Functions &middot; Documentation</span><span class="p" id="docPct">-</span></div>
           <div class="segbar" id="docBar"></div>
           <div class="seg-legend" id="docLegend"></div>
         </div>
         <div>
-          <div class="bar-lab"><span class="t">Conformance</span><span class="p" id="confPct">-</span></div>
+          <div class="bar-lab"><span class="t">Functions &middot; Conformance</span><span class="p" id="confPct">-</span></div>
           <div class="segbar" id="confBar"></div>
           <div class="seg-legend" id="confLegend"></div>
+        </div>
+        <div>
+          <div class="bar-lab"><span class="t">Globals &middot; Documentation</span><span class="p" id="globPct">-</span></div>
+          <div class="segbar" id="globBar"></div>
+          <div class="seg-legend" id="globLegend"></div>
         </div>
       </div>
     </div></div>
@@ -475,6 +486,22 @@
     seg(document.getElementById("confBar"),document.getElementById("confLegend"),
       [{label:"REGRESSION",n:s.CONF_REGRESSION,c:"var(--rare)"},{label:"BATTLETESTED",n:s.CONF_BATTLETESTED,c:"var(--set)"},{label:"LIVE",n:s.CONF_LIVE,c:"var(--magic)"},{label:"vetted",n:s.vetted,c:"var(--gold)"},{label:"none",n:inscope-s.proven,c:"var(--text-muted)"}],inscope);
   }
+  // Globals-documentation top bar: faint hatched typed-groundwork underlay + solid DOC rungs on top.
+  function segGlob(g){
+    const bar=document.getElementById("globBar"), legend=document.getElementById("globLegend");
+    bar.innerHTML=""; legend.innerHTML="";
+    const scope=g.scope||1, r=g.rungs||{};
+    document.getElementById("globPct").innerHTML=`<b>${(100*(g.done||0)/scope).toFixed(1)}%</b> documented &middot; ${g.typed_pct||0}% typed`;
+    if(g.typed>0){ const u=document.createElement("span"); u.className="glob-underlay";
+      u.style.width=(100*g.typed/scope)+"%"; u.title=`typed groundwork ${g.typed}`; bar.appendChild(u); }
+    [["DOC_VERIFIED","var(--set)"],["DOC_REVIEWED","var(--magic)"],["DOC_DRAFT","var(--crafted)"]].forEach(([k,c])=>{
+      const n=r[k]||0; if(!n) return;
+      const s=document.createElement("span"); s.className="rung"; s.style.background=c;
+      s.style.width=(100*n/scope)+"%"; s.title=`${pretty(k)} ${n}`; bar.appendChild(s); });
+    legend.innerHTML=`<span class="lg"><span class="sw" style="background:var(--set)"></span>VERIFIED ${r.DOC_VERIFIED||0}</span>`+
+      `<span class="lg"><span class="sw" style="background:var(--magic)"></span>REVIEWED ${r.DOC_REVIEWED||0}</span>`+
+      `<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`;
+  }
   function renderMatrix(m){
     const head=document.getElementById("mtxHead"), body=document.getElementById("mtxBody");
     head.innerHTML="<tr><th></th>"+m.cols.map(c=>`<th>${c==='none'?'none':pretty(c)}</th>`).join("")+"</tr>";
@@ -504,12 +531,14 @@
     {name:"g_awSuperUniquesHcIdxLookup",address:"0x6fd9b220",type:"word",typed:false,doc:"none"},
     {name:"g_pSkillsTxt",address:"0x6fde9f10",type:"SkillsTxt *",typed:true,doc:"DOC_REVIEWED"},
     {name:"g_pDataTables",address:"0x6fde9e1c",type:"DataTablesContext *",typed:true,doc:"none"},
-    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:false,doc:"none"}]};
+    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:false,doc:"none"}],
+    summary:{scope:2120,typed:697,typed_pct:32.9,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},done:0,remaining:2120}};
   let globTimer; function debouncedGlob(){ clearTimeout(globTimer); globTimer=setTimeout(loadGlobals,220); }
   async function loadGlobals(){
     const q=document.getElementById("globSearch").value;
     const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200")||SAMPLE_GLOB;
     document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
+    if(g.summary) segGlob(g.summary);
     document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
       `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
       `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+

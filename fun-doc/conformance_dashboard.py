@@ -272,16 +272,28 @@ def globals_inventory(search: str = "", limit: int = 100, program: str = None) -
     undocumented globals sort first (most work), then by name."""
     program = program or PROGRAM
     doc = _doc_map_rungs(program)
+    allrows = _global_rows(program)
+
+    # whole-program summary (feeds the top Globals-Documentation bar; NOT affected by search)
+    scope = len(allrows)
+    typed = sum(1 for g in allrows if g["typed"])
+    rungs = {r: 0 for r in DOC_RUNGS}
+    for g in allrows:
+        dv = doc.get(g["addr"], "none")
+        if dv in rungs:
+            rungs[dv] += 1
+    done = sum(rungs.values())
+    summ = {"scope": scope, "typed": typed,
+            "typed_pct": round(typed / scope * 100, 1) if scope else 0,
+            "rungs": rungs, "done": done, "remaining": max(0, scope - done)}
+
     s = search.lower()
-    rows = []
-    for g in _global_rows(program):
-        if s and s not in g["name"].lower():
-            continue
-        rows.append({"name": g["name"], "address": g["addr"], "type": g["type"],
-                     "typed": g["typed"], "doc": doc.get(g["addr"], "none")})
+    rows = [{"name": g["name"], "address": g["addr"], "type": g["type"],
+             "typed": g["typed"], "doc": doc.get(g["addr"], "none")}
+            for g in allrows if not s or s in g["name"].lower()]
     total = len(rows)
     rows.sort(key=lambda r: (r["doc"] != "none", r["typed"], r["name"].lower()))
-    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit)}
+    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit), "summary": summ}
 
 
 def binaries_progress() -> dict:
