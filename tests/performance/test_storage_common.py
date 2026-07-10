@@ -447,6 +447,102 @@ def test_bulk_upsert_functions(storage_repo):
     assert got["score"] == 99
 
 
+def test_bulk_upsert_partial_record_is_merge_not_replace(storage_repo):
+    """Bulk upsert with a PARTIAL record must preserve unspecified columns
+    and never reset created_at.
+
+    Pins the semantics across the 2026-07 rewrite from per-row UPDATE
+    statements to batched ON CONFLICT DO UPDATE (which only sets the
+    columns the record actually carries — a naive ON CONFLICT that updates
+    every table column would null the omitted ones via ``excluded``).
+    """
+    repo = storage_repo
+    repo.bulk_upsert_functions([_sample_function()])
+    original = repo.get_function("/test/foo.dll", "00400000")
+
+    repo.bulk_upsert_functions(
+        [
+            {
+                "program_path": "/test/foo.dll",
+                "address": "00400000",
+                "score": 95,
+                "queue_status": "in_progress",
+            }
+        ]
+    )
+    got = repo.get_function("/test/foo.dll", "00400000")
+    assert got["score"] == 95
+    assert got["queue_status"] == "in_progress"
+    # Omitted columns survive.
+    assert got["classification"] == "wrapper"
+    assert got["name"] == "TestFn"
+    assert got["callees"] == ["00400100", "00400200"]
+    # created_at is never rewritten on conflict; updated_at is.
+    assert got["created_at"] == original["created_at"]
+    assert got["updated_at"] >= original["updated_at"]
+
+
+def test_bulk_upsert_heterogeneous_batch(storage_repo):
+    """One call mixing full inserts, full updates, and partial updates with
+    different key sets — the implementation groups by key-set internally."""
+    repo = storage_repo
+    repo.bulk_upsert_functions(
+        [_sample_function(addr="00600000", name="KeepMe", score=10)]
+    )
+    n = repo.bulk_upsert_functions(
+        [
+            _sample_function(addr="00600001", name="FullInsert"),  # insert, full
+            {  # insert, sparse
+                "program_path": "/test/foo.dll",
+                "binary_name": "foo.dll",
+                "address": "00600002",
+                "name": "SparseInsert",
+            },
+            {  # update, partial — different key set from both above
+                "program_path": "/test/foo.dll",
+                "address": "00600000",
+                "score": 42,
+            },
+        ]
+    )
+    assert n == 3
+    assert repo.count_functions(program_path="/test/foo.dll") == 3
+    updated = repo.get_function("/test/foo.dll", "00600000")
+    assert updated["score"] == 42
+    assert updated["name"] == "KeepMe"  # untouched by the partial update
+    sparse = repo.get_function("/test/foo.dll", "00600002")
+    assert sparse["name"] == "SparseInsert"
+    assert repo.get_function("/test/foo.dll", "00600001")["name"] == "FullInsert"
+
+
+def test_list_binary_names_distinct_sorted(storage_repo):
+    repo = storage_repo
+    for i, binary in enumerate(["b.dll", "a.dll", "b.dll", "c.dll"]):
+        rec = _sample_function(addr=f"0070{i:04x}")
+        rec["program_path"] = f"/test/{binary}"
+        rec["binary_name"] = binary
+        repo.upsert_function(rec)
+    assert repo.list_binary_names() == ["a.dll", "b.dll", "c.dll"]
+
+
+def test_bulk_upsert_sessions(storage_repo):
+    """save_state's archived-sessions path — one transaction, upsert
+    semantics on the id key."""
+    repo = storage_repo
+    n = repo.bulk_upsert_sessions(
+        [
+            {"id": "s1", "payload": {"completed": 1}},
+            {"id": "s2", "payload": {"completed": 2}},
+        ]
+    )
+    assert n == 2
+    assert repo.get_session("s1")["payload"] == {"completed": 1}
+    # Re-upsert overwrites the existing row instead of erroring.
+    repo.bulk_upsert_sessions([{"id": "s1", "payload": {"completed": 99}}])
+    assert repo.get_session("s1")["payload"] == {"completed": 99}
+    assert len(repo.list_sessions()) == 2
+
+
 def test_count_runs_filters(storage_repo):
     repo = storage_repo
     repo.upsert_function(_sample_function())

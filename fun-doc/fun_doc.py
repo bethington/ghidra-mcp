@@ -1203,7 +1203,7 @@ def _derive_version(program_path):
     return None
 
 
-def _state_dict_from_repo(repo):
+def _state_dict_from_repo(repo, binary_name=None):
     """Materialize the legacy state dict from the SQL backend.
 
     Builds the same shape as load_state()'s old return value: project_folder,
@@ -1216,6 +1216,13 @@ def _state_dict_from_repo(repo):
     rows). On SQLite that's ~300 ms; on Postgres locally ~150 ms. Previously
     the dashboard read the entire state.json (~30 MB) on each refresh, so
     this is a strict improvement.
+
+    ``binary_name`` pushes the dashboard's active-binary filter into SQL:
+    only that binary's rows are materialized into ``functions``. Callers
+    that mutate and save the whole state must NOT pass it — a filtered
+    snapshot round-tripped through save_state() would only rewrite the
+    filtered rows (safe), but code that diffs "every function" against it
+    would treat the other binaries as missing.
     """
     meta = repo.get_meta()
     state = {
@@ -1238,7 +1245,7 @@ def _state_dict_from_repo(repo):
         if sess and isinstance(sess.get("payload"), dict):
             state["current_session"] = sess["payload"]
     # Functions
-    for row in repo.list_functions():
+    for row in repo.list_functions(binary_name=binary_name):
         program_path = row.get("program_path") or ""
         address = row.get("address") or ""
         state["functions"][f"{program_path}::{address}"] = _row_to_state_func(row)
@@ -1253,13 +1260,18 @@ def _ts_to_iso(value):
     return str(value)
 
 
-def load_state():
+def load_state(*, binary_name=None):
     """Load state from the SQL backend.
 
     SQL backend is the only runtime path. Returns the same dict shape
     callers have always expected:
         {project_folder, last_scan, active_binary, current_session,
          sessions: list, functions: {key: record}}
+
+    ``binary_name`` restricts ``functions`` to one binary, with the filter
+    pushed into SQL (a full materialization costs ~3 s on a 60K-row store).
+    Read-only consumers only — see the _state_dict_from_repo docstring for
+    why mutate-and-save callers must load unfiltered.
 
     The state.json fallback below is now test-only scaffolding (reached
     only when the test fixture flips ``_storage_repo_failed = True``).
@@ -1271,8 +1283,20 @@ def load_state():
     repo = _get_storage_repo()
     if repo is not None:
         with _state_lock:
-            return _state_dict_from_repo(repo)
+            return _state_dict_from_repo(repo, binary_name=binary_name)
 
+    state = _load_state_legacy()
+    if binary_name:
+        funcs = state.get("functions") or {}
+        state["functions"] = {
+            k: v
+            for k, v in funcs.items()
+            if (v or {}).get("program_name") == binary_name
+        }
+    return state
+
+
+def _load_state_legacy():
     # ---- Legacy state.json fallback ------------------------------------
     # Kept verbatim from the pre-migration implementation. Reached only
     # when the storage layer is unavailable; safe to delete after the
@@ -1305,6 +1329,84 @@ def load_state():
         f"state.json is corrupt and backup is missing or corrupt: {last_err}. "
         f"Run the recovery logic in fun_doc.py to truncate at the last clean "
         f"function entry, or delete state.json to start fresh."
+    )
+
+
+def get_state_meta():
+    """Meta-only snapshot: {project_folder, last_scan, active_binary}.
+
+    One single-row SELECT — never materializes the functions table
+    (load_state() costs ~3 s on a 60K-row store). Use this wherever only
+    the top-level pointers are needed.
+    """
+    repo = _get_storage_repo()
+    if repo is not None:
+        meta = repo.get_meta()
+        return {
+            "project_folder": meta.get("project_folder")
+            or _default_state()["project_folder"],
+            "last_scan": _ts_to_iso(meta.get("last_scan")),
+            "active_binary": meta.get("active_binary"),
+        }
+    state = _load_state_legacy()
+    return {
+        k: state.get(k) for k in ("project_folder", "last_scan", "active_binary")
+    }
+
+
+_META_SETTABLE_FIELDS = frozenset({"active_binary", "project_folder"})
+
+
+def set_state_meta(**fields):
+    """Targeted write of top-level state pointers. Pass None to clear.
+
+    This is the switch-binary/switch-folder path. It must NEVER go through
+    save_state(): the legacy 'pass me everything' contract bulk-upserts the
+    entire functions table, which was measured at ~50 s on a 60K-row store —
+    the dashboard's binary-switch stall. A meta pointer is one UPDATE on the
+    singleton meta row. (Same pattern as finalize_worker_session.)
+    """
+    unknown = set(fields) - _META_SETTABLE_FIELDS
+    if unknown:
+        raise ValueError(
+            f"set_state_meta: unsupported field(s) {sorted(unknown)}; "
+            f"allowed: {sorted(_META_SETTABLE_FIELDS)}"
+        )
+    if not fields:
+        return
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            repo.set_meta(**fields)
+        bus_emit("state_changed")
+        return
+    # Legacy state.json fallback (test-only scaffolding, same as load_state).
+    with _state_lock:
+        state = _load_state_legacy()
+        for k, v in fields.items():
+            if v is None:
+                state.pop(k, None)
+            else:
+                state[k] = v
+        _atomic_write_state(state)
+    bus_emit("state_changed")
+
+
+def list_scanned_binaries():
+    """Distinct program names present in the workflow store.
+
+    One DISTINCT query — lets a binary-filtered dashboard load still offer
+    every scanned binary in the header dropdown.
+    """
+    repo = _get_storage_repo()
+    if repo is not None:
+        return repo.list_binary_names()
+    state = _load_state_legacy()
+    return sorted(
+        {
+            (f or {}).get("program_name") or "unknown"
+            for f in (state.get("functions") or {}).values()
+        }
     )
 
 
@@ -1403,19 +1505,30 @@ def _persist_state_to_repo(repo, state):
         current_session=cur_id,
         active_binary=state.get("active_binary"),
     )
-    # Archived sessions
+    # Archived sessions — batched into one transaction (per-session
+    # upsert_session calls meant one commit+fsync each, ~337 at last count).
+    session_rows = []
+    seen_sids = set()
     for sess in state.get("sessions") or []:
         if not isinstance(sess, dict):
             continue
         sid = sess.get("id") or sess.get("started") or sess.get("date")
         if not sid:
             continue
-        repo.upsert_session(
-            str(sid),
-            started_at=_parse_state_ts(sess.get("started")),
-            ended_at=_parse_state_ts(sess.get("ended")),
-            payload=sess,
+        sid = str(sid)
+        if sid in seen_sids:
+            continue  # ON CONFLICT can't touch the same row twice per stmt
+        seen_sids.add(sid)
+        session_rows.append(
+            {
+                "id": sid,
+                "started_at": _parse_state_ts(sess.get("started")),
+                "ended_at": _parse_state_ts(sess.get("ended")),
+                "payload": sess,
+            }
         )
+    if session_rows:
+        repo.bulk_upsert_sessions(session_rows)
     # Functions: bulk upsert. Convert each record dict to a row dict.
     funcs = state.get("functions") or {}
     if funcs:

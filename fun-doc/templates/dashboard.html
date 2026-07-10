@@ -596,7 +596,7 @@
                 <div class="panel">
                     <div class="panel-header"><h2>Cross-Binary Progress</h2></div>
                     <div class="panel-content" id="perBinaryPanel" style="max-height: 300px; overflow-y: auto;">
-                        <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody>
+                        <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody id="perBinaryBody">
                         {% for prog, info in stats.by_program.items()|sort %}
                         {% set pct = ((info.done / info.total * 100) if info.total > 0 else 0)|round(1) %}
                         <tr>
@@ -1453,6 +1453,31 @@
                         return `<div class="deduction-row"><span class="deduction-cat">${d.category.replace(/_/g, ' ')}</span><span class="deduction-stat">${d.functions} fns</span><div class="deduction-bar"><div class="deduction-bar-fill" style="width:${pct}%"></div></div><span class="deduction-stat">${Math.round(d.total_pts)} pts</span></div>`;
                     }).join('');
                 }
+                // Cross-Binary Progress — SSR on first paint; repainted here
+                // so a binary switch (which no longer reloads the page)
+                // doesn't leave stale rows. Markup mirrors the Jinja rows.
+                const pbBody = document.getElementById("perBinaryBody");
+                if (pbBody && stats.by_program) {
+                    pbBody.innerHTML = Object.keys(stats.by_program).sort().map(prog => {
+                        const info = stats.by_program[prog];
+                        const pct = info.total > 0 ? Math.round(info.done / info.total * 1000) / 10 : 0;
+                        const barColor = pct >= 90 ? 'var(--color-set)' : pct >= 50 ? 'var(--accent-gold)' : 'var(--color-crafted)';
+                        const pctColor = pct >= 90 ? 'var(--color-set)' : pct >= 50 ? 'var(--accent-gold)' : 'var(--text-muted)';
+                        return `<tr>
+                            <td style="cursor: pointer; color: var(--accent-gold);" onclick="switchBinaryDirect('${escapeHtml(prog)}')">${escapeHtml(prog)}</td>
+                            <td style="width: 100px;">
+                                <div style="width: 100%; height: 10px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;">
+                                    <div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 2px;"></div>
+                                </div>
+                            </td>
+                            <td class="mono">${info.done}</td>
+                            <td class="mono">${info.total}</td>
+                            <td class="mono" style="color: ${pctColor};">${pct}%</td>
+                            <td class="mono">${info.remaining}</td>
+                            <td><button class="btn" onclick="requestRescanBinary('${escapeHtml(prog)}')">Rescan</button></td>
+                        </tr>`;
+                    }).join('');
+                }
                 // Refresh layer dropdown counts
                 populateLayerDropdown();
             }).catch(() => {});
@@ -1874,15 +1899,22 @@
         function requestRescanBinary(prog) { socket.emit("request_rescan", {program: prog}); showBanner(`Rescanning ${prog}...`); }
 
         // --- Queue controls (no page reload) ---
-        // Binary selector
+        // Binary selector — the server write is meta-only; repaint in place.
+        // (A location.reload() here re-runs the SSR render + socket
+        // handshake + first stats refresh — three full stats computes.)
         async function switchBinary(binary) {
             await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: binary || null})});
-            location.reload();
+            _refreshGlobalsWorkerButton();
+            refreshStats();
+            refreshAllFunctions();
         }
         async function switchFolder(folder) {
             await fetch('/api/context/folder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({folder})});
             // Clear binary filter when switching folders
             await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: null})});
+            // Folder switch changes the SSR-rendered binary/folder option
+            // lists — a reload is the simple correct repaint (and is cheap
+            // now that the context writes are meta-only).
             location.reload();
         }
         function switchBinaryDirect(prog) {

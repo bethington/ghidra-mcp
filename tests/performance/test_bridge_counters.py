@@ -44,7 +44,21 @@ def app_with_bus(monkeypatch, tmp_path):
     bus = event_bus.EventBus()
     state_file = tmp_path / "state.json"
     state_file.write_text("{\"functions\": {}}", encoding="utf-8")
-    app, _socketio = web.create_app(state_file, event_bus=bus)
+    # Suppress create_app's background daemon threads (WorkerManager watchdog
+    # + `_prewarm`). This fixture re-imports `event_bus` fresh on each of its
+    # function-scoped runs; a leftover daemon thread from a prior create_app
+    # concurrently touching sys.modules races that import and intermittently
+    # raises KeyError('event_bus') under full-suite collection order. The
+    # test drives the bridge synchronously via the Flask test client, so no
+    # background thread is needed.
+    import threading as _threading
+
+    _orig_start = _threading.Thread.start
+    _threading.Thread.start = lambda self: None
+    try:
+        app, _socketio = web.create_app(state_file, event_bus=bus)
+    finally:
+        _threading.Thread.start = _orig_start
     client = app.test_client()
     yield client, bus
 
