@@ -27,19 +27,30 @@ import conformance_dashboard as cd
 conf_bp = Blueprint("conformance", __name__)
 
 
+def _prog():
+    """The selected binary (full program path) from ?program=, or None for the default.
+    Everything is per-binary -- the dashboard focuses on ONE program at a time."""
+    return request.args.get("program") or None
+
+
+@conf_bp.route("/api/conformance/binaries")
+def _binaries():
+    return jsonify(cd.list_binaries())
+
+
 @conf_bp.route("/api/conformance/summary")
 def _summary():
-    return jsonify(cd.summary())
+    return jsonify(cd.summary(program=_prog()))
 
 
 @conf_bp.route("/api/conformance/matrix")
 def _matrix():
-    return jsonify(cd.matrix())
+    return jsonify(cd.matrix(program=_prog()))
 
 
 @conf_bp.route("/api/conformance/intake")
 def _intake():
-    return jsonify(cd.intake())
+    return jsonify(cd.intake(program=_prog()))
 
 
 @conf_bp.route("/api/conformance/inventory")
@@ -48,9 +59,9 @@ def _inventory():
         limit = max(1, min(500, int(request.args.get("limit", 100))))
     except (TypeError, ValueError):
         limit = 100
-    return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit))
+    return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
 
 
 @conf_bp.route("/api/conformance/function/<addr>")
 def _function(addr):
-    return jsonify(cd.function_detail(addr))
+    return jsonify(cd.function_detail(addr, program=_prog()))

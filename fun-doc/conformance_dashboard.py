@@ -41,31 +41,31 @@ def _get(path: str, **params):
         return raw   # text endpoints (decompile, list_functions)
 
 
-def _tag_addrs(tag: str) -> set[str]:
+def _tag_addrs(tag: str, program: str = None) -> set[str]:
     """Set of function addresses carrying `tag` (one search, not per-function)."""
     try:
-        r = _get("/search_functions_by_tag", tag=tag, program=PROGRAM)
+        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM)
     except OSError:
         return set()
     return {"0x" + str(f.get("address", "")).lower() for f in (r.get("functions") or [])}
 
 
-def summary() -> dict:
+def summary(program: str = None) -> dict:
     """The one-call dashboard rollup from the program option (written per batch by the
     sync tool). Falls back to {} if Ghidra/the option is unavailable."""
     try:
-        opts = _get("/get_program_options", group=OPT_GROUP, program=PROGRAM).get("options", [])
+        opts = _get("/get_program_options", group=OPT_GROUP, program=program or PROGRAM).get("options", [])
         raw = next((o["value"] for o in opts if o.get("name") == OPT_NAME), None)
         return json.loads(raw) if raw else {}
     except (OSError, json.JSONDecodeError, KeyError):
         return {}
 
 
-def matrix() -> dict:
+def matrix(program: str = None) -> dict:
     """The DOC_ x CONF_ joint counts, plus marginals and the never-evaluated cell.
     Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math."""
-    conf_sets = {r: _tag_addrs(r) for r in CONF_RUNGS}
-    doc_sets = {r: _tag_addrs(r) for r in DOC_RUNGS}
+    conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
     conf_tagged = set().union(*conf_sets.values()) if conf_sets else set()
     doc_tagged = set().union(*doc_sets.values()) if doc_sets else set()
 
@@ -81,7 +81,7 @@ def matrix() -> dict:
     for a in conf_tagged | doc_tagged:
         cell[conf_of(a)][doc_of(a)] += 1
 
-    s = summary()
+    s = summary(program)
     in_scope = s.get("in_scope")
     evaluated = len(conf_tagged | doc_tagged)
     if in_scope is not None:                       # the none/none cell = never-evaluated
@@ -91,23 +91,24 @@ def matrix() -> dict:
             "excluded_lib": s.get("excluded_lib")}
 
 
-def intake() -> dict:
+def intake(program: str = None) -> dict:
     """The intake lane: never-evaluated (in-scope, no tag) and the excluded library set."""
-    s = summary()
-    m = matrix()
+    s = summary(program)
+    m = matrix(program)
     return {"untriaged": m["cell"]["none"]["none"], "in_scope": s.get("in_scope"),
             "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
 
 
-def inventory(search: str = "", limit: int = 100) -> dict:
+def inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
     """Searchable Function Inventory: in-scope functions matching `search` (name substring),
     each with its DOC_/CONF_ rung. Computed from tag sets + a name filter over the defined
     function list, so a search returns fast without per-function calls."""
-    conf_sets = {r: _tag_addrs(r) for r in CONF_RUNGS}
-    doc_sets = {r: _tag_addrs(r) for r in DOC_RUNGS}
-    lib = _tag_addrs("LIB_CRT") | _tag_addrs("LIB_MSVC_EH") | _tag_addrs("LIB_SECURITY") \
-        | _tag_addrs("LIB_MATH") | _tag_addrs("LIB_MSVC") | _tag_addrs("LIB_UNKNOWN")
-    txt = _get("/list_functions", program=PROGRAM, limit=6000)
+    program = program or PROGRAM
+    conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
+    lib = set().union(*(_tag_addrs(t, program) for t in
+                        ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")))
+    txt = _get("/list_functions", program=program, limit=6000)
     import re
     line = re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
     s = search.lower()
@@ -133,14 +134,15 @@ def inventory(search: str = "", limit: int = 100) -> dict:
     return {"rows": rows, "total": total, "shown": len(rows)}
 
 
-def function_detail(addr: str) -> dict:
+def function_detail(addr: str, program: str = None) -> dict:
     """One function's drawer data: rung tags, the Conf proof record, and the signature
     for the side-by-side code view."""
+    program = program or PROGRAM
     addr = addr if str(addr).startswith("0x") else "0x" + str(addr)
     out = {"address": addr, "doc": "none", "conf": "none", "scope": None, "proof": None,
            "name": None, "signature": None}
     try:
-        tg = _get("/get_function_tags", function=addr, program=PROGRAM)
+        tg = _get("/get_function_tags", function=addr, program=program)
         out["name"] = tg.get("function")
         for t in tg.get("tags", []):
             n = t.get("name", "")
@@ -153,16 +155,38 @@ def function_detail(addr: str) -> dict:
     except OSError:
         pass
     try:
-        p = _get("/get_property", map="Conf", address=addr, program=PROGRAM)
+        p = _get("/get_property", map="Conf", address=addr, program=program)
         if p.get("value"):
             out["proof"] = json.loads(p["value"])
     except (OSError, json.JSONDecodeError):
         pass
     try:
-        sig = _get("/get_function_signature", function=addr, program=PROGRAM)
+        sig = _get("/get_function_signature", function=addr, program=program)
         out["signature"] = sig.get("signature") if isinstance(sig, dict) else None
     except OSError:
         pass
+    return out
+
+
+def list_binaries() -> dict:
+    """The folder + binary options for the header selectors, so the dashboard is
+    focused on ONE binary at a time (its per-program tags/maps/rollup). Sourced from
+    Ghidra's OPEN programs; the currently-active one is flagged."""
+    out = {"binaries": [], "active": PROGRAM}
+    try:
+        r = _get("/list_open_programs")
+        progs = r.get("programs") or r.get("open_programs") or []
+        for p in progs:
+            path = p.get("path") or p.get("program") or (p if isinstance(p, str) else None)
+            if not path:
+                continue
+            folder, _, name = str(path).rpartition("/")
+            out["binaries"].append({"path": path, "name": name or path, "folder": folder or "/"})
+    except OSError:
+        pass
+    if not out["binaries"]:                # fall back to the current program
+        folder, _, name = PROGRAM.rpartition("/")
+        out["binaries"] = [{"path": PROGRAM, "name": name, "folder": folder or "/"}]
     return out
 
 

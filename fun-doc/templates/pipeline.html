@@ -179,6 +179,9 @@
   <header class="header">
     <span class="header-logo">Fun-Doc Command Center</span>
     <span><span class="live-dot" id="liveDot"></span><span class="mono" id="liveTxt" style="font-size:.62rem;color:var(--text-muted)">offline</span></span>
+    <!-- FOCUS: which binary this dashboard is showing. Everything (tags/maps/rollup) is per-binary. -->
+    <select id="folderSel" onchange="onFolder()" title="Project folder"></select>
+    <select id="binarySel" onchange="onBinary()" title="Binary in focus"></select>
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
@@ -283,7 +286,35 @@
       cell:{CONF_REGRESSION:{none:4,DOC_DRAFT:0,DOC_REVIEWED:0,DOC_VERIFIED:0},CONF_BATTLETESTED:{none:29,DOC_DRAFT:0,DOC_REVIEWED:6,DOC_VERIFIED:0},CONF_LIVE:{none:60,DOC_DRAFT:0,DOC_REVIEWED:14,DOC_VERIFIED:6},CONF_VECTORS:{none:0,DOC_DRAFT:0,DOC_REVIEWED:0,DOC_VERIFIED:0},none:{none:2423,DOC_DRAFT:0,DOC_REVIEWED:5,DOC_VERIFIED:0}}},
     inventory:{rows:[{name:"UNITS_GetField08",address:"0x6fd681f0",doc:"none",conf:"CONF_LIVE"},{name:"DATATBLS_GetSkillsTxtRecord",address:"0x6fd5c8e0",doc:"DOC_REVIEWED",conf:"CONF_BATTLETESTED"},{name:"PATH_GetOriginX",address:"0x6fd68250",doc:"none",conf:"CONF_REGRESSION"}],total:3,shown:3}
   };
-  async function api(path){ try{ const r=await fetch("/api/conformance"+path); if(!r.ok) throw 0; return await r.json(); }catch(e){ return null; } }
+  // focus: the selected binary (full program path). Every API call is scoped to it.
+  let PROGRAM=null, BINARIES=[];
+  async function api(path){ try{
+    const sep=path.includes("?")?"&":"?";
+    const url="/api/conformance"+path+(PROGRAM?sep+"program="+encodeURIComponent(PROGRAM):"");
+    const r=await fetch(url); if(!r.ok) throw 0; return await r.json();
+  }catch(e){ return null; } }
+
+  function folderOf(p){ const b=BINARIES.find(x=>x.path===p); return b?b.folder:""; }
+  function populateBinaries(){
+    const folder=document.getElementById("folderSel").value;
+    const bins=BINARIES.filter(b=>b.folder===folder);
+    const bsel=document.getElementById("binarySel");
+    bsel.innerHTML=bins.map(b=>`<option value="${b.path}" ${b.path===PROGRAM?'selected':''}>${b.name}</option>`).join("");
+    if(!bins.find(b=>b.path===PROGRAM)) PROGRAM=bins[0]&&bins[0].path;
+  }
+  async function loadBinaries(){
+    const r=await api("/binaries")||{binaries:[
+      {path:"/Mods/PD2-S12/D2Common.dll",name:"D2Common.dll",folder:"/Mods/PD2-S12"},
+      {path:"/Mods/PD2-S12/D2Client.dll",name:"D2Client.dll",folder:"/Mods/PD2-S12"},
+      {path:"/Mods/PD2-S12/D2Game.dll",name:"D2Game.dll",folder:"/Mods/PD2-S12"},
+      {path:"/testing/D2Common.dll",name:"D2Common.dll",folder:"/testing"}],active:"/Mods/PD2-S12/D2Common.dll"};
+    BINARIES=r.binaries||[]; PROGRAM=r.active||(BINARIES[0]&&BINARIES[0].path)||null;
+    const folders=[...new Set(BINARIES.map(b=>b.folder))];
+    document.getElementById("folderSel").innerHTML=folders.map(f=>`<option ${f===folderOf(PROGRAM)?'selected':''}>${f}</option>`).join("");
+    populateBinaries();
+  }
+  function onFolder(){ populateBinaries(); PROGRAM=document.getElementById("binarySel").value; refreshAll(); }
+  function onBinary(){ PROGRAM=document.getElementById("binarySel").value; refreshAll(); }
 
   const RUNG_CLASS={CONF_REGRESSION:"b-regr",CONF_BATTLETESTED:"b-battle",CONF_LIVE:"b-live",DOC_REVIEWED:"b-docR",DOC_VERIFIED:"b-docV"};
   const RUNG_COLOR={CONF_REGRESSION:"var(--rare)",CONF_BATTLETESTED:"var(--set)",CONF_LIVE:"var(--magic)",CONF_VECTORS:"var(--crafted)",none:"var(--text-muted)",
@@ -372,9 +403,9 @@
   // ---------- actions (emit to backend; graceful if socket absent) ----------
   let socket=null;
   function startLane(force){ const lane=force||document.getElementById("lane").value;
-    if(socket) socket.emit("request_start_worker",{lane,provider:document.getElementById("provider").value,count:+document.getElementById("count").value,continuous:document.getElementById("auto").checked});
-    flash(`start ${lane}`); }
-  function triage(n){ if(socket) socket.emit("request_start_worker",{lane:"triage",count:n}); flash(`triage ${n||'all'}`); }
+    if(socket) socket.emit("request_start_worker",{lane,program:PROGRAM,provider:document.getElementById("provider").value,count:+document.getElementById("count").value,continuous:document.getElementById("auto").checked});
+    flash(`start ${lane} on ${PROGRAM||'?'}`); }
+  function triage(n){ if(socket) socket.emit("request_start_worker",{lane:"triage",program:PROGRAM,count:n}); flash(`triage ${n||'all'}`); }
   function flash(m){ const h=document.getElementById("workerHint"); const o=h.textContent; h.textContent=m+"..."; setTimeout(()=>h.textContent=o,1200); }
 
   async function refreshAll(){
@@ -401,7 +432,8 @@
     c.innerHTML=w.map(x=>`<div class="worker-card ${x.status==='running'?'running':''}"><div class="wc-title">${x.lane||x.mode||'worker'} - ${x.id||''}</div><div class="wc-detail">${x.status||''} ${x.current||''}</div></div>`).join("");
   }
 
-  refreshAll();
+  // load the binary list first (sets the focus), then render everything for it
+  loadBinaries().then(refreshAll);
 </script>
 </body>
 </html>
