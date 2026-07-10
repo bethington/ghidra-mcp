@@ -43,6 +43,17 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
+- **`ensure-prereqs` now self-heals stale cached Ghidra jars.**
+  `install_ghidra_dependencies` skipped an m2 dependency whenever a jar with the
+  matching version string was already cached — but Ghidra re-releases (and dev
+  builds) rebuild jars while keeping the same version, so a stale jar stayed
+  cached forever. A stale test-scoped `DB.jar` cached this way broke the entire
+  offline Java suite (`DomainObjectAdapterDB` → `db.util.ErrorHandler` "cannot be
+  resolved" at test setUp) with no obvious cause. The installer now compares the
+  cached jar's SHA-256 against the install's jar and refreshes on drift, so
+  `python -m tools.setup ensure-prereqs` makes the offline suite runnable from a
+  clean checkout. Covered by `tests/unit/test_setup_ghidra.py`.
+
 - **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
   shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the
   fast path, and their design docs assumed contradictory models of how a

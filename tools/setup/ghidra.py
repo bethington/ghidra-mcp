@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -2054,6 +2055,16 @@ def install_ghidratrace_for_debugger(
     return 0
 
 
+def _file_sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file, streamed so large jars don't
+    load fully into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def install_ghidra_dependencies(
     repo_root: Path,
     ghidra_path: Path,
@@ -2076,9 +2087,20 @@ def install_ghidra_dependencies(
             / ghidra_version
             / f"{artifact_id}-{ghidra_version}.jar"
         )
+        # Skip only when the cached jar is byte-identical to the install's jar.
+        # Presence alone is NOT enough: Ghidra re-releases (and dev builds) can
+        # rebuild jars while keeping the same version string, leaving a stale
+        # jar cached under the same coordinates. A stale test-scoped DB.jar this
+        # way broke the offline Java suite (DomainObjectAdapterDB ->
+        # db.util.ErrorHandler "cannot be resolved") until the cache was
+        # refreshed. Compare content so `ensure-prereqs` self-heals.
         if cached_jar.is_file() and not force:
-            print(f"Skipping already installed dependency: {artifact_id}")
-            continue
+            if _file_sha256(cached_jar) == _file_sha256(jar_path):
+                print(f"Skipping already installed dependency: {artifact_id}")
+                continue
+            print(
+                f"Refreshing stale cached dependency (content changed): {artifact_id}"
+            )
 
         command = [
             maven_command,
