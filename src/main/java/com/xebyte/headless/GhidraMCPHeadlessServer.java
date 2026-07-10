@@ -54,7 +54,7 @@ import java.util.*;
  */
 public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
-    private static final String VERSION = "5.15.0-headless";
+    private static final String VERSION = "5.16.0-headless";
     private static final int DEFAULT_PORT = 8089;
     private static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
 
