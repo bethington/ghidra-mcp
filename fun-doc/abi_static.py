@@ -625,6 +625,15 @@ def resolvable_globals(disasm_text: str, resolve_rev: dict = None) -> list:
             if a in rev and a not in seen:
                 out.append((a, rev[a]))
                 seen.add(a)
+        # array-base globals addressed as a base+index displacement `[reg + 0x<global>]`
+        # (e.g. `MOV AL,[EAX + 0x6fdef0a8]`) -- same image-range rule as derive_abi.
+        # Without this the model is never told the wired name and invents one -> the
+        # provider's D2MOO_Resolve(<invented>) returns null and the prove mismatches.
+        for m in _DISP_GLOBAL_RE.finditer(ops):
+            a = int(m.group(1), 16)
+            if a >= _IMAGE_MIN and a in rev and a not in seen:
+                out.append((a, rev[a]))
+                seen.add(a)
     return out
 
 
