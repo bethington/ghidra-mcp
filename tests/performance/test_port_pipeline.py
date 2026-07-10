@@ -52,12 +52,31 @@ class TestClassifyFunction:
         """
         assert pp.classify_function(text) == "leaf"
 
-    def test_named_struct_pointer_is_stateful(self):
+    def test_readonly_struct_pointer_getter_is_shadow_leaf(self):
+        # A read-only getter over EXACTLY ONE struct pointer -- reads a field,
+        # touches no globals, calls no delegate, writes nothing through the
+        # pointer -- is the shadow_leaf class: provable LIVE via the oracle
+        # handle path (a real captured object passed to orig+reimpl). This is
+        # checked BEFORE the `->` stateful guard on purpose (classify_function
+        # lines ~328-348); it is the biggest hot-path class and IS provable, so
+        # a named-struct-pointer getter must NOT dead-end as "stateful".
         text = """
         int __fastcall CalcDamageBonusByLevel(CalcDamageBonusByLevel_MonsterData *pMonsterData)
         {
             if (pMonsterData->bDamageBonusEnabled != 0) { return 1; }
             return 0;
+        }
+        """
+        assert pp.classify_function(text) == "shadow_leaf"
+
+    def test_struct_pointer_that_writes_is_stateful(self):
+        # The shadow_leaf gate REQUIRES read-only (no write through the pointer):
+        # handle-proving a mutator would corrupt the live captured game object.
+        # A struct pointer that is written through stays "stateful".
+        text = """
+        void __fastcall SetDamageBonus(CalcDamageBonusByLevel_MonsterData *pMonsterData, int v)
+        {
+            pMonsterData->bDamageBonusEnabled = v;
         }
         """
         assert pp.classify_function(text) == "stateful"
