@@ -99,6 +99,40 @@ def intake() -> dict:
             "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
 
 
+def inventory(search: str = "", limit: int = 100) -> dict:
+    """Searchable Function Inventory: in-scope functions matching `search` (name substring),
+    each with its DOC_/CONF_ rung. Computed from tag sets + a name filter over the defined
+    function list, so a search returns fast without per-function calls."""
+    conf_sets = {r: _tag_addrs(r) for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r) for r in DOC_RUNGS}
+    lib = _tag_addrs("LIB_CRT") | _tag_addrs("LIB_MSVC_EH") | _tag_addrs("LIB_SECURITY") \
+        | _tag_addrs("LIB_MATH") | _tag_addrs("LIB_MSVC") | _tag_addrs("LIB_UNKNOWN")
+    txt = _get("/list_functions", program=PROGRAM, limit=6000)
+    import re
+    line = re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
+    s = search.lower()
+    rows, total = [], 0
+    seen = set()
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = line.match(ln.strip())
+        if not m:
+            continue
+        a = "0x" + m.group("addr").lower()
+        name = m.group("name")
+        if a in seen or a in lib:          # dedup + exclude library (out of scope)
+            continue
+        seen.add(a)
+        if s and s not in name.lower():
+            continue
+        total += 1
+        if len(rows) < limit:
+            conf = next((r for r in CONF_RUNGS if a in conf_sets[r]), "none")
+            doc = next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
+            rows.append({"name": name, "address": a, "doc": doc, "conf": conf})
+    rows.sort(key=lambda r: (r["conf"] == "none", r["name"].lower()))
+    return {"rows": rows, "total": total, "shown": len(rows)}
+
+
 def function_detail(addr: str) -> dict:
     """One function's drawer data: rung tags, the Conf proof record, and the signature
     for the side-by-side code view."""
