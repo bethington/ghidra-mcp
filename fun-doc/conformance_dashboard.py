@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""conformance_dashboard.py -- the Ghidra-native READ LAYER for the confidence dashboard.
+
+Per the nailed-down design, Ghidra is the source of truth AND the dashboard's read-model,
+read LIVE (no cache DB). This module pulls everything the dashboard needs directly:
+
+  summary()          -> the `Conformance.summary` program OPTION -- one call: rung counts,
+                        vetted, in_scope, totals. The dashboard headline + matrix marginals.
+  matrix()           -> the DOC_ x CONF_ joint, computed from tag SETS (a handful of
+                        search_functions_by_tag calls -- cheap set math, no per-fn scan).
+  intake()           -> never-evaluated count (in_scope minus everything tagged).
+  function_detail()  -> one function's drawer: rung tags + the `Conf` property (proof
+                        detail) + signature/decompile for the side-by-side code.
+
+Runnable standalone to dump/verify the data against a live Ghidra:
+  python conformance_dashboard.py            # summary + matrix + intake
+  python conformance_dashboard.py --fn 0x6fd681f0   # one function's drawer data
+"""
+from __future__ import annotations
+import argparse
+import json
+import os
+import urllib.request
+from urllib.parse import urlencode
+
+GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
+PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
+
+CONF_RUNGS = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "CONF_DRAFT"]  # best->worst
+DOC_RUNGS = ["DOC_VERIFIED", "DOC_REVIEWED", "DOC_DRAFT"]                                        # best->worst
+OPT_GROUP, OPT_NAME = "Program Information", "Conformance.summary"
+
+
+def _get(path: str, **params):
+    url = f"{GHIDRA}{path}" + ("?" + urlencode(params) if params else "")
+    with urllib.request.urlopen(url, timeout=60) as r:
+        raw = r.read().decode("utf-8", "replace")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw   # text endpoints (decompile, list_functions)
+
+
+def _tag_addrs(tag: str) -> set[str]:
+    """Set of function addresses carrying `tag` (one search, not per-function)."""
+    try:
+        r = _get("/search_functions_by_tag", tag=tag, program=PROGRAM)
+    except OSError:
+        return set()
+    return {"0x" + str(f.get("address", "")).lower() for f in (r.get("functions") or [])}
+
+
+def summary() -> dict:
+    """The one-call dashboard rollup from the program option (written per batch by the
+    sync tool). Falls back to {} if Ghidra/the option is unavailable."""
+    try:
+        opts = _get("/get_program_options", group=OPT_GROUP, program=PROGRAM).get("options", [])
+        raw = next((o["value"] for o in opts if o.get("name") == OPT_NAME), None)
+        return json.loads(raw) if raw else {}
+    except (OSError, json.JSONDecodeError, KeyError):
+        return {}
+
+
+def matrix() -> dict:
+    """The DOC_ x CONF_ joint counts, plus marginals and the never-evaluated cell.
+    Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math."""
+    conf_sets = {r: _tag_addrs(r) for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r) for r in DOC_RUNGS}
+    conf_tagged = set().union(*conf_sets.values()) if conf_sets else set()
+    doc_tagged = set().union(*doc_sets.values()) if doc_sets else set()
+
+    def conf_of(a):  # a function has at most one rung (mutual exclusivity, now enforced)
+        return next((r for r in CONF_RUNGS if a in conf_sets[r]), "none")
+
+    def doc_of(a):
+        return next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
+
+    rows = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "none"]
+    cols = ["none", "DOC_DRAFT", "DOC_REVIEWED", "DOC_VERIFIED"]
+    cell = {rk: {ck: 0 for ck in cols} for rk in rows}
+    for a in conf_tagged | doc_tagged:
+        cell[conf_of(a)][doc_of(a)] += 1
+
+    s = summary()
+    in_scope = s.get("in_scope")
+    evaluated = len(conf_tagged | doc_tagged)
+    if in_scope is not None:                       # the none/none cell = never-evaluated
+        cell["none"]["none"] = max(0, in_scope - evaluated)
+    return {"rows": rows, "cols": cols, "cell": cell,
+            "in_scope": in_scope, "evaluated": evaluated,
+            "excluded_lib": s.get("excluded_lib")}
+
+
+def intake() -> dict:
+    """The intake lane: never-evaluated (in-scope, no tag) and the excluded library set."""
+    s = summary()
+    m = matrix()
+    return {"untriaged": m["cell"]["none"]["none"], "in_scope": s.get("in_scope"),
+            "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
+
+
+def function_detail(addr: str) -> dict:
+    """One function's drawer data: rung tags, the Conf proof record, and the signature
+    for the side-by-side code view."""
+    addr = addr if str(addr).startswith("0x") else "0x" + str(addr)
+    out = {"address": addr, "doc": "none", "conf": "none", "scope": None, "proof": None,
+           "name": None, "signature": None}
+    try:
+        tg = _get("/get_function_tags", function=addr, program=PROGRAM)
+        out["name"] = tg.get("function")
+        for t in tg.get("tags", []):
+            n = t.get("name", "")
+            if n in CONF_RUNGS:
+                out["conf"] = n
+            elif n in DOC_RUNGS:
+                out["doc"] = n
+            elif n.startswith("LIB_"):
+                out["scope"] = n
+    except OSError:
+        pass
+    try:
+        p = _get("/get_property", map="Conf", address=addr, program=PROGRAM)
+        if p.get("value"):
+            out["proof"] = json.loads(p["value"])
+    except (OSError, json.JSONDecodeError):
+        pass
+    try:
+        sig = _get("/get_function_signature", function=addr, program=PROGRAM)
+        out["signature"] = sig.get("signature") if isinstance(sig, dict) else None
+    except OSError:
+        pass
+    return out
+
+
+def _main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--fn", help="print one function's drawer data (address)")
+    args = ap.parse_args()
+    if args.fn:
+        print(json.dumps(function_detail(args.fn), indent=2))
+        return 0
+    print("SUMMARY:", json.dumps(summary()))
+    print("\nINTAKE:", json.dumps(intake()))
+    m = matrix()
+    print(f"\nMATRIX (in_scope={m['in_scope']}, evaluated={m['evaluated']}):")
+    print(f"  {'':16}" + "".join(f"{c:>13}" for c in m["cols"]))
+    for rk in m["rows"]:
+        print(f"  {rk:16}" + "".join(f"{m['cell'][rk][ck]:>13}" for ck in m["cols"]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
