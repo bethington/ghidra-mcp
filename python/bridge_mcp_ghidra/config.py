@@ -36,6 +36,9 @@ ENDPOINT_TIMEOUTS = {
 
 DEFAULT_TCP_URL = "http://127.0.0.1:8089"
 DEFAULT_TCP_PORT = 8089
+# When set, forwarded to the Ghidra server as `Authorization: Bearer <token>`.
+# Same env var the plugin/headless server enforces (v5.4.1+); unset = no header.
+AUTH_TOKEN = (os.getenv("GHIDRA_MCP_AUTH_TOKEN") or "").strip()
 # Bridge-side TCP port scan range. Mirrors the plugin's
 # TCP_PORT_FALLBACK_RANGE so a TCP-only multi-instance setup (e.g. Windows
 # 10 pre-1803 where AF_UNIX is unavailable) can still be discovered without

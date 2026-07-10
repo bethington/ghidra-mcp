@@ -72,7 +72,7 @@ test = [
     # clang (bindings) and libclang (bundled DLL) must track the same LLVM
     # major: the libclang wheel tops out at 18.1.1 on PyPI, and 19+ bindings
     # call symbols (e.g. clang_getOffsetOfBase) the 18.x DLL doesn't export.
-    "clang>=18.1.8,<19",
+    "clang>=18.1.8,<22",
     "libclang>=18.1.1,<19",
 ]
 # Standalone debugger server + Ghidra TraceRmi backend (Windows-only bits).

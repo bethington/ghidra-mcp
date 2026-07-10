@@ -421,6 +421,8 @@ GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev bo
 
 The headless server refuses to start on a non-loopback bind address (`0.0.0.0`, explicit external IP) unless `GHIDRA_MCP_AUTH_TOKEN` is set.
 
+**The MCP bridge reads the same `GHIDRA_MCP_AUTH_TOKEN`** and attaches `Authorization: Bearer <token>` to every outbound call (UDS and TCP). Export the same token in the bridge's environment — otherwise it will hit `401 Unauthorized` on every tool call to an auth-enabled server. Unset = no header (matches the localhost default).
+
 ### Worked example — exposing to a private LAN with auth
 
 ```bash

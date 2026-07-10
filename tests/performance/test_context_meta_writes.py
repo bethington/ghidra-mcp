@@ -215,7 +215,20 @@ def dashboard_client(monkeypatch, tmp_path):
 
     bus = event_bus.EventBus()
     state_file = tmp_path / "state.json"
-    app, _socketio = web.create_app(state_file, event_bus=bus)
+    # Suppress create_app's background daemon threads (WorkerManager
+    # watchdog + `_prewarm`). The route tests are fully synchronous through
+    # the Flask test client, so they need no threads — and a leftover daemon
+    # thread from create_app concurrently touching sys.modules is what raced
+    # with a sibling fixture's del-and-reimport of `event_bus`, tripping an
+    # intermittent KeyError under full-suite collection order.
+    import threading as _threading
+
+    _orig_start = _threading.Thread.start
+    _threading.Thread.start = lambda self: None
+    try:
+        app, _socketio = web.create_app(state_file, event_bus=bus)
+    finally:
+        _threading.Thread.start = _orig_start
     yield app.test_client(), repo
     engine.dispose()
 

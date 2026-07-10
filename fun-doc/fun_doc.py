@@ -1064,7 +1064,8 @@ _STATE_DIRECT_FIELDS = (
     "name_source",
     "name_source_binary",
     "name_confidence",
-    # OpenD2 conformance port pipeline (Sec 14 of EMULATION_CONFORMANCE_PLAN.md)
+    # OpenD2 conformance port pipeline (document -> port -> prove). Populated
+    # only for functions the PORT worker has touched; NULL/none otherwise.
     "port_status",
     "port_attempts",
     "port_draft_path",
@@ -10442,18 +10443,11 @@ def run_globals_worker_pass(
     return summary
 
 
-# ============================================================================
-# OpenD2 conformance port pipeline -- Stage 2 ("port") + Stage 3 ("prove") of
-# the document -> port -> prove pipeline (OpenD2/docs/EMULATION_CONFORMANCE_
-# PLAN.md Sec 14). Stage 1 (document) is the existing worker above. These two
-# functions are the analog of process_global/run_globals_worker_pass for the
-# PORT worker mode -- see web.py's WorkerManager._run_worker_port.
-#
-# Scope note: reuses "FULL" mode's configured model per provider rather than
-# introducing a distinct "PORT" model-mode key across SUPPORTED_MODEL_MODES/
-# priority_queue.json's provider_models schema -- a reasonable simplification
-# for this Phase-1 rollout, revisit if PORT-specific model tuning is wanted.
-# ============================================================================
+# ==========================================================================
+# OpenD2 conformance PORT pipeline (document -> port -> prove).
+# Live-proves a reimpl draft against the D2MOO oracle; see port_pipeline.py
+# / port_live_prove.py / prove_doc.py for the drivers.
+# ==========================================================================
 
 def process_global_leaf_live(program, address, func_name, decompiled, *,
                              provider, model=None, max_turns=15, worker_id=None,
