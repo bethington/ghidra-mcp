@@ -8,6 +8,8 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Added
 
+- **Autohand Code MCP setup documentation.** The stdio quick start now includes
+  the `autohand mcp add` command for launching the bridge from a cloned checkout.
 - **Coverage gates and baselines across all test tiers.**
   - CI unit job now runs with coverage and a `--cov-fail-under=46` ratchet
     (baseline 53%); the offline fun-doc job adds `--cov=fun-doc` with a floor of
