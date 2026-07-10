@@ -1080,20 +1080,47 @@ def set_doc_level(address, doc_level: str, *, program: str = "D2Common.dll") -> 
     return _set_rung(address, doc_level, DOC_TAGS, program)
 
 
+def _conf_record_json(row: dict) -> str:
+    """The compact proof record stored in the `Conf` property map (Ghidra = single source
+    of truth for the semantic proof facts; a typed per-address map, queryable via
+    list_properties -- not a bookmark comment). Kept in sync with
+    conformance/tools/sync_conformance_to_ghidra.py::_conf_record so a prove-time write
+    and a later reconcile agree byte-for-byte. Only durable proof facts -- never
+    queue/token/telemetry state."""
+    rec: dict = {"conf": row.get("conf")}
+    if row.get("proof_kind"):
+        rec["method"] = row["proof_kind"]
+    for k in ("vectors", "passed", "total", "ret", "callconv", "orig_regs", "date"):
+        v = row.get(k)
+        if v not in (None, "", 0):
+            rec[k] = v
+    rec["reimpl"] = f"candidates/{row.get('name')}.cpp"
+    for flag in ("abort_class", "weak_proof", "needs_review"):
+        if row.get(flag):
+            rec[flag] = row[flag]
+    return json.dumps(rec, separators=(",", ":"))
+
+
 def record_proof(name: str, address, spec: dict, result: dict, *,
                  program: str = "D2Common.dll", conf_level: str = "CONF_LIVE",
                  abort_class: bool = False, weak_proof: str = None) -> dict:
     """WRITE-BACK (see the writeback-source-of-truth principle). On a successful
-    live proof: (1) set the CONF_ rung in Ghidra -- the RE source of truth,
-    queryable via search_functions_by_tag -- REMOVING the other (mutually
-    exclusive) CONF_ rungs first, and (2) append a machine-readable row to
-    conformance/proven_functions.jsonl. Additive to the DOC_ axis and decompiler
-    comments (never clobbered). Best-effort; never raises.
+    live proof, make GHIDRA the source of truth for the proof, three ways:
+      (1) set the CONF_ rung tag (mutually exclusive -- removes the other CONF_ rungs),
+      (2) write the compact proof record (method, vectors, ABI, date, reimpl path) into
+          the `Conf` PROPERTY MAP -- Ghidra's typed per-address store, queryable via
+          list_properties -- so the DETAIL is authoritative at prove time, not just after
+          a sync_conformance_to_ghidra.py reconcile, and
+      (3) append a machine-readable row to conformance/proven_functions.jsonl -- now a
+          git-tracked MIRROR of (1)+(2).
+    Additive to the DOC_ axis and decompiler comments (never clobbered). Each write is
+    independent best-effort; never raises. (No save_program here -- matches the existing
+    tag write; the open program persists on the next save / sync.)
 
     conf_level defaults to CONF_LIVE (the live-oracle proof). A future battle-test
     promoter passes CONF_BATTLETESTED (earned by zero shadow divergences in real
     gameplay)."""
-    status = {"ghidra_tag": None, "registry": None}
+    status = {"ghidra_tag": None, "property": None, "registry": None}
     a = spec.get("addr", address)
     addr = f"0x{a:x}" if isinstance(a, int) else str(a)
 
@@ -1101,29 +1128,44 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
     r = _set_rung(addr, conf_level, CONF_TAGS, program)
     status["ghidra_tag"] = f"{conf_level}={r['status']}"
 
+    row = {
+        "name": name, "address": addr, "program": program,
+        "conf": conf_level,
+        "callconv": spec.get("callconv"), "ret": spec.get("ret"),
+        "orig_regs": spec.get("orig_regs"),
+        "vectors": len(spec.get("vectors", [])),
+        "passed": result.get("passed"), "total": result.get("total"),
+        "date": datetime.date.today().isoformat(),
+    }
+    if abort_class or spec.get("abort_class"):
+        # out-of-range input is FATAL: V1 adversarial (and any fuzzing tool
+        # reading this registry) must stay in-envelope or skip entirely.
+        row["abort_class"] = True
+    if weak_proof:
+        # DEGENERATE capture -> this CONF_LIVE proof matched by luck; must not
+        # silently promote/freeze. shadow_promote + freeze tooling should honor this.
+        row["weak_proof"] = weak_proof
+    # proof provenance (synth / synth2 / delegate_call_through) + delegate metadata,
+    # so the record is self-describing (a delegate row names its callee).
+    for _k in ("proof_kind", "callee", "note"):
+        if result.get(_k) is not None:
+            row[_k] = result[_k]
+
+    # (2) `Conf` property map -- Ghidra's purpose-built per-address store is authoritative
+    # for the proof detail (typed, queryable via list_properties, no bookmark/plate
+    # pollution). Ensure the map exists, then set this function's record.
     try:
-        row = {
-            "name": name, "address": addr, "program": program,
-            "conf": conf_level,
-            "callconv": spec.get("callconv"), "ret": spec.get("ret"),
-            "orig_regs": spec.get("orig_regs"),
-            "vectors": len(spec.get("vectors", [])),
-            "passed": result.get("passed"), "total": result.get("total"),
-            "date": datetime.date.today().isoformat(),
-        }
-        if abort_class or spec.get("abort_class"):
-            # out-of-range input is FATAL: V1 adversarial (and any fuzzing tool
-            # reading this registry) must stay in-envelope or skip entirely.
-            row["abort_class"] = True
-        if weak_proof:
-            # DEGENERATE capture -> this CONF_LIVE proof matched by luck; must not
-            # silently promote/freeze. shadow_promote + freeze tooling should honor this.
-            row["weak_proof"] = weak_proof
-        # proof provenance (synth / synth2 / delegate_call_through) + delegate metadata,
-        # so the registry row is self-describing (a delegate row names its callee).
-        for _k in ("proof_kind", "callee", "note"):
-            if result.get(_k) is not None:
-                row[_k] = result[_k]
+        rec = _conf_record_json(row)
+        p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+        if not p.get("success") and "No property map" in str(p):
+            _ghidra_post("/create_property_map", {"name": "Conf", "type": "string", "program": program})
+            p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+        status["property"] = "ok" if p.get("success") else p.get("error", p)
+    except OSError as e:
+        status["property"] = f"error: {e}"
+
+    # (3) git-tracked registry mirror.
+    try:
         PROVEN_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
         with open(PROVEN_REGISTRY, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
