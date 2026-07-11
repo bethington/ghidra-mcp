@@ -95,29 +95,49 @@
   .seg-legend .lg { display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
   .sw { width:9px; height:9px; border-radius:2px; }
 
-  /* ---- worker panes: live streaming model output, auto-scroll ---- */
-  .worker-cards { display:flex; flex-direction:column; gap:.5rem; }
-  .worker-empty { font-family:var(--font-mono); font-size:.66rem; color:var(--text-muted); padding:.3rem; }
-  .worker-pane { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:6px; overflow:hidden; }
+  /* ---- worker panes: classic-dashboard look (3-col grid, fn-blocks, streaming, auto-scroll) ---- */
+  .worker-cards { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.4rem; }
+  @media (max-width:1100px){ .worker-cards{grid-template-columns:1fr 1fr;} }
+  @media (max-width:720px){ .worker-cards{grid-template-columns:1fr;} }
+  .worker-empty { grid-column:1/-1; font-family:var(--font-mono); font-size:.66rem; color:var(--text-muted); padding:.3rem; }
+  .worker-pane { background:var(--bg-dark); border:1px solid var(--border-dark); border-radius:6px; display:flex; flex-direction:column; min-height:120px; max-height:270px; }
   .worker-pane.running { border-color:var(--set); }
-  .worker-pane.stopping { border-color:var(--crafted); }
+  .worker-pane.timeout { border-color:var(--red-light); box-shadow:0 0 8px rgba(201,48,48,.2); }
+  .worker-pane.focused { border-color:var(--gold); border-width:2px; box-shadow:0 0 8px rgba(199,179,119,.3); }
+  .worker-pane.stopping { border-color:var(--rare); }
+  .worker-pane.finished { border-color:var(--text-muted); opacity:.8; }
   .worker-pane.quota_paused { border-color:var(--rare); }
-  .worker-pane.finished { opacity:.65; }
-  .wp-head { display:flex; justify-content:space-between; align-items:center; gap:.6rem;
-    padding:.35rem .6rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); }
-  .wp-title { font-family:var(--font-mono); font-size:.7rem; color:var(--gold); white-space:nowrap; }
-  .wp-status { font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); text-align:right; overflow:hidden; text-overflow:ellipsis; }
-  .wp-current { color:var(--magic); }
-  .wp-output { height:200px; overflow-y:auto; padding:.35rem .55rem; background:var(--bg-darkest);
-    font-family:var(--font-mono); font-size:.6rem; line-height:1.55; }
-  .wp-output::-webkit-scrollbar { width:7px; } .wp-output::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:4px; }
+  .worker-pane-header { padding:.25rem .5rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); border-radius:6px 6px 0 0; display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; font-size:.65rem; }
+  .worker-pane-header .wp-title { font-family:var(--font-mono); color:var(--text-primary); font-weight:600; white-space:nowrap; }
+  .worker-pane-header .wp-title .wp-id { color:var(--text-muted); font-weight:400; }
+  .worker-pane-header .wp-status { font-family:var(--font-mono); color:var(--text-muted); font-size:.6rem; flex:1; min-width:0; }
+  .worker-pane-header .wp-status .wp-current { color:var(--gold); }
+  .worker-pane-header .wp-alert { font-family:var(--font-mono); font-size:.55rem; color:var(--red-light); border:1px solid rgba(201,48,48,.4); background:rgba(139,32,32,.18); border-radius:3px; padding:1px 4px; display:none; }
+  .worker-pane-header .wp-alert.active { display:inline-block; }
+  .worker-pane-header .wp-actions { margin-left:auto; display:flex; gap:3px; }
+  .icon-btn { width:22px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 22px; line-height:1; }
+  .icon-btn.is-active { border-color:var(--gold); color:var(--gold); }
+  .icon-stop { width:9px; height:9px; border-radius:1px; background:currentColor; display:block; }
+  .icon-focus { width:12px; height:12px; border:1px solid currentColor; border-radius:50%; position:relative; display:block; }
+  .icon-focus::before,.icon-focus::after { content:""; position:absolute; background:currentColor; left:50%; top:50%; transform:translate(-50%,-50%); }
+  .icon-focus::before { width:14px; height:1px; } .icon-focus::after { width:1px; height:14px; }
+  .btn.btn-danger { color:var(--red-light); border-color:var(--red); }
+  .btn.btn-danger:hover { border-color:var(--red-light); color:var(--red-light); }
+  .wp-config { display:none; padding:.15rem .5rem; font-family:var(--font-mono); font-size:.58rem; color:var(--text-secondary); border-bottom:1px solid var(--border-dark); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .worker-pane-output { flex:1; overflow-y:auto; padding:.2rem .3rem; font-family:var(--font-mono); font-size:.6rem; line-height:1.3; background:var(--bg-darkest); }
+  .worker-pane-output::-webkit-scrollbar { width:7px; } .worker-pane-output::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:4px; }
+  .fn-block { border-top:1px solid var(--gold); border-left:1px solid var(--gold); border-bottom:1px solid var(--gold); border-right:none; margin:0 0 .5rem 0; padding:0; }
+  .fn-block .fn-name { color:var(--gold); font-weight:600; padding:1px 4px 1px 6px; }
+  .fn-block .fn-name.fn-header { border-bottom:1px dashed rgba(199,179,119,.18); }
+  .fn-block .fn-name.fn-footer { border-top:1px dashed rgba(199,179,119,.18); }
+  .fn-block .fn-body { padding-left:1rem; }
+  .fn-block .fn-body .activity-entry { padding-left:0; }
   .activity-entry { white-space:pre-wrap; word-break:break-word; }
   .activity-tool { color:var(--text-secondary); }
   .activity-text { color:var(--text-primary); }
   .activity-success { color:var(--set); }
   .activity-error { color:var(--red-light); }
   .activity-neutral { color:var(--text-muted); }
-  .activity-fn-header { color:var(--gold); margin-top:4px; }
 
   /* ---- intake lane ---- */
   .intake { display:flex; align-items:center; gap:1.1rem; border-left:3px solid var(--crafted); }
@@ -734,63 +754,121 @@
     renderQueue(); loadReco(); loadInv(); loadGlobals();
   }
 
-  // ---------- worker panes: persistent per-worker streaming logs (like the classic dashboard) ----------
-  const workerPanes = {};                    // id -> {element, output}
-  const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // ---------- worker panes: classic-dashboard look -- per-worker streaming pane, fn-blocks, auto-scroll ----------
+  const workerPanes = {};              // id -> {element, output, currentFnBlock, currentFuncName, currentFuncAddr}
+  let _focusedWorkerId = null;
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const shortAddr = a => a ? ('0x' + String(a).replace(/^0x/,'')) : '';
   function getOrCreatePane(id, provider, binary){
     if(!id) return null;
     if(workerPanes[id]) return workerPanes[id];
-    const c = document.getElementById("workerCards");
-    const empty = c.querySelector(".worker-empty"); if(empty) empty.remove();
-    const bin = (binary||'').split('/').pop() || '';
+    const grid = document.getElementById("workerCards");
+    const empty = grid.querySelector(".worker-empty"); if(empty) empty.remove();
     const pane = document.createElement("div");
-    pane.className = "worker-pane";
-    pane.innerHTML = `<div class="wp-head"><span class="wp-title" id="wp-title-${id}">${esc(provider||'worker')} #${id}${bin?' · '+esc(bin):''}</span>`+
-                     `<span class="wp-status" id="wp-status-${id}"></span></div>`+
-                     `<div class="wp-output" id="wp-out-${id}"></div>`;
-    c.appendChild(pane);
-    const p = { element: pane, output: pane.querySelector(".wp-output") };
-    workerPanes[id] = p; return p;
+    pane.className = "worker-pane running"; pane.id = `wp-${id}`;
+    pane.innerHTML =
+      `<div class="worker-pane-header">`+
+        `<span class="wp-title" id="wp-title-${id}">${esc(provider||'worker')} <span class="wp-id">#${esc(id)}</span></span>`+
+        `<span class="wp-status" id="wp-status-${id}">${esc((binary||'').split('/').pop()||'')}</span>`+
+        `<span class="wp-alert" id="wp-alert-${id}"></span>`+
+        `<div class="wp-actions">`+
+          `<button class="btn icon-btn" onclick="focusWorker('${id}')" id="wp-focus-${id}" title="Focus worker"><span class="icon-focus"></span></button>`+
+          `<button class="btn btn-danger icon-btn" onclick="stopWorker('${id}')" id="wp-stop-${id}" title="Stop worker"><span class="icon-stop"></span></button>`+
+        `</div>`+
+      `</div>`+
+      `<div class="wp-config" id="wp-config-${id}"></div>`+
+      `<div class="worker-pane-output" id="wp-out-${id}"></div>`;
+    grid.appendChild(pane);
+    workerPanes[id] = { element:pane, output:pane.querySelector(".worker-pane-output"), currentFnBlock:null, currentFuncName:null, currentFuncAddr:null };
+    return workerPanes[id];
   }
   function appendToPane(id, text, type){
     if(!id || !text || !String(text).trim()) return;
     const p = getOrCreatePane(id, null, ''); if(!p) return;
-    // stick-to-bottom only if the user is already near the bottom (don't fight manual scroll)
     const atBottom = p.output.scrollHeight - p.output.scrollTop - p.output.clientHeight < 40;
     const el = document.createElement("div");
     el.className = "activity-entry activity-" + (type||'neutral');
     el.textContent = text;
-    p.output.appendChild(el);
-    while(p.output.children.length > 200) p.output.removeChild(p.output.firstChild);
+    (p.currentFnBlock && p.currentFnBlock.body ? p.currentFnBlock.body : p.output).appendChild(el);
+    if(p.output.children.length > 220) p.output.removeChild(p.output.firstChild);
     if(atBottom) p.output.scrollTop = p.output.scrollHeight;
   }
-  // worker_status is a BARE LIST of worker rows; update panes in place (never wipe the logs).
+  function _openFnBlock(p, name, address){
+    if(p.currentFnBlock) _closeFnBlock(p, null, null, true);
+    const block = document.createElement("div"); block.className = "fn-block";
+    const header = document.createElement("div"); header.className = "fn-name fn-header"; header.textContent = `${name||''} @ ${shortAddr(address)}`;
+    block.appendChild(header);
+    const body = document.createElement("div"); body.className = "fn-body"; block.appendChild(body);
+    p.output.appendChild(block); p.currentFnBlock = { block, body };
+    p.output.scrollTop = p.output.scrollHeight;
+  }
+  function _closeFnBlock(p, name, address, interrupted){
+    if(!p || !p.currentFnBlock) return;
+    const footer = document.createElement("div"); footer.className = "fn-name fn-footer";
+    const nm = name || p.currentFuncName || '?'; const ad = address || p.currentFuncAddr || '?';
+    footer.textContent = interrupted ? `${nm} @ ${shortAddr(ad)} (interrupted)` : `${nm} @ ${shortAddr(ad)}`;
+    p.currentFnBlock.block.appendChild(footer); p.currentFnBlock = null;
+    p.output.scrollTop = p.output.scrollHeight;
+  }
+  function setPaneAlert(id, alert){
+    const p = workerPanes[id], badge = document.getElementById(`wp-alert-${id}`);
+    if(!p || !badge) return;
+    if(alert && alert.type==='provider_timeout'){
+      badge.textContent = `TIMEOUT${alert.timeout_secs?' '+alert.timeout_secs+'s':''}`;
+      badge.title = alert.message || 'Provider timeout'; badge.classList.add('active'); p.element.classList.add('timeout');
+    } else { badge.textContent=''; badge.classList.remove('active'); p.element.classList.remove('timeout'); }
+  }
+  function renderWorkerConfig(id, snap){
+    const el = document.getElementById(`wp-config-${id}`); if(!el) return;
+    if(!snap || typeof snap!=='object'){ el.style.display='none'; el.textContent=''; return; }
+    const provs = snap.providers||{}, pe = provs[snap.primary_provider]||{}, tk = [];
+    const fullModel = (pe.models||{}).FULL; if(fullModel) tk.push(fullModel);
+    if(pe.max_turns!==undefined) tk.push(`t:${pe.max_turns}`);
+    tk.push(snap.audit_provider ? `audit:${snap.audit_provider} Δ${snap.audit_min_delta}` : 'audit:off');
+    tk.push(snap.complexity_handoff_provider ? `esc:${snap.complexity_handoff_provider}` : 'esc:off');
+    if(snap.good_enough_score!==undefined) tk.push(`good@${snap.good_enough_score}`);
+    el.textContent = tk.join(' · '); el.style.display = '';
+  }
+  function markPaneFinished(id, reason){
+    const p = workerPanes[id]; if(!p) return;
+    if(p.currentFnBlock) _closeFnBlock(p, null, null, true);
+    p.element.className = 'worker-pane finished';
+    const st = document.getElementById(`wp-status-${id}`); if(st) st.textContent = reason||'finished';
+    const stop = document.getElementById(`wp-stop-${id}`); if(stop) stop.style.display = 'none';
+  }
+  function stopWorker(id){ if(socket) socket.emit('request_stop_worker',{worker_id:id}); flash('stopping '+id); }
+  function focusWorker(id){
+    const setBtn=(wid,on)=>{ const b=document.getElementById(`wp-focus-${wid}`); if(b) b.classList.toggle('is-active',on); const pp=workerPanes[wid]; if(pp) pp.element.classList.toggle('focused',on); };
+    if(_focusedWorkerId===id){ setBtn(id,false); _focusedWorkerId=null; return; }
+    if(_focusedWorkerId) setBtn(_focusedWorkerId,false);
+    _focusedWorkerId=id; setBtn(id,true);
+  }
+  // worker_status is a BARE LIST of worker rows; update panes IN PLACE (never wipe the logs).
   function renderWorkers(st){
     const w = Array.isArray(st) ? st : ((st && st.workers) || []);
-    const c = document.getElementById("workerCards");
-    const hint = document.getElementById("workerHint");
+    const grid = document.getElementById("workerCards"); const hint = document.getElementById("workerHint");
     const ids = new Set(w.map(x=>String(x.id)));
-    Object.keys(workerPanes).forEach(id=>{ if(!ids.has(String(id))){ workerPanes[id].element.remove(); delete workerPanes[id]; } });
-    if(!w.length){ if(!c.querySelector(".worker-empty")) c.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
+    Object.keys(workerPanes).forEach(id=>{ if(!ids.has(String(id))){ workerPanes[id].element.remove(); delete workerPanes[id]; if(_focusedWorkerId===id)_focusedWorkerId=null; } });
+    if(!w.length){ if(!grid.querySelector(".worker-empty")) grid.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
     const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
     if(hint) hint.textContent = `${running} running / ${w.length} total`;
     w.forEach(x=>{
       const p = getOrCreatePane(x.id, x.provider, x.binary);
-      const cls = x.status==='running' ? 'running' : x.status==='stopping' ? 'stopping'
-                : x.status==='quota_paused' ? 'quota_paused'
-                : ['finished','stopped'].includes(x.status) ? 'finished' : '';
-      p.element.className = 'worker-pane ' + cls;
-      const st2 = document.getElementById(`wp-status-${x.id}`);
-      if(st2){
+      const titleEl = document.getElementById(`wp-title-${x.id}`); if(titleEl && x.provider) titleEl.innerHTML = `${esc(x.provider)} <span class="wp-id">#${esc(x.id)}</span>`;
+      if(['finished','stopped'].includes(x.status)){ markPaneFinished(x.id, x.status); return; }
+      const cls = x.status==='stopping' ? 'stopping' : x.status==='quota_paused' ? 'quota_paused' : 'running';
+      p.element.className = 'worker-pane ' + cls + (_focusedWorkerId===String(x.id)||_focusedWorkerId===x.id?' focused':'') + (p.element.classList.contains('timeout')?' timeout':'');
+      setPaneAlert(x.id, x.last_alert);
+      renderWorkerConfig(x.id, x.config_snapshot);
+      const stt = document.getElementById(`wp-status-${x.id}`);
+      if(stt){
         const pr = x.progress || {};
         const done = (pr.completed||0)+(pr.skipped||0)+(pr.failed||0);
         const cnt = x.continuous ? 'auto' : `${done}/${x.count||'?'}`;
-        let cur = '';
-        if(pr.current) cur = typeof pr.current==='string' ? pr.current : (pr.current.name || pr.current.address || '');
-        const alert = x.last_alert ? ` · ⚠ ${esc(x.last_alert.type||'')}` : '';
-        st2.innerHTML = esc(`${x.status||''}${x.phase?' · '+x.phase:''} · ${cnt} · ${pr.completed||0}ok ${pr.failed||0}fail${pr.skipped?' '+pr.skipped+'skip':''}`) + alert
-                      + (cur ? ` · <span class="wp-current">${esc(cur)}</span>` : '');
+        const skip = pr.skipped>0 ? ` ${pr.skipped}skip` : '';
+        const to = x.timeout_count>0 ? ` | ${x.timeout_count} timeout${x.timeout_count>1?'s':''}` : '';
+        let cur=''; if(pr.current) cur = typeof pr.current==='string' ? pr.current : (pr.current.name || pr.current.address || '');
+        stt.innerHTML = esc(`${cnt} | ${pr.completed||0}ok ${pr.failed||0}fail${skip}${to}`) + (cur ? ` | <span class="wp-current">${esc(cur)}</span>` : '');
       }
     });
   }
@@ -803,21 +881,22 @@
     let confTimer;   // debounce: workers emit conf_changed per documented/proven item
     socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
     let wsTimer;
-    socket.on("worker_status",st=>{ renderWorkers(st);   // auto-refresh as workers change Ghidra
-      clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
+    socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
     socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
-    // --- streaming model/tool output per worker (auto-scrolling) ---
-    socket.on("function_started",d=>{ getOrCreatePane(d.worker_id,null,''); appendToPane(d.worker_id,`▶ ${d.name||''} @ ${shortAddr(d.address)}`,'fn-header'); });
-    socket.on("global_started",  d=>{ getOrCreatePane(d.worker_id,null,''); appendToPane(d.worker_id,`▶ ${d.name||d.address||''}`,'fn-header'); });
-    socket.on("function_mode",   d=>appendToPane(d.worker_id,`  ${d.mode||''} | ${d.model||''} | score ${d.score}%`,'neutral'));
-    socket.on("tool_result",     d=>{ const meta=[d.bytes!=null?d.bytes+'b':'', d.duration_ms!=null?d.duration_ms+'ms':''].filter(Boolean).join(', ');
-      appendToPane(d.worker_id,`  [mcp] ${d.tool} → ${d.status}${d.error?' - '+d.error:''}${meta?' ('+meta+')':''}`,(d.status==='failed'||d.status==='error')?'error':'tool'); });
-    socket.on("model_text",      d=>{ if(d.text) appendToPane(d.worker_id, String(d.text).substring(0,300),'text'); });
-    socket.on("score_update",    d=>{ const del=(d.score_after||0)-(d.score_before||0); appendToPane(d.worker_id,`  Score ${d.score_before}% → ${d.score_after}% (${del>=0?'+':''}${del}%) | ${d.result||''}`,del>0?'success':'neutral'); });
-    socket.on("function_complete",d=>appendToPane(d.worker_id, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`✔ Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
-    socket.on("global_complete", d=>appendToPane(d.worker_id, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`✔ ${d.result||'done'}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
-    socket.on("provider_timeout",d=>{ if(d.worker_id) appendToPane(d.worker_id,`  [watchdog] ${d.message||'provider timeout'} — killed stalled session`,'error'); });
+    // --- streaming model/tool output per worker, grouped into function blocks (auto-scrolling) ---
+    function _startBlock(d){ const p=getOrCreatePane(d.worker_id,null,''); if(p){ _openFnBlock(p, d.name||d.address, d.address); p.currentFuncName=d.name||d.address; p.currentFuncAddr=d.address; } }
+    function _endBlock(d, line, cls){ const p=workerPanes[d.worker_id]; appendToPane(d.worker_id, line, cls); if(p && p.currentFnBlock) _closeFnBlock(p, d.name, d.address, false); }
+    socket.on("function_started", _startBlock);
+    socket.on("global_started",   _startBlock);
+    socket.on("function_mode",  d=>appendToPane(d.worker_id, `${d.mode||''} | ${d.model||''} | score: ${d.score}%`, 'neutral'));
+    socket.on("tool_result",    d=>{ const meta=[d.bytes!=null?d.bytes+'b':'', d.duration_ms!=null?d.duration_ms+'ms':''].filter(Boolean).join(', ');
+      appendToPane(d.worker_id, `[mcp] ${d.tool} → ${d.status}${d.error?' - '+d.error:''}${meta?' ('+meta+')':''}`, (d.status==='failed'||d.status==='error')?'error':'tool'); });
+    socket.on("model_text",     d=>{ if(d.text) appendToPane(d.worker_id, String(d.text).substring(0,300), 'text'); });
+    socket.on("score_update",   d=>{ const del=(d.score_after||0)-(d.score_before||0); appendToPane(d.worker_id, `Score: ${d.score_before}% -> ${d.score_after}% (${del>=0?'+':''}${del}%) | ${d.result||''}`, del>0?'success':'neutral'); });
+    socket.on("function_complete", d=>_endBlock(d, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
+    socket.on("global_complete",   d=>_endBlock(d, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`Complete: ${d.result||'done'}${d.fixed!=null?' (fixed '+d.fixed+')':''}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
+    socket.on("provider_timeout",  d=>{ if(d.worker_id){ getOrCreatePane(d.worker_id,d.provider,null); appendToPane(d.worker_id, `[watchdog] ${d.message||'provider timeout'} — killed stalled session`, 'error'); setPaneAlert(d.worker_id, d); } });
   } catch(e){}
 
   // load the binary list first (sets the focus), then render everything for it
