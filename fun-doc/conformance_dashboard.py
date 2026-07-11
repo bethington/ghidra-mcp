@@ -21,7 +21,7 @@ import argparse
 import json
 import os
 import urllib.request
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
@@ -425,6 +425,63 @@ def remove_pin(kind: str, address: str, program: str = None) -> list:
             if not (p["kind"] == kind and _norm(p["address"]) == address)]
     set_pins(program, pins)
     return pins
+
+
+# ---- canonical D2MOO type vocabulary: is it loaded into this binary's type manager? ----
+import d2moo_types
+
+_TYPES_CACHE = {}   # program -> status (session cache; the check runs once per binary per session)
+
+
+def types_status(program: str = None, force: bool = False) -> dict:
+    """Lightweight 'are the canonical types loaded & current?' check for one binary: reads the
+    D2MOO.types.version program-option marker and compares it to the expected marker. Cached per
+    program until a load or an explicit force (the once-per-session cadence)."""
+    program = program or PROGRAM
+    if not force and program in _TYPES_CACHE:
+        return _TYPES_CACHE[program]
+    try:
+        expected = d2moo_types.version_marker()
+    except Exception:
+        expected = None
+    current = None
+    try:
+        opts = _get("/get_program_options", group=d2moo_types.MARKER_GROUP,
+                    program=program).get("options", [])
+        current = next((o["value"] for o in opts if o.get("name") == d2moo_types.MARKER_OPTION), None)
+    except (OSError, KeyError, AttributeError):
+        pass
+    loaded = bool(current)
+    count = None
+    if expected and expected.count(":") >= 1:
+        try:
+            count = int(expected.split(":")[1])
+        except ValueError:
+            pass
+    res = {"program": program, "loaded": loaded, "current": current, "expected": expected,
+           "stale": loaded and expected is not None and current != expected, "count": count}
+    _TYPES_CACHE[program] = res
+    return res
+
+
+def types_cache_clear(program: str = None) -> None:
+    _TYPES_CACHE.pop(program, None) if program else _TYPES_CACHE.clear()
+
+
+def types_mark_loaded(program: str = None) -> dict:
+    """Stamp the version marker after a successful load and refresh the cached status.
+    NOTE: these POST endpoints read `program` from the QUERY string (not the body), so it must
+    go in the path -- a body-only program silently targets the active program instead."""
+    program = program or PROGRAM
+    q = "?program=" + quote(program, safe="")
+    _post("/set_program_option" + q, {"group": d2moo_types.MARKER_GROUP,
+                                      "name": d2moo_types.MARKER_OPTION,
+                                      "value": d2moo_types.version_marker()})
+    try:
+        _post("/save_program" + q, {})
+    except OSError:
+        pass
+    return types_status(program, force=True)
 
 
 def _pretty(rung: str) -> str:

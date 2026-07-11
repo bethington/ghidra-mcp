@@ -107,3 +107,10 @@ def _unpin():
 @conf_bp.route("/api/conformance/function/<addr>")
 def _function(addr):
     return jsonify(cd.function_detail(addr, program=_prog()))
+
+
+@conf_bp.route("/api/conformance/types_status")
+def _types_status():
+    """Is the canonical D2MOO type vocabulary loaded (and current) in the focused binary?"""
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify(cd.types_status(program=_prog(), force=force))

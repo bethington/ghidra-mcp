@@ -2338,6 +2338,52 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
         threading.Thread(target=_run, daemon=True, name=sid).start()
 
+    @socketio.on("request_load_types")
+    def handle_load_types(data):
+        """Load the canonical D2MOO type vocabulary into the focused binary's type manager:
+        emit the flat header, POST it to /import_data_types (CParser), then stamp the version
+        marker. Streams progress; the slide-out bar collapses on success."""
+        program = (data or {}).get("binary") or (data or {}).get("program") or None
+        if not program:
+            sio_emit("types_load_done", {"ok": False, "error": "select a binary first"})
+            return
+
+        def job():
+            import json as _json
+            import urllib.request
+            import conformance_dashboard as cd
+            import d2moo_types
+            try:
+                socketio.emit("types_load_progress", {"program": program, "text": "emitting canonical header..."})
+                header, stats = d2moo_types.emit_header()
+                socketio.emit("types_load_progress", {"program": program,
+                    "text": f"parsing {stats['total']} definitions ({stats['bytes']//1024} KB) into Ghidra..."})
+                # NOTE: /import_data_types reads `program` from the QUERY string, not the body
+                from urllib.parse import quote as _quote
+                body = _json.dumps({"source": header}).encode()
+                url = f"{cd.GHIDRA}/import_data_types?program={_quote(program, safe='')}"
+                req = urllib.request.Request(url, data=body,
+                    headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    res = _json.loads(resp.read().decode("utf-8", "replace"))
+                added = res.get("types_added", 0)
+                socketio.emit("types_load_progress", {"program": program,
+                    "text": f"added {added} types (status {res.get('status')})"})
+                if res.get("parse_succeeded") or added > 0:
+                    st = cd.types_mark_loaded(program)
+                    socketio.emit("types_load_done", {"ok": True, "program": program,
+                        "added": added, "status": st})
+                    socketio.emit("conf_changed", {})
+                else:
+                    socketio.emit("types_load_done", {"ok": False, "program": program,
+                        "error": res.get("error") or "parse failed",
+                        "messages": (res.get("messages") or "")[:400]})
+            except Exception as e:
+                socketio.emit("types_load_done", {"ok": False, "program": program, "error": str(e)})
+
+        socketio.start_background_task(job)
+        sio_emit("types_load_started", {"program": program})
+
     @socketio.on("request_start_triage")
     def handle_start_triage(data):
         """Triage lane: run the conformance intake classify (scope-classify LIB_ + enqueue

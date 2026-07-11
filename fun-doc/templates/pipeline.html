@@ -301,6 +301,16 @@
     text-shadow:0 0 3px var(--bg-darkest), 0 0 2px var(--bg-darkest), 0 0 2px var(--bg-darkest); }
 
   /* ---- settings slide-out panel ---- */
+  .types-bar { max-height:0; overflow:hidden; display:flex; align-items:center; gap:.6rem;
+    background:linear-gradient(90deg,rgba(199,120,60,.16),rgba(199,120,60,.04)); border-bottom:1px solid transparent;
+    padding:0 1rem; transition:max-height .2s ease, border-color .2s ease; }
+  .types-bar.active { max-height:52px; padding:.5rem 1rem; border-bottom-color:var(--gold,#c7b377); }
+  .types-bar.busy { background:linear-gradient(90deg,rgba(120,150,199,.16),rgba(120,150,199,.04)); }
+  .types-bar.ok { background:linear-gradient(90deg,rgba(120,199,140,.16),rgba(120,199,140,.04)); }
+  .types-bar .tb-icon { font-size:1rem; }
+  .types-bar .tb-msg { flex:1; font-size:.72rem; color:var(--text-secondary); }
+  .types-bar .tb-btn { padding:.28rem .7rem; font-size:.66rem; }
+  .types-bar .tb-dismiss { background:none; border:none; color:var(--text-muted); font-size:1rem; cursor:pointer; padding:0 .3rem; }
   .settings-popout { max-height:0; overflow:hidden; background:linear-gradient(180deg,var(--bg-medium),var(--bg-dark));
     border-bottom:1px solid transparent; transition:max-height .18s ease, border-color .18s ease; }
   .settings-popout.active { max-height:460px; border-bottom-color:var(--red); overflow:auto; }
@@ -364,6 +374,14 @@
     </select>
     <button class="btn" onclick="refreshAll()" title="Refresh">&#8635;</button>
   </header>
+
+  <!-- CANONICAL TYPES slide-out warning bar (missing/stale D2MOO type vocabulary) -->
+  <div class="types-bar" id="typesBar">
+    <span class="tb-icon">&#9888;</span>
+    <span class="tb-msg" id="typesBarMsg">Loading type status&hellip;</span>
+    <button class="btn go tb-btn" id="typesBarBtn" onclick="loadTypes()">Load types</button>
+    <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('typesBar').classList.remove('active')">&times;</button>
+  </div>
 
   <!-- SETTINGS slide-out (queue config: good@, cold, debug, handoff, audit, provider models) -->
   <div class="settings-popout" id="settingsPopout">
@@ -933,6 +951,38 @@
     document.getElementById("intakeN").innerHTML=`${(ik.untriaged||0).toLocaleString()} <small>/ ${(ik.in_scope||0).toLocaleString()} in scope &middot; ${ik.excluded_lib||0} excluded</small>`;
     document.getElementById("workerHint").textContent=`last sync ${s.last_sync||'-'}`;
     renderQueue(); loadReco(); loadInv(); loadGlobals();
+    checkTypes();
+  }
+
+  // ---------- canonical D2MOO types: session-cached check + slide-out bar ----------
+  const _typesChecked = new Set();   // programs checked this session (once-per-session cadence)
+  let _typesBusy = false;
+  function _shortBin(p){ return (p||'').split(/[\\/]/).pop() || p || 'this binary'; }
+  async function checkTypes(force){
+    const prog = PROGRAM; if(!prog) return;
+    if(!force && _typesChecked.has(prog)) return;      // once per binary per session
+    _typesChecked.add(prog);
+    const st = await api("/types_status"+(force?"?force=1":""));
+    if(!st){ return; }
+    const bar=document.getElementById("typesBar");
+    if(st.loaded && !st.stale){ bar.classList.remove("active","busy","ok"); return; }  // all good
+    bar.classList.remove("busy","ok");
+    const n = st.count ? st.count.toLocaleString() : '~1000';
+    document.getElementById("typesBarMsg").innerHTML = st.stale
+      ? `<b>${_shortBin(prog)}</b>&rsquo;s canonical types are out of date (${n} types) &mdash; reload to match the current D2MOO headers.`
+      : `<b>${_shortBin(prog)}</b> is missing D2MOO&rsquo;s canonical data types (${n} types) &mdash; variables can&rsquo;t be validly typed.`;
+    document.getElementById("typesBarBtn").disabled = false;
+    document.getElementById("typesBarBtn").textContent = st.stale ? "Reload types" : "Load types";
+    bar.classList.add("active");
+  }
+  function loadTypes(){
+    if(_typesBusy || !PROGRAM || !socket){ return; }
+    _typesBusy = true;
+    const bar=document.getElementById("typesBar");
+    bar.classList.add("active","busy");
+    document.getElementById("typesBarBtn").disabled = true;
+    document.getElementById("typesBarMsg").textContent = "Starting type load…";
+    socket.emit("request_load_types", {binary: PROGRAM});
   }
 
   // ---------- worker panes: classic-dashboard look -- per-worker streaming pane, fn-blocks, auto-scroll ----------
@@ -1066,6 +1116,24 @@
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
     socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
+    // canonical-types load progress
+    socket.on("types_load_started", ()=>{ document.getElementById("typesBarMsg").textContent="Loading canonical types…"; });
+    socket.on("types_load_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });
+    socket.on("types_load_done", d=>{
+      _typesBusy=false; const bar=document.getElementById("typesBar");
+      const btn=document.getElementById("typesBarBtn"); btn.disabled=false;
+      if(d && d.ok){
+        bar.classList.remove("busy"); bar.classList.add("ok");
+        document.getElementById("typesBarMsg").innerHTML=`&#10003; Loaded ${Number(d.added||0).toLocaleString()} canonical types.`;
+        _typesChecked.delete(d.program||PROGRAM);   // allow a fresh confirm
+        setTimeout(()=>{ bar.classList.remove("active","ok"); }, 2600);
+        flash("canonical types loaded");
+      } else {
+        bar.classList.remove("busy");
+        document.getElementById("typesBarMsg").textContent = "Load failed: " + ((d&&d.error)||"unknown");
+        flash("type load failed");
+      }
+    });
     // --- streaming model/tool output per worker, grouped into function blocks (auto-scrolling) ---
     function _startBlock(d){ const p=getOrCreatePane(d.worker_id,null,''); if(p){ _openFnBlock(p, d.name||d.address, d.address); p.currentFuncName=d.name||d.address; p.currentFuncAddr=d.address; } }
     function _endBlock(d, line, cls){ const p=workerPanes[d.worker_id]; appendToPane(d.worker_id, line, cls); if(p && p.currentFnBlock) _closeFnBlock(p, d.name, d.address, false); }
