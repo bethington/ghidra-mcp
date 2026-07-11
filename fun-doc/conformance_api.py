@@ -78,6 +78,32 @@ def _globals():
     return jsonify(cd.globals_inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
 
 
+@conf_bp.route("/api/conformance/recommended")
+def _recommended():
+    """One auto 'closest to advancing' pick for functions and globals, plus user pins."""
+    return jsonify(cd.recommended_next(program=_prog()))
+
+
+@conf_bp.route("/api/conformance/pin", methods=["POST"])
+def _pin():
+    d = request.get_json(silent=True) or {}
+    kind = d.get("kind"); addr = d.get("address")
+    if kind not in ("fn", "glob") or not addr:
+        return jsonify({"error": "kind (fn|glob) and address required"}), 400
+    pins = cd.add_pin(kind, addr, d.get("name"), program=d.get("program") or None)
+    return jsonify({"pins": pins})
+
+
+@conf_bp.route("/api/conformance/unpin", methods=["POST"])
+def _unpin():
+    d = request.get_json(silent=True) or {}
+    kind = d.get("kind"); addr = d.get("address")
+    if kind not in ("fn", "glob") or not addr:
+        return jsonify({"error": "kind (fn|glob) and address required"}), 400
+    pins = cd.remove_pin(kind, addr, program=d.get("program") or None)
+    return jsonify({"pins": pins})
+
+
 @conf_bp.route("/api/conformance/function/<addr>")
 def _function(addr):
     return jsonify(cd.function_detail(addr, program=_prog()))

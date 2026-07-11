@@ -41,6 +41,28 @@ def _get(path: str, **params):
         return raw   # text endpoints (decompile, list_functions)
 
 
+def _post(path: str, data: dict) -> dict:
+    req = urllib.request.Request(f"{GHIDRA}{path}", data=json.dumps(data).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def _norm(a) -> str:
+    """Normalize an address to '0x' + lowercase hex (tag search returns bare hex)."""
+    a = str(a).lower()
+    return a if a.startswith("0x") else "0x" + a
+
+
+def _tag_named(tag: str, program: str = None) -> dict:
+    """{address -> name} for functions carrying `tag`."""
+    try:
+        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM)
+    except OSError:
+        return {}
+    return {_norm(f.get("address", "")): f.get("name") for f in (r.get("functions") or [])}
+
+
 def _tag_addrs(tag: str, program: str = None) -> set[str]:
     """Set of function addresses carrying `tag` (one search, not per-function)."""
     try:
@@ -198,7 +220,8 @@ _GLOB_PRIM = _re.compile(
     r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|"
     r"bool|float|double|pointer|code|undefined)\s*$", _re.I)
 _GLOB_LINE = _re.compile(
-    r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)")
+    r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
+    r"(?:\s+xrefs=(?P<xrefs>\d+))?")
 _IMG_LO, _IMG_HI = 0x6f000000, 0x70000000  # DLL mapped range; excludes TIB/PEB/stack labels
 # Globals carry the SAME doc rungs as functions, but stored in a per-address property map
 # ("Doc") rather than Ghidra function-tags (which are function-scoped and can't attach to data).
@@ -223,7 +246,8 @@ def _global_rows(program: str) -> list[dict]:
             continue
         t = m.group("type").strip()
         rows.append({"addr": "0x%08x" % a, "name": name, "type": t,
-                     "typed": not bool(_GLOB_PRIM.match(t))})
+                     "typed": not bool(_GLOB_PRIM.match(t)),
+                     "xrefs": int(m.group("xrefs") or 0)})
     return rows
 
 
@@ -294,6 +318,136 @@ def globals_inventory(search: str = "", limit: int = 100, program: str = None) -
     total = len(rows)
     rows.sort(key=lambda r: (r["doc"] != "none", r["typed"], r["name"].lower()))
     return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit), "summary": summ}
+
+
+# ---- Recommended next: 1 auto "closest to advancing" pick per entity + user pins ----
+PIN_GROUP, PIN_NAME = "Program Information", "Recommended.pins"
+
+
+def get_pins(program: str = None) -> list:
+    """User-pinned recommended items for a binary: list of {kind, address, name}."""
+    program = program or PROGRAM
+    try:
+        opts = _get("/get_program_options", group=PIN_GROUP, program=program).get("options", [])
+        raw = next((o["value"] for o in opts if o.get("name") == PIN_NAME), None)
+        return json.loads(raw) if raw else []
+    except (OSError, json.JSONDecodeError, KeyError):
+        return []
+
+
+def set_pins(program: str, pins: list) -> None:
+    _post("/set_program_option", {"group": PIN_GROUP, "name": PIN_NAME,
+                                  "value": json.dumps(pins), "program": program})
+    try:
+        _post("/save_program", {"program": program})
+    except OSError:
+        pass
+
+
+def add_pin(kind: str, address: str, name: str = None, program: str = None) -> list:
+    program = program or PROGRAM
+    address = _norm(address)
+    pins = get_pins(program)
+    if not any(p["kind"] == kind and _norm(p["address"]) == address for p in pins):
+        pins.append({"kind": kind, "address": address, "name": name})
+        set_pins(program, pins)
+    return pins
+
+
+def remove_pin(kind: str, address: str, program: str = None) -> list:
+    program = program or PROGRAM
+    address = _norm(address)
+    pins = [p for p in get_pins(program)
+            if not (p["kind"] == kind and _norm(p["address"]) == address)]
+    set_pins(program, pins)
+    return pins
+
+
+def _pretty(rung: str) -> str:
+    return (rung or "").replace("CONF_", "").replace("DOC_", "")
+
+
+def _fn_status(addr, conf_named, doc_named):
+    c = conf_named.get(addr)
+    d = doc_named.get(addr)
+    return {"conf": c[1] if c else "none", "doc": d[1] if d else "none",
+            "name": (c or d or (None,))[0]}
+
+
+def recommended_next(program: str = None) -> dict:
+    """One auto 'closest to advancing' pick for functions and for globals, plus the user's
+    pinned items (resolved to current status). Functions: proven-but-undocumented -> document
+    (else documented-but-unproven -> prove). Globals: typed-but-undocumented -> document
+    (else untyped -> type & document). Impact (xrefs) breaks global ties."""
+    program = program or PROGRAM
+
+    # function tag maps: addr -> (name, rung)
+    conf_named = {}
+    for r in CONF_RUNGS:
+        for a, n in _tag_named(r, program).items():
+            conf_named.setdefault(a, (n, r))
+    doc_named = {}
+    for r in DOC_RUNGS:
+        for a, n in _tag_named(r, program).items():
+            doc_named.setdefault(a, (n, r))
+    conf_a, doc_a = set(conf_named), set(doc_named)
+    corder = {r: i for i, r in enumerate(CONF_RUNGS)}   # REGRESSION=0 (best) first
+    dorder = {r: i for i, r in enumerate(DOC_RUNGS)}
+
+    fn_auto = None
+    t1 = [(a, conf_named[a][0], conf_named[a][1]) for a in conf_a - doc_a]
+    if t1:
+        t1.sort(key=lambda x: (corder.get(x[2], 9), (x[1] or "").lower()))
+        a, n, rung = t1[0]
+        fn_auto = {"kind": "fn", "address": a, "name": n, "action": "document",
+                   "conf": rung, "doc": "none",
+                   "reason": f"proven ({_pretty(rung)}) but undocumented → document"}
+    else:
+        t2 = [(a, doc_named[a][0], doc_named[a][1]) for a in doc_a - conf_a]
+        if t2:
+            t2.sort(key=lambda x: (dorder.get(x[2], 9), (x[1] or "").lower()))
+            a, n, rung = t2[0]
+            fn_auto = {"kind": "fn", "address": a, "name": n, "action": "prove",
+                       "conf": "none", "doc": rung,
+                       "reason": f"documented ({_pretty(rung)}) but unproven → prove"}
+
+    # globals
+    grows = _global_rows(program)
+    gmap = {g["addr"]: g for g in grows}
+    gdoc = _doc_map_rungs(program)
+    glob_auto = None
+    gt1 = sorted([g for g in grows if g["typed"] and gdoc.get(g["addr"], "none") == "none"],
+                 key=lambda g: -g.get("xrefs", 0))
+    if gt1:
+        g = gt1[0]
+        glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "document",
+                     "type": g["type"], "doc": "none",
+                     "reason": f"typed ({g['type']}), {g.get('xrefs', 0)} xrefs → document"}
+    else:
+        gt2 = sorted([g for g in grows if not g["typed"] and gdoc.get(g["addr"], "none") == "none"],
+                     key=lambda g: -g.get("xrefs", 0))
+        if gt2:
+            g = gt2[0]
+            glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "type",
+                         "type": g["type"], "doc": "none",
+                         "reason": f"untyped, {g.get('xrefs', 0)} xrefs → type & document"}
+
+    # resolve user pins to current status
+    pins = get_pins(program)
+    fn_pins, glob_pins = [], []
+    for p in pins:
+        a = _norm(p["address"])
+        if p["kind"] == "fn":
+            st = _fn_status(a, conf_named, doc_named)
+            fn_pins.append({"kind": "fn", "address": a, "name": p.get("name") or st["name"],
+                            "conf": st["conf"], "doc": st["doc"], "pinned": True})
+        else:
+            g = gmap.get(a, {})
+            glob_pins.append({"kind": "glob", "address": a, "name": p.get("name") or g.get("name"),
+                              "type": g.get("type"), "doc": gdoc.get(a, "none"), "pinned": True})
+
+    return {"functions": {"auto": fn_auto, "pins": fn_pins},
+            "globals": {"auto": glob_auto, "pins": glob_pins}}
 
 
 def binaries_progress() -> dict:

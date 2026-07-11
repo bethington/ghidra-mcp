@@ -134,7 +134,27 @@
   .qrow { display:flex; justify-content:space-between; align-items:center; padding:8px; border-radius:5px; cursor:pointer; border:1px solid transparent; }
   .qrow:hover { background:var(--bg-medium); border-color:var(--border-dark); }
   .qrow .nm { font-family:var(--font-mono); font-size:.7rem; color:var(--text-primary); }
-  .qrow .badges { display:flex; gap:4px; margin-top:3px; }
+  .qrow .badges { display:flex; gap:4px; margin-top:3px; align-items:center; }
+  /* recommended-next / advancement sub-sections */
+  .reco-sec { font-family:var(--font-mono); font-size:.56rem; text-transform:uppercase; letter-spacing:1px;
+    color:var(--text-muted); padding:6px 8px 3px; border-bottom:1px solid var(--border-dark); margin-bottom:2px; }
+  .reco-sec:not(:first-child) { margin-top:8px; }
+  .qrow.auto { border-color:var(--gold); background:linear-gradient(90deg,rgba(199,179,119,.10),transparent); }
+  .reco-star { color:var(--gold); margin-right:5px; }
+  .reco-reason { font-size:.6rem; color:var(--text-secondary); margin-top:3px; font-family:var(--font-mono); }
+  .reco-action { font-family:var(--font-mono); font-size:.55rem; text-transform:uppercase; letter-spacing:.4px;
+    padding:2px 5px; border-radius:3px; border:1px solid var(--gold); color:var(--gold); }
+  .gtype-mini { font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
+  .gtype-mini.untyped { color:var(--text-muted); font-style:italic; }
+  .pin-x { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:.9rem; line-height:1; padding:2px 4px; }
+  .pin-x:hover { color:var(--red-light); }
+  /* pin button in inventory rows */
+  td.act { width:26px; text-align:center; padding:0; }
+  .pin-btn { background:none; border:1px solid var(--border-light); border-radius:3px; color:var(--text-muted);
+    cursor:pointer; font-size:.7rem; line-height:1; padding:1px 5px; opacity:0; transition:opacity .1s; }
+  table.inv tr:hover .pin-btn { opacity:1; }
+  .pin-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .pin-btn.pinned { opacity:1; border-color:var(--gold); color:var(--gold); }
 
   /* ---- badges ---- */
   .badge { font-family:var(--font-mono); font-size:.55rem; letter-spacing:.3px; padding:2px 5px; border-radius:3px; border:1px solid; white-space:nowrap; }
@@ -313,24 +333,21 @@
       <button class="btn primary" onclick="triage(0)">Triage all &#9654;</button>
     </div></div>
 
-    <!-- RECOMMENDED NEXT -->
-    <div class="panel"><div class="panel-content reco">
-      <span class="tag">Recommended next</span>
-      <div class="txt" id="recoTxt">Shadow-stage the CONF_LIVE + DOC_REVIEWED getters to battletest them.</div>
-      <button class="btn go" onclick="startLane('prove')">Run &#9654;</button>
-    </div></div>
-
-    <!-- MATRIX + QUEUE -->
+    <!-- RECOMMENDED NEXT (forward) + ADVANCEMENT QUEUE (backward) -->
     <div class="grid-2">
       <div class="panel">
-        <div class="panel-header"><h2>Confidence matrix</h2><span class="hint">rows conformance &#8593; - cols documentation &#8594; - drive top-right</span></div>
-        <div class="matrix-wrap"><table class="mtx"><thead id="mtxHead"></thead><tbody id="mtxBody"></tbody></table>
-          <div class="axis-hint"><span>&#9700; least confidence</span><span>most confidence &#9705;</span></div>
+        <div class="panel-header"><h2>Recommended next</h2><span class="hint">1 auto pick &middot; closest to advancing &middot; + your pins</span></div>
+        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
+          <div class="reco-sec">Functions</div><div id="recoFn"></div>
+          <div class="reco-sec">Globals</div><div id="recoGlob"></div>
         </div>
       </div>
       <div class="panel">
-        <div class="panel-header"><h2>Advancement queue</h2><span class="hint">proven, recent</span></div>
-        <div class="panel-content" id="queue" style="max-height:420px;overflow-y:auto"></div>
+        <div class="panel-header"><h2>Advancement queue</h2><span class="hint">recently advanced</span></div>
+        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
+          <div class="reco-sec">Functions</div><div id="queueFn"></div>
+          <div class="reco-sec">Globals</div><div id="queueGlob"></div>
+        </div>
       </div>
     </div>
 
@@ -342,7 +359,7 @@
           <span class="hint" id="invHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
-          <table class="inv"><thead><tr><th>Function</th><th>Address</th><th>DOC</th><th>CONF</th></tr></thead>
+          <table class="inv"><thead><tr><th>Function</th><th>Address</th><th>DOC</th><th>CONF</th><th></th></tr></thead>
           <tbody id="invBody"></tbody></table>
         </div>
       </div>
@@ -352,7 +369,7 @@
           <span class="hint" id="globHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
-          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th></tr></thead>
+          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th><th></th></tr></thead>
           <tbody id="globBody"></tbody></table>
         </div>
       </div>
@@ -502,29 +519,47 @@
       `<span class="lg"><span class="sw" style="background:var(--magic)"></span>REVIEWED ${r.DOC_REVIEWED||0}</span>`+
       `<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`;
   }
-  function renderMatrix(m){
-    const head=document.getElementById("mtxHead"), body=document.getElementById("mtxBody");
-    head.innerHTML="<tr><th></th>"+m.cols.map(c=>`<th>${c==='none'?'none':pretty(c)}</th>`).join("")+"</tr>";
-    body.innerHTML="";
-    m.rows.forEach(rk=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML=`<th class="rw">${rk==='none'?'no equiv.':pretty(rk)}<span class="rk" style="background:${RUNG_COLOR[rk]}"></span></th>`;
-      m.cols.forEach(ck=>{
-        const n=m.cell[rk][ck], untri=(rk==='none'&&ck==='none');
-        const td=document.createElement("td");
-        td.innerHTML=`<div class="cell ${n===0?'z':''} ${untri?'untri':''}" onclick="cellClick('${rk}','${ck}')"><span class="cn tnum">${n.toLocaleString()}</span><span class="cd">${untri?'triage':''}</span></div>`;
-        tr.appendChild(td);
-      });
-      body.appendChild(tr);
-    });
-  }
+  const jsq=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const addrCell=a=>`<span class="mono" style="color:var(--text-muted);font-size:.6rem">${a}</span>`;
+  // Advancement queue: what has already advanced. Functions = proven; Globals = reached a DOC rung.
   async function renderQueue(){
-    const inv=await api("/inventory?q=&limit=200")||SAMPLE.inventory;
-    const proven=inv.rows.filter(r=>r.conf!=='none').slice(0,40);
-    document.getElementById("queue").innerHTML=proven.map(f=>
-      `<div class="qrow" onclick="openFn('${f.address}')"><div><div class="nm">${f.name}</div><div class="badges">${badge(f.doc)}${badge(f.conf)}</div></div><span class="mono" style="color:var(--text-muted);font-size:.6rem">${f.address}</span></div>`).join("")
-      ||'<div class="worker-empty">none</div>';
+    const inv=await api("/inventory?q=&limit=300")||SAMPLE.inventory;
+    const proven=(inv.rows||[]).filter(r=>r.conf!=='none').slice(0,40);
+    document.getElementById("queueFn").innerHTML=proven.map(f=>
+      `<div class="qrow" onclick="openFn('${f.address}')"><div><div class="nm">${f.name}</div><div class="badges">${badge(f.doc)}${badge(f.conf)}</div></div>${addrCell(f.address)}</div>`).join("")
+      ||'<div class="worker-empty">none yet</div>';
+    // globals advance by reaching a DOC rung -- none until the globals-doc pass runs
+    const g=await api("/globals?q=&limit=500")||SAMPLE_GLOB;
+    const adv=(g.rows||[]).filter(r=>r.doc!=='none').slice(0,40);
+    document.getElementById("queueGlob").innerHTML=adv.map(r=>
+      `<div class="qrow"><div><div class="nm">${r.name}</div><div class="badges"><span class="gtype-mini ${r.typed?'':'untyped'}">${r.type||'-'}</span>${badge(r.doc)}</div></div>${addrCell(r.address)}</div>`).join("")
+      ||'<div class="worker-empty">none yet &middot; globals-doc pass pending</div>';
   }
+  // Recommended next: 1 auto pick per entity (closest to advancing) + user pins.
+  const SAMPLE_RECO={functions:{auto:{kind:"fn",address:"0x6fd84c00",name:"PATH_GetDirection",action:"document",conf:"CONF_REGRESSION",doc:"none",reason:"proven (REGRESSION) but undocumented → document"},pins:[]},
+    globals:{auto:{kind:"glob",address:"0x6fdda728",name:"g_szDrlgLogicSourceFile",action:"document",type:"char[39]",doc:"none",reason:"typed (char[39]), 555 xrefs → document"},pins:[]}};
+  function recoRow(it,isAuto){
+    const clk=it.kind==='fn'?`onclick="openFn('${it.address}')"`:'';
+    const right=isAuto?addrCell(it.address)
+      :`<button class="pin-x" title="unpin" onclick="event.stopPropagation();unpin('${it.kind}','${it.address}')">&times;</button>`;
+    let sub;
+    if(isAuto){ sub=`<div class="badges"><span class="reco-action">${it.action}</span></div><div class="reco-reason">${it.reason||''}</div>`; }
+    else if(it.kind==='fn'){ sub=`<div class="badges">${badge(it.doc)}${badge(it.conf)}</div>`; }
+    else { const prim=!it.type||/^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|bool|float|double|pointer|code)\s*$/i.test(it.type);
+      sub=`<div class="badges"><span class="gtype-mini ${prim?'untyped':''}">${it.type||'-'}</span>${badge(it.doc)}</div>`; }
+    return `<div class="qrow ${isAuto?'auto':''}" ${clk}><div><div class="nm">${isAuto?'<span class="reco-star">&#9733;</span>':''}${it.name||it.address}</div>${sub}</div>${right}</div>`;
+  }
+  function renderReco(r){
+    const f=r.functions||{}, g=r.globals||{};
+    document.getElementById("recoFn").innerHTML=
+      (f.auto?recoRow(f.auto,true):'<div class="worker-empty">all quick wins done</div>')+(f.pins||[]).map(p=>recoRow(p,false)).join("");
+    document.getElementById("recoGlob").innerHTML=
+      (g.auto?recoRow(g.auto,true):'<div class="worker-empty">all quick wins done</div>')+(g.pins||[]).map(p=>recoRow(p,false)).join("");
+  }
+  async function loadReco(){ renderReco(await api("/recommended")||SAMPLE_RECO); }
+  async function postJSON(path,body){ try{ await fetch("/api/conformance"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){} }
+  async function pin(kind,address,name){ await postJSON("/pin",{kind,address,name,program:PROGRAM}); flash(`pinned ${name||address}`); loadReco(); }
+  async function unpin(kind,address){ await postJSON("/unpin",{kind,address,program:PROGRAM}); loadReco(); }
   let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
   const SAMPLE_GLOB={total:2120,shown:5,rows:[
     {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
@@ -542,7 +577,8 @@
     document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
       `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
       `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+
-      `<td>${badge(r.doc)}</td></tr>`).join("")
+      `<td>${badge(r.doc)}</td>`+
+      `<td class="act"><button class="pin-btn" title="pin to Recommended next" onclick="event.stopPropagation();pin('glob','${r.address}','${jsq(r.name)}')">+</button></td></tr>`).join("")
       ||'<div class="worker-empty">none</div>';
   }
   async function loadInv(){
@@ -550,7 +586,8 @@
     const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=100")||SAMPLE.inventory;
     document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
-      `<tr onclick="openFn('${f.address}')"><td class="fn">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td></tr>`).join("");
+      `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
+      `<td class="act"><button class="pin-btn" title="pin to Recommended next" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button></td></tr>`).join("");
   }
   async function openFn(addr){
     const f=await api("/function/"+addr)||{address:addr,doc:"none",conf:"CONF_LIVE",name:addr,proof:SAMPLE.inventory.rows[0]};
@@ -591,10 +628,10 @@
     const s=await api("/summary")||SAMPLE.summary;
     const m=await api("/matrix")||SAMPLE.matrix;
     const ik=await api("/intake")||SAMPLE.intake;
-    renderBars(s,m); renderMatrix(m);
+    renderBars(s,m);
     document.getElementById("intakeN").innerHTML=`${(ik.untriaged||0).toLocaleString()} <small>/ ${(ik.in_scope||0).toLocaleString()} in scope &middot; ${ik.excluded_lib||0} excluded</small>`;
     document.getElementById("workerHint").textContent=`last sync ${s.last_sync||'-'}`;
-    renderQueue(); loadInv(); loadGlobals();
+    renderQueue(); loadReco(); loadInv(); loadGlobals();
   }
 
   // ---------- socket (live-dot + push refresh) ----------
