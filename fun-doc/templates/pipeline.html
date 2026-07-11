@@ -379,7 +379,7 @@
   <div class="types-bar" id="typesBar">
     <span class="tb-icon">&#9888;</span>
     <span class="tb-msg" id="typesBarMsg">Loading type status&hellip;</span>
-    <button class="btn go tb-btn" id="typesBarBtn" onclick="typesBarAction()">Load types</button>
+    <button class="btn go tb-btn" id="typesBarBtn" onclick="loadTypes()">Load types</button>
     <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('typesBar').classList.remove('active')">&times;</button>
   </div>
 
@@ -971,6 +971,7 @@
     // (1) MISSING / STALE canonical types -> load first, stop here
     if(!st.loaded || st.stale){
       bar.classList.remove("busy","ok"); bar.dataset.mode="load";
+      btn.style.display="";                          // show the Load button
       const n = st.count ? st.count.toLocaleString() : '~1000';
       msg.innerHTML = st.stale
         ? `<b>${_shortBin(prog)}</b>&rsquo;s canonical types are out of date (${n}) &mdash; reload to match the current D2MOO headers.`
@@ -978,21 +979,20 @@
       btn.disabled=false; btn.textContent = st.stale ? "Reload types" : "Load types";
       bar.classList.add("active"); return;
     }
-    // (2) LOADED -> warn if existing variables use native (non-canonical) types
+    // (2) LOADED -> INFORMATIONAL warning if existing variables use native / untyped (undefined*)
+    // types. No fix button: Ghidra collapses stdint typedefs to their width builtin, so bulk
+    // scalar normalization is cosmetic -- real typing is the doc pipeline's job (struct identity).
     const nt = await api("/native_types_status"+(force?"?force=1":""));
     if(nt && nt.native > 0){
-      bar.classList.remove("busy","ok"); bar.dataset.mode="normalize";
+      bar.classList.remove("busy","ok"); bar.dataset.mode="detect";
+      btn.style.display="none";                      // detection only -- no action
       const parts=[];
       if(nt.unrefined) parts.push(`${nt.unrefined.toLocaleString()} on native width types`);
-      if(nt.invalid)   parts.push(`${nt.invalid.toLocaleString()} untyped (undefined*)`);
-      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} &mdash; normalize globals to D2MOO canonical types.`;
-      btn.textContent = "Normalize types"; btn.disabled = !nt.unrefined;   // undefined* alone isn't auto-fixable
+      if(nt.invalid)   parts.push(`${nt.invalid.toLocaleString()} still untyped (undefined*)`);
+      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals &mdash; these need real D2MOO types (via the Document/Prove lanes).`;
       bar.classList.add("active"); return;
     }
     bar.classList.remove("active","busy","ok");     // all clean
-  }
-  function typesBarAction(){
-    (document.getElementById("typesBar").dataset.mode === "normalize" ? normalizeTypes : loadTypes)();
   }
   function loadTypes(){
     if(_typesBusy || !PROGRAM || !socket){ return; }
@@ -1001,14 +1001,6 @@
     document.getElementById("typesBarBtn").disabled = true;
     document.getElementById("typesBarMsg").textContent = "Starting type load…";
     socket.emit("request_load_types", {binary: PROGRAM});
-  }
-  function normalizeTypes(){
-    if(_typesBusy || !PROGRAM || !socket){ return; }
-    _typesBusy = true;
-    document.getElementById("typesBar").classList.add("active","busy");
-    document.getElementById("typesBarBtn").disabled = true;
-    document.getElementById("typesBarMsg").textContent = "Starting normalization…";
-    socket.emit("request_normalize_types", {binary: PROGRAM});
   }
 
   // ---------- worker panes: classic-dashboard look -- per-worker streaming pane, fn-blocks, auto-scroll ----------
@@ -1159,26 +1151,6 @@
         bar.classList.remove("busy");
         document.getElementById("typesBarMsg").textContent = "Load failed: " + ((d&&d.error)||"unknown");
         flash("type load failed");
-      }
-    });
-    // canonical-types normalization progress
-    socket.on("normalize_started", ()=>{ document.getElementById("typesBarMsg").textContent="Normalizing types…"; });
-    socket.on("normalize_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });
-    socket.on("normalize_done", d=>{
-      _typesBusy=false; const bar=document.getElementById("typesBar");
-      const btn=document.getElementById("typesBarBtn"); btn.disabled=false;
-      if(d && d.ok){
-        bar.classList.remove("busy"); bar.classList.add("ok");
-        let m=`&#10003; Normalized ${Number(d.fixed||0).toLocaleString()} globals to canonical types.`;
-        if(d.invalid_remaining) m+=` ${Number(d.invalid_remaining).toLocaleString()} still untyped (undefined*).`;
-        document.getElementById("typesBarMsg").innerHTML=m;
-        _typesChecked.delete(d.program||PROGRAM);
-        setTimeout(()=>{ bar.classList.remove("active","ok"); checkTypes(true); }, 3000);
-        flash("types normalized");
-      } else {
-        bar.classList.remove("busy");
-        document.getElementById("typesBarMsg").textContent = "Normalize failed: " + ((d&&d.error)||"unknown");
-        flash("normalize failed");
       }
     });
     // --- streaming model/tool output per worker, grouped into function blocks (auto-scrolling) ---
