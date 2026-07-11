@@ -232,7 +232,7 @@
   /* ---- drawer ---- */
   .scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .18s; z-index:40; }
   .scrim.open { opacity:1; pointer-events:auto; }
-  .drawer { position:fixed; top:0; right:0; height:100%; width:min(640px,94vw); background:var(--bg-dark); border-left:1px solid var(--border-light); transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1); z-index:50; display:flex; flex-direction:column; }
+  .drawer { position:fixed; top:0; right:0; height:100%; width:50vw; min-width:640px; max-width:94vw; background:var(--bg-dark); border-left:1px solid var(--border-light); transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1); z-index:50; display:flex; flex-direction:column; }
   .drawer.open { transform:translateX(0); }
   .dr-h { padding:14px 16px; border-bottom:1px solid var(--border-dark); }
   .dr-h .top { display:flex; align-items:center; gap:10px; }
