@@ -135,6 +135,10 @@
   .qrow:hover { background:var(--bg-medium); border-color:var(--border-dark); }
   .qrow .nm { font-family:var(--font-mono); font-size:.7rem; color:var(--text-primary); }
   .qrow .badges { display:flex; gap:4px; margin-top:3px; align-items:center; }
+  /* Recommended next beside Advancement queue (equal width; stack on narrow) */
+  .two-eq { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; align-items:start; }
+  @media (max-width:1000px){ .two-eq{grid-template-columns:1fr;} }
+  .two-eq .panel { margin-bottom:0; min-width:0; }
   /* recommended-next / advancement: Functions | Globals as two light titled columns */
   .subcols { display:grid; grid-template-columns:1fr 1fr; gap:0; }
   .subcol { min-width:0; }
@@ -344,24 +348,24 @@
       <button class="btn primary" onclick="triage(0)">Triage all &#9654;</button>
     </div></div>
 
-    <!-- RECOMMENDED NEXT (forward) -- Functions | Globals side by side -->
-    <div class="panel">
-      <div class="panel-header"><h2>Recommended next</h2><span class="hint">1 auto pick &middot; closest to advancing &middot; + your pins</span></div>
-      <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
-        <div class="subcols">
-          <div class="subcol"><div class="reco-sec">Functions</div><div id="recoFn"></div></div>
-          <div class="subcol"><div class="reco-sec">Globals</div><div id="recoGlob"></div></div>
+    <!-- RECOMMENDED NEXT (forward) beside ADVANCEMENT QUEUE (backward); each Functions | Globals -->
+    <div class="two-eq">
+      <div class="panel">
+        <div class="panel-header"><h2>Recommended next</h2><span class="hint">1 auto pick &middot; closest to advancing &middot; + your pins</span></div>
+        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
+          <div class="subcols">
+            <div class="subcol"><div class="reco-sec">Functions</div><div id="recoFn"></div></div>
+            <div class="subcol"><div class="reco-sec">Globals</div><div id="recoGlob"></div></div>
+          </div>
         </div>
       </div>
-    </div>
-
-    <!-- ADVANCEMENT QUEUE (backward) -- Functions | Globals side by side -->
-    <div class="panel">
-      <div class="panel-header"><h2>Advancement queue</h2><span class="hint">recently advanced</span></div>
-      <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
-        <div class="subcols">
-          <div class="subcol"><div class="reco-sec">Functions</div><div id="queueFn"></div></div>
-          <div class="subcol"><div class="reco-sec">Globals</div><div id="queueGlob"></div></div>
+      <div class="panel">
+        <div class="panel-header"><h2>Advancement queue</h2><span class="hint">recently advanced</span></div>
+        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
+          <div class="subcols">
+            <div class="subcol"><div class="reco-sec">Functions</div><div id="queueFn"></div></div>
+            <div class="subcol"><div class="reco-sec">Globals</div><div id="queueGlob"></div></div>
+          </div>
         </div>
       </div>
     </div>
