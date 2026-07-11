@@ -350,7 +350,7 @@
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
-      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="triage">Triage</option></select>
+      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess">Assess</option><option value="triage">Triage</option></select>
     </div>
     <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
@@ -821,6 +821,8 @@
       socket.emit("request_start_globals_worker",{binary,provider,count,continuous});
     } else if(lane==="triage"){
       socket.emit("request_start_triage",{binary});
+    } else if(lane==="assess"){
+      socket.emit("request_start_assess",{binary, count});
     } else {
       const mode=(lane==="prove"||lane==="port")?"port":"functions";
       socket.emit("request_start_worker",{binary,provider,count,continuous,mode});
@@ -1056,27 +1058,30 @@
     socket.on("function_complete", d=>_endBlock(d, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
     socket.on("global_complete",   d=>_endBlock(d, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`Complete: ${d.result||'done'}${d.fixed!=null?' (fixed '+d.fixed+')':''}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
     socket.on("provider_timeout",  d=>{ if(d.worker_id){ getOrCreatePane(d.worker_id,d.provider,null); appendToPane(d.worker_id, `[watchdog] ${d.message||'provider timeout'} — killed stalled session`, 'error'); setPaneAlert(d.worker_id, d); } });
-    // --- triage: not a WorkerManager worker; stream its subprocess output into a synthetic pane ---
+    // --- triage/assess: not WorkerManager workers; stream their subprocess output into a synthetic pane ---
     socket.on("triage_started", d=>{
-      const id=d.id||'triage'; syntheticPanes.add(String(id));
-      const p=getOrCreatePane(id, 'triage', d.program||'');
+      const id=d.id||'triage', label=d.label||id; syntheticPanes.add(String(id));
+      const p=getOrCreatePane(id, label, d.program||'');
       p.output.innerHTML=''; p.currentFnBlock=null;                 // reset if re-run
       p.element.className='worker-pane running';
-      const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent=`classify + enqueue (${d.scope==='all'?'all':d.scope})`;
+      const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent='running';
       const stopBtn=document.getElementById(`wp-stop-${id}`); if(stopBtn) stopBtn.style.display='none';   // can't stop a quick subprocess
-      appendToPane(id, '▶ triage: scope-classify (drain LIB_) + enqueue backlog', 'fn-header');
+      const head = id==='assess' ? '▶ assess: score in-scope functions → stamp DOC_DRAFT on documented ones'
+                                 : '▶ triage: scope-classify (drain LIB_) + enqueue backlog';
+      appendToPane(id, head, 'fn-header');
     });
     socket.on("triage_line", d=>{
       const t=d.text||''; let cls='neutral';
       if(d.error||/\berror\b|traceback|\bfail/i.test(t)) cls='error';
-      else if(/^\s*\[\d+\/\d+\]/.test(t)) cls='tool';                       // per-item progress -> dim
+      else if(/->\s*DOC_DRAFT/i.test(t)) cls='success';                    // assess stamped a rung
+      else if(/^\s*\[\d+\/\d+\]/.test(t)) cls='tool';                       // other per-item -> dim
       else if(/\btagged LIB_/i.test(t)) cls='tool';
-      else if(/enqueued|excluded \d|backlog|complete|drain|never-evaluated/i.test(t)) cls='success';
+      else if(/enqueued|excluded \d|backlog|complete|drain|never-evaluated|assessed \d|stamped|scored \d/i.test(t)) cls='success';
       appendToPane(d.id||'triage', t, cls);
     });
     socket.on("triage_done", d=>{
       const id=d.id||'triage';
-      appendToPane(id, d.code===0?`✔ triage complete (${d.lines||0} lines)`:`triage exited ${d.code}`, d.code===0?'success':'error');
+      appendToPane(id, d.code===0?`✔ ${id} complete (${d.lines||0} lines)`:`${id} exited ${d.code}`, d.code===0?'success':'error');
       const p=workerPanes[id]; if(p){ p.element.className='worker-pane finished'; }
       const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent = d.code===0?'done':'error';
       flash(d.code===0?'triage complete':'triage failed');

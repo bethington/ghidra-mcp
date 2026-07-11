@@ -2304,15 +2304,45 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
 
+    def _stream_proc(sid, label, program, args, cwd, env):
+        """Run a non-LLM tool as a background subprocess and stream its stdout to the
+        dashboard as triage_started/triage_line/triage_done events, so it shows as a
+        visible pane (these tools aren't WorkerManager workers). One pane per `sid`."""
+        import subprocess
+
+        def _run():
+            socketio.emit("triage_started", {"id": sid, "label": label, "program": program})
+            code, emitted = -1, 0
+            try:
+                proc = subprocess.Popen(args, cwd=cwd, env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        text=True, bufsize=1)
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    # drop fun_doc/DB startup noise so the pane shows only the tool's work
+                    if ("slow_query" in line or line.startswith("[migrate]")
+                            or "Serving Flask" in line or "Debug mode" in line
+                            or "Running on http" in line or "Press CTRL" in line
+                            or "development server" in line or "Dashboard:" in line):
+                        continue
+                    emitted += 1
+                    socketio.emit("triage_line", {"id": sid, "text": line})
+                proc.wait()
+                code = proc.returncode
+            except Exception as e:
+                socketio.emit("triage_line", {"id": sid, "text": f"launch failed: {e}", "error": True})
+            socketio.emit("triage_done", {"id": sid, "code": code, "lines": emitted})
+            socketio.emit("conf_changed", {})   # tags may have changed -> dashboard re-reads
+
+        threading.Thread(target=_run, daemon=True, name=sid).start()
+
     @socketio.on("request_start_triage")
     def handle_start_triage(data):
-        """Triage lane: run the conformance intake classify over the focused binary.
-        It's a non-LLM script (scope-classify LIB_ + enqueue the rest), run in a
-        background thread. Its stdout is streamed to the dashboard as triage_line
-        events so it shows as a visible pane (triage isn't a WorkerManager worker).
-        Scopes to a binary via FUNDOC_GHIDRA_PROGRAM; takes --apply/--count. Path
-        configurable via CONF_TRIAGE_TOOL."""
-        import subprocess
+        """Triage lane: run the conformance intake classify (scope-classify LIB_ + enqueue
+        the rest) over the focused binary. Scopes via FUNDOC_GHIDRA_PROGRAM; --apply/--count.
+        Path configurable via CONF_TRIAGE_TOOL."""
         program = (data or {}).get("binary") or (data or {}).get("program") or None
         tool = os.environ.get(
             "CONF_TRIAGE_TOOL",
@@ -2320,43 +2350,42 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 / "conformance" / "tools" / "triage.py"),
         )
         if not Path(tool).exists():
-            sio_emit("worker_error", {"error": f"triage tool not found: {tool} "
-                                               "(set CONF_TRIAGE_TOOL)"})
+            sio_emit("worker_error", {"error": f"triage tool not found: {tool} (set CONF_TRIAGE_TOOL)"})
             return
-        cnt = (data or {}).get("count")
         env = dict(os.environ)
         if program:
-            env["FUNDOC_GHIDRA_PROGRAM"] = program   # tool reads the target from here
+            env["FUNDOC_GHIDRA_PROGRAM"] = program
         args = [sys.executable, "-u", tool, "--apply"]
+        cnt = (data or {}).get("count")
         if cnt:
             try:
                 args += ["--count", str(int(cnt))]
             except (TypeError, ValueError):
                 pass
-
-        def _run_triage():
-            socketio.emit("triage_started", {"id": "triage", "program": program,
-                                             "scope": ("all" if not cnt else int(cnt))})
-            code, emitted = -1, 0
-            try:
-                proc = subprocess.Popen(args, cwd=str(Path(tool).parent), env=env,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        text=True, bufsize=1)
-                for line in proc.stdout:
-                    line = line.rstrip()
-                    if line:
-                        emitted += 1
-                        socketio.emit("triage_line", {"id": "triage", "text": line})
-                proc.wait()
-                code = proc.returncode
-            except Exception as e:
-                socketio.emit("triage_line", {"id": "triage", "text": f"launch failed: {e}", "error": True})
-            socketio.emit("triage_done", {"id": "triage", "code": code, "lines": emitted})
-            # tags/scope may have changed (LIB_ drained) -> nudge the dashboard to re-read
-            socketio.emit("conf_changed", {})
-
-        threading.Thread(target=_run_triage, daemon=True, name="triage").start()
+        _stream_proc("triage", "triage", program, args, str(Path(tool).parent), env)
         sio_emit("worker_started_ack", {"mode": "triage", "program": program})
+
+    @socketio.on("request_start_assess")
+    def handle_start_assess(data):
+        """Assess lane: score in-scope functions' current documentation and stamp DOC_DRAFT
+        on the already-documented ones (fun_doc.py --assess). Only scores functions without
+        a DOC rung yet, so repeat passes shrink the pool. Streams per-function progress."""
+        program = (data or {}).get("binary") or (data or {}).get("program") or None
+        if not program:
+            sio_emit("worker_error", {"error": "assess requires a binary -- select one in the header."})
+            return
+        fun_doc_py = str(Path(__file__).resolve().parent / "fun_doc.py")
+        args = [sys.executable, "-u", fun_doc_py, "--assess", "--binary", program]
+        cnt = (data or {}).get("count")
+        if cnt:
+            try:
+                args += ["--assess-count", str(int(cnt))]
+            except (TypeError, ValueError):
+                pass
+        env = dict(os.environ)
+        env["FUNDOC_DASHBOARD"] = "false"   # belt-and-suspenders: never spawn a nested dashboard
+        _stream_proc("assess", "assess", program, args, str(Path(fun_doc_py).parent), env)
+        sio_emit("worker_started_ack", {"mode": "assess", "program": program})
 
     @socketio.on("request_start_globals_worker")
     def handle_start_globals_worker(data):

@@ -1855,6 +1855,100 @@ def _fetch_function_list(prog_path):
     return all_funcs
 
 
+# Library scope tags (mirrors conformance/tools/scope_tag_library) + the DOC rung ladder.
+_ASSESS_LIB_TAGS = ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")
+_ASSESS_DOC_TAGS = ("DOC_DRAFT", "DOC_REVIEWED", "DOC_VERIFIED")
+
+
+def _assess_tag_addrs(tag, program):
+    """Set of '0x<hex>' function addresses carrying `tag` in `program`."""
+    try:
+        r = ghidra_get("/search_functions_by_tag", params={"tag": tag, "program": program})
+        if isinstance(r, str):
+            r = json.loads(r)
+        if not isinstance(r, dict):
+            return set()
+        return {"0x" + str(f.get("address", "")).lower().lstrip("0x")
+                for f in (r.get("functions") or [])}
+    except Exception:
+        return set()
+
+
+def run_assess_pass(program, count=None, draft_score=40):
+    """Assess the CURRENT documentation state of in-scope functions and stamp DOC_DRAFT on
+    any whose completeness score is >= draft_score (i.e. they already carry real docs). Only
+    functions that don't yet have a DOC rung are scored, so each pass shrinks the pool and
+    repeats get cheaper. Streams per-function progress via print() for the dashboard pane.
+    Returns 0 on success."""
+    def emit(s):
+        print(s, flush=True)
+
+    funcs = _fetch_function_list(program) or []
+    if not funcs:
+        emit(f"no functions found for {program}")
+        return 1
+    norm = lambda a: "0x" + str(a).lower().lstrip("0x")
+    lib = set()
+    for t in _ASSESS_LIB_TAGS:
+        lib |= _assess_tag_addrs(t, program)
+    doc_tagged = set()
+    for t in _ASSESS_DOC_TAGS:
+        doc_tagged |= _assess_tag_addrs(t, program)
+
+    candidates = []
+    for f in funcs:
+        a = norm(f.get("address", ""))
+        if a in lib or a in doc_tagged:
+            continue
+        candidates.append((f.get("name", "") or a, a))
+    emit(f"{len(funcs)} defined - {len(lib)} library - {len(doc_tagged)} already DOC-tagged "
+         f"-> {len(candidates)} to assess")
+    if count:
+        candidates = candidates[:count]
+        emit(f"  (this pass: first {len(candidates)})")
+    if not candidates:
+        emit("nothing to assess -- every in-scope function already carries a DOC rung")
+        return 0
+
+    addrs = [a for _n, a in candidates]
+    emit(f"scoring {len(addrs)} functions (completeness, batched)...")
+
+    def _on_batch(scored, total, failed):
+        emit(f"  ...scored {scored}/{total}" + (f" ({failed} batch retries)" if failed else ""))
+
+    score_map = _batch_score(addrs, prog_path=program, progress_callback=_on_batch) or {}
+
+    # best-effort: make sure the tag exists before tagging
+    try:
+        ghidra_post("/create_function_tag", {"name": "DOC_DRAFT", "program": program})
+    except Exception:
+        pass
+
+    stamped, total = 0, len(candidates)
+    for i, (nm, a) in enumerate(candidates, 1):
+        info = score_map.get(a.replace("0x", ""))
+        sc = info.get("score") if isinstance(info, dict) else None
+        if sc is not None and sc >= draft_score:
+            try:
+                ghidra_post("/add_function_tag",
+                            {"function": a, "tags": "DOC_DRAFT", "program": program})
+                stamped += 1
+                emit(f"  [{i}/{total}] {nm} @ {a}  ->  DOC_DRAFT (score {sc})")
+            except Exception as e:
+                emit(f"  [{i}/{total}] {nm} @ {a}  ->  FAIL {e}")
+        else:
+            emit(f"  [{i}/{total}] {nm} @ {a}  ->  untagged (score {sc if sc is not None else '?'})")
+
+    try:
+        ghidra_post("/save_program", {"program": program})
+    except Exception:
+        emit("  [warn] save_program failed -- DOC_DRAFT tags are in memory; save Ghidra manually")
+    emit(f"\nassessed {total}: stamped DOC_DRAFT on {stamped}, left {total - stamped} untagged "
+         f"(score < {draft_score})")
+    emit("next: the Document lane raises these toward REVIEWED/VERIFIED; run again for the rest")
+    return 0
+
+
 def _score_single(addr_hex, prog_path=None):
     """Score a single function via analyze_function_completeness. Returns score_info dict or None."""
     params = {"function_address": addr_hex}
@@ -8841,6 +8935,12 @@ def main():
     parser.add_argument(
         "--refresh", action="store_true", help="Force full rescan (use with --scan)"
     )
+    parser.add_argument("--assess", action="store_true",
+                        help="Assess in-scope functions' current docs and stamp DOC_DRAFT on the documented ones")
+    parser.add_argument("--assess-count", type=int, default=None,
+                        help="Limit functions assessed this pass (default: all untagged in-scope)")
+    parser.add_argument("--draft-score", type=int, default=40,
+                        help="Completeness score >= this stamps DOC_DRAFT during --assess (default: 40)")
     parser.add_argument("--web", action="store_true", help="Start web dashboard")
     parser.add_argument(
         "--web-port", type=int, default=5000, help="Web dashboard port (default: 5000)"
@@ -8977,9 +9077,12 @@ def main():
         )
         return
 
-    # Auto-start dashboard in background (unless disabled)
+    # Auto-start dashboard in background (unless disabled). --assess is a one-shot
+    # command (often invoked as a subprocess by the running dashboard) -- never spawn
+    # a second dashboard for it.
     dashboard_enabled = (
         not args.no_dashboard
+        and not args.assess
         and os.environ.get("FUNDOC_DASHBOARD", "true").lower() != "false"
     )
     if dashboard_enabled:
@@ -9120,6 +9223,15 @@ def main():
             state, project_folder, refresh=args.refresh, binary_filter=active_binary
         )
         print_status(state)
+        return
+
+    # --assess: score in-scope functions and stamp DOC_DRAFT on the already-documented ones
+    if args.assess:
+        prog = active_binary or args.binary
+        if not prog:
+            print("--assess requires a binary: pass --binary <program path>")
+            return
+        run_assess_pass(prog, count=args.assess_count, draft_score=args.draft_score)
         return
 
     # Validate state
