@@ -2307,14 +2307,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     @socketio.on("request_start_triage")
     def handle_start_triage(data):
         """Triage lane: run the conformance intake classify over the focused
-        binary. It's a non-LLM script (scope-classify + enqueue), run as a
-        subprocess so it doesn't block the socket thread. Path is configurable
-        via CONF_TRIAGE_TOOL; a clear error is surfaced if it isn't present."""
+        binary. It's a non-LLM script (scope-classify LIB_ + enqueue), run as a
+        subprocess so it doesn't block the socket thread. The tool scopes to a
+        binary via the FUNDOC_GHIDRA_PROGRAM env var and takes --apply/--count.
+        Path is configurable via CONF_TRIAGE_TOOL."""
         import subprocess
         program = (data or {}).get("binary") or (data or {}).get("program") or None
         tool = os.environ.get(
             "CONF_TRIAGE_TOOL",
-            str(Path(__file__).resolve().parents[2] / "cpp" / "D2MOO"
+            str(Path(__file__).resolve().parents[3] / "cpp" / "D2MOO"
                 / "conformance" / "tools" / "triage.py"),
         )
         if not Path(tool).exists():
@@ -2322,10 +2323,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                                                "(set CONF_TRIAGE_TOOL)"})
             return
         try:
-            args = [sys.executable, tool]
+            env = dict(os.environ)
             if program:
-                args += ["--program", program]
-            subprocess.Popen(args)
+                env["FUNDOC_GHIDRA_PROGRAM"] = program   # tool reads the target from here
+            args = [sys.executable, tool, "--apply"]
+            cnt = (data or {}).get("count")
+            if cnt:
+                args += ["--count", str(int(cnt))]
+            subprocess.Popen(args, cwd=str(Path(tool).parent), env=env)
             sio_emit("worker_started_ack", {"mode": "triage", "program": program})
         except Exception as e:
             sio_emit("worker_error", {"error": f"triage launch failed: {e}"})
