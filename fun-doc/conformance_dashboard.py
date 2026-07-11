@@ -271,7 +271,8 @@ def _doc_map_rungs(program: str) -> dict:
     out = {}
     try:
         r = _get("/list_properties", map=GLOB_DOC_MAP, program=program)
-        for p in (r.get("properties") or []):
+        # the endpoint returns the list under "entries" (not "properties")
+        for p in (r.get("entries") or r.get("properties") or []):
             a = p.get("address")
             v = p.get("value")
             if a and v in DOC_RUNGS:
