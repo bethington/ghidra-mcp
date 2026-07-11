@@ -1954,9 +1954,11 @@ def run_assess_pass(program, count=None, draft_score=40):
 _GA_LINE = re.compile(
     r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
     r"(?:\s+xrefs=(?P<xrefs>\d+))?")
-_GA_PRIM = re.compile(
-    r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|"
-    r"bool|float|double|pointer|code|undefined)\s*$", re.I)
+# A "placeholder" type carries no semantic meaning -- Ghidra's analysis defaults for
+# not-yet-typed data. NOTE this is deliberately narrower than a primitive check: int/bool/
+# float/char[N]/named-struct-ptr ARE meaningful documentation, only the unknowns below are not.
+_GA_PLACEHOLDER_TYPE = re.compile(
+    r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|code|pointer|undefined)\s*$", re.I)
 _GA_AUTONAME = re.compile(
     r"^(DAT|LAB|SUB|UNK|FUN|PTR|OFF|BYTE|WORD|DWORD|QWORD|STRU|JMP|switchdata)_[0-9A-Fa-f]+$"
     r"|^g_(dw|w|b|p|f|q)?(data|unknown|unk|ptr|field|global)?_?[0-9A-Fa-f]{3,8}$", re.I)
@@ -1993,11 +1995,38 @@ def _global_doc_rungs(program):
     return out
 
 
+def _global_comment_state(program, addr):
+    """(explanatory, available) for the listing comment at a data address, via /get_comment
+    (reads plate/pre/eol/... -- the kinds set_global/batch_set_comments write on a global).
+    `explanatory` = the first non-empty comment line has >=4 words (the project's global-plate
+    quality bar). `available` = the endpoint responded in the expected shape; False means
+    /get_comment isn't live yet (Ghidra reload pending) so the caller must NOT stamp DRAFT."""
+    try:
+        r = ghidra_get("/get_comment", params={"address": addr, "program": program}, timeout=15)
+        if isinstance(r, str):
+            try:
+                r = json.loads(r)
+            except (json.JSONDecodeError, ValueError):
+                return (False, False)
+        if not isinstance(r, dict) or "has_comment" not in r:
+            return (False, False)              # endpoint absent / wrong shape -> unavailable
+        c = (r.get("comment") or "").strip()
+        if not c:
+            return (False, True)               # endpoint live, but no comment here
+        first = next((ln for ln in c.splitlines() if ln.strip()), "")
+        return (len(re.findall(r"\w+", first)) >= 4, True)
+    except Exception:
+        return (False, False)
+
+
 def run_assess_globals_pass(program, count=None, draft_score=80):
-    """Assess the CURRENT documentation state of in-scope globals and stamp DOC_DRAFT (in the
-    `Doc` property map) on any that already carry a meaningful name AND a real (non-primitive)
-    type -- the data-address analog of run_assess_pass. Only globals without a DOC rung are
-    scored, so repeats shrink the pool. Streams per-global progress. Returns 0 on success."""
+    """Assess the CURRENT documentation state of in-scope globals -- the data-address analog of
+    run_assess_pass. A global reaches DOC_DRAFT only when it has a meaningful NAME, a real
+    (non-placeholder) TYPE, *and* an explanatory COMMENT (the plate/pre comment set_global writes);
+    the comment is a hard requirement -- name+type alone is 'ready, needs comment', not documented.
+    Only globals without a DOC rung are scored. For each, reports which piece is missing so the
+    Document lane can target it. The comment is read only when name+type already pass (cheap).
+    Streams per-global progress. Returns 0 on success."""
     def emit(s):
         print(s, flush=True)
 
@@ -2013,9 +2042,9 @@ def run_assess_globals_pass(program, count=None, draft_score=80):
         name = m.group("name")
         if name.startswith("Ordinal_"):
             continue
-        rows.append({"addr": "0x%08x" % a, "name": name,
-                     "typed": not bool(_GA_PRIM.match(m.group("type").strip())),
-                     "xrefs": int(m.group("xrefs") or 0)})
+        t = m.group("type").strip()
+        rows.append({"addr": "0x%08x" % a, "name": name, "type": t,
+                     "typed": bool(t) and not _GA_PLACEHOLDER_TYPE.match(t)})
     if not rows:
         emit(f"no globals found for {program}")
         return 1
@@ -2030,23 +2059,45 @@ def run_assess_globals_pass(program, count=None, draft_score=80):
         emit("[globals] nothing to assess -- every in-scope global already carries a DOC rung")
         return 0
 
-    stamped, total = 0, len(candidates)
+    # DOC_DRAFT now requires an explanatory comment -- probe /get_comment once (it's a new
+    # endpoint; absent until the Ghidra extension is reloaded).
+    _probe = next((g for g in candidates if _global_meaningful_name(g["name"]) and g["typed"]), None)
+    comments_live = _global_comment_state(program, _probe["addr"])[1] if _probe else True
+    if not comments_live:
+        emit("[globals] NOTE: /get_comment not live yet (Ghidra extension reload pending) -- "
+             "reporting readiness but stamping nothing, since DOC_DRAFT requires a confirmable comment")
+
+    stamped = ready_no_comment = 0
+    miss = {"name": 0, "type": 0, "comment": 0}
+    total = len(candidates)
     for i, g in enumerate(candidates, 1):
-        named = _global_meaningful_name(g["name"])
-        # 0-100 heuristic: a global is 'draft-documented' once it has BOTH a real name and a real type
-        score = (55 if named else 0) + (35 if g["typed"] else 0) + (10 if g["xrefs"] else 0)
-        if score >= draft_score:
+        named, typed = _global_meaningful_name(g["name"]), g["typed"]
+        explanatory = False
+        if named and typed and comments_live:
+            explanatory = _global_comment_state(program, g["addr"])[0]
+        if named and typed and explanatory:
             _stamp_global_doc_rung(program, g["addr"], "DOC_DRAFT")
             stamped += 1
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT (score {score})")
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT (name+type+comment)")
+        elif named and typed:
+            ready_no_comment += 1
+            miss["comment"] += 1
+            note = "needs comment" + ("" if comments_live else " (comment check pending reload)")
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  ready: {note}")
         else:
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  untagged (score {score})")
+            gaps = [k for k, ok in (("name", named), ("type", typed)) if not ok]
+            for k in gaps:
+                miss[k] += 1
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  needs {', '.join(gaps)}")
     try:
         ghidra_post("/save_program", {"program": program})
     except Exception:
         emit("  [warn] save_program failed -- Doc rungs are in memory; save Ghidra manually")
-    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped}, left {total - stamped} "
-         f"untagged (score < {draft_score})")
+    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped} (name+type+comment); "
+         f"{ready_no_comment} ready-but-need-a-comment; "
+         f"missing name={miss['name']} type={miss['type']}")
+    emit("next: the Document/Globals lane writes the missing comments (and names/types); "
+         "re-run assess to promote them to DOC_DRAFT")
     return 0
 
 
