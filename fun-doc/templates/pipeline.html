@@ -299,6 +299,23 @@
   .brow .seg .cnt { position:absolute; right:5px; top:0; line-height:15px; font-family:var(--font-mono);
     font-size:.54rem; color:var(--text-primary); pointer-events:none; white-space:nowrap;
     text-shadow:0 0 3px var(--bg-darkest), 0 0 2px var(--bg-darkest), 0 0 2px var(--bg-darkest); }
+
+  /* ---- settings slide-out panel ---- */
+  .settings-popout { max-height:0; overflow:hidden; background:linear-gradient(180deg,var(--bg-medium),var(--bg-dark));
+    border-bottom:1px solid transparent; transition:max-height .18s ease, border-color .18s ease; }
+  .settings-popout.active { max-height:460px; border-bottom-color:var(--red); overflow:auto; }
+  .settings-popout-inner { max-width:1400px; margin:0 auto; width:100%; padding:0 1rem; }
+  .settings-popout .panel { margin:0 0 .75rem; border-top:none; border-radius:0 0 6px 6px; }
+  .settings-bar { display:flex; flex-wrap:wrap; gap:.6rem .9rem; align-items:center; }
+  .settings-group { display:flex; flex-wrap:wrap; gap:.4rem .6rem; align-items:center; }
+  .settings-label { font-size:.65rem; color:var(--text-secondary); display:flex; align-items:center; gap:4px; }
+  .settings-divider { width:1px; align-self:stretch; background:var(--border-dark); }
+  .header-select { padding:3px 6px; font-size:.7rem; border-radius:3px; border:1px solid var(--border-dark); background:var(--bg-darkest); color:var(--text-primary); font-family:var(--font-mono); cursor:pointer; }
+  .header-select:focus { outline:none; border-color:var(--gold); }
+  .models-grid { display:grid; grid-template-columns:64px repeat(3, minmax(110px,1fr)) minmax(70px,90px); gap:4px 6px; align-items:center; width:100%; }
+  .models-grid-header { color:var(--text-muted); font-size:.6rem; text-transform:uppercase; letter-spacing:.6px; }
+  .models-provider { font-family:var(--font-mono); font-size:.7rem; color:var(--gold); }
+  .settings-popout .worker-input { text-align:left; }
 </style>
 </head>
 <body>
@@ -339,6 +356,7 @@
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
     <label class="mono" style="font-size:.62rem;color:var(--text-secondary)"><input type="checkbox" id="auto"> Auto</label>
     <button class="btn go" onclick="startLane()">Start &#9654;</button>
+    <button class="btn" id="btnToggleSettings" onclick="toggleSettings()" title="Settings">&#9881; Settings</button>
     <span style="width:8px"></span>
     <select id="themeSel" onchange="setTheme(this.value)" title="Theme">
       <option value="d2-dark">D2 - Dark</option><option value="d2-light">D2 - Light</option>
@@ -346,6 +364,57 @@
     </select>
     <button class="btn" onclick="refreshAll()" title="Refresh">&#8635;</button>
   </header>
+
+  <!-- SETTINGS slide-out (queue config: good@, cold, debug, handoff, audit, provider models) -->
+  <div class="settings-popout" id="settingsPopout">
+    <div class="settings-popout-inner">
+      <div class="panel">
+        <div class="panel-header"><h2>Settings</h2></div>
+        <div class="panel-content">
+          <div class="settings-bar">
+            <div class="settings-group">
+              <label class="settings-label" title="Functions at/above this score are excluded from the queue unless pinned">
+                <span>Good@</span><input type="number" class="worker-input" id="goodEnoughInput" min="0" max="100" onchange="saveQueueConfig()"></label>
+              <label class="settings-label" title="Surface unscored functions so they get scored on first contact">
+                <input type="checkbox" id="requireScoredInput" onchange="saveQueueConfig()" style="margin:0"><span>Score Cold</span></label>
+              <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/">
+                <input type="checkbox" id="debugModeInput" onchange="saveQueueConfig()" style="margin:0"><span>Debug Logs</span></label>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" title="Hand off complex functions to this provider instead of skipping">
+                <span>Handoff&rarr;</span>
+                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
+                  <option value="off">Off</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="minimax">MiniMax</option><option value="gemini">Gemini</option>
+                </select></label>
+              <label class="settings-label" title="Max handoffs per worker session. 0 = unlimited">
+                <span>Max</span><input type="number" class="worker-input" id="handoffMaxInput" min="0" max="999" onchange="saveQueueConfig()" style="width:48px"></label>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" title="A second provider reviews and fixes gaps after the worker finishes. Off = no audit">
+                <span>Audit&rarr;</span>
+                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
+                  <option value="off">Off</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="minimax">MiniMax</option><option value="gemini">Gemini</option>
+                </select></label>
+              <label class="settings-label" title="Skip audit if the worker's score gain >= this value">
+                <span>Min&Delta;</span><input type="number" class="worker-input" id="auditMinDeltaInput" min="0" max="100" onchange="saveQueueConfig()" style="width:48px"></label>
+            </div>
+          </div>
+          <div style="margin-top:.75rem">
+            <div style="font-size:.65rem; color:var(--text-secondary); margin-bottom:.35rem" title="Dashboard-owned model config; Max Turns is the per-provider tool-call cap">Provider Models</div>
+            <div class="models-grid" id="modelsGrid">
+              <div></div>
+              <div class="models-grid-header">Full</div>
+              <div class="models-grid-header">Fix</div>
+              <div class="models-grid-header">Verify</div>
+              <div class="models-grid-header" title="Max tool-call turns per provider">Max Turns</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="main">
     <!-- COMPLETION BARS (replaces stat cards) -->
@@ -743,6 +812,78 @@
   }
   function triage(n){ if(socket) socket.emit("request_start_triage",{binary:PROGRAM}); flash("triage"); }
   function flash(m){ const h=document.getElementById("workerHint"); const o=h.textContent; h.textContent=m+"..."; setTimeout(()=>h.textContent=o,1200); }
+
+  // ---------- settings slide-out (queue config via /api/queue/config) ----------
+  const SETTINGS_PROVIDERS = ['minimax','gemini','claude','codex'];
+  let _settingsLoaded = false;
+  function toggleSettings(){
+    const pop = document.getElementById("settingsPopout");
+    const btn = document.getElementById("btnToggleSettings");
+    const open = !pop.classList.contains("active");
+    pop.classList.toggle("active", open);
+    if(btn) btn.classList.toggle("primary", open);
+    if(open) loadQueueConfig();
+  }
+  async function loadQueueConfig(){
+    let cfg = {};
+    try { const r = await fetch("/api/queue/config"); const j = await r.json(); cfg = j.config || j || {}; }
+    catch(e){ flash("settings load failed"); return; }
+    const g = id => document.getElementById(id);
+    if(g("goodEnoughInput"))  g("goodEnoughInput").value  = cfg.good_enough_score!=null ? cfg.good_enough_score : 80;
+    if(g("requireScoredInput")) g("requireScoredInput").checked = !!cfg.require_scored;
+    if(g("debugModeInput"))   g("debugModeInput").checked = !!cfg.debug_mode;
+    if(g("handoffProviderInput")) g("handoffProviderInput").value = cfg.complexity_handoff_provider || "off";
+    if(g("handoffMaxInput"))  g("handoffMaxInput").value  = cfg.complexity_handoff_max!=null ? cfg.complexity_handoff_max : 0;
+    if(g("auditProviderInput")) g("auditProviderInput").value = cfg.audit_provider || "off";
+    if(g("auditMinDeltaInput")) g("auditMinDeltaInput").value = cfg.audit_min_delta!=null ? cfg.audit_min_delta : 5;
+    // provider models grid: keep the 5 header cells, rebuild the provider rows
+    const grid = g("modelsGrid");
+    while(grid.children.length > 5) grid.removeChild(grid.lastChild);
+    const pm = cfg.provider_models || {}, pt = cfg.provider_max_turns || {};
+    SETTINGS_PROVIDERS.forEach(prov=>{
+      const mm = pm[prov] || {};
+      const lab = document.createElement("div"); lab.className = "models-provider"; lab.textContent = prov; grid.appendChild(lab);
+      ["FULL","FIX","VERIFY"].forEach(mode=>{
+        const inp = document.createElement("input");
+        inp.type="text"; inp.className="worker-input"; inp.id=`model-${prov}-${mode}`;
+        inp.value = mm[mode] || ""; inp.placeholder = mode.toLowerCase(); inp.style.width="100%";
+        inp.addEventListener("change", saveQueueConfig); grid.appendChild(inp);
+      });
+      const turns = document.createElement("input");
+      turns.type="number"; turns.className="worker-input"; turns.id=`turns-${prov}`;
+      turns.value = pt[prov]!=null ? pt[prov] : 25; turns.min="1"; turns.max="999"; turns.style.width="100%";
+      turns.addEventListener("change", saveQueueConfig); grid.appendChild(turns);
+    });
+    _settingsLoaded = true;
+  }
+  function collectProviderModels(){
+    const pm = {};
+    SETTINGS_PROVIDERS.forEach(p=>{ pm[p]={}; ["FULL","FIX","VERIFY"].forEach(m=>{ const el=document.getElementById(`model-${p}-${m}`); if(el && el.value.trim()) pm[p][m]=el.value.trim(); }); });
+    return pm;
+  }
+  function collectProviderMaxTurns(){
+    const pt = {};
+    SETTINGS_PROVIDERS.forEach(p=>{ const el=document.getElementById(`turns-${p}`); if(el){ const v=parseInt(el.value); if(!isNaN(v)) pt[p]=v; } });
+    return pt;
+  }
+  async function saveQueueConfig(){
+    if(!_settingsLoaded) return;   // don't POST an empty form before load populates it
+    const g = id => document.getElementById(id);
+    const v = (id,d) => { const e=g(id); return e ? e.value : d; };
+    const cfg = {
+      good_enough_score: parseInt(v("goodEnoughInput",80)) || 80,
+      require_scored: g("requireScoredInput") ? g("requireScoredInput").checked : false,
+      debug_mode: g("debugModeInput") ? g("debugModeInput").checked : false,
+      complexity_handoff_provider: v("handoffProviderInput","off")==="off" ? null : v("handoffProviderInput","off"),
+      complexity_handoff_max: parseInt(v("handoffMaxInput",0)) || 0,
+      audit_provider: v("auditProviderInput","off")==="off" ? null : v("auditProviderInput","off"),
+      audit_min_delta: parseInt(v("auditMinDeltaInput",5)) || 5,
+      provider_models: collectProviderModels(),
+      provider_max_turns: collectProviderMaxTurns(),
+    };
+    try { await fetch("/api/queue/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(cfg)}); flash("settings saved"); }
+    catch(e){ flash("settings save failed"); }
+  }
 
   async function refreshAll(){
     const s=await api("/summary")||SAMPLE.summary;
