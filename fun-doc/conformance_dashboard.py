@@ -137,20 +137,22 @@ def intake(program: str = None) -> dict:
             "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
 
 
-def inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
-    """Searchable Function Inventory: in-scope functions matching `search` (name substring),
-    each with its DOC_/CONF_ rung. Computed from tag sets + a name filter over the defined
-    function list, so a search returns fast without per-function calls."""
+def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
+    """Searchable Function Inventory: the COMPLETE list of in-scope functions matching `search`
+    (name substring), each with its DOC_/CONF_ rung. Library functions (LIB_-tagged) are
+    excluded. Computed from tag sets + a name filter over the defined function list. Rows are
+    sorted (un-proven first, then by name) BEFORE the limit is applied, so the cap keeps the
+    most-relevant rows rather than an arbitrary address-ordered slice."""
     program = program or PROGRAM
     conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
     doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
     lib = set().union(*(_tag_addrs(t, program) for t in
                         ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")))
-    txt = _get("/list_functions", program=program, limit=6000)
+    txt = _get("/list_functions", program=program, limit=100000)
     import re
     line = re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
     s = search.lower()
-    rows, total = [], 0
+    rows = []
     seen = set()
     for ln in (txt if isinstance(txt, str) else "").splitlines():
         m = line.match(ln.strip())
@@ -163,13 +165,12 @@ def inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
         seen.add(a)
         if s and s not in name.lower():
             continue
-        total += 1
-        if len(rows) < limit:
-            conf = next((r for r in CONF_RUNGS if a in conf_sets[r]), "none")
-            doc = next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
-            rows.append({"name": name, "address": a, "doc": doc, "conf": conf})
+        conf = next((r for r in CONF_RUNGS if a in conf_sets[r]), "none")
+        doc = next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
+        rows.append({"name": name, "address": a, "doc": doc, "conf": conf})
+    total = len(rows)
     rows.sort(key=lambda r: (r["conf"] == "none", r["name"].lower()))
-    return {"rows": rows, "total": total, "shown": len(rows)}
+    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit)}
 
 
 def function_detail(addr: str, program: str = None) -> dict:

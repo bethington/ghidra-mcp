@@ -63,9 +63,9 @@ def _intake():
 @conf_bp.route("/api/conformance/inventory")
 def _inventory():
     try:
-        limit = max(1, min(500, int(request.args.get("limit", 100))))
+        limit = max(1, min(20000, int(request.args.get("limit", 6000))))
     except (TypeError, ValueError):
-        limit = 100
+        limit = 6000
     return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
 
 

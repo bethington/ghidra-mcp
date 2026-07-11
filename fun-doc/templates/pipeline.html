@@ -772,7 +772,7 @@
   }
   async function loadInv(){
     const q=document.getElementById("invSearch").value;
-    const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=100")||SAMPLE.inventory;
+    const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000")||SAMPLE.inventory;
     document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
       `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
