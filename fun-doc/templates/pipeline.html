@@ -223,6 +223,12 @@
   .picker-head { padding:.45rem .7rem; border-bottom:1px solid var(--border-dark);
     font-size:.7rem; font-weight:600; color:var(--gold); text-transform:uppercase; letter-spacing:.5px; }
   .picker-sub { text-transform:none; font-weight:400; color:var(--text-muted); letter-spacing:0; }
+  .picker-nav { display:flex; align-items:center; gap:3px; padding:.4rem .55rem; overflow-x:auto;
+    border-bottom:1px solid var(--border-dark); white-space:nowrap; }
+  .picker-nav::-webkit-scrollbar { height:6px; }
+  .pn-sel { padding:2px 6px; font-size:.62rem; border-radius:3px; border:1px solid var(--border-dark);
+    background:var(--bg-darkest); color:var(--text-primary); font-family:var(--font-mono); max-width:150px; }
+  .pn-sep { color:var(--text-muted); font-size:.7rem; padding:0 1px; }
   .picker-body { overflow-y:auto; padding:.45rem; display:flex; flex-direction:column; gap:.4rem; }
   .picker-foot { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:center; padding:.4rem .7rem;
     border-top:1px solid var(--border-dark); font-size:.54rem; color:var(--text-secondary); }
@@ -268,6 +274,7 @@
         <div class="picker-head">
           <span>Focus a binary <span class="picker-sub mono">&mdash; most work first</span></span>
         </div>
+        <div class="picker-nav" id="pickerNav"></div>
         <div class="picker-body" id="pickerBody"></div>
         <div class="picker-foot mono">
           <span class="lg"><span class="sw" style="background:var(--set)"></span>verified/battletested</span>
@@ -427,7 +434,19 @@
     {path:"/Mods/PD2-S12/D2Win.dll",name:"D2Win.dll",folder:"/Mods/PD2-S12",fn_scope:647,remaining_total:1843,
       fn_doc:{scope:647,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:647,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:549,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:182,typed_pct:33.2}}]};
+      glob_doc:{scope:549,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:182,typed_pct:33.2}},
+    {path:"/Mods/OtherMod/D2Common.dll",name:"D2Common.dll",folder:"/Mods/OtherMod",fn_scope:2500,remaining_total:5000,
+      fn_doc:{scope:2500,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:2500,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:1200,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:300,typed_pct:25}},
+    {path:"/testing/D2Common.dll",name:"D2Common.dll",folder:"/testing",fn_scope:2220,remaining_total:4441,
+      fn_doc:{scope:2220,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:2220,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:1,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}},
+    {path:"/benchmark/bench_core.dll",name:"bench_core.dll",folder:"/benchmark",fn_scope:460,remaining_total:920,
+      fn_doc:{scope:460,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:460,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:0,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}}]};
   async function loadBinaries(){
     const r=await api("/binaries/progress")||SAMPLE_PROG;
     BINARIES=r.binaries||[]; PROGRAM=r.active||(BINARIES[0]&&BINARIES[0].path)||null;
@@ -439,7 +458,7 @@
     const p=document.getElementById("picker");
     const open=!p.classList.contains("open");
     p.classList.toggle("open",open);
-    if(open) renderPicker();
+    if(open){ PNAV=segsOf(folderOfPath(PROGRAM)); renderPicker(); }   // default to the focused folder
   }
   function closePicker(){ document.getElementById("picker").classList.remove("open"); }
   function segHTML(bar,order){
@@ -468,9 +487,43 @@
       ${brow("Glob Doc",c.glob_doc,DOC_ORDER,` &middot;${Math.round(c.glob_doc.typed_pct)}%`)}
     </div>`;
   }
+  // ---- folder breadcrumb (recursive; each dropdown has an "All"; leading "All folders") ----
+  let PNAV=null;   // chosen folder segments; [] = all folders; null = init from focus
+  const segsOf=f=>String(f||"").split("/").filter(Boolean);
+  function folderOfPath(p){ const b=(BINARIES||[]).find(x=>x.path===p); return b?b.folder:""; }
+  function childrenAt(prefix){        // next-level folder names among binaries whose path starts with prefix
+    const kids=new Set();
+    (BINARIES||[]).forEach(b=>{ const s=segsOf(b.folder);
+      if(s.length>prefix.length && prefix.every((p,i)=>s[i]===p)) kids.add(s[prefix.length]); });
+    return [...kids].sort();
+  }
+  function binInNav(b){ const s=segsOf(b.folder); return PNAV.every((p,i)=>s[i]===p); }
+  function renderBreadcrumb(){
+    let html="", lvl=0;
+    while(true){
+      const opts=childrenAt(PNAV.slice(0,lvl));
+      if(opts.length===0) break;
+      const val=PNAV[lvl]||"";
+      html += (lvl>0?'<span class="pn-sep">/</span>':'')
+        + `<select class="pn-sel" onchange="onNav(${lvl},this.value)">`
+        + `<option value=""${val===""?" selected":""}>${lvl===0?"All folders":"All"}</option>`
+        + opts.map(o=>`<option value="${o}"${o===val?" selected":""}>${o}</option>`).join("")
+        + `</select>`;
+      if(!val) break;              // "All" chosen here -> recursive, no deeper dropdown
+      lvl++;
+    }
+    document.getElementById("pickerNav").innerHTML=html;
+  }
+  function onNav(lvl,value){
+    PNAV = value ? PNAV.slice(0,lvl).concat([value]) : PNAV.slice(0,lvl);  // concrete adds; All drops deeper
+    renderPicker();
+  }
   function renderPicker(){
+    if(PNAV===null) PNAV=segsOf(folderOfPath(PROGRAM));
+    renderBreadcrumb();
+    const list=(BINARIES||[]).filter(binInNav);
     document.getElementById("pickerBody").innerHTML=
-      (BINARIES||[]).map(bcardHTML).join("")||'<div class="worker-empty">No binaries open in Ghidra.</div>';
+      list.map(bcardHTML).join("")||'<div class="worker-empty">No binaries in this folder.</div>';
   }
   function pickBinary(path){ PROGRAM=path; updFocusBtn(); closePicker(); refreshAll(); }
   // click-away + Esc close the anchored popover
