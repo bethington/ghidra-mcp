@@ -369,6 +369,7 @@ CATEGORY_TO_MODULE = {
     "return_type_unresolved": "fix-prototype.md",
     "address_suffix_name": "fix-prototype.md",
     "undocumented_ordinals": "fix-ordinals.md",
+    "non_canonical_type": "fix-canonical-types.md",
 }
 
 ALL_FIX_MODULES = sorted(set(CATEGORY_TO_MODULE.values()))
@@ -2807,7 +2808,77 @@ def fetch_function_data(program, address, mode="FIX"):
         if decompiled_is_error and completeness_missing_name:
             data["not_a_function"] = True
 
+    if not data.get("not_a_function"):
+        _apply_canonical_type_deduction(data)
     return data
+
+
+def _apply_canonical_type_deduction(data):
+    """Fold canonical-type usage into the completeness score + its hint feedback loop. Flags
+    params/locals/return that are typed but NOT with a canonical D2MOO type -- specifically a
+    void* (should be a specific D2 struct pointer) or a named struct/enum absent from D2MOO's
+    vocabulary (a community/Ghidra name that has a D2 equivalent, e.g. UnitAny -> D2UnitStrc).
+
+    Deliberately does NOT flag scalar-width spelling (uint vs uint32_t, ulonglong vs uint64_t):
+    Ghidra collapses stdint typedefs to their width builtin, so that's unfixable in Ghidra and
+    belongs to output-normalization, not the score. Nor undefined* (already the undefined_variables
+    deduction). Mutates `data`: appends a 'non_canonical_type' deduction, lowers the score below the
+    VERIFY(100) gate, and registers the fixable category so the fix-canonical-types.md hint is fed
+    back to the model -- the same 'why you didn't score higher' loop as every other deduction."""
+    try:
+        import d2moo_types
+    except Exception:
+        return
+    comp = data.get("completeness")
+    if not isinstance(comp, dict):
+        return
+    vars_ = data.get("variables")
+    if isinstance(vars_, str):
+        try:
+            vars_ = json.loads(vars_)
+        except (json.JSONDecodeError, TypeError):
+            vars_ = None
+    typed = []   # (where, name, type_str)
+    if isinstance(vars_, dict):
+        for p in (vars_.get("parameters") or []):
+            if isinstance(p, dict) and p.get("type"):
+                typed.append(("param", p.get("name", ""), p["type"]))
+        for lv in (vars_.get("locals") or []):
+            if isinstance(lv, dict) and lv.get("type"):
+                typed.append(("local", lv.get("name", ""), lv["type"]))
+    rt = comp.get("return_type")
+    if rt and rt not in ("void", "undefined"):
+        typed.append(("return", "<return>", rt))
+
+    ext = d2moo_types.PREAMBLE_NAMES
+    items = []
+    for where, name, t in typed:
+        r = d2moo_types.validate_type(t)
+        base = r.get("base") or ""
+        is_ptr = "*" in str(t)
+        if is_ptr and base == "void":
+            items.append({"where": where, "name": name, "type": t,
+                          "fix": "resolve void* to the specific D2MOO struct pointer"})
+        elif (r.get("verdict") == "UNKNOWN" and base[:1].isupper()
+              and base not in ext and not base.startswith("__")):
+            items.append({"where": where, "name": name, "type": t,
+                          "fix": f"'{base}' is not a D2MOO type -- use the canonical D2MOO struct/enum"})
+    if not items:
+        return
+
+    pts = min(len(items) * 3, 18)
+    comp.setdefault("deduction_breakdown", []).append({
+        "category": "non_canonical_type", "count": len(items), "points": pts, "fixable": True,
+        "description": "parameters/locals/return not using canonical D2MOO types",
+        "items": items[:12]})
+    old = int(comp.get("effective_score", comp.get("completeness_score", 0)))
+    new = max(0, (min(old, 99) if old >= 100 else old) - pts)
+    comp["effective_score"] = new
+    data["score"] = new
+    data["deductions"] = comp["deduction_breakdown"]
+    fc = data.setdefault("fixable_categories", [])
+    if "non_canonical_type" not in fc:
+        fc.append("non_canonical_type")
 
 
 # ---------------------------------------------------------------------------
