@@ -95,13 +95,29 @@
   .seg-legend .lg { display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
   .sw { width:9px; height:9px; border-radius:2px; }
 
-  /* ---- worker cards (kept structure) ---- */
-  .worker-cards { display:flex; gap:.5rem; flex-wrap:wrap; }
-  .worker-card { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:6px; padding:.5rem .7rem; min-width:190px; }
-  .worker-card.running { border-color:var(--set); }
-  .worker-card .wc-title { font-family:var(--font-mono); font-size:.72rem; color:var(--gold); }
-  .worker-card .wc-detail { font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
+  /* ---- worker panes: live streaming model output, auto-scroll ---- */
+  .worker-cards { display:flex; flex-direction:column; gap:.5rem; }
   .worker-empty { font-family:var(--font-mono); font-size:.66rem; color:var(--text-muted); padding:.3rem; }
+  .worker-pane { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:6px; overflow:hidden; }
+  .worker-pane.running { border-color:var(--set); }
+  .worker-pane.stopping { border-color:var(--crafted); }
+  .worker-pane.quota_paused { border-color:var(--rare); }
+  .worker-pane.finished { opacity:.65; }
+  .wp-head { display:flex; justify-content:space-between; align-items:center; gap:.6rem;
+    padding:.35rem .6rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); }
+  .wp-title { font-family:var(--font-mono); font-size:.7rem; color:var(--gold); white-space:nowrap; }
+  .wp-status { font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); text-align:right; overflow:hidden; text-overflow:ellipsis; }
+  .wp-current { color:var(--magic); }
+  .wp-output { height:200px; overflow-y:auto; padding:.35rem .55rem; background:var(--bg-darkest);
+    font-family:var(--font-mono); font-size:.6rem; line-height:1.55; }
+  .wp-output::-webkit-scrollbar { width:7px; } .wp-output::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:4px; }
+  .activity-entry { white-space:pre-wrap; word-break:break-word; }
+  .activity-tool { color:var(--text-secondary); }
+  .activity-text { color:var(--text-primary); }
+  .activity-success { color:var(--set); }
+  .activity-error { color:var(--red-light); }
+  .activity-neutral { color:var(--text-muted); }
+  .activity-fn-header { color:var(--gold); margin-top:4px; }
 
   /* ---- intake lane ---- */
   .intake { display:flex; align-items:center; gap:1.1rem; border-left:3px solid var(--crafted); }
@@ -718,10 +734,71 @@
     renderQueue(); loadReco(); loadInv(); loadGlobals();
   }
 
-  // ---------- socket (live-dot + push refresh) ----------
+  // ---------- worker panes: persistent per-worker streaming logs (like the classic dashboard) ----------
+  const workerPanes = {};                    // id -> {element, output}
+  const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const shortAddr = a => a ? ('0x' + String(a).replace(/^0x/,'')) : '';
+  function getOrCreatePane(id, provider, binary){
+    if(!id) return null;
+    if(workerPanes[id]) return workerPanes[id];
+    const c = document.getElementById("workerCards");
+    const empty = c.querySelector(".worker-empty"); if(empty) empty.remove();
+    const bin = (binary||'').split('/').pop() || '';
+    const pane = document.createElement("div");
+    pane.className = "worker-pane";
+    pane.innerHTML = `<div class="wp-head"><span class="wp-title" id="wp-title-${id}">${esc(provider||'worker')} #${id}${bin?' · '+esc(bin):''}</span>`+
+                     `<span class="wp-status" id="wp-status-${id}"></span></div>`+
+                     `<div class="wp-output" id="wp-out-${id}"></div>`;
+    c.appendChild(pane);
+    const p = { element: pane, output: pane.querySelector(".wp-output") };
+    workerPanes[id] = p; return p;
+  }
+  function appendToPane(id, text, type){
+    if(!id || !text || !String(text).trim()) return;
+    const p = getOrCreatePane(id, null, ''); if(!p) return;
+    // stick-to-bottom only if the user is already near the bottom (don't fight manual scroll)
+    const atBottom = p.output.scrollHeight - p.output.scrollTop - p.output.clientHeight < 40;
+    const el = document.createElement("div");
+    el.className = "activity-entry activity-" + (type||'neutral');
+    el.textContent = text;
+    p.output.appendChild(el);
+    while(p.output.children.length > 200) p.output.removeChild(p.output.firstChild);
+    if(atBottom) p.output.scrollTop = p.output.scrollHeight;
+  }
+  // worker_status is a BARE LIST of worker rows; update panes in place (never wipe the logs).
+  function renderWorkers(st){
+    const w = Array.isArray(st) ? st : ((st && st.workers) || []);
+    const c = document.getElementById("workerCards");
+    const hint = document.getElementById("workerHint");
+    const ids = new Set(w.map(x=>String(x.id)));
+    Object.keys(workerPanes).forEach(id=>{ if(!ids.has(String(id))){ workerPanes[id].element.remove(); delete workerPanes[id]; } });
+    if(!w.length){ if(!c.querySelector(".worker-empty")) c.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
+    const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
+    if(hint) hint.textContent = `${running} running / ${w.length} total`;
+    w.forEach(x=>{
+      const p = getOrCreatePane(x.id, x.provider, x.binary);
+      const cls = x.status==='running' ? 'running' : x.status==='stopping' ? 'stopping'
+                : x.status==='quota_paused' ? 'quota_paused'
+                : ['finished','stopped'].includes(x.status) ? 'finished' : '';
+      p.element.className = 'worker-pane ' + cls;
+      const st2 = document.getElementById(`wp-status-${x.id}`);
+      if(st2){
+        const pr = x.progress || {};
+        const done = (pr.completed||0)+(pr.skipped||0)+(pr.failed||0);
+        const cnt = x.continuous ? 'auto' : `${done}/${x.count||'?'}`;
+        let cur = '';
+        if(pr.current) cur = typeof pr.current==='string' ? pr.current : (pr.current.name || pr.current.address || '');
+        const alert = x.last_alert ? ` · ⚠ ${esc(x.last_alert.type||'')}` : '';
+        st2.innerHTML = esc(`${x.status||''}${x.phase?' · '+x.phase:''} · ${cnt} · ${pr.completed||0}ok ${pr.failed||0}fail${pr.skipped?' '+pr.skipped+'skip':''}`) + alert
+                      + (cur ? ` · <span class="wp-current">${esc(cur)}</span>` : '');
+      }
+    });
+  }
+
+  // ---------- socket (live-dot + streaming worker output + push refresh) ----------
   try {
     socket=io();
-    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; });
+    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; socket.emit("request_worker_status"); });
     socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
     let confTimer;   // debounce: workers emit conf_changed per documented/proven item
     socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
@@ -730,28 +807,18 @@
       clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
     socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
+    // --- streaming model/tool output per worker (auto-scrolling) ---
+    socket.on("function_started",d=>{ getOrCreatePane(d.worker_id,null,''); appendToPane(d.worker_id,`▶ ${d.name||''} @ ${shortAddr(d.address)}`,'fn-header'); });
+    socket.on("global_started",  d=>{ getOrCreatePane(d.worker_id,null,''); appendToPane(d.worker_id,`▶ ${d.name||d.address||''}`,'fn-header'); });
+    socket.on("function_mode",   d=>appendToPane(d.worker_id,`  ${d.mode||''} | ${d.model||''} | score ${d.score}%`,'neutral'));
+    socket.on("tool_result",     d=>{ const meta=[d.bytes!=null?d.bytes+'b':'', d.duration_ms!=null?d.duration_ms+'ms':''].filter(Boolean).join(', ');
+      appendToPane(d.worker_id,`  [mcp] ${d.tool} → ${d.status}${d.error?' - '+d.error:''}${meta?' ('+meta+')':''}`,(d.status==='failed'||d.status==='error')?'error':'tool'); });
+    socket.on("model_text",      d=>{ if(d.text) appendToPane(d.worker_id, String(d.text).substring(0,300),'text'); });
+    socket.on("score_update",    d=>{ const del=(d.score_after||0)-(d.score_before||0); appendToPane(d.worker_id,`  Score ${d.score_before}% → ${d.score_after}% (${del>=0?'+':''}${del}%) | ${d.result||''}`,del>0?'success':'neutral'); });
+    socket.on("function_complete",d=>appendToPane(d.worker_id, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`✔ Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
+    socket.on("global_complete", d=>appendToPane(d.worker_id, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`✔ ${d.result||'done'}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
+    socket.on("provider_timeout",d=>{ if(d.worker_id) appendToPane(d.worker_id,`  [watchdog] ${d.message||'provider timeout'} — killed stalled session`,'error'); });
   } catch(e){}
-  function renderWorkers(st){
-    // worker_status emits get_status() which is a BARE LIST of worker rows (not {workers:[]})
-    const w = Array.isArray(st) ? st : ((st && st.workers) || []);
-    const c = document.getElementById("workerCards");
-    const hint = document.getElementById("workerHint");
-    if(!w.length){ c.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
-    const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
-    if(hint) hint.textContent = `${running} running / ${w.length} total`;
-    c.innerHTML = w.map(x=>{
-      const bin = (x.binary||'').split('/').pop() || '';
-      const pr = x.progress || {};
-      const prog = [pr.completed!=null?`done ${pr.completed}`:null, pr.failed?`failed ${pr.failed}`:null, pr.skipped?`skipped ${pr.skipped}`:null].filter(Boolean).join(' · ');
-      let curTxt = '';
-      if (pr.current) curTxt = typeof pr.current === 'string' ? pr.current : (pr.current.name || pr.current.address || '');
-      const cur = curTxt ? ` · ${curTxt}` : '';
-      const alert = x.last_alert ? ` · ⚠ ${x.last_alert.type||''}` : '';
-      return `<div class="worker-card ${x.status==='running'?'running':''}">`+
-        `<div class="wc-title">${x.provider||'worker'} #${x.id||''}${bin?' · '+bin:''}</div>`+
-        `<div class="wc-detail">${x.status||''}${x.phase?' · '+x.phase:''}${prog?' · '+prog:''}${cur}${alert}</div></div>`;
-    }).join("");
-  }
 
   // load the binary list first (sets the focus), then render everything for it
   loadBinaries().then(refreshAll);
