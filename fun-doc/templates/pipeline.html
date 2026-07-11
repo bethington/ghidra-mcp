@@ -784,11 +784,21 @@
     document.getElementById("drAddr").textContent=f.address;
     document.getElementById("drBadges").innerHTML=badge(f.doc)+badge(f.conf)+(f.proof&&f.proof.vetted?`<span class="badge b-vet">vetted</span>`:'');
     const p=f.proof||{};
+    const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // original = live Ghidra decompilation; fall back to signature, then a clear notice
+    const orig = f.decompile ? esc(f.decompile)
+               : f.signature ? esc(f.signature)+'\n\n// (full decompilation unavailable)'
+               : '// no decompilation available from Ghidra for this function';
+    // equivalent = proven D2MOO reimpl code read from the file the proof points at
+    const equiv = f.reimpl_code ? esc(f.reimpl_code)
+                : f.reimpl_path ? '// equivalent expected at '+esc(f.reimpl_path)+'\n// (file not found on disk)'
+                : '// no proven equivalent yet';
+    const equivHdr = f.reimpl_path ? 'D2MOO equivalent — '+esc(f.reimpl_path) : 'D2MOO equivalent';
     document.getElementById("drBody").innerHTML=`
       <div class="sec">Proven 1:1 code</div>
       <div class="codegrid">
-        <div><div class="mono" style="font-size:.58rem;color:var(--text-muted);margin-bottom:4px">original - Ghidra</div><pre>${(f.signature||'// decompile loads from Ghidra on the live dashboard').replace(/</g,'&lt;')}</pre></div>
-        <div><div class="mono" style="font-size:.58rem;color:var(--set);margin-bottom:4px">D2MOO equivalent</div><pre>${(p.reimpl?('// '+p.reimpl):'// no equivalent yet')}</pre></div>
+        <div><div class="mono" style="font-size:.58rem;color:var(--text-muted);margin-bottom:4px">original - Ghidra</div><pre>${orig}</pre></div>
+        <div><div class="mono" style="font-size:.58rem;color:var(--set);margin-bottom:4px">${equivHdr}</div><pre>${equiv}</pre></div>
       </div>
       <div class="sec">Proof</div>
       <div class="proofgrid">

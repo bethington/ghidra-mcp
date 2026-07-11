@@ -175,13 +175,23 @@ def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
     return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit)}
 
 
+from pathlib import Path as _Path
+
+# Where the proven D2MOO reimplementations live. The Conf proof record stores a relative
+# path like "candidates/SEED_GetRandomNumber.cpp"; the code itself is read from here.
+REIMPL_DIR = os.environ.get(
+    "CONF_REIMPL_DIR",
+    str(_Path(__file__).resolve().parents[3] / "cpp" / "D2MOO" / "conformance" / "reimpl_provider"))
+
+
 def function_detail(addr: str, program: str = None) -> dict:
-    """One function's drawer data: rung tags, the Conf proof record, and the signature
-    for the side-by-side code view."""
+    """One function's drawer data: rung tags, the Conf proof record, the signature, the
+    ORIGINAL decompiled code from Ghidra, and the D2MOO EQUIVALENT reimpl code (read from the
+    file the proof points at) so the side-by-side code view is populated."""
     program = program or PROGRAM
     addr = addr if str(addr).startswith("0x") else "0x" + str(addr)
     out = {"address": addr, "doc": "none", "conf": "none", "scope": None, "proof": None,
-           "name": None, "signature": None}
+           "name": None, "signature": None, "decompile": None, "reimpl_code": None, "reimpl_path": None}
     try:
         tg = _get("/get_function_tags", function=addr, program=program)
         out["name"] = tg.get("function")
@@ -191,7 +201,7 @@ def function_detail(addr: str, program: str = None) -> dict:
                 out["conf"] = n
             elif n in DOC_RUNGS:
                 out["doc"] = n
-            elif n.startswith("LIB_"):
+            elif n.startswith("LIB_") or n in ("STUB", "THUNK", "EXTERNAL"):
                 out["scope"] = n
     except OSError:
         pass
@@ -206,6 +216,24 @@ def function_detail(addr: str, program: str = None) -> dict:
         out["signature"] = sig.get("signature") if isinstance(sig, dict) else None
     except OSError:
         pass
+    # ORIGINAL: the live Ghidra decompilation (text endpoint -> raw string)
+    try:
+        dec = _get("/decompile_function", address=addr, program=program)
+        if isinstance(dec, dict):
+            dec = dec.get("decompilation") or dec.get("code") or dec.get("result")
+        out["decompile"] = dec if isinstance(dec, str) and dec.strip() else None
+    except OSError:
+        pass
+    # EQUIVALENT: the proven D2MOO reimpl, read from the file the proof references
+    rel = (out.get("proof") or {}).get("reimpl")
+    if rel:
+        out["reimpl_path"] = rel
+        try:
+            fp = _Path(REIMPL_DIR) / rel
+            if fp.exists():
+                out["reimpl_code"] = fp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
     return out
 
 
