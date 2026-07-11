@@ -2376,8 +2376,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return
         fun_doc_py = str(Path(__file__).resolve().parent / "fun_doc.py")
         args = [sys.executable, "-u", fun_doc_py, "--assess", "--binary", program]
+        # "All" (continuous) -> no --assess-count so run_assess_pass scores EVERY candidate
         cnt = (data or {}).get("count")
-        if cnt:
+        if cnt and not (data or {}).get("continuous"):
             try:
                 args += ["--assess-count", str(int(cnt))]
             except (TypeError, ValueError):

@@ -840,7 +840,8 @@
     } else if(lane==="triage"){
       socket.emit("request_start_triage",{binary});
     } else if(lane==="assess"){
-      socket.emit("request_start_assess",{binary, count});
+      // "All" -> count 0 so the backend omits --assess-count and scores every candidate
+      socket.emit("request_start_assess",{binary, count: continuous?0:count, continuous});
     } else {
       const mode=(lane==="prove"||lane==="port")?"port":"functions";
       socket.emit("request_start_worker",{binary,provider,count,continuous,mode});
