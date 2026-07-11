@@ -584,8 +584,8 @@
       if(n>0&&scope>0) html+=`<span class="sg" title="${pretty(k)}: ${n}" style="width:${(n/scope*100).toFixed(2)}%;background:${RUNG_COLOR[k]||'var(--text-muted)'}"></span>`; });
     return html;   // whatever's left is the empty .seg background = remaining
   }
-  const DOC_ORDER=["DOC_VERIFIED","DOC_REVIEWED","DOC_DRAFT"];
-  const CONF_ORDER=["CONF_REGRESSION","CONF_BATTLETESTED","CONF_LIVE","CONF_VECTORS","CONF_DRAFT"];
+  const DOC_ORDER=["DOC_DRAFT","DOC_REVIEWED","DOC_VERIFIED"];                                   // low -> high
+  const CONF_ORDER=["CONF_DRAFT","CONF_VECTORS","CONF_LIVE","CONF_BATTLETESTED","CONF_REGRESSION"]; // low -> high
   function brow(lbl,bar,order,extra){        // count overlaid on the bar -- no side column
     const cnt=`${kf(bar.done||0)}/${kf(bar.scope)}${extra||''}`;
     return `<div class="brow"><span class="lbl">${lbl}</span>`+
@@ -653,27 +653,43 @@
   const badge=(v)=>`<span class="badge ${RUNG_CLASS[v]||'b-none'}">${v==='none'?'&middot;none':v.replace('CONF_','').replace('DOC_','')}</span>`;
   const pretty=(v)=>v.replace('CONF_','').replace('DOC_','');
 
+  // A bar lists ALL rungs in progression order (low->high); untagged/none is the FIRST
+  // (leftmost) segment. Legend always lists every rung, even at 0. Bar span drawn only when >0.
   function seg(bar,legend,parts,total){
     bar.innerHTML=""; legend.innerHTML="";
-    parts.forEach(p=>{ if(!p.n) return;
-      const s=document.createElement("span"); s.style.background=p.c; s.style.width=(100*p.n/Math.max(1,total))+"%"; s.title=`${p.label} ${p.n}`; bar.appendChild(s);
-      legend.insertAdjacentHTML("beforeend",`<span class="lg"><span class="sw" style="background:${p.c}"></span>${p.label} ${p.n}</span>`); });
+    parts.forEach(p=>{
+      if(p.n>0){ const s=document.createElement("span"); s.style.background=p.c; s.style.width=(100*p.n/Math.max(1,total))+"%"; s.title=`${p.label} ${p.n}`; bar.appendChild(s); }
+      legend.insertAdjacentHTML("beforeend",`<span class="lg"><span class="sw" style="background:${p.c}"></span>${p.label} ${p.n}</span>`);
+    });
   }
   function renderBars(s,m){
     const inscope=s.in_scope||1;
-    // documentation
-    const dv=(m.cell.CONF_REGRESSION.DOC_VERIFIED+m.cell.CONF_BATTLETESTED.DOC_VERIFIED+m.cell.CONF_LIVE.DOC_VERIFIED+m.cell.none.DOC_VERIFIED)||0;
-    const dr=(m.cell.CONF_REGRESSION.DOC_REVIEWED+m.cell.CONF_BATTLETESTED.DOC_REVIEWED+m.cell.CONF_LIVE.DOC_REVIEWED+m.cell.none.DOC_REVIEWED)||0;
-    const docTagged=dv+dr;
+    const col=c=>(m.rows||[]).reduce((a,rk)=>a+(((m.cell||{})[rk]||{})[c]||0),0);   // DOC column summed over all conf rows
+    const row=rk=>(m.cols||[]).reduce((a,ck)=>a+(((m.cell||{})[rk]||{})[ck]||0),0);  // conf row summed over all doc cols
+    // ---- Functions - Documentation: untagged -> DRAFT -> REVIEWED -> VERIFIED ----
+    const dd=col("DOC_DRAFT"), dr=col("DOC_REVIEWED"), dv=col("DOC_VERIFIED"), docTagged=dd+dr+dv;
     document.getElementById("docPct").innerHTML=`<b>${(100*dv/inscope).toFixed(1)}%</b> at VERIFIED &middot; ${(100*docTagged/inscope).toFixed(1)}% any`;
-    seg(document.getElementById("docBar"),document.getElementById("docLegend"),
-      [{label:"VERIFIED",n:dv,c:"var(--set)"},{label:"REVIEWED",n:dr,c:"var(--magic)"},{label:"untagged",n:inscope-docTagged,c:"var(--text-muted)"}],inscope);
-    // conformance
-    document.getElementById("confPct").innerHTML=`<b>${(100*s.proven/inscope).toFixed(1)}%</b> of in-scope proven`;
-    seg(document.getElementById("confBar"),document.getElementById("confLegend"),
-      [{label:"REGRESSION",n:s.CONF_REGRESSION,c:"var(--rare)"},{label:"BATTLETESTED",n:s.CONF_BATTLETESTED,c:"var(--set)"},{label:"LIVE",n:s.CONF_LIVE,c:"var(--magic)"},{label:"vetted",n:s.vetted,c:"var(--gold)"},{label:"none",n:inscope-s.proven,c:"var(--text-muted)"}],inscope);
+    seg(document.getElementById("docBar"),document.getElementById("docLegend"),[
+      {label:"untagged",n:Math.max(0,inscope-docTagged),c:"var(--text-muted)"},
+      {label:"DRAFT",n:dd,c:RUNG_COLOR.DOC_DRAFT},
+      {label:"REVIEWED",n:dr,c:RUNG_COLOR.DOC_REVIEWED},
+      {label:"VERIFIED",n:dv,c:RUNG_COLOR.DOC_VERIFIED},
+    ],inscope);
+    // ---- Functions - Conformance: none -> DRAFT -> VECTORS -> LIVE -> BATTLETESTED -> REGRESSION ----
+    const cDr=row("CONF_DRAFT"), cVe=row("CONF_VECTORS"), cLi=row("CONF_LIVE"), cBa=row("CONF_BATTLETESTED"), cRe=row("CONF_REGRESSION");
+    const proven=cDr+cVe+cLi+cBa+cRe;
+    document.getElementById("confPct").innerHTML=`<b>${(100*proven/inscope).toFixed(1)}%</b> of in-scope proven`;
+    seg(document.getElementById("confBar"),document.getElementById("confLegend"),[
+      {label:"none",n:Math.max(0,inscope-proven),c:"var(--text-muted)"},
+      {label:"DRAFT",n:cDr,c:RUNG_COLOR.CONF_DRAFT},
+      {label:"VECTORS",n:cVe,c:RUNG_COLOR.CONF_VECTORS},
+      {label:"LIVE",n:cLi,c:RUNG_COLOR.CONF_LIVE},
+      {label:"BATTLETESTED",n:cBa,c:RUNG_COLOR.CONF_BATTLETESTED},
+      {label:"REGRESSION",n:cRe,c:RUNG_COLOR.CONF_REGRESSION},
+    ],inscope);
   }
-  // Globals-documentation top bar: faint hatched typed-groundwork underlay + solid DOC rungs on top.
+  // Globals - Documentation: hatched typed-groundwork underlay is the untagged-first leftmost;
+  // solid DOC rungs on top in progression order DRAFT -> REVIEWED -> VERIFIED.
   function segGlob(g){
     const bar=document.getElementById("globBar"), legend=document.getElementById("globLegend");
     bar.innerHTML=""; legend.innerHTML="";
@@ -681,13 +697,14 @@
     document.getElementById("globPct").innerHTML=`<b>${(100*(g.done||0)/scope).toFixed(1)}%</b> documented &middot; ${g.typed_pct||0}% typed`;
     if(g.typed>0){ const u=document.createElement("span"); u.className="glob-underlay";
       u.style.width=(100*g.typed/scope)+"%"; u.title=`typed groundwork ${g.typed}`; bar.appendChild(u); }
-    [["DOC_VERIFIED","var(--set)"],["DOC_REVIEWED","var(--magic)"],["DOC_DRAFT","var(--crafted)"]].forEach(([k,c])=>{
+    [["DOC_DRAFT","var(--crafted)"],["DOC_REVIEWED","var(--magic)"],["DOC_VERIFIED","var(--set)"]].forEach(([k,c])=>{
       const n=r[k]||0; if(!n) return;
       const s=document.createElement("span"); s.className="rung"; s.style.background=c;
       s.style.width=(100*n/scope)+"%"; s.title=`${pretty(k)} ${n}`; bar.appendChild(s); });
-    legend.innerHTML=`<span class="lg"><span class="sw" style="background:var(--set)"></span>VERIFIED ${r.DOC_VERIFIED||0}</span>`+
+    legend.innerHTML=`<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`+
+      `<span class="lg"><span class="sw" style="background:var(--crafted)"></span>DRAFT ${r.DOC_DRAFT||0}</span>`+
       `<span class="lg"><span class="sw" style="background:var(--magic)"></span>REVIEWED ${r.DOC_REVIEWED||0}</span>`+
-      `<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`;
+      `<span class="lg"><span class="sw" style="background:var(--set)"></span>VERIFIED ${r.DOC_VERIFIED||0}</span>`;
   }
   const jsq=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const addrCell=a=>`<span class="mono" style="color:var(--text-muted);font-size:.6rem">${a}</span>`;

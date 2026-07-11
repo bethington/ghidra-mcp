@@ -111,7 +111,9 @@ def matrix(program: str = None) -> dict:
     def doc_of(a):
         return next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
 
-    rows = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "none"]
+    # every CONF rung is a row (incl. CONF_DRAFT) so the dashboard bars can show the full
+    # ladder; every DOC rung is a column. `none` = no rung on that axis.
+    rows = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "CONF_DRAFT", "none"]
     cols = ["none", "DOC_DRAFT", "DOC_REVIEWED", "DOC_VERIFIED"]
     cell = {rk: {ck: 0 for ck in cols} for rk in rows}
     for a in conf_tagged | doc_tagged:
