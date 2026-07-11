@@ -5981,12 +5981,19 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
             return json.dumps({"error": f"Tool execution failed: {str(e)}"})
 
     # --- Conversation loop ---
-    # 180s timeout: MiniMax occasionally hangs indefinitely under load (6 concurrent
-    # workers). Without a timeout the thread blocks forever with no output or retry.
+    # Per-request timeout: MiniMax occasionally hangs indefinitely under load (e.g. 6
+    # concurrent workers, or a background global-scorer pass competing for the API).
+    # Without it the thread blocks forever. It's env-tunable (MINIMAX_REQUEST_TIMEOUT_SECS)
+    # so a hung request can be made to fail-fast-and-retry within the session budget
+    # (_provider_timeout_seconds, default 300s) rather than eating most of it in one stall.
+    try:
+        _req_timeout = float(os.environ.get("MINIMAX_REQUEST_TIMEOUT_SECS", "180"))
+    except (TypeError, ValueError):
+        _req_timeout = 180.0
     client = OpenAI(
         api_key=api_key,
         base_url="https://api.minimax.io/v1",
-        timeout=180.0,
+        timeout=_req_timeout,
     )
 
     messages = [

@@ -1271,6 +1271,18 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     ]:
         bus.on(evt, bridge(evt))
 
+    # Nudge the new /pipeline dashboard to re-read Ghidra whenever conformance/doc state
+    # actually changes -- an item documented/proven, or a worker pass ended. The pipeline
+    # frontend listens for `conf_changed` and (debounced) refreshes. Separate from the
+    # per-tick worker_status stream so a real state change always forces an authoritative
+    # re-read even if the status debounce missed the final transition.
+    def _conf_changed(_data=None):
+        socketio.emit("conf_changed", {})
+
+    for _evt in ("function_complete", "global_complete",
+                 "port_proven_pending_review", "worker_stopped"):
+        bus.on(_evt, _conf_changed)
+
     # --- Bridge event counters for the audit watcher ---
     # The audit rule `bridge_counter_stall` (fun-doc/audit/rules.yaml)
     # checks that tool_call / tool_result / model_text counters are

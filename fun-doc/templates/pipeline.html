@@ -723,7 +723,8 @@
     socket=io();
     socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; });
     socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
-    socket.on("conf_changed",()=>refreshAll());
+    let confTimer;   // debounce: workers emit conf_changed per documented/proven item
+    socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
     let wsTimer;
     socket.on("worker_status",st=>{ renderWorkers(st);   // auto-refresh as workers change Ghidra
       clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
