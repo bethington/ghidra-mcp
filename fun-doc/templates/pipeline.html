@@ -732,9 +732,25 @@
     socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
   } catch(e){}
   function renderWorkers(st){
-    const w=(st&&st.workers)||[]; const c=document.getElementById("workerCards");
-    if(!w.length){ c.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; return; }
-    c.innerHTML=w.map(x=>`<div class="worker-card ${x.status==='running'?'running':''}"><div class="wc-title">${x.lane||x.mode||'worker'} - ${x.id||''}</div><div class="wc-detail">${x.status||''} ${x.current||''}</div></div>`).join("");
+    // worker_status emits get_status() which is a BARE LIST of worker rows (not {workers:[]})
+    const w = Array.isArray(st) ? st : ((st && st.workers) || []);
+    const c = document.getElementById("workerCards");
+    const hint = document.getElementById("workerHint");
+    if(!w.length){ c.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
+    const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
+    if(hint) hint.textContent = `${running} running / ${w.length} total`;
+    c.innerHTML = w.map(x=>{
+      const bin = (x.binary||'').split('/').pop() || '';
+      const pr = x.progress || {};
+      const prog = [pr.completed!=null?`done ${pr.completed}`:null, pr.failed?`failed ${pr.failed}`:null, pr.skipped?`skipped ${pr.skipped}`:null].filter(Boolean).join(' · ');
+      let curTxt = '';
+      if (pr.current) curTxt = typeof pr.current === 'string' ? pr.current : (pr.current.name || pr.current.address || '');
+      const cur = curTxt ? ` · ${curTxt}` : '';
+      const alert = x.last_alert ? ` · ⚠ ${x.last_alert.type||''}` : '';
+      return `<div class="worker-card ${x.status==='running'?'running':''}">`+
+        `<div class="wc-title">${x.provider||'worker'} #${x.id||''}${bin?' · '+bin:''}</div>`+
+        `<div class="wc-detail">${x.status||''}${x.phase?' · '+x.phase:''}${prog?' · '+prog:''}${cur}${alert}</div></div>`;
+    }).join("");
   }
 
   // load the binary list first (sets the focus), then render everything for it
