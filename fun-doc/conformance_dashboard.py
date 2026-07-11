@@ -275,11 +275,27 @@ _IMG_LO, _IMG_HI = 0x6f000000, 0x70000000  # DLL mapped range; excludes TIB/PEB/
 GLOB_DOC_MAP = "Doc"
 
 
+def _scope_excluded_globals(program: str) -> set[str]:
+    """Data addresses triage marked as library data (`Scope` property) -- excluded from the
+    Globals Inventory and denominators, mirroring LIB_ function exclusion."""
+    out = set()
+    try:
+        r = _get("/list_properties", map="Scope", program=program)
+        for p in ((r or {}).get("entries") or (r or {}).get("properties") or []):
+            a, v = p.get("address"), p.get("value")
+            if a and v:
+                out.add("0x" + str(a).lower().lstrip("0x").rjust(8, "0"))
+    except (OSError, AttributeError):
+        pass
+    return out
+
+
 def _global_rows(program: str) -> list[dict]:
     """In-scope image globals for a program: {addr, name, type, typed}. Parsed from the
     free list_globals text (one call, no per-global fanout). Excludes out-of-image OS
-    labels (TIB/PEB) and Ordinal_ export aliases."""
+    labels (TIB/PEB), Ordinal_ export aliases, and triage-marked library data (Scope)."""
     txt = _get("/list_globals", program=program, limit=100000)
+    excluded = _scope_excluded_globals(program)
     rows = []
     for ln in (txt if isinstance(txt, str) else "").splitlines():
         m = _GLOB_LINE.match(ln.strip())
@@ -289,7 +305,7 @@ def _global_rows(program: str) -> list[dict]:
         if not (_IMG_LO <= a < _IMG_HI):
             continue
         name = m.group("name")
-        if name.startswith("Ordinal_"):
+        if name.startswith("Ordinal_") or ("0x%08x" % a) in excluded:
             continue
         t = m.group("type").strip()
         rows.append({"addr": "0x%08x" % a, "name": name, "type": t,

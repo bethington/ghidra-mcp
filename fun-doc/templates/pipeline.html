@@ -350,7 +350,7 @@
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
-      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess">Assess</option><option value="triage">Triage</option></select>
+      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess" title="Score current docs of functions AND globals; stamp DOC_DRAFT on the documented ones">Assess</option><option value="triage" title="Intake-classify functions AND globals: exclude library/stub/thunk, enqueue the rest">Triage</option></select>
     </div>
     <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">

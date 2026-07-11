@@ -1949,6 +1949,107 @@ def run_assess_pass(program, count=None, draft_score=40):
     return 0
 
 
+# ---- globals assess: heuristic doc-state scoring (a global's doc quality is visible from its
+# ---- name + type, so no LLM call is needed -- mirrors run_assess_pass but for data addresses) ----
+_GA_LINE = re.compile(
+    r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
+    r"(?:\s+xrefs=(?P<xrefs>\d+))?")
+_GA_PRIM = re.compile(
+    r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|"
+    r"bool|float|double|pointer|code|undefined)\s*$", re.I)
+_GA_AUTONAME = re.compile(
+    r"^(DAT|LAB|SUB|UNK|FUN|PTR|OFF|BYTE|WORD|DWORD|QWORD|STRU|JMP|switchdata)_[0-9A-Fa-f]+$"
+    r"|^g_(dw|w|b|p|f|q)?(data|unknown|unk|ptr|field|global)?_?[0-9A-Fa-f]{3,8}$", re.I)
+_GA_IMG_LO, _GA_IMG_HI = 0x6f000000, 0x70000000
+
+
+def _global_meaningful_name(name):
+    """True only for a clearly human-meaningful global name (>=3 letters, not an auto-generated
+    Ghidra/placeholder label). Conservative on purpose: crediting junk as 'named' would wrongly
+    stamp DOC_DRAFT on an undocumented global."""
+    if not name:
+        return False
+    n = name.strip()
+    if _GA_AUTONAME.match(n):
+        return False
+    if re.match(r".*_[0-9A-Fa-f]{6,8}$", n) and not re.search(r"[A-Za-z]{3}", n[:-7]):
+        return False
+    return len(re.sub(r"[^A-Za-z]", "", n)) >= 3
+
+
+def _global_doc_rungs(program):
+    """{normalized 0xaddr -> DOC rung} from the `Doc` property map (already-assessed globals)."""
+    out = {}
+    try:
+        r = ghidra_get("/list_properties", params={"map": "Doc", "program": program})
+        if isinstance(r, str):
+            r = json.loads(r)
+        for p in (r.get("entries") or r.get("properties") or []):
+            a, v = p.get("address"), p.get("value")
+            if a and v in _ASSESS_DOC_TAGS:
+                out["0x" + str(a).lower().lstrip("0x")] = v
+    except Exception:
+        pass
+    return out
+
+
+def run_assess_globals_pass(program, count=None, draft_score=80):
+    """Assess the CURRENT documentation state of in-scope globals and stamp DOC_DRAFT (in the
+    `Doc` property map) on any that already carry a meaningful name AND a real (non-primitive)
+    type -- the data-address analog of run_assess_pass. Only globals without a DOC rung are
+    scored, so repeats shrink the pool. Streams per-global progress. Returns 0 on success."""
+    def emit(s):
+        print(s, flush=True)
+
+    txt = ghidra_get("/list_globals", params={"program": program, "limit": 100000}, timeout=60)
+    rows = []
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = _GA_LINE.match(ln.strip())
+        if not m:
+            continue
+        a = int(m.group("addr"), 16)
+        if not (_GA_IMG_LO <= a < _GA_IMG_HI):
+            continue
+        name = m.group("name")
+        if name.startswith("Ordinal_"):
+            continue
+        rows.append({"addr": "0x%08x" % a, "name": name,
+                     "typed": not bool(_GA_PRIM.match(m.group("type").strip())),
+                     "xrefs": int(m.group("xrefs") or 0)})
+    if not rows:
+        emit(f"no globals found for {program}")
+        return 1
+    already = _global_doc_rungs(program)
+    candidates = [g for g in rows if g["addr"] not in already]
+    emit(f"[globals] {len(rows)} in-image globals - {len(already)} already DOC-tagged "
+         f"-> {len(candidates)} to assess")
+    if count:
+        candidates = candidates[:count]
+        emit(f"  (this pass: first {len(candidates)})")
+    if not candidates:
+        emit("[globals] nothing to assess -- every in-scope global already carries a DOC rung")
+        return 0
+
+    stamped, total = 0, len(candidates)
+    for i, g in enumerate(candidates, 1):
+        named = _global_meaningful_name(g["name"])
+        # 0-100 heuristic: a global is 'draft-documented' once it has BOTH a real name and a real type
+        score = (55 if named else 0) + (35 if g["typed"] else 0) + (10 if g["xrefs"] else 0)
+        if score >= draft_score:
+            _stamp_global_doc_rung(program, g["addr"], "DOC_DRAFT")
+            stamped += 1
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT (score {score})")
+        else:
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  untagged (score {score})")
+    try:
+        ghidra_post("/save_program", {"program": program})
+    except Exception:
+        emit("  [warn] save_program failed -- Doc rungs are in memory; save Ghidra manually")
+    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped}, left {total - stamped} "
+         f"untagged (score < {draft_score})")
+    return 0
+
+
 def _score_single(addr_hex, prog_path=None):
     """Score a single function via analyze_function_completeness. Returns score_info dict or None."""
     params = {"function_address": addr_hex}
@@ -8939,9 +9040,11 @@ def main():
         "--refresh", action="store_true", help="Force full rescan (use with --scan)"
     )
     parser.add_argument("--assess", action="store_true",
-                        help="Assess in-scope functions' current docs and stamp DOC_DRAFT on the documented ones")
+                        help="Assess in-scope functions AND globals' current docs and stamp DOC_DRAFT on the documented ones")
+    parser.add_argument("--assess-functions-only", action="store_true", help="--assess: skip the globals phase")
+    parser.add_argument("--assess-globals-only", action="store_true", help="--assess: skip the functions phase")
     parser.add_argument("--assess-count", type=int, default=None,
-                        help="Limit functions assessed this pass (default: all untagged in-scope)")
+                        help="Limit items assessed this pass (default: all untagged in-scope)")
     parser.add_argument("--draft-score", type=int, default=80,
                         help="Completeness score >= this stamps DOC_DRAFT during --assess (default: 80)")
     parser.add_argument("--web", action="store_true", help="Start web dashboard")
@@ -9234,7 +9337,10 @@ def main():
         if not prog:
             print("--assess requires a binary: pass --binary <program path>")
             return
-        run_assess_pass(prog, count=args.assess_count, draft_score=args.draft_score)
+        if not args.assess_globals_only:
+            run_assess_pass(prog, count=args.assess_count, draft_score=args.draft_score)
+        if not args.assess_functions_only:
+            run_assess_globals_pass(prog, count=args.assess_count, draft_score=args.draft_score)
         return
 
     # Validate state
