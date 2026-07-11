@@ -2754,7 +2754,7 @@ def compute_priority(func):
 # Update these whenever a model is renamed/deprecated upstream — they're the
 # single source of truth for "what model should each provider call by default."
 DEFAULT_PROVIDER_MODELS = {
-    "minimax": {"FULL": "MiniMax-M2.7", "FIX": "MiniMax-M2.7", "VERIFY": "MiniMax-M2.7"},
+    "minimax": {"FULL": "MiniMax-M3", "FIX": "MiniMax-M3", "VERIFY": "MiniMax-M3"},
     "gemini":  {"FULL": "gemini-2.5-pro", "FIX": "gemini-2.5-flash", "VERIFY": "gemini-2.5-flash"},
     "claude":  {"FULL": "claude-sonnet-4-6", "FIX": "claude-sonnet-4-6", "VERIFY": "claude-sonnet-4-6"},
     "codex":   {"FULL": "gpt-5.5", "FIX": "gpt-5.5", "VERIFY": "gpt-5.5"},
