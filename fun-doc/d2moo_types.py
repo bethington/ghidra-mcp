@@ -453,6 +453,56 @@ def emit_header(source_dir: Path = None) -> tuple[str, dict]:
     return header, stats
 
 
+# ---- output normalization: rewrite generated C to D2MOO's canonical stdint spelling ----------
+# Ghidra can't DISPLAY uint32_t (it collapses stdint typedefs to their width builtin), so the
+# canonical scalar spelling only lives in the GENERATED artifact (reimpl .cpp, docs). This rewrites
+# the width spellings a drafted candidate uses (unsigned int, uint, ...) to D2MOO's stdint names.
+# The mappings are typedef-IDENTICAL (unsigned int == uint32_t via <cstdint> on 32-bit x86), so
+# they never change compiled behavior. char/int/bool/float/double/void are left alone (valid D2MOO
+# scalars), and void*->struct is NOT done here (that needs semantic identity, the doc side's job).
+_C_NORMALIZE = [(re.compile(p), r) for p, r in [
+    (r"\bunsigned\s+long\s+long(\s+int)?\b", "uint64_t"),
+    (r"\bsigned\s+long\s+long(\s+int)?\b", "int64_t"),
+    (r"\blong\s+long(\s+int)?\b", "int64_t"),
+    (r"\bunsigned\s+short(\s+int)?\b", "uint16_t"),
+    (r"\bunsigned\s+char\b", "uint8_t"),
+    (r"\bsigned\s+char\b", "int8_t"),
+    (r"\bunsigned\s+int\b", "uint32_t"),
+    (r"\bunsigned\s+long(\s+int)?\b", "uint32_t"),
+    (r"\bulonglong\b", "uint64_t"),   # Ghidra non-English spellings (safe: never English words)
+    (r"\bushort\b", "uint16_t"),
+    (r"\buchar\b", "uint8_t"),
+    (r"\bulong\b", "uint32_t"),
+    (r"\buint\b", "uint32_t"),
+    (r"\bundefined8\b", "uint64_t"),
+    (r"\bundefined4\b", "uint32_t"),
+    (r"\bundefined2\b", "uint16_t"),
+    (r"\bundefined1\b", "uint8_t"),
+]]
+_C_MASK = re.compile(r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'", re.S)
+
+
+def normalize_c_types(text: str) -> tuple[str, int]:
+    """Rewrite Ghidra/C width spellings in generated C to D2MOO's stdint canonical spelling
+    (`unsigned int` -> `uint32_t`, `uint` -> `uint32_t`, `unsigned char` -> `uint8_t`, ...).
+    Preserves comments and string literals (masked out first). Returns (text, replacements)."""
+    if not text:
+        return text, 0
+    masks = []
+
+    def _mask(m):
+        masks.append(m.group(0))
+        return f"\x00{len(masks) - 1}\x00"
+
+    masked = _C_MASK.sub(_mask, text)
+    count = 0
+    for rx, repl in _C_NORMALIZE:
+        masked, n = rx.subn(repl, masked)
+        count += n
+    out = re.sub(r"\x00(\d+)\x00", lambda m: masks[int(m.group(1))], masked)
+    return out, count
+
+
 # ---- version marker --------------------------------------------------------------------------
 MARKER_GROUP, MARKER_OPTION = "Program Information", "D2MOO.types.version"
 
@@ -494,6 +544,15 @@ def _selftest() -> int:
     assert validate_type("__lc_time_data")["verdict"] == "UNKNOWN"
     # marker stable across calls
     assert version_marker(v) == version_marker(v)
+    # output normalization: width spellings -> stdint, code only (comments/strings/idents preserved)
+    nt, n = normalize_c_types(
+        'extern "C" unsigned char f(void* p){ unsigned int x=(uint)0; return *(unsigned char*)p; }')
+    assert "uint8_t" in nt and "uint32_t" in nt and "unsigned char" not in nt, nt
+    assert 'extern "C"' in nt and "void* p" in nt, nt          # void*/char untouched
+    keep, _ = normalize_c_types('int n; char* s; // returns a byte\nchar c = uintVar;')
+    assert "int n" in keep and "char* s" in keep, keep         # char/int untouched
+    assert "// returns a byte" in keep, keep                   # comment word 'byte' untouched
+    assert "uintVar" in keep, keep                             # identifier containing 'uint' untouched
     print(f"[ok] d2moo_types self-test: {s['total_names']} canonical names "
           f"({s['structs']} structs, {s['enums']} enums, {s['unions']} unions, "
           f"{s['aliases']} aliases); marker {s['marker']}")
@@ -506,7 +565,14 @@ def main() -> int:
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--validate", help="classify a Ghidra type string")
     ap.add_argument("--emit-header", metavar="PATH", help="write the flat Ghidra-parseable header")
+    ap.add_argument("--normalize-file", metavar="PATH", help="rewrite a C file's widths to stdint in place")
     args = ap.parse_args()
+    if args.normalize_file:
+        p = Path(args.normalize_file)
+        out, n = normalize_c_types(p.read_text(encoding="utf-8"))
+        p.write_text(out, encoding="utf-8")
+        print(f"normalized {args.normalize_file}: {n} replacements")
+        return 0
     if args.emit_header:
         header, stats = emit_header()
         Path(args.emit_header).write_text(header, encoding="utf-8")

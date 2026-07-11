@@ -958,6 +958,14 @@ def write_candidate(reimpl_cpp: str, name: str) -> Path:
             f"write build poison into the provider candidates dir")
     CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
     body = reimpl_cpp
+    # Output-normalization (phase b): rewrite width spellings to D2MOO's canonical stdint
+    # (unsigned int -> uint32_t, uint -> uint32_t, ...). Typedef-identical via <cstdint>, so it
+    # can't change compiled behavior -- and the prove that follows this write validates it.
+    try:
+        import d2moo_types
+        body, _n = d2moo_types.normalize_c_types(body)
+    except Exception:
+        pass
     if "D2MOO_REIMPL_EXPORT:" not in body:
         body = f"// D2MOO_REIMPL_EXPORT: {name}\n{body}"
     path = CANDIDATES_DIR / f"{name}.cpp"
