@@ -3,13 +3,18 @@ package com.xebyte.core;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.plugin.core.clear.ClearFlowAndRepairCmd;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressOutOfBoundsException;
+import ghidra.program.model.address.AddressOverflowException;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.lang.InjectPayload;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
@@ -17,6 +22,8 @@ import ghidra.program.model.pcode.HighFunctionDBUtil.ReturnCommitOption;
 import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.LocalSymbolMap;
+import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.SymbolTable;
@@ -2979,6 +2986,290 @@ public class FunctionService {
                                    boolean restrictToExecuteMemory, String programName) {
         return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
                                 true, 1000, programName);
+    }
+
+    // ========================================================================
+    // Clear Flow and Repair
+    // ========================================================================
+
+    /** Command failure inside the write transaction; thrown so executeWrite rolls back. */
+    private static final class ClearFlowFailedException extends RuntimeException {
+        ClearFlowFailedException(String message) {
+            super(message);
+        }
+    }
+
+    @McpTool(path = "/clear_flow_and_repair", method = "POST",
+             description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
+             category = "function")
+    public Response clearFlowAndRepair(
+            @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Seed start. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000). "
+                               + "Use get_address_spaces first on multi-space programs.") String startAddress,
+            @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                   description = "Exclusive seed end (consistent with disassemble_bytes). Must be in the same "
+                               + "address space as start_address and strictly greater. Omitted: one-address seed; "
+                               + "the command still follows flow from there like clicking one address in the GUI.") String endAddress,
+            @Param(value = "program", defaultValue = "") String programName) {
+
+        if (startAddress == null || startAddress.isEmpty()) {
+            return Response.err("start_address parameter required");
+        }
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address start = ServiceUtils.parseAddress(program, startAddress);
+        if (start == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Address seedEnd = start;
+        if (endAddress != null && !endAddress.isEmpty()) {
+            Address end = ServiceUtils.parseAddress(program, endAddress);
+            if (end == null) return Response.err(ServiceUtils.getLastParseError());
+            if (!end.getAddressSpace().equals(start.getAddressSpace())) {
+                return Response.err("end_address must be in the same address space as start_address");
+            }
+            if (end.compareTo(start) <= 0) {
+                return Response.err("end_address must be greater than start_address (end_address is exclusive)");
+            }
+            seedEnd = end.subtract(1);
+        }
+
+        final AddressSet seed = new AddressSet(start, seedEnd);
+
+        // Computed before the transaction: a seed ending at the address-space maximum has no
+        // representable exclusive end.
+        String endExclusive;
+        try {
+            endExclusive = seedEnd.add(1).toString();
+        } catch (AddressOutOfBoundsException e) {
+            endExclusive = null;
+        }
+        final String endExclusiveStr = endExclusive;
+
+        try {
+            Map<String, Object> data = threadingStrategy.executeWrite(program, "Clear Flow and Repair", () -> {
+                Listing listing = program.getListing();
+                long instructionsBefore = countInstructionsIn(listing, seed);
+                List<Map<String, Object>> functionsBefore = snapshotFunctionsOverlapping(program, seed);
+
+                rejectDestructiveNoReturnBoundaries(program, listing, seed);
+                redisassembleStaleNoReturnCalls(program, listing, seed);
+                rejectDestructiveNoReturnBoundaries(program, listing, seed);
+
+                ClearFlowAndRepairCmd cmd = new ClearFlowAndRepairCmd(seed, false, false, true);
+                if (!cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
+                    String status = cmd.getStatusMsg();
+                    throw new ClearFlowFailedException(status != null && !status.isBlank()
+                            ? status : "Clear Flow and Repair returned false without a status message");
+                }
+                rejectDestructiveNoReturnBoundaries(program, listing, seed);
+
+                long instructionsAfter = countInstructionsIn(listing, seed);
+                List<Map<String, Object>> functionsAfter = snapshotFunctionsOverlapping(program, seed);
+
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("success", true);
+                Map<String, Object> seedRange = new LinkedHashMap<>();
+                seedRange.put("start_address", start.toString());
+                seedRange.put("end_address_exclusive", endExclusiveStr);
+                result.put("seed_range", seedRange);
+                result.put("repair", true);
+                result.put("clear_data", false);
+                result.put("clear_labels", false);
+                Map<String, Object> observations = new LinkedHashMap<>();
+                observations.put("instructions_in_seed_before", instructionsBefore);
+                observations.put("instructions_in_seed_after", instructionsAfter);
+                observations.put("instruction_count_delta_in_seed", instructionsAfter - instructionsBefore);
+                observations.put("functions_intersecting_seed_before", functionsBefore);
+                observations.put("functions_intersecting_seed_after", functionsAfter);
+                observations.put("noreturn_call_boundaries_in_seed",
+                    snapshotUndefinedNoReturnBoundaries(program, listing, seed));
+                result.put("observations", observations);
+                return result;
+            });
+            return Response.ok(data);
+        } catch (ClearFlowFailedException e) {
+            return Response.err(e.getMessage());
+        } catch (Exception e) {
+            return Response.err(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private static void redisassembleStaleNoReturnCalls(Program program, Listing listing,
+                                                        AddressSetView seed) {
+        List<Address> staleCalls = new ArrayList<>();
+        InstructionIterator instructions = listing.getInstructions(seed, true);
+        while (instructions.hasNext()) {
+            Instruction instruction = instructions.next();
+            if (instruction.getFlowOverride() != FlowOverride.CALL_RETURN ||
+                instruction.isFallThroughOverridden() || !isOriginalCall(instruction)) {
+                continue;
+            }
+
+            Address[] flows = instruction.getFlows();
+            if (flows.length != 1) {
+                continue;
+            }
+            Function target = program.getFunctionManager().getFunctionAt(flows[0]);
+            if (target != null && !calleeStopsFallthrough(program, target)) {
+                staleCalls.add(instruction.getAddress());
+            }
+        }
+
+        for (Address address : staleCalls) {
+            Instruction instruction = listing.getInstructionAt(address);
+            if (instruction == null || instruction.getFlowOverride() != FlowOverride.CALL_RETURN) {
+                continue;
+            }
+
+            listing.clearCodeUnits(address, instruction.getMaxAddress(), false);
+            DisassembleCommand disassemble = new DisassembleCommand(address, seed, true);
+            disassemble.enableCodeAnalysis(false);
+            boolean success = disassemble.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY);
+            Instruction repaired = listing.getInstructionAt(address);
+            if (!success || repaired == null || repaired.getFlowOverride() == FlowOverride.CALL_RETURN) {
+                String status = disassemble.getStatusMsg();
+                throw new ClearFlowFailedException(status != null && !status.isBlank()
+                        ? status : "Failed to re-disassemble stale no-return call at " + address);
+            }
+        }
+    }
+
+    private static void rejectDestructiveNoReturnBoundaries(Program program, Listing listing,
+                                                              AddressSetView seed) {
+        List<Map<String, Object>> boundaries = new ArrayList<>();
+        InstructionIterator instructions = listing.getInstructions(seed, true);
+        while (instructions.hasNext()) {
+            Instruction call = instructions.next();
+            Function target = getDirectCallTarget(program, call);
+            Address next = getSequentialAddress(call);
+            if (target == null || next == null || call.isFallThroughOverridden() ||
+                !calleeStopsFallthrough(program, target) || listing.getInstructionAt(next) == null ||
+                hasIndependentEntry(program, listing, call, next)) {
+                continue;
+            }
+            boundaries.add(snapshotNoReturnBoundary(call, target, next));
+        }
+        if (!boundaries.isEmpty()) {
+            throw new ClearFlowFailedException(
+                "Repair would delete defined continuation after no-return call(s): " + boundaries);
+        }
+    }
+
+    private static List<Map<String, Object>> snapshotUndefinedNoReturnBoundaries(
+            Program program, Listing listing, AddressSetView seed) {
+        List<Map<String, Object>> boundaries = new ArrayList<>();
+        InstructionIterator instructions = listing.getInstructions(seed, true);
+        while (instructions.hasNext()) {
+            Instruction call = instructions.next();
+            Function target = getDirectCallTarget(program, call);
+            Address next = getSequentialAddress(call);
+            if (target != null && next != null && calleeStopsFallthrough(program, target) &&
+                listing.getInstructionAt(next) == null) {
+                boundaries.add(snapshotNoReturnBoundary(call, target, next));
+            }
+        }
+        return boundaries;
+    }
+
+    private static Function getDirectCallTarget(Program program, Instruction instruction) {
+        if (!isOriginalCall(instruction)) {
+            return null;
+        }
+        Address[] flows = instruction.getFlows();
+        if (flows.length != 1) {
+            return null;
+        }
+        return program.getFunctionManager().getFunctionAt(flows[0]);
+    }
+
+    private static boolean isOriginalCall(Instruction instruction) {
+        return instruction.getPrototype().getFlowType(instruction.getInstructionContext()).isCall();
+    }
+
+    private static boolean calleeStopsFallthrough(Program program, Function target) {
+        if (target.hasNoReturn()) {
+            return true;
+        }
+        String callFixup = target.getCallFixup();
+        if (callFixup == null || callFixup.isEmpty()) {
+            return false;
+        }
+        InjectPayload payload = program.getCompilerSpec().getPcodeInjectLibrary()
+            .getPayload(InjectPayload.CALLFIXUP_TYPE, callFixup);
+        return payload != null && !payload.isFallThru();
+    }
+
+    private static Address getSequentialAddress(Instruction instruction) {
+        try {
+            return instruction.getAddress().addNoWrap(instruction.getDefaultFallThroughOffset());
+        }
+        catch (AddressOverflowException e) {
+            return null;
+        }
+    }
+
+    private static boolean hasIndependentEntry(Program program, Listing listing,
+                                                Instruction call, Address next) {
+        Address fallFrom = listing.getInstructionAt(next).getFallFrom();
+        if (fallFrom != null && !fallFrom.equals(call.getAddress())) {
+            return true;
+        }
+        ReferenceIterator references = program.getReferenceManager().getReferencesTo(next);
+        while (references.hasNext()) {
+            Reference reference = references.next();
+            if (reference.getReferenceType().isFlow() &&
+                !reference.getFromAddress().equals(call.getAddress())) {
+                return true;
+            }
+        }
+        if (program.getFunctionManager().getFunctionAt(next) != null ||
+            program.getSymbolTable().isExternalEntryPoint(next)) {
+            return true;
+        }
+        Symbol symbol = program.getSymbolTable().getPrimarySymbol(next);
+        return symbol != null && symbol.getSource() != SourceType.DEFAULT;
+    }
+
+    private static Map<String, Object> snapshotNoReturnBoundary(Instruction call, Function target,
+                                                                 Address next) {
+        Map<String, Object> boundary = new LinkedHashMap<>();
+        boundary.put("call_address", call.getAddress().toString());
+        boundary.put("callee_address", target.getEntryPoint().toString());
+        boundary.put("callee_name", target.getName());
+        boundary.put("callee_is_thunk", target.isThunk());
+        Function thunked = target.getThunkedFunction(false);
+        boundary.put("thunked_function", thunked != null ? thunked.getEntryPoint().toString() : null);
+        boundary.put("next_address", next.toString());
+        return boundary;
+    }
+
+    private static long countInstructionsIn(Listing listing, AddressSetView set) {
+        long count = 0;
+        for (InstructionIterator it = listing.getInstructions(set, true); it.hasNext(); it.next()) {
+            count++;
+        }
+        return count;
+    }
+
+    /** Immutable name/entry snapshots, entry-ascending; Function objects must not outlive the transaction. */
+    private static List<Map<String, Object>> snapshotFunctionsOverlapping(Program program, AddressSetView set) {
+        List<Function> funcs = new ArrayList<>();
+        java.util.Iterator<Function> it = program.getFunctionManager().getFunctionsOverlapping(set);
+        while (it.hasNext()) {
+            funcs.add(it.next());
+        }
+        funcs.sort(java.util.Comparator.comparing(Function::getEntryPoint));
+        List<Map<String, Object>> out = new ArrayList<>(funcs.size());
+        for (Function f : funcs) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", f.getName());
+            m.put("entry", f.getEntryPoint().toString());
+            out.add(m);
+        }
+        return out;
     }
 
     // ========================================================================

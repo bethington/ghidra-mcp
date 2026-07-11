@@ -1,7 +1,7 @@
 {
   "version": "5.17.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 270,
+  "total_endpoints": 271,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -446,6 +446,17 @@
         "keep_checked_out"
       ],
       "description": "Check an open program back in to the shared Ghidra Server as a new version"
+    },
+    {
+      "path": "/clear_flow_and_repair",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "start_address",
+        "end_address",
+        "program"
+      ],
+      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call."
     },
     {
       "path": "/clear_function_comments",
