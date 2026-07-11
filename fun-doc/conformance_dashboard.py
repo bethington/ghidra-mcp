@@ -28,6 +28,9 @@ PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
 
 CONF_RUNGS = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "CONF_DRAFT"]  # best->worst
 DOC_RUNGS = ["DOC_VERIFIED", "DOC_REVIEWED", "DOC_DRAFT"]                                        # best->worst
+# tags that drop a function OUT of the "real game work" scope: library + trivial dispositions.
+LIB_TAGS = ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")
+EXCLUDE_TAGS = LIB_TAGS + ("STUB", "THUNK", "EXTERNAL")
 OPT_GROUP, OPT_NAME = "Program Information", "Conformance.summary"
 
 
@@ -146,8 +149,7 @@ def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
     program = program or PROGRAM
     conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
     doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
-    lib = set().union(*(_tag_addrs(t, program) for t in
-                        ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")))
+    lib = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
     txt = _get("/list_functions", program=program, limit=100000)
     import re
     line = re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
@@ -294,7 +296,7 @@ def _in_scope_fn(program: str, s: dict) -> int | None:
     defined = {line.search(l.strip()).group(1).lower() for l in
                (txt if isinstance(txt, str) else "").splitlines() if line.search(l.strip())}
     lib = set()
-    for t in ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN"):
+    for t in EXCLUDE_TAGS:
         lib |= {a.lstrip("0x") for a in _tag_addrs(t, program)}
     return len(defined - lib) if defined else None
 
