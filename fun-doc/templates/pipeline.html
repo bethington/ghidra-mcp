@@ -297,7 +297,7 @@
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
-      <select id="lane"><option value="document">Document</option><option value="triage">Triage</option><option value="prove">Prove</option></select>
+      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="triage">Triage</option></select>
     </div>
     <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
@@ -683,10 +683,29 @@
 
   // ---------- actions (emit to backend; graceful if socket absent) ----------
   let socket=null;
-  function startLane(force){ const lane=force||document.getElementById("lane").value;
-    if(socket) socket.emit("request_start_worker",{lane,program:PROGRAM,provider:document.getElementById("provider").value,count:+document.getElementById("count").value,continuous:document.getElementById("auto").checked});
-    flash(`start ${lane} on ${PROGRAM||'?'}`); }
-  function triage(n){ if(socket) socket.emit("request_start_worker",{lane:"triage",program:PROGRAM,count:n}); flash(`triage ${n||'all'}`); }
+  // Lanes map to real backend worker modes:
+  //   Document -> request_start_worker mode=functions
+  //   Prove    -> request_start_worker mode=port (conformance)
+  //   Globals  -> request_start_globals_worker
+  //   Triage   -> request_start_triage (non-LLM classify script)
+  function startLane(force){
+    const lane=force||document.getElementById("lane").value;
+    const provider=document.getElementById("provider").value;
+    const count=+document.getElementById("count").value;
+    const continuous=document.getElementById("auto").checked;
+    const binary=PROGRAM;
+    if(!socket){ flash("no socket"); return; }
+    if(lane==="globals"){
+      socket.emit("request_start_globals_worker",{binary,provider,count,continuous});
+    } else if(lane==="triage"){
+      socket.emit("request_start_triage",{binary});
+    } else {
+      const mode=(lane==="prove"||lane==="port")?"port":"functions";
+      socket.emit("request_start_worker",{binary,provider,count,continuous,mode});
+    }
+    flash(`start ${lane} on ${binary||'?'}`);
+  }
+  function triage(n){ if(socket) socket.emit("request_start_triage",{binary:PROGRAM}); flash("triage"); }
   function flash(m){ const h=document.getElementById("workerHint"); const o=h.textContent; h.textContent=m+"..."; setTimeout(()=>h.textContent=o,1200); }
 
   async function refreshAll(){
@@ -705,7 +724,11 @@
     socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; });
     socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
     socket.on("conf_changed",()=>refreshAll());
-    socket.on("worker_status",st=>renderWorkers(st));
+    let wsTimer;
+    socket.on("worker_status",st=>{ renderWorkers(st);   // auto-refresh as workers change Ghidra
+      clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
+    socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
+    socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
   } catch(e){}
   function renderWorkers(st){
     const w=(st&&st.workers)||[]; const c=document.getElementById("workerCards");

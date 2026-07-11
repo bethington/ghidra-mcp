@@ -12,6 +12,7 @@ Features:
 
 import json
 import os
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -216,6 +217,7 @@ class WorkerManager:
         continuous=False,
         restored=False,
         mode="functions",
+        addresses=None,
     ):
         # Q9: globals worker requires a binary — refuse early with a clear
         # message rather than launching a worker that can't pick a target.
@@ -287,6 +289,9 @@ class WorkerManager:
                 "continuous": continuous,
                 "model": model,
                 "binary": binary,
+                # Targeted-fix mode (cleanup queue): dispatch exactly these
+                # addresses instead of walking the binary. Globals mode only.
+                "addresses": list(addresses) if addresses else None,
                 "thread": None,
                 "stop_flag": stop_flag,
                 "started_at": datetime.now().isoformat(),
@@ -1029,7 +1034,19 @@ class WorkerManager:
                 on_progress=_on_progress,
                 on_started=_on_global_started,
                 exclude_binaries_provider=_exclude_binaries,
+                target_addresses=worker.get("addresses"),
             )
+            # Stash for the worker_stopped emit in the finally block so the
+            # dashboard pane can render the skip breakdown — "0 processed"
+            # alone can't distinguish "binary is drained" from "worker did
+            # nothing".
+            worker["globals_summary"] = {
+                "processed": summary.get("processed"),
+                "totals": summary.get("totals"),
+                "skip_reasons": summary.get("skip_reasons"),
+                "stopped_reason": summary.get("stopped_reason"),
+                "binaries_visited": summary.get("binaries_visited"),
+            }
             print(
                 f"  [globals-worker {worker_id}] done: "
                 f"{summary['processed']} processed across "
@@ -1061,6 +1078,7 @@ class WorkerManager:
                     "reason": worker["status"],
                     "mode": "globals",
                     "progress": dict(worker["progress"]),
+                    "summary": worker.get("globals_summary"),
                 },
             )
 
@@ -1553,11 +1571,44 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "today_skipped_delta": 0,
             },
             "today": {"runs": 0, "success_rate": 0, "avg_delta": 0, "by_provider": {}},
+            "globals_today": {"runs": 0, "completed": 0, "skipped": 0, "failed": 0, "renames": 0},
         }
         if not logs:
             return empty
 
         today = datetime.now().date().isoformat()
+
+        # Model-performance is a FUNCTION-doc panel: globals/port runs carry
+        # no score deltas, so counting them dilutes success_rate toward 0%
+        # whenever those workers dominate the log tail (observed live:
+        # "0.0% success, 500 unknown tc" after a globals-heavy day). Split
+        # them out — globals get their own today-summary; port runs have
+        # their own panel elsewhere.
+        NON_FUNCTION_MODES = ("globals", "port", "port_handle", "port_live")
+        g_today = [
+            l for l in logs
+            if l.get("mode") == "globals" and l.get("timestamp", "").startswith(today)
+        ]
+        globals_today = {
+            "runs": len(g_today),
+            "completed": sum(1 for l in g_today if l.get("result") in ("completed", "improved")),
+            "skipped": sum(1 for l in g_today if l.get("result") == "skipped"),
+            "failed": sum(
+                1 for l in g_today
+                if l.get("result") in ("no_change", "audit_fail", "regressed", "blocked", "lateral_change")
+            ),
+            "renames": sum(
+                1 for l in g_today
+                if l.get("result") in ("completed", "improved")
+                and l.get("name_before") and l.get("name")
+                and l.get("name_before") != l.get("name")
+            ),
+        }
+        logs = [l for l in logs if l.get("mode") not in NON_FUNCTION_MODES]
+        if not logs:
+            empty["globals_today"] = globals_today
+            return empty
+
         today_logs = [l for l in logs if l.get("timestamp", "").startswith(today)]
 
         deltas = []
@@ -1741,6 +1792,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             ),
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
+            "globals_today": globals_today,
             "by_provider": provider_stats,
             "handoffs": {
                 "total": sum(handoff_chains.values()),
@@ -1798,12 +1850,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 set(f.get("program_name", "unknown") for f in all_funcs.values())
             )
         available_binaries = sorted(set(project_binaries + scanned_binaries))
-        # Filter to active binary if set
+        # Filter to active binary if set (full program path disambiguates same-named
+        # binaries when active_binary is a path; else falls back to the bare name).
         if active_binary:
+            from fun_doc import func_in_binary
             funcs = {
                 k: v
                 for k, v in all_funcs.items()
-                if v.get("program_name") == active_binary
+                if func_in_binary(v, active_binary)
             }
         else:
             funcs = all_funcs
@@ -2220,16 +2274,49 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             count = max(1, min(500, int((data or {}).get("count", 5))))
             model = (data or {}).get("model") or None
             binary = (data or {}).get("binary") or None
+            # The new pipeline UI drives the Document and Prove lanes through this
+            # event; Prove maps to the PORT (conformance) worker mode. Default stays
+            # "functions" (document) so the classic dashboard is unaffected.
+            mode = (data or {}).get("mode") or "functions"
+            if mode in ("document", "doc", "functions"):
+                mode = "functions"
             worker_id = worker_mgr.start_worker(
                 provider=provider,
                 count=count,
                 model=model,
                 binary=binary,
                 continuous=continuous,
+                mode=mode,
             )
-            sio_emit("worker_started_ack", {"worker_id": worker_id})
+            sio_emit("worker_started_ack", {"worker_id": worker_id, "mode": mode})
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
+
+    @socketio.on("request_start_triage")
+    def handle_start_triage(data):
+        """Triage lane: run the conformance intake classify over the focused
+        binary. It's a non-LLM script (scope-classify + enqueue), run as a
+        subprocess so it doesn't block the socket thread. Path is configurable
+        via CONF_TRIAGE_TOOL; a clear error is surfaced if it isn't present."""
+        import subprocess
+        program = (data or {}).get("binary") or (data or {}).get("program") or None
+        tool = os.environ.get(
+            "CONF_TRIAGE_TOOL",
+            str(Path(__file__).resolve().parents[2] / "cpp" / "D2MOO"
+                / "conformance" / "tools" / "triage.py"),
+        )
+        if not Path(tool).exists():
+            sio_emit("worker_error", {"error": f"triage tool not found: {tool} "
+                                               "(set CONF_TRIAGE_TOOL)"})
+            return
+        try:
+            args = [sys.executable, tool]
+            if program:
+                args += ["--program", program]
+            subprocess.Popen(args)
+            sio_emit("worker_started_ack", {"mode": "triage", "program": program})
+        except Exception as e:
+            sio_emit("worker_error", {"error": f"triage launch failed: {e}"})
 
     @socketio.on("request_start_globals_worker")
     def handle_start_globals_worker(data):
@@ -2255,6 +2342,36 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
 
+    @socketio.on("request_fix_global")
+    def handle_fix_global(data):
+        """Targeted fix from the cleanup queue: run a globals worker on
+        exactly one address (or a small list). Bypasses the clean cache so
+        the fix always dispatches."""
+        try:
+            program = (data or {}).get("program") or None
+            addresses = (data or {}).get("addresses") or []
+            if isinstance(addresses, str):
+                addresses = [addresses]
+            if not program or not addresses:
+                sio_emit("worker_error", {"error": "program and addresses required"})
+                return
+            provider = (data or {}).get("provider", "minimax")
+            worker_id = worker_mgr.start_worker(
+                provider=provider,
+                count=len(addresses),
+                model=(data or {}).get("model") or None,
+                binary=program,
+                continuous=False,
+                mode="globals",
+                addresses=addresses,
+            )
+            sio_emit(
+                "worker_started_ack",
+                {"worker_id": worker_id, "mode": "globals", "targeted": len(addresses)},
+            )
+        except ValueError as e:
+            sio_emit("worker_error", {"error": str(e)})
+
     @socketio.on("request_stop_worker")
     def handle_stop_worker(data):
         try:
@@ -2276,6 +2393,18 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     @app.route("/")
     def dashboard():
         return render_template("dashboard.html", stats=get_stats_snapshot())
+
+    # New Ghidra-native confidence dashboard (kept alongside the classic one).
+    @app.route("/pipeline")
+    def pipeline_dashboard():
+        return render_template("pipeline.html")
+
+    try:
+        from conformance_api import conf_bp
+        if "conformance" not in app.blueprints:
+            app.register_blueprint(conf_bp)
+    except Exception as _e:
+        print(f"  (conformance blueprint not registered: {_e})", flush=True)
 
     @app.route("/api/stats")
     def api_stats():
@@ -2771,8 +2900,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             blacklist = set(scorer_status.get("blacklisted") or [])
 
             from global_scorer import status_for as _global_status_for
+            from global_scorer import _is_phantom_program_name
             binaries = []
             for path, rec in persisted.items():
+                if _is_phantom_program_name(rec.get("name") or Path(path).name):
+                    continue  # skip D2Launch.dll.0-style versioned phantoms
                 total = rec.get("total_documentable", 0) or 0
                 fully = rec.get("fully_documented", 0) or 0
                 with_issues = max(0, total - fully)
@@ -2789,6 +2921,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     "percent": pct,
                     "last_scan": rec.get("last_scan"),
                     "status": row_status,
+                    # Category breakdown from classify_documented (v2 bar).
+                    # Absent on records stamped by an older scorer.
+                    "pending": rec.get("pending"),
+                    "soft_only": rec.get("soft_only"),
+                    "os_canonical": rec.get("os_canonical"),
+                    "code_labels": rec.get("code_label"),
+                    "clean": rec.get("clean"),
+                    "rules_version": rec.get("rules_version"),
                 })
             binaries.sort(key=lambda r: r["name"], reverse=True)
             binaries.sort(key=lambda r: r["with_issues"], reverse=True)
@@ -2796,6 +2936,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "total_documentable": sum(r["total_documentable"] for r in binaries),
                 "fully_documented": sum(r["fully_documented"] for r in binaries),
                 "with_issues": sum(r["with_issues"] for r in binaries),
+                "pending": sum(r.get("pending") or 0 for r in binaries),
+                "soft_only": sum(r.get("soft_only") or 0 for r in binaries),
+                "os_canonical": sum(r.get("os_canonical") or 0 for r in binaries),
+                "code_labels": sum(r.get("code_labels") or 0 for r in binaries),
                 "binaries_total": len(binaries),
                 "binaries_complete": sum(
                     1 for r in binaries if r["status"] == "complete"
@@ -2861,6 +3005,190 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
 
+    @app.route("/api/global_inventory/reset_all", methods=["POST"])
+    def global_inventory_reset_all():
+        """Bulk reset: drop EVERY binary's inventory record so the scorer
+        re-walks the whole project under the current counting rules.
+        Companion to the per-binary ↻ — a rules change used to require 31
+        individual clicks (or waiting out an hour-long cooldown apiece)."""
+        try:
+            inv_dir = Path(__file__).parent
+            data_inv = load_global_inventory(inv_dir)
+            removed = len(data_inv.get("binaries") or {})
+            data_inv["binaries"] = {}
+            from global_scorer import save_inventory as _save_g_inv
+            _save_g_inv(inv_dir, data_inv)
+            global_scorer.clear_blacklist(None)
+            socketio.emit("global_inventory_reset", {"ok": True, "path": None})
+            return jsonify({"ok": True, "removed": removed})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    # --- Globals quality-review feeds (renames + cleanup queue) ---
+
+    _globals_feed_cache = {"renames": None, "cleanup": None, "sig": None}
+
+    def _runs_file_sig():
+        lf = app.config["LOG_FILE"]
+        try:
+            st = lf.stat()
+            return (st.st_mtime, st.st_size)
+        except OSError:
+            return None
+
+    def _globals_feed_sync():
+        """Refresh the shared file signature; on change, drop BOTH cached
+        feeds (they must not survive independently — a stale one would
+        pass the sig check after the other refreshed it)."""
+        sig = _runs_file_sig()
+        if sig != _globals_feed_cache["sig"]:
+            _globals_feed_cache["renames"] = None
+            _globals_feed_cache["cleanup"] = None
+            _globals_feed_cache["sig"] = sig
+        return sig
+
+    @app.route("/api/globals/renames")
+    def api_globals_renames():
+        """Recent globals renames (name_before != name), newest first.
+        Reads a tail window of runs.jsonl — renames are sparse (~1 per
+        27 KB historically), so a 16 MB window yields several hundred.
+        Cached by file mtime+size."""
+        try:
+            limit = max(1, min(500, int(request.args.get("limit", 200))))
+        except ValueError:
+            limit = 200
+        _globals_feed_sync()
+        if _globals_feed_cache["renames"] is not None:
+            return jsonify({"renames": _globals_feed_cache["renames"][:limit]})
+        lf = app.config["LOG_FILE"]
+        renames = []
+        try:
+            with open(lf, "rb") as f:
+                size = f.seek(0, 2)
+                start = max(0, size - 16_000_000)
+                f.seek(start)
+                if start > 0:
+                    f.readline()
+                for raw in f:
+                    if b'"mode": "globals"' not in raw:
+                        continue
+                    try:
+                        r = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    nb, na = r.get("name_before"), r.get("name")
+                    if r.get("result") not in ("completed", "improved") or not nb or not na or nb == na:
+                        continue
+                    renames.append({
+                        "timestamp": r.get("timestamp"),
+                        "program": r.get("program"),
+                        "address": r.get("address"),
+                        "name_before": nb,
+                        "name": na,
+                        "duplicate_name": bool(r.get("duplicate_name")),
+                        "placeholder_name": bool(r.get("placeholder_name")),
+                        "issues_before": r.get("issues_before") or [],
+                    })
+        except OSError:
+            pass
+        renames.reverse()  # newest first
+        _globals_feed_cache["renames"] = renames
+        return jsonify({"renames": renames[:limit]})
+
+    @app.route("/api/globals/cleanup")
+    def api_globals_cleanup():
+        """Cleanup queue: duplicate names (same final name at 2+ addresses
+        in one binary) and placeholder/offset-derived names, derived from
+        the full runs.jsonl history (latest completed run per address wins).
+        Full-file scan (~118 MB, a few seconds) — cached by mtime+size and
+        only fetched when the panel is opened/refreshed."""
+        _globals_feed_sync()
+        if _globals_feed_cache["cleanup"] is not None:
+            return jsonify(_globals_feed_cache["cleanup"])
+        from fun_doc import _name_is_placeholder, _placeholder_cluster_base
+        lf = app.config["LOG_FILE"]
+        final = {}  # (program, address) -> latest completed name
+        try:
+            with open(lf, "rb") as f:
+                for raw in f:
+                    if b'"mode": "globals"' not in raw:
+                        continue
+                    try:
+                        r = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if r.get("result") not in ("completed", "improved"):
+                        continue
+                    name = r.get("name")
+                    if name:
+                        # File is append-ordered — later lines overwrite.
+                        final[(r.get("program") or "", r.get("address") or "")] = name
+        except OSError:
+            pass
+        by_name = defaultdict(list)
+        for (program, address), name in final.items():
+            by_name[(program, name)].append(address)
+        duplicates = sorted(
+            (
+                {"program": prog, "name": name, "addresses": sorted(addrs)}
+                for (prog, name), addrs in by_name.items()
+                if len(addrs) > 1
+            ),
+            key=lambda d: len(d["addresses"]),
+            reverse=True,
+        )
+
+        # Cluster placeholder names that share an array-base. A run of
+        # per-element placeholders (g_dwKeybindingStateEntry0x16, ...0x17, …)
+        # is one array to reinterpret in Ghidra, NOT N worker fixes —
+        # dispatching the worker per-address would just re-invent the same
+        # offset-suffixed names. Clusters of >= ARRAY_MIN are pulled out as
+        # `array_candidates` (no per-address Fix); the rest stay as
+        # individually-fixable placeholders.
+        ARRAY_MIN = 4
+        ph_all = [
+            (prog, addr, name)
+            for (prog, addr), name in final.items()
+            if _name_is_placeholder(name)
+        ]
+        clusters = defaultdict(list)
+        for prog, addr, name in ph_all:
+            clusters[(prog, _placeholder_cluster_base(name))].append((addr, name))
+        array_candidates = []
+        clustered_keys = set()
+        for (prog, base), members in clusters.items():
+            if len(members) >= ARRAY_MIN:
+                addrs = sorted(a for a, _ in members)
+                array_candidates.append({
+                    "program": prog,
+                    "base": base,
+                    "count": len(members),
+                    "addr_first": addrs[0],
+                    "addr_last": addrs[-1],
+                    "sample_names": sorted({n for _, n in members})[:6],
+                })
+                for a, _ in members:
+                    clustered_keys.add((prog, a))
+        array_candidates.sort(key=lambda c: c["count"], reverse=True)
+        placeholders = sorted(
+            (
+                {"program": prog, "address": addr, "name": name}
+                for prog, addr, name in ph_all
+                if (prog, addr) not in clustered_keys
+            ),
+            key=lambda d: (d["program"], d["name"]),
+        )
+        payload = {
+            "duplicates": duplicates[:300],
+            "placeholders": placeholders[:300],
+            "array_candidates": array_candidates[:200],
+            "duplicate_total": len(duplicates),
+            "placeholder_total": len(placeholders),
+            "array_candidate_total": len(array_candidates),
+        }
+        _globals_feed_cache["cleanup"] = payload
+        return jsonify(payload)
+
     # --- Provider quota pauses (Q1-Q11) ---
     from provider_pause import get_default_manager as _get_pause_mgr
 
@@ -2912,6 +3240,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     if restored_workers:
         print(f"  Restored {len(restored_workers)} dashboard worker(s) after restart")
 
+    # /api/functions/search fires on every binary switch and costs a
+    # ~300 ms full-row materialization per call (it showed up in the
+    # slow-query log during routine dashboard navigation). Nav-time
+    # searches tolerate 30 s of staleness, so cache whole responses per
+    # parameter tuple. Bounded size; entries expire by TTL.
+    _search_cache = {}
+    _SEARCH_CACHE_TTL = 30.0
+    _SEARCH_CACHE_MAX = 32
+
     @app.route("/api/functions/search", methods=["GET"])
     def search_functions():
         """Search across the full state.functions map without the 500-row dashboard cap."""
@@ -2923,6 +3260,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError:
             limit = 5000
         sort = request.args.get("sort", "score")
+        cache_key = (q, program, layer_filter, limit, sort)
+        now = time.time()
+        hit = _search_cache.get(cache_key)
+        if hit is not None and (now - hit[0]) < _SEARCH_CACHE_TTL:
+            return hit[1]
         # Push the program filter into SQL — this route fires on every
         # dashboard repaint, and a full-state load costs ~3 s at 60K rows.
         state = load_state(binary_name=program) if program else load_state()
@@ -2931,11 +3273,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         good_enough = queue.get("config", {}).get("good_enough_score", 80)
         pinned = set(queue.get("pinned", []))
 
+        from fun_doc import func_in_binary
         results = []
         for key, func in all_funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
                 continue
-            if program and func.get("program_name") != program:
+            if program and not func_in_binary(func, program):
                 continue
             # Layer filter — computed dynamically using the same BFS as
             # /api/call_graph_layers so results match the dashboard exactly.
@@ -2952,7 +3295,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     bf = {
                         k: v
                         for k, v in all_funcs.items()
-                        if v.get("program_name") == active_bin
+                        if func_in_binary(v, active_bin)
                         and not v.get("is_thunk")
                         and not v.get("is_external")
                     }
@@ -3130,9 +3473,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         else:  # "score" (default — lowest first)
             results.sort(key=lambda r: r["score"])
         total_match = len(results)
-        return jsonify(
+        response = jsonify(
             {"total": total_match, "results": results[:limit], "limit": limit}
         )
+        if len(_search_cache) >= _SEARCH_CACHE_MAX:
+            # Evict the oldest entry — tiny cache, no need for real LRU.
+            oldest = min(_search_cache, key=lambda k: _search_cache[k][0])
+            _search_cache.pop(oldest, None)
+        _search_cache[cache_key] = (now, response)
+        return response
 
     # --- Folder / binary selection ---
 
@@ -3399,12 +3748,13 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         queue = load_queue()
         good_enough = queue.get("config", {}).get("good_enough_score", 80)
 
-        # Filter to active binary, non-thunk only
+        # Filter to active binary, non-thunk only (path-aware -- disambiguates same names)
         if active_binary:
+            from fun_doc import func_in_binary
             funcs = {
                 k: v
                 for k, v in all_funcs.items()
-                if v.get("program_name") == active_binary
+                if func_in_binary(v, active_binary)
                 and not v.get("is_thunk")
                 and not v.get("is_external")
             }

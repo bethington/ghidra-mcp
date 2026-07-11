@@ -31,14 +31,28 @@ DOC_RUNGS = ["DOC_VERIFIED", "DOC_REVIEWED", "DOC_DRAFT"]                       
 OPT_GROUP, OPT_NAME = "Program Information", "Conformance.summary"
 
 
+import time as _time
+
+
 def _get(path: str, **params):
+    """GET with a couple of retries -- Ghidra's HTTP bridge can transiently hiccup
+    (5xx/reset) when a worker is hammering it; a bare failure here would 500 the
+    dashboard endpoint and make the UI fall back to stale sample data."""
     url = f"{GHIDRA}{path}" + ("?" + urlencode(params) if params else "")
-    with urllib.request.urlopen(url, timeout=60) as r:
-        raw = r.read().decode("utf-8", "replace")
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw   # text endpoints (decompile, list_functions)
+    last = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                raw = r.read().decode("utf-8", "replace")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return raw   # text endpoints (decompile, list_functions)
+        except Exception as e:   # URLError, HTTPError, timeout, reset
+            last = e
+            if attempt < 2:
+                _time.sleep(0.3 * (attempt + 1))
+    raise last
 
 
 def _post(path: str, data: dict) -> dict:

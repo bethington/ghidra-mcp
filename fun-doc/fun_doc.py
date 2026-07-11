@@ -1250,8 +1250,14 @@ def _state_dict_from_repo(repo, binary_name=None):
         sess = repo.get_session(cur_id)
         if sess and isinstance(sess.get("payload"), dict):
             state["current_session"] = sess["payload"]
-    # Functions
-    for row in repo.list_functions(binary_name=binary_name):
+    # Functions. The selector may be a full program PATH (unique -- disambiguates
+    # same-named binaries) or a bare binary NAME (legacy); dispatch to the matching
+    # DB column so a full path filters correctly instead of returning 0 rows.
+    if binary_name and ("/" in binary_name or "\\" in binary_name):
+        rows = repo.list_functions(program_path=binary_name)
+    else:
+        rows = repo.list_functions(binary_name=binary_name)
+    for row in rows:
         program_path = row.get("program_path") or ""
         address = row.get("address") or ""
         state["functions"][f"{program_path}::{address}"] = _row_to_state_func(row)
@@ -1297,7 +1303,7 @@ def load_state(*, binary_name=None):
         state["functions"] = {
             k: v
             for k, v in funcs.items()
-            if (v or {}).get("program_name") == binary_name
+            if func_in_binary(v or {}, binary_name)
         }
     return state
 
@@ -1414,6 +1420,7 @@ def list_scanned_binaries():
             for f in (state.get("functions") or {}).values()
         }
     )
+
 
 
 def _atomic_write_state(state):
@@ -2343,7 +2350,7 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
         stale_keys = [
             k
             for k, f in state["functions"].items()
-            if f.get("program_name") == binary_filter and k not in all_functions
+            if func_in_binary(f, binary_filter) and k not in all_functions
         ]
         for k in stale_keys:
             del state["functions"][k]
@@ -3071,6 +3078,25 @@ def load_conformance_protected(force_reload=False):
     return _conformance_protected_cache
 
 
+def func_in_binary(func, sel):
+    """Does `func` belong to the binary selector `sel`?
+
+    `sel` may be a FULL PROGRAM PATH ("/Mods/PD2-S12/D2Common.dll") -- the correct,
+    UNIQUE key that disambiguates same-named binaries across folders (the project has
+    two D2Common.dll) -- or a bare binary NAME ("D2Common.dll") for legacy/convenience.
+    A path selector matches the func's full program path (func['program'] ==
+    program_path); a bare name matches program_name. Falsy `sel` = no filter (all).
+
+    Prefer passing the full path: a bare name silently conflates every binary of that
+    name. The func dict carries the full path under 'program' (_row_to_state_func)."""
+    if not sel:
+        return True
+    prog = func.get("program") or func.get("program_path")
+    if "/" in sel or "\\" in sel:
+        return prog == sel
+    return func.get("program_name") == sel
+
+
 def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=None):
     """Canonical work-queue selector. Used by both fun_doc CLI and web dashboard.
 
@@ -3109,7 +3135,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         if func.get("is_thunk") or func.get("is_external"):
             continue
         is_pinned = key in pinned
-        if active_binary and func.get("program_name") != active_binary:
+        if active_binary and not func_in_binary(func, active_binary):
             continue
 
         # Conformance-protected: functions carrying an OpenD2 conformance tag
@@ -9529,6 +9555,32 @@ def _name_is_placeholder(name):
     return bool(_GLOBAL_PLACEHOLDER_NAME_RE.search(name))
 
 
+# Strips offset/index tokens so placeholder names that are really elements
+# of one array collapse to a shared base. `g_dwKeybindingStateEntry0x16`,
+# `...0x17`, `...Idx_0x50` all → `g_dwKeybindingStateEntry`. Used to cluster
+# per-element placeholders into a single "reinterpret as array in Ghidra"
+# task instead of feeding N individual addresses to the worker.
+_PLACEHOLDER_TOKEN_RE = re.compile(
+    r"(_?(?<![0-9])0x[0-9a-fA-F]+|Field[0-9A-Fa-f]+|Entry(?=0x|_0x)|_[0-9a-f]{3,8}$"
+    r"|Idx$|Alt$|[0-9]+$)"
+)
+
+
+def _placeholder_cluster_base(name):
+    """Collapse a placeholder name to its array-base by repeatedly stripping
+    trailing offset/index tokens. Returns the base (may equal `name` if no
+    token strips)."""
+    if not name:
+        return name
+    prev = None
+    cur = name
+    # Iterate: one element can carry several tokens (Idx + _0x50).
+    while cur != prev:
+        prev = cur
+        cur = _PLACEHOLDER_TOKEN_RE.sub("", cur)
+    return cur.rstrip("_") or name
+
+
 def _list_global_entries(prog_path):
     """Page through `/list_globals` and return
     `[{"address": "0x<hex>", "name": <str|None>}, ...]`. Mirrors web.py's
@@ -9636,6 +9688,117 @@ def _invalidate_global_inventory(prog_path):
         )
 
 
+# Issues the audit treats as non-blocking cosmetics (soft severity). A
+# global whose blocking issues reduce to exactly {untyped} after removing
+# these is a pure typing target — see _is_untyped_only / typing mode.
+_SOFT_GLOBAL_ISSUES = frozenset({
+    "plate_line_too_long",
+    "generic_descriptor",
+    "bytes_size_unknown",
+})
+
+
+def _blocking_global_issues(issues):
+    """Hard+medium issues only (drop soft cosmetics)."""
+    return [i for i in (issues or []) if i not in _SOFT_GLOBAL_ISSUES]
+
+
+def _is_untyped_only(audit):
+    """True when the ONLY blocking issue is `untyped` — the global already
+    has a real name and plate; it just needs a type applied. A 2026-07-09
+    audit found ~91% of the pending backlog is exactly this shape, so these
+    are routed through the slim typing prompt (~15k tokens) instead of the
+    full documentation prompt (~77k) — ~5x cheaper for the same result."""
+    blocking = _blocking_global_issues(audit.get("issues") or [])
+    return blocking == ["untyped"]
+
+
+def _build_typing_prompt(prog_path, address, audit_before):
+    """Slim, self-contained prompt for the untyped-only case. Deliberately
+    does NOT load worker-globals.md + step-globals.md (the ~77k-token full
+    ruleset) — the only task here is determining and applying a type while
+    preserving the existing name and plate. Keeps just the type-inference
+    guidance, the struct-field lookup path, and the single set_global call."""
+    name = audit_before.get("name") or address
+    plate = audit_before.get("plate_comment") or ""
+    xref_count = audit_before.get("xref_count")
+    parts = []
+    parts.append(
+        f"# TYPE THIS GLOBAL — pass `program=\"{prog_path}\"` on EVERY tool call.\n\n"
+        f"Multiple programs are open in this Ghidra session. Omitting `program`\n"
+        f"routes the write to the wrong binary and it silently no-ops here.\n\n"
+        f"---\n\n"
+    )
+    parts.append(
+        f"The global `{name}` at `{address}` is fully documented EXCEPT it is\n"
+        f"still `undefined`-typed. It already has a name and a plate comment —\n"
+        f"**do not change them.** Your only job: determine the correct data type\n"
+        f"and apply it.\n\n"
+    )
+    parts.append(
+        "## How to determine the type — CHEAPEST PATH FIRST\n\n"
+        "Tool calls are the dominant cost here. Work down this ladder and\n"
+        "**stop at the first rung that gives you a defensible type** — do not\n"
+        "gather more evidence than you need, and decompile AT MOST ONE caller.\n\n"
+        "1. **Name prefix + size (usually enough, ZERO decompiles).** The\n"
+        "   existing name already encodes an intended type; combined with the\n"
+        "   audit's byte `length` that is normally sufficient:\n"
+        "   - `g_dw*` / 4 bytes → `dword` (or `uint`);  `g_n*` → `int`\n"
+        "   - `g_w*` / 2 bytes → `word`;  `g_b*`/`g_f*` 1 byte → `bool`/`byte`\n"
+        "   - `g_fl*` / 4 → `float`;  `g_d*` / 8 → `double`\n"
+        "   - `g_p*`/`g_pfn*`/`g_lp*` → pointer (`void *` if pointee unknown)\n"
+        "   - `g_sz*` → `char[len]`;  `g_wsz*` → `wchar_t[len]`\n"
+        "   - `g_a*`/`g_an*`/`g_ab*`/`g_ap*` → array of the element the\n"
+        "     second prefix implies; set `array_length` from byte length.\n"
+        "   Apply it and you're done. Only go further if the prefix is absent\n"
+        "   or clearly a stale guess.\n"
+        "2. **One caller decompile — only if step 1 is ambiguous.** Pick the\n"
+        "   single highest-value xref (`get_xrefs_to` → `decompile_function`\n"
+        "   on ONE caller, never this data address). Dereferenced (`*x`,\n"
+        "   `x->f`, `x[i]`) → pointer/array; whole-word math → int/uint;\n"
+        "   0/1 test → bool; float/xmm → float.\n"
+        "3. **Struct field — only if a caller clearly treats it as one:**\n"
+        "   `get_struct_layout(...)` and apply the field's type.\n"
+        "4. **Unsure → plain width primitive** (`dword`/`word`/`byte` by\n"
+        "   size). A correct underclaim beats a wrong specific type; never\n"
+        "   leave it `undefined`.\n\n"
+        "Do NOT call `disassemble_function`, `list_globals`, or\n"
+        "`search_functions` in typing mode — they don't help determine a type\n"
+        "and just burn round-trips.\n\n"
+    )
+    parts.append(
+        "## Apply it — one call\n\n"
+        f"`set_global(program=\"{prog_path}\", address=\"{address}\", "
+        f"type_name=<type>)` — pass `array_length=<N>` for arrays. Do **not**\n"
+        "pass `name` or `plate_comment` (they're already set; re-sending them\n"
+        "risks clobbering). If `set_global` rejects, fall back to\n"
+        f"`apply_data_type(program=\"{prog_path}\", address=\"{address}\", "
+        "type_name=<type>)`.\n\n"
+        "Then re-audit with `audit_global` to confirm `untyped` cleared.\n\n"
+    )
+    parts.append(
+        "## Notes\n"
+        "- `.bss` globals read as `Unable to read bytes` — that's expected\n"
+        "  (zero-init); use `analyze_data_region` or the caller context, don't\n"
+        "  retry the read.\n"
+        "- Addresses are bare hex (`0x6fdc1234`); never prefix with the binary\n"
+        "  name.\n"
+        "- Do not call `decompile_function` on THIS address (it's data, not a\n"
+        "  function) — decompile its callers instead.\n\n"
+    )
+    parts.append("---\n\n## This global\n")
+    parts.append(f"- Program: `{prog_path}`\n- Address: `{address}`\n")
+    parts.append(f"- Name (keep): `{name}`\n")
+    if xref_count is not None:
+        parts.append(f"- xref_count: {xref_count}\n")
+    if plate:
+        parts.append(f"- Existing plate (keep):\n```\n{plate}\n```\n")
+    parts.append("\n## Audit (before)\n```json\n")
+    parts.append(json.dumps(audit_before, indent=2, default=str))
+    parts.append("\n```\n")
+    return "".join(parts)
+
+
 def _build_global_prompt(prog_path, address, audit_before, prompt_dir=None):
     """Construct the per-global prompt by combining `worker-globals.md`,
     `step-globals.md` (the rules source of truth), and the address-specific
@@ -9701,6 +9864,7 @@ def process_global(
     worker_id=None,
     on_started=None,
     used_names=None,
+    reason_counter=None,
 ):
     """Process a single global address. Returns one of:
         "completed"  — issues went from N>0 to 0
@@ -9721,7 +9885,16 @@ def process_global(
     this binary. When provided, a rename that collides with an existing
     symbol at a different address triggers ONE corrective provider turn,
     and the index is updated in place with the final name so later globals
-    in the same pass see it."""
+    in the same pass see it.
+
+    `reason_counter` (optional) is a mutable dict the skip paths increment
+    by reason (`already_clean`, `soft_issues_only`, `os_canonical_label`,
+    `function_label`, `duplicate_retry`) so the caller's run summary can
+    show WHY a binary produced no work, not just that it didn't."""
+
+    def _count(reason):
+        if reason_counter is not None:
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
     run_id = str(uuid.uuid4())[:8]
     started_at = datetime.now()
 
@@ -9764,7 +9937,16 @@ def process_global(
     name_before = audit_before.get("name") or ""
 
     # Pre-audit short-circuit: clean global, skip the provider call.
-    if not issues_before:
+    # Severity-tiered like the completion rule below: a global whose only
+    # remaining issues are soft (plate_line_too_long, generic_descriptor,
+    # bytes_size_unknown) already counts as "completed", so dispatching a
+    # provider run for it burns ~80k input tokens fixing cosmetics the
+    # design explicitly demoted to non-blocking. Distinct skip reason so
+    # analytics can tell the two apart.
+    sev_pre = audit_before.get("severity_summary") or {}
+    blocking_pre = (sev_pre.get("hard", 0) or 0) + (sev_pre.get("medium", 0) or 0)
+    soft_only = bool(issues_before) and bool(sev_pre) and blocking_pre == 0
+    if not issues_before or soft_only:
         _append_run_log(
             {
                 "run_id": run_id,
@@ -9777,12 +9959,13 @@ def process_global(
                 "provider": provider,
                 "model": model,
                 "result": "skipped",
-                "issues_before": [],
-                "issues_after": [],
+                "issues_before": issues_before,
+                "issues_after": issues_before,
                 "fixed_count": 0,
-                "reason": "already_clean",
+                "reason": "soft_issues_only" if soft_only else "already_clean",
             }
         )
+        _count("soft_issues_only" if soft_only else "already_clean")
         return "skipped"
 
     # Function-label short-circuit. Names like `FID_conflict:__time32`,
@@ -9812,6 +9995,7 @@ def process_global(
                 "reason": "function_label",
             }
         )
+        _count("function_label")
         return "skipped"
 
     # OS-canonical short-circuit (TIB/PEB/KUSER labels). The audit flags
@@ -9839,6 +10023,7 @@ def process_global(
                 "reason": "os_canonical_label",
             }
         )
+        _count("os_canonical_label")
         return "skipped"
 
     # Real work is about to happen — emit the started event so the
@@ -9878,7 +10063,24 @@ def process_global(
     print(f"\n  [{prog_path}] {name_before or address} @ 0x{addr_bare}")
     print(f"  {'-' * 50}")
 
-    prompt = _build_global_prompt(prog_path, address, audit_before)
+    # Typing-mode routing: when the only blocking issue is `untyped`, use
+    # the slim type-only prompt (~15k tok) instead of the full doc prompt
+    # (~77k). ~91% of the pending backlog is this shape (2026-07-09 audit),
+    # so this is the single biggest cost lever. `prompt_mode` is logged for
+    # cost telemetry.
+    if _is_untyped_only(audit_before):
+        prompt = _build_typing_prompt(prog_path, address, audit_before)
+        prompt_mode = "typing"
+        # Live measurement (2026-07-09): typing runs are dominated by
+        # tool-call round-trips, not the base prompt — a run that decompiled
+        # several callers cost 119k input tokens (worse than the full-doc
+        # mean). Cap turns tight; the prompt now steers to name-prefix+size
+        # (zero decompiles) for the common case and at most one caller.
+        max_turns_eff = min(max_turns, 8)
+    else:
+        prompt = _build_global_prompt(prog_path, address, audit_before)
+        prompt_mode = "full"
+        max_turns_eff = max_turns
     # H24: route through the subprocess watchdog so a wedged provider call
     # can't stall the globals worker indefinitely (matches function-worker
     # path at L7826). invoke_claude → _invoke_provider_with_watchdog has the
@@ -9886,7 +10088,7 @@ def process_global(
     text, meta = invoke_claude(
         prompt,
         model=model,
-        max_turns=max_turns,
+        max_turns=max_turns_eff,
         provider=provider,
         complexity_tier=None,
     )
@@ -9968,6 +10170,7 @@ def process_global(
     )
     if duplicate_of and not quota_paused and not provider_error:
         duplicate_retry = True
+        _count("duplicate_retry")
         print(
             f"  [globals-worker] duplicate name {name_after!r} already exists "
             f"at {duplicate_of} — corrective retry",
@@ -10117,6 +10320,7 @@ def process_global(
             "duplicate_of": duplicate_of,
             "duplicate_retry": duplicate_retry,
             "placeholder_name": placeholder_name,
+            "prompt_mode": prompt_mode,
         }
     )
 
@@ -10140,6 +10344,29 @@ def process_global(
         },
     )
     return result
+
+
+def _resolve_globals_program_path(binary):
+    """Resolve a bare binary name (what the dashboard's binarySelect
+    emits, e.g. `D2Net.dll`) to its full project path
+    (`/Mods/PD2-S12/D2Net.dll`). Continuous-mode picks and the scorer's
+    inventory both use full paths, so a bare initial binary used to split
+    the clean cache and run logs across two keys — and, worse,
+    `_invalidate_global_inventory(bare_name)` never matched the
+    inventory's full-path keys, so the scorer never re-walked a binary
+    after a UI-launched worker run. Returns the input unchanged when it
+    already looks like a path or can't be resolved (Ghidra accepts both
+    forms)."""
+    if not binary or "/" in binary:
+        return binary
+    try:
+        programs = _fetch_programs(load_state().get("project_folder") or "/")
+    except Exception:  # noqa: BLE001 — resolution is best-effort
+        return binary
+    for prog in programs or []:
+        if prog.get("name") == binary:
+            return prog.get("path") or binary
+    return binary
 
 
 # Save the program every N result-bearing runs. The globals path
@@ -10202,6 +10429,27 @@ def _pick_next_globals_binary(programs, exclude_binaries):
     return candidates[0][2]
 
 
+def _stamp_global_doc_rung(program, address, rung="DOC_DRAFT"):
+    """Stamp a DOC rung for a freshly-documented global into the `Doc` property
+    map -- the globals-doc equivalent of a function's DOC tag (Ghidra function
+    tags are function-scoped and can't attach to a data address). The pipeline
+    dashboard reads this map for the Globals-Documentation bar/column. An
+    auto-documented global lands at DOC_DRAFT; human review promotes it later.
+    Best-effort -- never affects the worker result."""
+    if not program or not address:
+        return
+    try:
+        p = ghidra_post("/set_property",
+                        {"map": "Doc", "address": address, "value": rung, "program": program})
+        if isinstance(p, dict) and not p.get("success") and "No property map" in str(p):
+            ghidra_post("/create_property_map",
+                        {"name": "Doc", "type": "string", "program": program})
+            ghidra_post("/set_property",
+                        {"map": "Doc", "address": address, "value": rung, "program": program})
+    except Exception:
+        pass
+
+
 def run_globals_worker_pass(
     *,
     worker_id,
@@ -10214,6 +10462,7 @@ def run_globals_worker_pass(
     on_progress=None,
     on_started=None,
     exclude_binaries_provider=None,
+    target_addresses=None,
 ):
     """Orchestrate a globals worker run. Processes up to `count` globals
     across one or more binaries (continuous mode advances to the next
@@ -10225,7 +10474,11 @@ def run_globals_worker_pass(
         (binary_path, address, result, processed, count).
     `exclude_binaries_provider` is an optional callable that returns the
         set of binary paths currently held by other globals workers (for
-        per-binary lock when picking a continuation binary)."""
+        per-binary lock when picking a continuation binary).
+    `target_addresses` is an optional list of specific addresses to
+        process (the dashboard cleanup queue's targeted-fix path). When
+        set, only those addresses are dispatched — the clean cache and
+        continuous rotation are bypassed so a targeted fix always runs."""
     summary = {
         "binaries_visited": [],
         "totals": {
@@ -10238,12 +10491,13 @@ def run_globals_worker_pass(
             "audit_fail": 0,
             "cache_skipped": 0,
         },
+        "skip_reasons": {},
         "stopped": False,
         "stopped_reason": None,
     }
 
     processed = 0
-    current_binary = initial_binary
+    current_binary = _resolve_globals_program_path(initial_binary)
     visited_paths = set()
     clean_cache = _load_globals_clean_cache()
     cache_dirty = False
@@ -10297,11 +10551,29 @@ def run_globals_worker_pass(
             if nm and nm not in used_names:
                 used_names[nm] = e["address"]
 
+        # Targeted-fix mode: dispatch exactly the requested addresses,
+        # bypassing the clean cache (a targeted fix must always run, even
+        # on an address previously marked clean).
+        if target_addresses:
+            wanted = {
+                a if str(a).startswith("0x") else f"0x{a}"
+                for a in target_addresses
+            }
+            addresses = [a for a in addresses if a in wanted]
+            if not addresses:
+                print(
+                    f"  [globals-worker {worker_id}] {prog_name}: none of the "
+                    f"{len(wanted)} targeted addresses found in enumeration",
+                    flush=True,
+                )
+                summary["stopped_reason"] = "targets_not_found"
+                break
+
         # Clean-cache filter: drop addresses this worker already confirmed
         # clean within the TTL. Before this, every pass re-audited every
         # global in the binary — 40% of all historic dispatches were
         # redundant skips.
-        cached_set = {
+        cached_set = set() if target_addresses else {
             a
             for a in addresses
             if _clean_cache_is_fresh(clean_cache, current_binary, a)
@@ -10336,8 +10608,14 @@ def run_globals_worker_pass(
                 worker_id=worker_id,
                 on_started=on_started,
                 used_names=used_names,
+                reason_counter=summary["skip_reasons"],
             )
             summary["totals"][result] = summary["totals"].get(result, 0) + 1
+            # A documented global gets a DOC rung stamped into the `Doc` map so the
+            # pipeline dashboard's Globals-Documentation bar reflects it (draft level;
+            # human review promotes). Best-effort, never affects the result.
+            if result in ("completed", "improved"):
+                _stamp_global_doc_rung(current_binary, address, "DOC_DRAFT")
             # `skipped` results don't count toward the cap — they're cheap
             # filter passes, not real work.
             if result != "skipped":
