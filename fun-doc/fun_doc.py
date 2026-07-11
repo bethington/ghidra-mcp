@@ -2858,6 +2858,9 @@ DEFAULT_PROVIDER_MODELS = {
 DEFAULT_QUEUE_CONFIG = {
     "good_enough_score": 80,
     "require_scored": False,
+    # Assess lane: a function whose completeness score is >= this gets stamped DOC_DRAFT
+    # ("already documented"). Dashboard-tunable via Settings.
+    "assess_draft_score": 80,
     # Dashboard-owned provider -> mode -> model mapping. Defaults from
     # DEFAULT_PROVIDER_MODELS — overridable per-provider/mode via the dashboard.
     "provider_models": copy.deepcopy(DEFAULT_PROVIDER_MODELS),
@@ -8939,8 +8942,8 @@ def main():
                         help="Assess in-scope functions' current docs and stamp DOC_DRAFT on the documented ones")
     parser.add_argument("--assess-count", type=int, default=None,
                         help="Limit functions assessed this pass (default: all untagged in-scope)")
-    parser.add_argument("--draft-score", type=int, default=40,
-                        help="Completeness score >= this stamps DOC_DRAFT during --assess (default: 40)")
+    parser.add_argument("--draft-score", type=int, default=80,
+                        help="Completeness score >= this stamps DOC_DRAFT during --assess (default: 80)")
     parser.add_argument("--web", action="store_true", help="Start web dashboard")
     parser.add_argument(
         "--web-port", type=int, default=5000, help="Web dashboard port (default: 5000)"

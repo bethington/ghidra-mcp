@@ -375,6 +375,8 @@
             <div class="settings-group">
               <label class="settings-label" title="Functions at/above this score are excluded from the queue unless pinned">
                 <span>Good@</span><input type="number" class="worker-input" id="goodEnoughInput" min="0" max="100" onchange="saveQueueConfig()"></label>
+              <label class="settings-label" title="Assess lane: functions whose completeness score is >= this get stamped DOC_DRAFT">
+                <span>Draft@</span><input type="number" class="worker-input" id="assessDraftInput" min="0" max="100" onchange="saveQueueConfig()"></label>
               <label class="settings-label" title="Surface unscored functions so they get scored on first contact">
                 <input type="checkbox" id="requireScoredInput" onchange="saveQueueConfig()" style="margin:0"><span>Score Cold</span></label>
               <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/">
@@ -849,6 +851,7 @@
     catch(e){ flash("settings load failed"); return; }
     const g = id => document.getElementById(id);
     if(g("goodEnoughInput"))  g("goodEnoughInput").value  = cfg.good_enough_score!=null ? cfg.good_enough_score : 80;
+    if(g("assessDraftInput")) g("assessDraftInput").value = cfg.assess_draft_score!=null ? cfg.assess_draft_score : 80;
     if(g("requireScoredInput")) g("requireScoredInput").checked = !!cfg.require_scored;
     if(g("debugModeInput"))   g("debugModeInput").checked = !!cfg.debug_mode;
     if(g("handoffProviderInput")) g("handoffProviderInput").value = cfg.complexity_handoff_provider || "off";
@@ -891,6 +894,7 @@
     const v = (id,d) => { const e=g(id); return e ? e.value : d; };
     const cfg = {
       good_enough_score: parseInt(v("goodEnoughInput",80)) || 80,
+      assess_draft_score: parseInt(v("assessDraftInput",80)) || 80,
       require_scored: g("requireScoredInput") ? g("requireScoredInput").checked : false,
       debug_mode: g("debugModeInput") ? g("debugModeInput").checked : false,
       complexity_handoff_provider: v("handoffProviderInput","off")==="off" ? null : v("handoffProviderInput","off"),

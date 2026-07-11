@@ -2382,6 +2382,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 args += ["--assess-count", str(int(cnt))]
             except (TypeError, ValueError):
                 pass
+        # DRAFT threshold from the dashboard Settings (queue config), default 80
+        try:
+            draft = (load_queue().get("config") or {}).get("assess_draft_score", 80)
+            args += ["--draft-score", str(int(draft))]
+        except Exception:
+            pass
         env = dict(os.environ)
         env["FUNDOC_DASHBOARD"] = "false"   # belt-and-suspenders: never spawn a nested dashboard
         _stream_proc("assess", "assess", program, args, str(Path(fun_doc_py).parent), env)
@@ -2661,6 +2667,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     )
             if "require_scored" in data:
                 cfg["require_scored"] = bool(data["require_scored"])
+            if "assess_draft_score" in data:
+                try:
+                    cfg["assess_draft_score"] = max(0, min(100, int(data["assess_draft_score"])))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "assess_draft_score must be int 0-100"}), 400
             if "complexity_handoff_provider" in data:
                 v = data["complexity_handoff_provider"]
                 if v in (None, "", "none", "off"):
