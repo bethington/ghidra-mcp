@@ -907,9 +907,9 @@ public class EndpointRegistry {
             params(bStr("struct_name"), bStr("field_name"), pProg()),
             (q, b) -> dataTypeService.removeStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"), str(q, "program")));
 
-        post("/import_data_types", "Import data types from C source",
-            params(bStr("source"), bStr("format")),
-            (q, b) -> dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c")));
+        post("/import_data_types", "Parse C source into the program's data type manager (CParser)",
+            params(bStr("source"), bStr("format"), pProg()),
+            (q, b) -> dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c"), str(q, "program")));
 
         post("/create_data_type_category", "Create a new data type category",
             params(bStr("category_path"), pProg()),
