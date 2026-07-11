@@ -1067,10 +1067,11 @@
       appendToPane(id, '▶ triage: scope-classify (drain LIB_) + enqueue backlog', 'fn-header');
     });
     socket.on("triage_line", d=>{
-      const t=d.text||''; let cls='tool';
-      if(d.error||/error|traceback|failed/i.test(t)) cls='error';
-      else if(/enqueued|excluded|-> |done|backlog/i.test(t)) cls='success';
-      else if(/^\s|next:/i.test(t)) cls='neutral';
+      const t=d.text||''; let cls='neutral';
+      if(d.error||/\berror\b|traceback|\bfail/i.test(t)) cls='error';
+      else if(/^\s*\[\d+\/\d+\]/.test(t)) cls='tool';                       // per-item progress -> dim
+      else if(/\btagged LIB_/i.test(t)) cls='tool';
+      else if(/enqueued|excluded \d|backlog|complete|drain|never-evaluated/i.test(t)) cls='success';
       appendToPane(d.id||'triage', t, cls);
     });
     socket.on("triage_done", d=>{
