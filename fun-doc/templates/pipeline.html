@@ -354,7 +354,7 @@
     </div>
     <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
-    <label class="mono" style="font-size:.62rem;color:var(--text-secondary)"><input type="checkbox" id="auto"> Auto</label>
+    <label class="mono" style="font-size:.62rem;color:var(--text-secondary)" title="Process every function (ignores count)"><input type="checkbox" id="allFns" onchange="syncAllFns()"> All</label>
     <button class="btn go" onclick="startLane()">Start &#9654;</button>
     <button class="btn" id="btnToggleSettings" onclick="toggleSettings()" title="Settings">&#9881; Settings</button>
     <span style="width:8px"></span>
@@ -822,11 +822,17 @@
   //   Prove    -> request_start_worker mode=port (conformance)
   //   Globals  -> request_start_globals_worker
   //   Triage   -> request_start_triage (non-LLM classify script)
+  // "All" checkbox: when on, the worker runs over every function, so the count field is moot.
+  function syncAllFns(){
+    const all=document.getElementById("allFns").checked;
+    const c=document.getElementById("count");
+    c.disabled=all; c.style.opacity=all?.4:1; c.title=all?"count ignored — All is on":"count";
+  }
   function startLane(force){
     const lane=force||document.getElementById("lane").value;
     const provider=document.getElementById("provider").value;
     const count=+document.getElementById("count").value;
-    const continuous=document.getElementById("auto").checked;
+    const continuous=document.getElementById("allFns").checked;   // "All" -> run every function, ignore count
     const binary=PROGRAM;
     if(!socket){ flash("no socket"); return; }
     if(lane==="globals"){
