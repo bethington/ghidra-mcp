@@ -2306,11 +2306,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @socketio.on("request_start_triage")
     def handle_start_triage(data):
-        """Triage lane: run the conformance intake classify over the focused
-        binary. It's a non-LLM script (scope-classify LIB_ + enqueue), run as a
-        subprocess so it doesn't block the socket thread. The tool scopes to a
-        binary via the FUNDOC_GHIDRA_PROGRAM env var and takes --apply/--count.
-        Path is configurable via CONF_TRIAGE_TOOL."""
+        """Triage lane: run the conformance intake classify over the focused binary.
+        It's a non-LLM script (scope-classify LIB_ + enqueue the rest), run in a
+        background thread. Its stdout is streamed to the dashboard as triage_line
+        events so it shows as a visible pane (triage isn't a WorkerManager worker).
+        Scopes to a binary via FUNDOC_GHIDRA_PROGRAM; takes --apply/--count. Path
+        configurable via CONF_TRIAGE_TOOL."""
         import subprocess
         program = (data or {}).get("binary") or (data or {}).get("program") or None
         tool = os.environ.get(
@@ -2322,18 +2323,40 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             sio_emit("worker_error", {"error": f"triage tool not found: {tool} "
                                                "(set CONF_TRIAGE_TOOL)"})
             return
-        try:
-            env = dict(os.environ)
-            if program:
-                env["FUNDOC_GHIDRA_PROGRAM"] = program   # tool reads the target from here
-            args = [sys.executable, tool, "--apply"]
-            cnt = (data or {}).get("count")
-            if cnt:
+        cnt = (data or {}).get("count")
+        env = dict(os.environ)
+        if program:
+            env["FUNDOC_GHIDRA_PROGRAM"] = program   # tool reads the target from here
+        args = [sys.executable, "-u", tool, "--apply"]
+        if cnt:
+            try:
                 args += ["--count", str(int(cnt))]
-            subprocess.Popen(args, cwd=str(Path(tool).parent), env=env)
-            sio_emit("worker_started_ack", {"mode": "triage", "program": program})
-        except Exception as e:
-            sio_emit("worker_error", {"error": f"triage launch failed: {e}"})
+            except (TypeError, ValueError):
+                pass
+
+        def _run_triage():
+            socketio.emit("triage_started", {"id": "triage", "program": program,
+                                             "scope": ("all" if not cnt else int(cnt))})
+            code, emitted = -1, 0
+            try:
+                proc = subprocess.Popen(args, cwd=str(Path(tool).parent), env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        text=True, bufsize=1)
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        emitted += 1
+                        socketio.emit("triage_line", {"id": "triage", "text": line})
+                proc.wait()
+                code = proc.returncode
+            except Exception as e:
+                socketio.emit("triage_line", {"id": "triage", "text": f"launch failed: {e}", "error": True})
+            socketio.emit("triage_done", {"id": "triage", "code": code, "lines": emitted})
+            # tags/scope may have changed (LIB_ drained) -> nudge the dashboard to re-read
+            socketio.emit("conf_changed", {})
+
+        threading.Thread(target=_run_triage, daemon=True, name="triage").start()
+        sio_emit("worker_started_ack", {"mode": "triage", "program": program})
 
     @socketio.on("request_start_globals_worker")
     def handle_start_globals_worker(data):
