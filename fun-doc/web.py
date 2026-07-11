@@ -2384,6 +2384,64 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         socketio.start_background_task(job)
         sio_emit("types_load_started", {"program": program})
 
+    @socketio.on("request_normalize_types")
+    def handle_normalize_types(data):
+        """Migrate globals off native (UNREFINED) types onto their canonical D2MOO stdint
+        spelling (dword->uint32_t, byte->uint8_t, ...). Requires the canonical types to be
+        loaded first (uint32_t must exist). Streams progress; INVALID (undefined*) is reported
+        but not auto-fixed (no canonical target)."""
+        program = (data or {}).get("binary") or (data or {}).get("program") or None
+        if not program:
+            sio_emit("normalize_done", {"ok": False, "error": "select a binary first"})
+            return
+
+        def job():
+            from urllib.parse import quote
+            import conformance_dashboard as cd
+            import d2moo_types
+            try:
+                socketio.emit("normalize_progress", {"program": program, "text": "scanning globals for native types..."})
+                txt = cd._get("/list_globals", program=program, limit=100000)
+                targets = []
+                for ln in (txt if isinstance(txt, str) else "").splitlines():
+                    m = cd._GLOB_LINE.match(ln.strip())
+                    if not m:
+                        continue
+                    a = int(m.group("addr"), 16)
+                    if not (cd._IMG_LO <= a < cd._IMG_HI) or m.group("name").startswith("Ordinal_"):
+                        continue
+                    r = d2moo_types.validate_type(m.group("type"))
+                    if r.get("verdict") == "UNREFINED" and r.get("suggestion"):
+                        targets.append(("0x%08x" % a, m.group("name"), m.group("type").strip(), r["suggestion"]))
+                socketio.emit("normalize_progress", {"program": program,
+                    "text": f"{len(targets)} globals on native width types -> normalizing to stdint..."})
+                q = "?program=" + quote(program, safe="")
+                fixed = failed = 0
+                for addr, name, old, sug in targets:
+                    try:
+                        cd._post("/apply_data_type" + q, {"address": addr, "type_name": sug})
+                        fixed += 1
+                        if fixed <= 5 or fixed % 25 == 0:
+                            socketio.emit("normalize_progress", {"program": program,
+                                "text": f"  [{fixed}/{len(targets)}] {name}: {old} -> {sug}"})
+                    except Exception:
+                        failed += 1
+                if fixed:
+                    try:
+                        cd._post("/save_program" + q, {})
+                    except Exception:
+                        pass
+                cd.native_cache_clear(program)
+                st = cd.native_types_status(program, force=True)
+                socketio.emit("normalize_done", {"ok": True, "program": program, "fixed": fixed,
+                    "failed": failed, "invalid_remaining": st.get("invalid", 0)})
+                socketio.emit("conf_changed", {})
+            except Exception as e:
+                socketio.emit("normalize_done", {"ok": False, "program": program, "error": str(e)})
+
+        socketio.start_background_task(job)
+        sio_emit("normalize_started", {"program": program})
+
     @socketio.on("request_start_triage")
     def handle_start_triage(data):
         """Triage lane: run the conformance intake classify (scope-classify LIB_ + enqueue

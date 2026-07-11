@@ -114,3 +114,10 @@ def _types_status():
     """Is the canonical D2MOO type vocabulary loaded (and current) in the focused binary?"""
     force = request.args.get("force") in ("1", "true", "yes")
     return jsonify(cd.types_status(program=_prog(), force=force))
+
+
+@conf_bp.route("/api/conformance/native_types_status")
+def _native_types_status():
+    """Cheap globals canary: is the focused binary using native (non-canonical) types?"""
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify(cd.native_types_status(program=_prog(), force=force))

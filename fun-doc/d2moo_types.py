@@ -146,7 +146,10 @@ def validate_type(type_str: str, vocab: dict = None) -> dict:
         return {"verdict": "INVALID", "base": base, "suggestion": None,
                 "reason": f"{base} is a Ghidra placeholder -- the field is not actually typed"}
     if base in NORMALIZE:
-        sug = NORMALIZE[base]
+        # preserve pointer/array decoration: 'byte *' -> 'uint8_t *', not 'uint8_t'
+        md = re.search(r"((?:\s*\*)+|(?:\s*\[[^\]]*\])+)\s*$", str(type_str))
+        deco = md.group(1).strip() if md else ""
+        sug = NORMALIZE[base] + (" " + deco if deco else "")
         return {"verdict": "UNREFINED", "base": base, "suggestion": sug,
                 "reason": f"{base} is a Ghidra width type -- use D2MOO's {sug}"}
     if base in SCALARS or base in v["aliases"] or base in v["structs"] \

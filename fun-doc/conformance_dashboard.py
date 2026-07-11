@@ -484,6 +484,45 @@ def types_mark_loaded(program: str = None) -> dict:
     return types_status(program, force=True)
 
 
+_NATIVE_CACHE = {}   # program -> native-type-usage status (globals canary; session-cached)
+
+
+def native_types_status(program: str = None, force: bool = False) -> dict:
+    """Cheap 'is this binary using native (non-canonical) types?' canary: scans in-image GLOBALS
+    (one list_globals call) and counts UNREFINED (dword/byte/uint -> normalizable) and INVALID
+    (undefined*/code -> untyped) via validate_type. A trigger for the Normalize bar; the full
+    globals+locals+fields fix runs on demand. Cached per binary per session."""
+    program = program or PROGRAM
+    if not force and program in _NATIVE_CACHE:
+        return _NATIVE_CACHE[program]
+    unref = inval = total = 0
+    try:
+        txt = _get("/list_globals", program=program, limit=100000)
+        for ln in (txt if isinstance(txt, str) else "").splitlines():
+            m = _GLOB_LINE.match(ln.strip())
+            if not m:
+                continue
+            a = int(m.group("addr"), 16)
+            if not (_IMG_LO <= a < _IMG_HI) or m.group("name").startswith("Ordinal_"):
+                continue
+            total += 1
+            v = d2moo_types.validate_type(m.group("type")).get("verdict")
+            if v == "UNREFINED":
+                unref += 1
+            elif v == "INVALID":
+                inval += 1
+    except OSError:
+        pass
+    res = {"program": program, "unrefined": unref, "invalid": inval, "native": unref + inval,
+           "globals_scanned": total, "scope": "globals"}
+    _NATIVE_CACHE[program] = res
+    return res
+
+
+def native_cache_clear(program: str = None) -> None:
+    _NATIVE_CACHE.pop(program, None) if program else _NATIVE_CACHE.clear()
+
+
 def _pretty(rung: str) -> str:
     return (rung or "").replace("CONF_", "").replace("DOC_", "")
 
