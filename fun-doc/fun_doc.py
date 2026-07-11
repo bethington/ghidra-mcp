@@ -1981,7 +1981,7 @@ def _global_doc_rungs(program):
     """{normalized 0xaddr -> DOC rung} from the `Doc` property map (already-assessed globals)."""
     out = {}
     try:
-        r = ghidra_get("/list_properties", params={"map": "Doc", "program": program})
+        r = ghidra_get("/list_properties", params={"map": "Doc", "program": program, "limit": 100000})
         if isinstance(r, str):
             r = json.loads(r)
         for p in (r.get("entries") or r.get("properties") or []):

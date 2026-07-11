@@ -280,7 +280,7 @@ def _scope_excluded_globals(program: str) -> set[str]:
     Globals Inventory and denominators, mirroring LIB_ function exclusion."""
     out = set()
     try:
-        r = _get("/list_properties", map="Scope", program=program)
+        r = _get("/list_properties", map="Scope", program=program, limit=100000)
         for p in ((r or {}).get("entries") or (r or {}).get("properties") or []):
             a, v = p.get("address"), p.get("value")
             if a and v:
@@ -319,7 +319,7 @@ def _doc_map_rungs(program: str) -> dict:
     a globals-doc pass writes them -- the honest 'not yet documented' state."""
     out = {}
     try:
-        r = _get("/list_properties", map=GLOB_DOC_MAP, program=program)
+        r = _get("/list_properties", map=GLOB_DOC_MAP, program=program, limit=100000)
         # the endpoint returns the list under "entries" (not "properties")
         for p in (r.get("entries") or r.get("properties") or []):
             a = p.get("address")
