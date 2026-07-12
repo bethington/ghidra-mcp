@@ -2373,7 +2373,13 @@ def start_ghidra(ghidra_path: Path, *, repo_root: Path | None = None, dry_run: b
         print_command(command)
         return 0
 
-    subprocess.Popen(command, cwd=ghidra_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(
+        command,
+        cwd=ghidra_path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=os.name == "posix",
+    )
     print(f"Started Ghidra from {executable}")
     return 0
 
