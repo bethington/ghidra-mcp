@@ -43,8 +43,25 @@ PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
 _SLOT = "<TODO: {}>"
 _TODO_RE = re.compile(r"<TODO:[^>]*>")
 _SECTION_RE = re.compile(
-    r"^(Algorithm|Parameters|Returns|Special Cases|Magic Numbers|Source|"
-    r"Structure Layout[^:\n]*|Notes?)\s*:", re.I | re.M)
+    r"^[ \t]*(Algorithm|Parameters|Returns|Special Cases|Magic Numbers|Source|"
+    r"Structure Layout[^:\n]*|Notes?|Used by)\s*:", re.I | re.M)
+
+
+def _unwrap(text: str) -> str:
+    """Strip a /* ... */ box and per-line '* ' prefixes some plates carry, so the section parser
+    (which anchors on line starts) sees the real content. Indented section headers are handled by
+    the section regex's leading [ \\t]*."""
+    if not text:
+        return text
+    t = text.strip()
+    if t.startswith("/*"):
+        t = t[2:]
+    if t.endswith("*/"):
+        t = t[:-2]
+    lines = t.split("\n")
+    if sum(1 for l in lines if l.lstrip().startswith("*")) > len(lines) // 2:
+        lines = [re.sub(r"^\s*\*\s?", "", l) for l in lines]
+    return "\n".join(lines).strip()
 _PROV_RE = re.compile(r"^\[(?:D2MOO-DERIVED NAME|PROVEN)[^\n]*\][^\n]*(?:\n(?!\s*\n)[^\n]*)*", re.M)
 # a param line: "  name: type - desc"  OR markdown "| name | type | desc |"
 _PARAM_PLAIN = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(.+?)\s+-{1,2}\s+(.*\S)\s*$")
@@ -87,6 +104,7 @@ def parse_function_plate(text: str) -> dict:
     out = {"summary": "", "provenance": [], "sections": {}, "params": {}, "param_list": []}
     if not text:
         return out
+    text = _unwrap(text)
     out["provenance"] = [m.group(0).rstrip() for m in _PROV_RE.finditer(text)]
     hits = [(m.start(), m.end(), m.group(1).strip()) for m in _SECTION_RE.finditer(text)]
     first = hits[0][0] if hits else len(text)
@@ -285,7 +303,7 @@ _XREF_LINE = re.compile(r"From\s+[0-9a-fA-F]+\s+in\s+(?P<fn>\S+)\s+\[(?P<dir>WRI
 _TYPE_WIDTH = {"undefined1": 1, "byte": 1, "char": 1, "bool": 1, "undefined2": 2, "word": 2,
                "short": 2, "ushort": 2, "undefined4": 4, "dword": 4, "int": 4, "uint": 4,
                "undefined8": 8, "qword": 8, "double": 8, "float": 4}
-_GLOB_SECTION_RE = re.compile(r"^(Set by|Read by|Lifecycle|Bitfield|Callback|Used by|Notes?)\s*:", re.I | re.M)
+_GLOB_SECTION_RE = re.compile(r"^[ \t]*(Set by|Read by|Lifecycle|Bitfield|Callback|Used by|Notes?)\s*:", re.I | re.M)
 
 
 def _type_size(t: str) -> int:
@@ -301,6 +319,7 @@ def parse_global_plate(text: str) -> dict:
     out = {"summary": "", "sections": {}}
     if not text:
         return out
+    text = _unwrap(text)
     hits = [(m.start(), m.end(), m.group(1).strip()) for m in _GLOB_SECTION_RE.finditer(text)]
     first = hits[0][0] if hits else len(text)
     out["summary"] = "\n".join(l for l in text[:first].splitlines() if l.strip()).strip()
