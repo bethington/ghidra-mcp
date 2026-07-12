@@ -77,6 +77,7 @@ Complete version history for the Ghidra MCP Server project.
   `python -m tools.setup ensure-prereqs` makes the offline suite runnable from a
   clean checkout. Covered by `tests/unit/test_setup_ghidra.py`.
 
+- **Thunk no-return metadata repair.** `set_function_no_return` now synchronizes the requested flag across every thunk hop and its terminal target instead of relying on Ghidra's asymmetric delegated setter/local getter behavior. Successful responses include verified `function_no_return` and `terminal_no_return` values, allowing later flow repair to restore valid call fallthrough.
 - **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
   shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the
   fast path, and their design docs assumed contradictory models of how a
