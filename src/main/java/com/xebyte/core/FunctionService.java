@@ -93,6 +93,11 @@ public class FunctionService {
         }
     }
 
+    static record NoReturnUpdateResult(
+            boolean functionNoReturn,
+            boolean terminalNoReturn) {
+    }
+
     // ========================================================================
     // Decompilation methods
     // ========================================================================
@@ -1877,6 +1882,50 @@ public class FunctionService {
     // Function attribute methods
     // ========================================================================
 
+    static NoReturnUpdateResult setNoReturnState(Function function, boolean noReturn) {
+        List<Function> chain = new ArrayList<>();
+        Function current = function;
+
+        while (true) {
+            chain.add(current);
+            Function directTarget = current.getThunkedFunction(false);
+            if (directTarget == null) {
+                break;
+            }
+
+            if (current.hasNoReturn() != noReturn) {
+                boolean detached = false;
+                try {
+                    current.setThunkedFunction(null);
+                    detached = true;
+                    current.setNoReturn(noReturn);
+                } finally {
+                    if (detached) {
+                        current.setThunkedFunction(directTarget);
+                    }
+                }
+            }
+
+            current = directTarget;
+        }
+
+        Function terminal = current;
+        terminal.setNoReturn(noReturn);
+
+        for (Function candidate : chain) {
+            boolean actual = candidate.hasNoReturn();
+            if (actual != noReturn) {
+                throw new IllegalStateException(
+                    "No-return state did not persist for function " + candidate.getName()
+                        + ": expected " + noReturn + ", actual " + actual);
+            }
+        }
+
+        return new NoReturnUpdateResult(
+            function.hasNoReturn(),
+            terminal.hasNoReturn());
+    }
+
     /**
      * Set a function's "No Return" attribute.
      *
@@ -1915,6 +1964,7 @@ public class FunctionService {
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<NoReturnUpdateResult> verifiedResult = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Set function no return", () -> {
@@ -1927,10 +1977,9 @@ public class FunctionService {
 
                 String oldState = func.hasNoReturn() ? "non-returning" : "returning";
 
-                // Set the no-return attribute
-                func.setNoReturn(noReturn);
-
-                String newState = noReturn ? "non-returning" : "returning";
+                NoReturnUpdateResult verified = setNoReturnState(func, noReturn);
+                String newState = verified.functionNoReturn() ? "non-returning" : "returning";
+                verifiedResult.set(verified);
                 success.set(true);
 
                 resultMsg.append("Success: Set function '").append(func.getName())
@@ -1948,7 +1997,12 @@ public class FunctionService {
 
         String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
         if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            NoReturnUpdateResult verified = verifiedResult.get();
+            return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", text,
+                "function_no_return", verified.functionNoReturn(),
+                "terminal_no_return", verified.terminalNoReturn()));
         }
         return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
