@@ -123,12 +123,28 @@ def build():
         fields = []
         for off in offsets:
             dm, fo = d2f.get(off), ff.get(off)
-            prov = "proven" if off in pv["offsets"] else "unverified"
+            is_proven = off in pv["offsets"]
+            prov = "proven" if is_proven else "unverified"
+            fort_named = bool(fo and _is_named(fo["name"]))
+            d2_named = bool(dm and _is_named(dm["name"]))
+            # PD2 authority: proof (reads PD2 memory) > Fortification (PD2-native) > D2MOO (1.10f)
+            if is_proven:
+                pd2_conf = "confirmed"
+            elif fort_named and d2_named and fo["name"] != dm["name"]:
+                pd2_conf = "conflict"        # Fortification wins for PD2, but flag it
+            elif fort_named:
+                pd2_conf = "pd2-ref"         # only Fortification names it -> PD2-authoritative
+            elif d2_named:
+                pd2_conf = "1.10f-only"      # only D2MOO -> uncertain for PD2 (may be version drift)
+            else:
+                pd2_conf = "unknown"
+            # preferred PD2 field name: Fortification (PD2) when it names it, else D2MOO
+            pd2_name = (fo["name"] if fort_named else dm["name"] if d2_named else (fo or dm or {}).get("name"))
             fields.append({
                 "offset": off, "off_hex": f"0x{off:X}",
                 "d2moo": dm["name"] if dm else None, "type": (dm or fo or {}).get("type"),
                 "fort": fo["name"] if fo else None, "provability": prov,
-                # gap-fill signal: one side names it, the other doesn't
+                "pd2_conf": pd2_conf, "pd2_name": pd2_name,
                 "gapfill": ("fort->d2moo" if (dm and not _is_named(dm["name"]) and fo and _is_named(fo["name"]))
                             else "d2moo->fort" if (fo and not _is_named(fo["name"]) and dm and _is_named(dm["name"]))
                             else None),
@@ -141,6 +157,10 @@ def build():
             "size_proven": pv["size_proven"],
             "fields_total": len(offsets),
             "proven_offsets": len(pv["offsets"]),
+            "pd2_confirmed": sum(1 for f in fields if f["pd2_conf"] == "confirmed"),
+            "pd2_ref": sum(1 for f in fields if f["pd2_conf"] == "pd2-ref"),
+            "pd2_conflict": sum(1 for f in fields if f["pd2_conf"] == "conflict"),
+            "only_1_10f": sum(1 for f in fields if f["pd2_conf"] == "1.10f-only"),
             "gapfill_fort_to_d2moo": sum(1 for f in fields if f["gapfill"] == "fort->d2moo"),
             "gapfill_d2moo_to_fort": sum(1 for f in fields if f["gapfill"] == "d2moo->fort"),
             "fields": fields,
@@ -152,22 +172,25 @@ def _summary(reg):
     L = ["=" * 92,
          "CANONICAL STRUCT REGISTRY -- names, merged fields (D2MOO + Fortification), PD2 provability",
          "=" * 92,
-         f"{'concise':14} {'D2MOO':22} {'size':>10} {'sz?':4} {'flds':>4} {'prov':>4} {'gap<-F':>6} {'gap->F':>6}"]
+         "PD2 authority per field: confirmed=proven / ref=Fortification(PD2) / "
+         "1.10f=D2MOO-only(uncertain) / conflict=disagree(Fort wins)",
+         f"{'concise':14} {'D2MOO':22} {'size':>10} {'sz?':4} {'flds':>4} "
+         f"{'conf':>4} {'ref':>4} {'1.10f':>5} {'cflct':>5}"]
     for r in reg:
         sz = f"{r['size_d2moo']:#x}" if r["size_d2moo"] else "-"
         szm = ("=" if r["size_match"] else "x") + ("P" if r["size_proven"] else " ")
         L.append(f"{r['concise']:14} {(r['d2moo'] or '(missing)'):22} {sz:>10} {szm:4} "
-                 f"{r['fields_total']:>4} {r['proven_offsets']:>4} "
-                 f"{r['gapfill_fort_to_d2moo']:>6} {r['gapfill_d2moo_to_fort']:>6}")
-    tp = sum(r["proven_offsets"] for r in reg)
+                 f"{r['fields_total']:>4} {r['pd2_confirmed']:>4} {r['pd2_ref']:>4} "
+                 f"{r['only_1_10f']:>5} {r['pd2_conflict']:>5}")
+    tc = sum(r["pd2_confirmed"] for r in reg)
+    tr = sum(r["pd2_ref"] for r in reg)
+    t1 = sum(r["only_1_10f"] for r in reg)
+    tx = sum(r["pd2_conflict"] for r in reg)
     tg = sum(r["gapfill_fort_to_d2moo"] + r["gapfill_d2moo_to_fort"] for r in reg)
-    sm = sum(1 for r in reg if r["size_match"])
     L += ["-" * 92,
-          f"{len(reg)} structs | {sm} size-matched (D2MOO==Fortification) | "
-          f"{sum(1 for r in reg if r['size_proven'])} size-proven in PD2 | "
-          f"{tp} proven field offsets | {tg} cross-project gap-fill candidates",
-          "legend: sz? '=P' size matches Fortification AND stride-proven in PD2; "
-          "gap<-F = fields Fortification names that D2MOO leaves unk; gap->F = the reverse"]
+          f"{len(reg)} structs | PD2 fields: {tc} confirmed(proven) / {tr} Fortification-ref / "
+          f"{t1} 1.10f-only(uncertain) / {tx} conflict | {tg} gap-fill candidates",
+          "sz? '='=size matches Fortification, 'x'=differs (version drift 1.10f vs PD2)"]
     return "\n".join(L)
 
 
@@ -186,11 +209,11 @@ def main():
         print(f"{r['concise']}  (community: {r['community']}  |  D2MOO: {r['d2moo']}  |  "
               f"size D2MOO {sd} {'==' if r['size_match'] else '!='} Fort {sf}  |  "
               f"{r['proven_offsets']} proven offsets)")
-        print(f"{'offset':>7} {'prov':11} {'D2MOO field':28} {'Fortification field':24} type")
+        print(f"{'offset':>7} {'PD2 authority':13} {'PD2 field':24} {'D2MOO field':24} "
+              f"{'Fortification':22} type")
         for f in r["fields"]:
-            mark = {"proven": "PROVEN", "unverified": "."}[f["provability"]]
-            g = {"fort->d2moo": " <-F", "d2moo->fort": " ->F", None: ""}[f["gapfill"]]
-            print(f"{f['off_hex']:>7} {mark:11} {(f['d2moo'] or '-'):28} {(f['fort'] or '-'):24} {f['type'] or ''}{g}")
+            print(f"{f['off_hex']:>7} {f['pd2_conf']:13} {(f['pd2_name'] or '-'):24} "
+                  f"{(f['d2moo'] or '-'):24} {(f['fort'] or '-'):22} {f['type'] or ''}")
         return 0
     print(_summary(reg))
     path = args.json or os.path.join(os.environ.get("TEMP", "."), "struct_registry.json")
