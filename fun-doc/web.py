@@ -2340,44 +2340,30 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @socketio.on("request_load_types")
     def handle_load_types(data):
-        """Load the canonical D2MOO type vocabulary into the focused binary's type manager:
-        emit the flat header, POST it to /import_data_types (CParser), then stamp the version
-        marker. Streams progress; the slide-out bar collapses on success."""
+        """Load the UNIFIED type vocabulary into the focused binary: Fortification's PD2 structs
+        (the base, community names) + the D2MOO backfill/closure (data-table records + helpers PD2
+        lacks), then delete the D2MOO runtime duplicates so exactly ONE name set remains. Stamps the
+        unified marker. Streams progress; the slide-out bar collapses on success. Idempotent -- and
+        critically it can NEVER re-introduce the D2MOO duplicates (the delete pass runs every time)."""
         program = (data or {}).get("binary") or (data or {}).get("program") or None
         if not program:
             sio_emit("types_load_done", {"ok": False, "error": "select a binary first"})
             return
 
         def job():
-            import json as _json
-            import urllib.request
             import conformance_dashboard as cd
-            import d2moo_types
+            import unify_types
             try:
-                socketio.emit("types_load_progress", {"program": program, "text": "emitting canonical header..."})
-                header, stats = d2moo_types.emit_header()
                 socketio.emit("types_load_progress", {"program": program,
-                    "text": f"parsing {stats['total']} definitions ({stats['bytes']//1024} KB) into Ghidra..."})
-                # NOTE: /import_data_types reads `program` from the QUERY string, not the body
-                from urllib.parse import quote as _quote
-                body = _json.dumps({"source": header}).encode()
-                url = f"{cd.GHIDRA}/import_data_types?program={_quote(program, safe='')}"
-                req = urllib.request.Request(url, data=body,
-                    headers={"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=300) as resp:
-                    res = _json.loads(resp.read().decode("utf-8", "replace"))
-                added = res.get("types_added", 0)
+                    "text": "loading unified set: Fortification (base) + D2MOO backfill..."})
+                r = unify_types.load_unified(program)
                 socketio.emit("types_load_progress", {"program": program,
-                    "text": f"added {added} types (status {res.get('status')})"})
-                if res.get("parse_succeeded") or added > 0:
-                    st = cd.types_mark_loaded(program)
-                    socketio.emit("types_load_done", {"ok": True, "program": program,
-                        "added": added, "status": st})
-                    socketio.emit("conf_changed", {})
-                else:
-                    socketio.emit("types_load_done", {"ok": False, "program": program,
-                        "error": res.get("error") or "parse failed",
-                        "messages": (res.get("messages") or "")[:400]})
+                    "text": f"imported {r['added']} defs, removed {r['deleted_dups']} D2MOO duplicates"})
+                cd.types_cache_clear(program)
+                st = cd.types_status(program, force=True)
+                socketio.emit("types_load_done", {"ok": True, "program": program,
+                    "added": r["added"], "status": st})
+                socketio.emit("conf_changed", {})
             except Exception as e:
                 socketio.emit("types_load_done", {"ok": False, "program": program, "error": str(e)})
 

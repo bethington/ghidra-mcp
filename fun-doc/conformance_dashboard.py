@@ -435,20 +435,22 @@ _TYPES_CACHE = {}   # program -> status (session cache; the check runs once per 
 
 def types_status(program: str = None, force: bool = False) -> dict:
     """Lightweight 'are the canonical types loaded & current?' check for one binary: reads the
-    D2MOO.types.version program-option marker and compares it to the expected marker. Cached per
-    program until a load or an explicit force (the once-per-session cadence)."""
+    unified-types program-option marker (Fortification base + D2MOO backfill) and compares it to
+    the expected unified marker. Cached per program until a load or an explicit force (the
+    once-per-session cadence)."""
+    import unify_types
     program = program or PROGRAM
     if not force and program in _TYPES_CACHE:
         return _TYPES_CACHE[program]
     try:
-        expected = d2moo_types.version_marker()
+        expected = unify_types.unified_marker()
     except Exception:
         expected = None
     current = None
     try:
-        opts = _get("/get_program_options", group=d2moo_types.MARKER_GROUP,
+        opts = _get("/get_program_options", group=unify_types.MARKER_GROUP,
                     program=program).get("options", [])
-        current = next((o["value"] for o in opts if o.get("name") == d2moo_types.MARKER_OPTION), None)
+        current = next((o["value"] for o in opts if o.get("name") == unify_types.MARKER_OPTION), None)
     except (OSError, KeyError, AttributeError):
         pass
     loaded = bool(current)
@@ -472,11 +474,12 @@ def types_mark_loaded(program: str = None) -> dict:
     """Stamp the version marker after a successful load and refresh the cached status.
     NOTE: these POST endpoints read `program` from the QUERY string (not the body), so it must
     go in the path -- a body-only program silently targets the active program instead."""
+    import unify_types
     program = program or PROGRAM
     q = "?program=" + quote(program, safe="")
-    _post("/set_program_option" + q, {"group": d2moo_types.MARKER_GROUP,
-                                      "name": d2moo_types.MARKER_OPTION,
-                                      "value": d2moo_types.version_marker()})
+    _post("/set_program_option" + q, {"group": unify_types.MARKER_GROUP,
+                                      "name": unify_types.MARKER_OPTION,
+                                      "value": unify_types.unified_marker()})
     try:
         _post("/save_program" + q, {})
     except OSError:
