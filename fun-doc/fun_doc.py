@@ -370,6 +370,7 @@ CATEGORY_TO_MODULE = {
     "address_suffix_name": "fix-prototype.md",
     "undocumented_ordinals": "fix-ordinals.md",
     "non_canonical_type": "fix-canonical-types.md",
+    "plate_slot_unfilled": "fix-plate-slots.md",
 }
 
 ALL_FIX_MODULES = sorted(set(CATEGORY_TO_MODULE.values()))
@@ -2810,7 +2811,49 @@ def fetch_function_data(program, address, mode="FIX"):
 
     if not data.get("not_a_function"):
         _apply_canonical_type_deduction(data)
+        _apply_plate_scaffold_deduction(data, program, address)
     return data
+
+
+def _apply_plate_scaffold_deduction(data, program, address):
+    """Fold plate-scaffold slot-fill into the completeness score + hint loop: if the harness-owned
+    plate has unfilled <TODO> slots or placeholder/echo param descriptions, deduct and hand back
+    fix-plate-slots.md. Fires ONLY on scaffold-specific gaps (<TODO> / echo), so it never
+    double-counts the existing missing/short-plate deductions and no-ops on a well-filled or
+    not-yet-scaffolded plate."""
+    try:
+        import plate_scaffold
+    except Exception:
+        return
+    comp = data.get("completeness")
+    if not isinstance(comp, dict):
+        return
+    a = address if str(address).startswith("0x") else "0x" + str(address)
+    try:
+        cur = ghidra_get("/get_comment", params={"address": a, "program": program})
+        if isinstance(cur, str):
+            cur = json.loads(cur)
+        plate = cur.get("plate") if isinstance(cur, dict) else None
+    except Exception:
+        return
+    if not plate:
+        return   # a missing plate is the missing_plate_comment deduction's job, not this one
+    gaps = [g for g in plate_scaffold.unfilled_slots(plate)
+            if "<TODO>" in g or "placeholder" in g or "echo" in g]
+    if not gaps:
+        return
+    pts = min(len(gaps) * 3, 15)
+    comp.setdefault("deduction_breakdown", []).append({
+        "category": "plate_slot_unfilled", "count": len(gaps), "points": pts, "fixable": True,
+        "description": "harness-scaffolded plate has unfilled description slots", "items": gaps[:10]})
+    old = int(comp.get("effective_score", comp.get("completeness_score", 0)))
+    new = max(0, (min(old, 99) if old >= 100 else old) - pts)
+    comp["effective_score"] = new
+    data["score"] = new
+    data["deductions"] = comp["deduction_breakdown"]
+    fc = data.setdefault("fixable_categories", [])
+    if "plate_slot_unfilled" not in fc:
+        fc.append("plate_slot_unfilled")
 
 
 def _apply_canonical_type_deduction(data):
