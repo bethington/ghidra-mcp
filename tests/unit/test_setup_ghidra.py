@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import tools.setup.ghidra as ghidra_setup
 
 from tools.setup.ghidra import (
     DEFAULT_MCP_URL,
@@ -27,6 +28,7 @@ from tools.setup.ghidra import (
     run_default_smoke_test,
     run_endpoint_catalog_test,
     run_selected_endpoint_contract_test,
+    start_ghidra,
 )
 from tools.setup.versioning import VersionInfo
 
@@ -449,6 +451,76 @@ class TestFindPluginArchive:
 
         with pytest.raises(FileNotFoundError, match="build/distributions"):
             find_plugin_archive(tmp_path)
+
+
+def test_start_ghidra_detaches_from_parent_session_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    launcher = ghidra_path / "ghidraRun"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    recorded: dict = {}
+
+    monkeypatch.setattr(ghidra_setup.os, "name", "posix")
+    monkeypatch.setattr(
+        ghidra_setup.subprocess,
+        "Popen",
+        lambda command, **kwargs: recorded.update(
+            {"command": command, "kwargs": kwargs}
+        ),
+    )
+
+    assert start_ghidra(ghidra_path) == 0
+    assert recorded["command"] == [str(launcher)]
+    assert recorded["kwargs"]["start_new_session"] is True
+
+
+def test_start_ghidra_does_not_detach_on_non_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    launcher = ghidra_path / "ghidraRun"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    recorded: dict = {}
+
+    monkeypatch.setattr(ghidra_setup.os, "name", "java")
+    monkeypatch.setattr(
+        ghidra_setup.subprocess,
+        "Popen",
+        lambda command, **kwargs: recorded.update(
+            {"command": command, "kwargs": kwargs}
+        ),
+    )
+
+    assert start_ghidra(ghidra_path) == 0
+    assert recorded["kwargs"]["start_new_session"] is False
+
+
+def test_start_ghidra_uses_batch_launcher_without_detaching_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    launcher = ghidra_path / "ghidraRun.bat"
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    recorded: dict = {}
+
+    monkeypatch.setattr(ghidra_setup.os, "name", "nt")
+    monkeypatch.setattr(ghidra_setup.sys, "platform", "win32")
+    monkeypatch.setenv("COMSPEC", "cmd-test.exe")
+    monkeypatch.setattr(
+        ghidra_setup.subprocess,
+        "Popen",
+        lambda command, **kwargs: recorded.update(
+            {"command": command, "kwargs": kwargs}
+        ),
+    )
+
+    assert start_ghidra(ghidra_path, repo_root=tmp_path) == 0
+    assert recorded["command"] == ["cmd-test.exe", "/c", str(launcher)]
+    assert recorded["kwargs"]["start_new_session"] is False
 
 
 def test_collect_preflight_issues_passes_with_required_files(
