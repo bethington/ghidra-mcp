@@ -63,6 +63,9 @@ def analyze_function(addr, program):
     for pn, d in po["params"].items():
         # content-based: the description may have re-attached to a differently-named live param
         # (positional fallback, e.g. pUnit -> param_1), so check the prose survives ANYWHERE.
+        # Strip a storage annotation first -- the harness RELOCATES it to the canonical position,
+        # so those words aren't "lost", they moved.
+        d = ps._STORAGE_TAIL.sub("", d or "").strip()
         if d and not _content_in(d, regen):
             lost.append(f"param '{pn}' description")
     if po.get("summary") and not _content_in(po["summary"], regen):

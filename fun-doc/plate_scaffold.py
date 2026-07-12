@@ -330,9 +330,9 @@ def build_global_plate(name, gtype, address, *, size=None, writers=None, readers
     lines += ["Lifecycle: " + (_glific(_sec(psec, "Lifecycle")) or _SLOT.format("when set / owned by"))]
     # catch-all: carry any other original section (Notes, ...) verbatim so conversion is lossless
     for k, body in psec.items():
-        if k.lower().startswith(("set by", "read by", "used by", "lifecycle", "bitfield", "callback")) \
+        if k.lower().startswith(("set by", "read by", "lifecycle", "bitfield", "callback")) \
                 or not (body or "").strip():
-            continue
+            continue   # 'Used by' is NOT skipped -- carry it verbatim (Read-by regen may not cover it)
         lines += ["", f"{k}:", _indent(body)]
     if bitfield:
         lines += ["", "Bitfield:", _indent(psec.get("Bitfield")) if psec.get("Bitfield")
