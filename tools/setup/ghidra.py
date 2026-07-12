@@ -465,15 +465,16 @@ def find_ghidra_executable(ghidra_path: Path) -> Path:
 
 def find_plugin_archive(repo_root: Path) -> Path:
     version = read_pom_versions(repo_root).project_version
-    # Check Gradle output first, then Maven target/ for backward compatibility during transition.
+    # Prefer the freshest current-version output. Both backends may leave artifacts behind,
+    # so fixed backend priority can silently deploy a stale archive.
     candidates = [
         repo_root / "build" / "distributions" / f"GhidraMCP-{version}.zip",
         repo_root / "target" / f"GhidraMCP-{version}.zip",
         repo_root / "target" / "GhidraMCP.zip",
     ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+    existing_candidates = [candidate for candidate in candidates if candidate.is_file()]
+    if existing_candidates:
+        return max(existing_candidates, key=lambda path: path.stat().st_mtime)
 
     for search_dir in [repo_root / "build" / "distributions", repo_root / "target"]:
         archives = sorted(

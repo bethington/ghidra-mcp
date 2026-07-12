@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -320,7 +321,7 @@ def _stub_version(
 
 
 class TestFindPluginArchive:
-    def test_prefers_gradle_output_over_maven(
+    def test_prefers_newest_exact_version_archive(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         _stub_version(monkeypatch, tmp_path)
@@ -330,8 +331,10 @@ class TestFindPluginArchive:
         maven_zip.parent.mkdir(parents=True)
         gradle_zip.write_bytes(b"gradle")
         maven_zip.write_bytes(b"maven")
+        os.utime(gradle_zip, (100, 100))
+        os.utime(maven_zip, (200, 200))
 
-        assert find_plugin_archive(tmp_path) == gradle_zip
+        assert find_plugin_archive(tmp_path) == maven_zip
 
     def test_falls_back_to_maven_target_when_gradle_absent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
