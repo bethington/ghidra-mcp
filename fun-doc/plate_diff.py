@@ -61,7 +61,9 @@ def analyze_function(addr, program):
         if not _content_in(body, regen):
             lost.append(f"section '{sec}'")
     for pn, d in po["params"].items():
-        if d and (pn not in pr["params"] or not _content_in(d, pr["params"].get(pn, ""))):
+        # content-based: the description may have re-attached to a differently-named live param
+        # (positional fallback, e.g. pUnit -> param_1), so check the prose survives ANYWHERE.
+        if d and not _content_in(d, regen):
             lost.append(f"param '{pn}' description")
     if po.get("summary") and not _content_in(po["summary"], regen):
         lost.append("summary")

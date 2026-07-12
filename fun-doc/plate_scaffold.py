@@ -49,6 +49,8 @@ _PROV_RE = re.compile(r"^\[(?:D2MOO-DERIVED NAME|PROVEN)[^\n]*\][^\n]*(?:\n(?!\s
 # a param line: "  name: type - desc"  OR markdown "| name | type | desc |"
 _PARAM_PLAIN = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(.+?)\s+-{1,2}\s+(.*\S)\s*$")
 _PARAM_MD = re.compile(r"^\s*\|\s*([A-Za-z_]\w*)\s*\|\s*([^|]+?)\s*\|\s*(.*?)\s*\|")
+# a trailing inline storage annotation carried in an old description (harness re-adds it canonically)
+_STORAGE_TAIL = re.compile(r"\s*\[[^\]]*(?:register|IMPLICIT|Stack|E[A-DS][XIP])[^\]]*\]\s*$", re.I)
 
 
 # ---- HTTP helpers ----------------------------------------------------------------------------
@@ -70,9 +72,19 @@ def _post(path, data):
 
 
 # ---- parse an existing plate (for non-destructive re-attach) ---------------------------------
+def _sec(sections: dict, name: str):
+    """Case-insensitive section body lookup ('Algorithm' finds 'algorithm', 'Structure Layout (X)')."""
+    for k, v in sections.items():
+        if k.lower().startswith(name.lower()):
+            return v
+    return None
+
+
 def parse_function_plate(text: str) -> dict:
-    """{summary, provenance:[...], sections:{Name: body}, params:{pname: desc}} from a plate."""
-    out = {"summary": "", "provenance": [], "sections": {}, "params": {}}
+    """{summary, provenance:[...], sections:{RawName: body}, params:{name: desc},
+    param_list:[(name, desc)]} -- raw section names are preserved for verbatim catch-all
+    re-emit, and param_list keeps order for the positional re-attach fallback."""
+    out = {"summary": "", "provenance": [], "sections": {}, "params": {}, "param_list": []}
     if not text:
         return out
     out["provenance"] = [m.group(0).rstrip() for m in _PROV_RE.finditer(text)]
@@ -83,13 +95,12 @@ def parse_function_plate(text: str) -> dict:
     out["summary"] = "\n".join(summ).strip()
     for i, (start, hend, name) in enumerate(hits):
         end = hits[i + 1][0] if i + 1 < len(hits) else len(text)
-        body = text[hend:end].strip("\n").rstrip()
-        key = re.sub(r"\s+.*$", "", name.title()) if name.lower().startswith("structure") else name.title()
-        out["sections"].setdefault(name.title(), body)
-    for ln in out["sections"].get("Parameters", "").splitlines():
+        out["sections"].setdefault(name.strip(), text[hend:end].strip("\n").rstrip())
+    for ln in (_sec(out["sections"], "Parameters") or "").splitlines():
         m = _PARAM_PLAIN.match(ln) or _PARAM_MD.match(ln)
         if m:
             out["params"][m.group(1)] = m.group(3).strip()
+            out["param_list"].append((m.group(1), m.group(3).strip()))
     return out
 
 
@@ -109,41 +120,62 @@ def build_function_plate(params, return_type, *, prior: dict = None, source: str
     live signature; descriptions are slots unless prior prose exists."""
     prior = prior or {}
     pdesc = prior.get("params", {})
+    plist = prior.get("param_list", [])
     psec = prior.get("sections", {})
+    emitted = set()   # section names already emitted (lower) -> excluded from the catch-all
     lines = []
     lines.append(prior.get("summary") or _SLOT.format("one-line summary of what the function does"))
     for pv in prior.get("provenance", []):
         lines += ["", pv]
     lines += ["", "Algorithm:"]
-    lines.append(_indent(psec.get("Algorithm")) if psec.get("Algorithm")
+    lines.append(_indent(_sec(psec, "Algorithm")) if _sec(psec, "Algorithm")
                  else "  " + _SLOT.format("numbered steps"))
+    emitted |= {"algorithm", "parameters", "returns", "source"}
     lines += ["", "Parameters:"]
+    consumed = set()
     if params:
-        for p in params:
+        positional = len(plist) == len(params)   # same count -> re-attach prose by ORDINAL
+        for i, p in enumerate(params):
             nm, ty = p.get("name", "?"), (p.get("type") or "?").strip()
             reg = _reg(p.get("storage", ""))
-            d = pdesc.get(nm) or _SLOT.format("describe")
+            d = pdesc.get(nm)
+            if d:
+                consumed.add(nm)
+            elif positional and plist[i][1]:
+                d, _ = plist[i][1], consumed.add(plist[i][0])
+            d = _STORAGE_TAIL.sub("", d or _SLOT.format("describe")).rstrip()
             lines.append(f"  {nm}: {ty} - {d}" + (f" [{reg}]" if reg else ""))
     else:
         lines.append("  (none)")
+    # preserve orphaned param descriptions (implicit/register params the plate documented but
+    # that aren't in the formal signature, e.g. in_EAX) so conversion never loses prose
+    for pname, pd in plist:
+        if pname not in consumed and pd and not _TODO_RE.search(pd):
+            lines.append(f"  {pname}: (implicit / not in signature) - {_STORAGE_TAIL.sub('', pd).rstrip()}")
     lines += ["", "Returns:"]
     rt = (return_type or "void").strip()
     if rt == "void":
         lines.append("  void")
     else:
-        rd = psec.get("Returns")
-        rdesc = _returns_desc(rd) if rd else _SLOT.format("describe")
-        lines.append(f"  {rt}: {rdesc}")
-    if psec.get("Special Cases"):
-        lines += ["", "Special Cases:", _indent(psec["Special Cases"])]
+        rd = _sec(psec, "Returns")
+        lines.append(f"  {rt}: " + (_returns_desc(rd) if rd else _SLOT.format("describe")))
+    sc = _sec(psec, "Special Cases")
+    if sc:
+        lines += ["", "Special Cases:", _indent(sc)]
+        emitted.add("special cases")
     if magic:
         lines += ["", "Magic Numbers:"]
-        mexpl = _magic_expl(psec.get("Magic Numbers", ""))
+        mexpl = _magic_expl(_sec(psec, "Magic Numbers") or "")
         for c in magic:
             lines.append(f"  {c}: " + (mexpl.get(c) or _SLOT.format("explain")))
-    for k in prior.get("sections", {}):
-        if k.lower().startswith("structure layout"):
-            lines += ["", k + ":", _indent(psec[k])]
+        emitted.add("magic numbers")
+    # catch-all: carry EVERY other original section verbatim (Magic Numbers, Note, Structure
+    # Layout, ...) so conversion is truly lossless. Skip the empirical/already-emitted ones.
+    for k, body in psec.items():
+        if any(k.lower().startswith(e) for e in emitted) or not (body or "").strip():
+            continue
+        lines += ["", f"{k}:", _indent(body)]
+        emitted.add(k.lower())
     lines += ["", f"Source: {source or _SLOT.format('D2MOO source file')}"]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -295,7 +327,13 @@ def build_global_plate(name, gtype, address, *, size=None, writers=None, readers
         rn = len(readers)
         top = ", ".join(readers[:6])
         lines.append(f"Read by: {rn} site(s)" + (f" ({top}" + (" …)" if rn > 6 else ")") if top else ""))
-    lines += ["Lifecycle: " + (_glific(psec.get("Lifecycle")) or _SLOT.format("when set / owned by"))]
+    lines += ["Lifecycle: " + (_glific(_sec(psec, "Lifecycle")) or _SLOT.format("when set / owned by"))]
+    # catch-all: carry any other original section (Notes, ...) verbatim so conversion is lossless
+    for k, body in psec.items():
+        if k.lower().startswith(("set by", "read by", "used by", "lifecycle", "bitfield", "callback")) \
+                or not (body or "").strip():
+            continue
+        lines += ["", f"{k}:", _indent(body)]
     if bitfield:
         lines += ["", "Bitfield:", _indent(psec.get("Bitfield")) if psec.get("Bitfield")
                   else "  bit0: " + _SLOT.format("meaning")]
