@@ -3127,6 +3127,10 @@ DEFAULT_QUEUE_CONFIG = {
     # Assess lane: a function whose completeness score is >= this gets stamped DOC_DRAFT
     # ("already documented"). Dashboard-tunable via Settings.
     "assess_draft_score": 80,
+    # Plate scaffold: when on, the worker refreshes the harness-owned plate scaffold (empirical
+    # block + re-attached prose + <TODO> slots) before the model runs, so the model only fills
+    # descriptions. Off by default -- opt-in; the re-attach is verified 100% lossless by plate_diff.
+    "plate_scaffold": False,
     # Dashboard-owned provider -> mode -> model mapping. Defaults from
     # DEFAULT_PROVIDER_MODELS — overridable per-provider/mode via the dashboard.
     "provider_models": copy.deepcopy(DEFAULT_PROVIDER_MODELS),
@@ -3272,6 +3276,7 @@ def build_worker_config_snapshot(queue, primary_provider):
         "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
         "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
         "skip_library_code": bool(cfg.get("skip_library_code", True)),
+        "plate_scaffold": bool(cfg.get("plate_scaffold", False)),
     }
 
     # Per-provider slices — only the providers this worker can invoke. The
@@ -7780,6 +7785,22 @@ def process_function(
     data = fetch_function_data(program, address, mode=mode)
     live_score = data.get("score")
     print(f"done")
+
+    # Plate-scaffold auto-write (opt-in, queue config `plate_scaffold`): refresh the harness-owned
+    # plate -- empirical block (params/types/return/source) + re-attached existing prose + <TODO>
+    # slots -- so the model only fills descriptions and can't re-type or drift the derivable facts.
+    # Re-attach is verified 100% lossless (plate_diff). Skips VERIFY (review-only), manual, and
+    # non-functions; re-fetches so the model + score see the scaffolded plate + its slot deduction.
+    _scaffold_on = bool(config_snapshot.get("plate_scaffold", False)) if config_snapshot else False
+    if _scaffold_on and not data.get("not_a_function") and mode != "VERIFY" and not manual:
+        try:
+            import plate_scaffold
+            plate_scaffold.apply_scaffold(address, program)
+            data = fetch_function_data(program, address, mode=mode)
+            live_score = data.get("score")
+            print(f"  [plate-scaffold] refreshed", flush=True)
+        except Exception as e:
+            print(f"  [plate-scaffold] skipped: {e}", flush=True)
 
     # Phase 3 read hook: if this function is still default-named (FUN_*),
     # ask the cross-version archive whether we already documented this

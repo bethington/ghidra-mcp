@@ -399,6 +399,8 @@
                 <input type="checkbox" id="requireScoredInput" onchange="saveQueueConfig()" style="margin:0"><span>Score Cold</span></label>
               <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/">
                 <input type="checkbox" id="debugModeInput" onchange="saveQueueConfig()" style="margin:0"><span>Debug Logs</span></label>
+              <label class="settings-label" title="Refresh the harness-owned plate scaffold (empirical block + slots) before the model runs, so it only fills descriptions. Re-attach is 100% lossless.">
+                <input type="checkbox" id="plateScaffoldInput" onchange="saveQueueConfig()" style="margin:0"><span>Plate Scaffold</span></label>
             </div>
             <div class="settings-divider"></div>
             <div class="settings-group">
@@ -889,6 +891,7 @@
     if(g("assessDraftInput")) g("assessDraftInput").value = cfg.assess_draft_score!=null ? cfg.assess_draft_score : 80;
     if(g("requireScoredInput")) g("requireScoredInput").checked = !!cfg.require_scored;
     if(g("debugModeInput"))   g("debugModeInput").checked = !!cfg.debug_mode;
+    if(g("plateScaffoldInput")) g("plateScaffoldInput").checked = !!cfg.plate_scaffold;
     if(g("handoffProviderInput")) g("handoffProviderInput").value = cfg.complexity_handoff_provider || "off";
     if(g("handoffMaxInput"))  g("handoffMaxInput").value  = cfg.complexity_handoff_max!=null ? cfg.complexity_handoff_max : 0;
     if(g("auditProviderInput")) g("auditProviderInput").value = cfg.audit_provider || "off";
@@ -932,6 +935,7 @@
       assess_draft_score: parseInt(v("assessDraftInput",80)) || 80,
       require_scored: g("requireScoredInput") ? g("requireScoredInput").checked : false,
       debug_mode: g("debugModeInput") ? g("debugModeInput").checked : false,
+      plate_scaffold: g("plateScaffoldInput") ? g("plateScaffoldInput").checked : false,
       complexity_handoff_provider: v("handoffProviderInput","off")==="off" ? null : v("handoffProviderInput","off"),
       complexity_handoff_max: parseInt(v("handoffMaxInput",0)) || 0,
       audit_provider: v("auditProviderInput","off")==="off" ? null : v("auditProviderInput","off"),

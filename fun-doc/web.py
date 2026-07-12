@@ -2714,6 +2714,8 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     )
             if "require_scored" in data:
                 cfg["require_scored"] = bool(data["require_scored"])
+            if "plate_scaffold" in data:
+                cfg["plate_scaffold"] = bool(data["plate_scaffold"])
             if "assess_draft_score" in data:
                 try:
                     cfg["assess_draft_score"] = max(0, min(100, int(data["assess_draft_score"])))
