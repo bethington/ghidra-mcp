@@ -247,6 +247,119 @@ def apply_scaffold(addr: str, program: str = None) -> dict:
     return {"address": a, "written": True, "unfilled": unfilled_slots(text)}
 
 
+# ---- global plates (different shape: identity + who writes/reads + conditional specializations) ----
+_GLOB_LINE = re.compile(r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)")
+_XREF_LINE = re.compile(r"From\s+[0-9a-fA-F]+\s+in\s+(?P<fn>\S+)\s+\[(?P<dir>WRITE|READ)\]")
+_TYPE_WIDTH = {"undefined1": 1, "byte": 1, "char": 1, "bool": 1, "undefined2": 2, "word": 2,
+               "short": 2, "ushort": 2, "undefined4": 4, "dword": 4, "int": 4, "uint": 4,
+               "undefined8": 8, "qword": 8, "double": 8, "float": 4}
+_GLOB_SECTION_RE = re.compile(r"^(Set by|Read by|Lifecycle|Bitfield|Callback|Used by|Notes?)\s*:", re.I | re.M)
+
+
+def _type_size(t: str) -> int:
+    t = (t or "").strip()
+    if "*" in t:
+        return 4
+    return _TYPE_WIDTH.get(t.lower(), 0)
+
+
+def parse_global_plate(text: str) -> dict:
+    """{summary, sections:{Name: body}} -- for re-attaching a global's prose (summary/lifecycle/
+    bitfield). Set-by/Read-by are regenerated from xrefs, not re-attached."""
+    out = {"summary": "", "sections": {}}
+    if not text:
+        return out
+    hits = [(m.start(), m.end(), m.group(1).strip()) for m in _GLOB_SECTION_RE.finditer(text)]
+    first = hits[0][0] if hits else len(text)
+    out["summary"] = "\n".join(l for l in text[:first].splitlines() if l.strip()).strip()
+    for i, (start, hend, name) in enumerate(hits):
+        end = hits[i + 1][0] if i + 1 < len(hits) else len(text)
+        out["sections"][name.title()] = text[hend:end].strip("\n").rstrip()
+    return out
+
+
+def build_global_plate(name, gtype, address, *, size=None, writers=None, readers=None,
+                       prior: dict = None, bitfield: bool = False, callback: bool = False) -> str:
+    """Render a global plate: identity + Set-by/Read-by (empirical) + Lifecycle slot, with
+    conditional Bitfield/Callback sub-scaffolds. `prior` re-attaches summary + lifecycle prose."""
+    prior = prior or {}
+    psec = prior.get("sections", {})
+    lines = [prior.get("summary") or _SLOT.format("one-line summary of what this global holds")]
+    ident = f"Type: {gtype} · Address: {address}"
+    if size:
+        ident = f"Type: {gtype} · Size: {size} · Address: {address}"
+    lines += ["", ident]
+    if writers:
+        lines.append("Set by: " + ", ".join(writers[:6]) + (" …" if len(writers) > 6 else ""))
+    if readers is not None:
+        rn = len(readers)
+        top = ", ".join(readers[:6])
+        lines.append(f"Read by: {rn} site(s)" + (f" ({top}" + (" …)" if rn > 6 else ")") if top else ""))
+    lines += ["Lifecycle: " + (_glific(psec.get("Lifecycle")) or _SLOT.format("when set / owned by"))]
+    if bitfield:
+        lines += ["", "Bitfield:", _indent(psec.get("Bitfield")) if psec.get("Bitfield")
+                  else "  bit0: " + _SLOT.format("meaning")]
+    if callback:
+        lines += ["", "Callback:", "  " + (_glific(psec.get("Callback")) or _SLOT.format("what calls through + args"))]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _glific(block):
+    return (block or "").strip() or None
+
+
+def _fetch_global(addr: str, program: str):
+    """(name, type, size, writers[], readers[]) for a data global from list_globals + xref dirs."""
+    a = addr if str(addr).startswith("0x") else "0x" + str(addr)
+    bare = a[2:].lower().lstrip("0")
+    txt = _get("/list_globals", program=program, limit=100000)
+    name = gtype = None
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = _GLOB_LINE.match(ln.strip())
+        if m and m.group("addr").lower().lstrip("0") == bare:
+            name, gtype = m.group("name"), m.group("type").strip()
+            break
+    writers, readers = [], []
+    xr = _get("/get_xrefs_to", address=a, program=program, limit=100000)
+    for ln in (xr if isinstance(xr, str) else "").splitlines():
+        m = _XREF_LINE.search(ln)
+        if not m:
+            continue
+        (writers if m.group("dir") == "WRITE" else readers).append(m.group("fn"))
+    # unique, order-preserving
+    writers = list(dict.fromkeys(writers))
+    readers = list(dict.fromkeys(readers))
+    return name, gtype, _type_size(gtype), writers, readers
+
+
+def _glob_triggers(name: str, gtype: str):
+    """(bitfield, callback) conditional-section triggers from empirical signals."""
+    n, t = (name or ""), (gtype or "")
+    bitfield = bool(re.search(r"Flags|Bits|Mask|State|Mode", n)) and _type_size(t) in (1, 2, 4) and "*" not in t
+    callback = n.startswith("g_pfn") or "(" in t or ("*" in t and "code" in t.lower())
+    return bitfield, callback
+
+
+def global_scaffold_for(addr: str, program: str = None) -> str:
+    program = program or PROGRAM
+    a = addr if str(addr).startswith("0x") else "0x" + str(addr)
+    name, gtype, size, writers, readers = _fetch_global(a, program)
+    cur = _get("/get_comment", address=a, program=program)
+    prior = parse_global_plate(cur.get("plate") if isinstance(cur, dict) else "")
+    bf, cb = _glob_triggers(name, gtype)
+    return build_global_plate(name, gtype or "undefined", a, size=size or None,
+                              writers=writers, readers=readers, prior=prior, bitfield=bf, callback=cb)
+
+
+def apply_global_scaffold(addr: str, program: str = None) -> dict:
+    program = program or PROGRAM
+    a = addr if str(addr).startswith("0x") else "0x" + str(addr)
+    text = global_scaffold_for(a, program)
+    q = "?program=" + quote(program, safe="")
+    _post("/set_comment" + q, {"address": a, "type": "plate", "comment": text})
+    return {"address": a, "written": True, "unfilled": unfilled_slots(text)}
+
+
 def _selftest() -> int:
     # build a fresh scaffold
     params = [{"name": "dwClassId", "type": "uint", "storage": "ECX:4"},
@@ -279,26 +392,46 @@ def _selftest() -> int:
     bad = build_function_plate([{"name": "x", "type": "int", "storage": ""}], "int",
                                prior={"params": {"x": "x"}, "sections": {}, "summary": "does a thing here"})
     assert any("echo" in i or "placeholder" in i for i in unfilled_slots(bad)), unfilled_slots(bad)
-    print("[ok] plate_scaffold self-test: build + non-destructive re-attach + slot detection")
+    # --- globals ---
+    g = build_global_plate("g_dwSkillsTxtCount", "uint", "0x6fdf0a78", size=4,
+                           writers=["SKILLS_FreeAllSkillTables"],
+                           readers=["DATATBLS_Init", "SKILLS_GetSkillRange"])
+    assert "Type: uint · Size: 4 · Address: 0x6fdf0a78" in g, g
+    assert "Set by: SKILLS_FreeAllSkillTables" in g and "Read by: 2 site(s)" in g, g
+    assert "Lifecycle: <TODO:" in g and unfilled_slots(g), g
+    # conditional bitfield trigger + re-attach of a global's summary/lifecycle
+    gp = parse_global_plate("Locale ID for GetCPInfo.\n\nSet by: SetupCodePage\nLifecycle: set at init\n")
+    assert "Locale ID" in gp["summary"] and "set at init" in gp["sections"].get("Lifecycle", "")
+    g2 = build_global_plate("g_dwStateFlags", "uint", "0x6fd00000", size=4, writers=["A"], readers=["B"],
+                            prior=gp, bitfield=True)
+    assert "Locale ID" in g2 and "Lifecycle: set at init" in g2 and "Bitfield:" in g2, g2
+    bf, cb = _glob_triggers("g_dwStateFlags", "uint")
+    assert bf and not cb
+    assert _glob_triggers("g_pfnThreadInit", "code *")[1]      # callback trigger
+    print("[ok] plate_scaffold self-test: function + global scaffold, re-attach, slot detection")
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--show", metavar="ADDR")
-    ap.add_argument("--apply", metavar="ADDR")
+    ap.add_argument("--show", metavar="ADDR", help="build a FUNCTION scaffold, print")
+    ap.add_argument("--apply", metavar="ADDR", help="write a FUNCTION scaffold")
+    ap.add_argument("--show-global", metavar="ADDR", help="build a GLOBAL scaffold, print")
+    ap.add_argument("--apply-global", metavar="ADDR", help="write a GLOBAL scaffold")
     ap.add_argument("--program", default=None)
     args = ap.parse_args()
     if args.selftest:
         return _selftest()
     if args.show:
-        print(scaffold_for(args.show, args.program))
-        return 0
+        print(scaffold_for(args.show, args.program)); return 0
     if args.apply:
-        print(json.dumps(apply_scaffold(args.apply, args.program), indent=2))
-        return 0
-    ap.error("pick --selftest / --show <addr> / --apply <addr>")
+        print(json.dumps(apply_scaffold(args.apply, args.program), indent=2)); return 0
+    if args.show_global:
+        print(global_scaffold_for(args.show_global, args.program)); return 0
+    if args.apply_global:
+        print(json.dumps(apply_global_scaffold(args.apply_global, args.program), indent=2)); return 0
+    ap.error("pick --selftest / --show / --apply / --show-global / --apply-global")
 
 
 if __name__ == "__main__":
