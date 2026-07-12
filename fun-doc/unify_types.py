@@ -1,172 +1,101 @@
-"""unify_types.py -- collapse the two loaded vocabularies (D2MOO + Fortification) into ONE set.
+"""unify_types.py -- the Diablo II / Project Diablo 2 PROFILE of the generic type_unifier engine.
 
-Decision: Fortification (PD2-native, the version we prove against) is the base; D2MOO structs
-that DUPLICATE a Fortification struct (same size, or exact size+offset signature) are deleted;
-D2MOO structs with no Fortification match are KEPT as backfill (data-table records + PD2-absent
-concepts). Result: one set of struct names in Ghidra -- community/Fortification names + the D2MOO
-backfill -- no duplicates.
+Collapses the two loaded vocabularies into ONE set in the PD2 game binaries:
+  * PRIMARY  = Fortification's PD2-native structs (community names: UnitAny, Room1, ItemData, ...)
+  * SECONDARY= D2MOO's canonical headers (D2*Strc / D2*Txt); backfills what Fortification lacks
+    (data-table records + internal helpers), and its runtime duplicates of Fortification are deleted.
 
-    python unify_types.py --plan                 # print keep/delete counts + the delete list
-    python unify_types.py --apply [--program P]  # delete duplicates from one program
-    python unify_types.py --apply-all            # every open PD2 game binary
+All the app-specific choices live here; the dedup/closure/delete/marker engine is type_unifier.py.
+This module keeps the public API (plan / load_unified / unified_marker / MARKER_GROUP / MARKER_OPTION)
+that web.py's request_load_types and conformance_dashboard's types_status depend on, so wiring an
+entirely different application means writing a sibling profile, not touching the engine or callers.
+
+    python unify_types.py --plan          # keep/delete counts + lists
+    python unify_types.py --apply-all     # delete duplicates from every open binary
+    python unify_types.py --restore       # reload full D2MOO then re-delete the corrected dups
+    python unify_types.py --stamp-all     # stamp unified marker + save on every open binary
+    python unify_types.py --load-unified  # idempotent full unified load on every open binary
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import urllib.parse
-import urllib.request
 
+import type_unifier as tu
 import struct_registry as sr
+import d2moo_types as dt
+import fort_types as ft
 
-GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
+
+# ---- the two D2 vocabularies as TypeSources --------------------------------------------------
+class _FortSource(tu.TypeSource):
+    """PRIMARY: Fortification's PD2 runtime structs (the version the conformance oracle proves)."""
+    def structs(self):
+        return sr._fort_structs()
+
+    def emit_header(self):
+        return ft.emit_fort_header()[0]
 
 
-def _sig(s):
-    return (s.get("size"), tuple(sorted(s.get("fields", {}))))
+class _D2MOOSource(tu.TypeSource):
+    """SECONDARY: D2MOO's canonical headers -- every module's structs, with a dep graph for closure."""
+    def __init__(self):
+        self._defs = None
+
+    def _definitions(self):
+        if self._defs is None:
+            self._defs = {d["name"]: d for d in dt._definitions()}
+        return self._defs
+
+    def structs(self):
+        return sr._d2_all()
+
+    def emit_header(self):
+        return dt.emit_header()[0]
+
+    def deps(self, name):
+        return self._definitions().get(name, {}).get("deps", ())
 
 
 def _is_datatable(name):
-    """Data-table record (`.txt`/`.bin` compiled row): Fortification is a runtime-struct header
-    and defines NONE of these, so they are ALWAYS backfill, never a size-coincidence duplicate."""
+    """Data-table record (`.txt`/`.bin` compiled row): Fortification is a runtime-struct header and
+    defines NONE of these, so they are ALWAYS backfill, never a size-coincidence duplicate."""
     return name.endswith(("Txt", "Bin"))
 
 
+def _pd2_programs(paths):
+    """The PD2 game binaries loaded in Ghidra (mod DLLs under /Mods/)."""
+    return sorted({p for p in paths if p.startswith("/Mods/") and p.endswith(".dll")})
+
+
+# The configured engine instance -- swapping applications = a different Unifier here.
+UNIFIER = tu.Unifier(
+    primary=_FortSource(),
+    secondary=_D2MOOSource(),
+    never_dedup=_is_datatable,
+    program_selector=_pd2_programs,
+    marker_group="Program Information",
+    marker_option="PD2.unified.types.version",
+)
+
+# ---- public API preserved for web.py / conformance_dashboard (thin passthroughs) -------------
+MARKER_GROUP = UNIFIER.marker_group
+MARKER_OPTION = UNIFIER.marker_option
+
+
 def plan():
-    """(duplicates[list of D2MOO names], backfill[list]). A duplicate matches a Fortification
-    struct (exact sig OR size) AND is not a data-table record. Backfill is the rest PLUS the
-    transitive D2MOO dependency-closure of that rest: a D2MOO helper struct that a kept struct
-    embeds/points to is retained even if it size-matches Fortification, so the kept type graph
-    resolves fully (no dangling undefined references)."""
-    import d2moo_types as dt
-    d2 = sr._d2_all()
-    fort = sr._fort_structs()
-    fort_sigs = {_sig(s) for s in fort.values() if s.get("fields")}
-    fort_sizes = {s.get("size") for s in fort.values() if s.get("fields") and s.get("size")}
-    dup_cand, keep = set(), set()
-    for n, s in d2.items():
-        if not s.get("fields"):
-            continue                      # fieldless/forward-decl -> leave alone
-        is_dup = (not _is_datatable(n)) and (_sig(s) in fort_sigs or s.get("size") in fort_sizes)
-        (dup_cand if is_dup else keep).add(n)
-    # pull any dup that a kept struct depends on into keep, transitively (fixpoint)
-    defs = {d["name"]: d for d in dt._definitions()}
-    changed = True
-    while changed:
-        changed = False
-        for n in list(keep):
-            for dep in defs.get(n, {}).get("deps", []):
-                if dep in dup_cand:
-                    dup_cand.discard(dep); keep.add(dep); changed = True
-    return sorted(dup_cand), sorted(keep)
-
-
-def reload_full_d2moo(targets):
-    """Re-import the complete D2MOO header (re-adds every struct, incl. data-table records that a
-    prior over-aggressive delete removed). Dependency-safe: emit_header topo-sorts + forward-decls
-    the whole set, so subset-dependency gaps can't occur."""
-    import d2moo_types as dt
-    header, stats = dt.emit_header()
-    print(f"re-importing full D2MOO header ({stats['total']} defs) into {len(targets)} binary(ies)...")
-    for p in targets:
-        res = _post("/import_data_types", {"source": header}, p)
-        try:
-            added = json.loads(res).get("types_added", "?")
-        except Exception:
-            added = "?"
-        print(f"  {os.path.basename(p):16} +{added}")
-
-
-MARKER_GROUP, MARKER_OPTION = "Program Information", "PD2.unified.types.version"
-
-
-def _keep_names():
-    """The unified struct name set = Fortification's structs + the D2MOO backfill/closure kept."""
-    import fort_types as ft
-    _dups, backfill = plan()
-    fort_names = set(sr._fort_structs())
-    return fort_names | set(backfill)
+    return UNIFIER.plan()
 
 
 def unified_marker():
-    """Stable marker for 'the ONE unified set is loaded & current'. Changes if either vocabulary's
-    contribution changes, so a stale/partial load is detectable in a single option read."""
-    import hashlib
-    names = sorted(_keep_names())
-    h = hashlib.sha1("\n".join(names).encode("utf-8")).hexdigest()[:8]
-    return f"uni1:{len(names)}:{h}"
+    return UNIFIER.unified_marker()
 
 
 def load_unified(program):
-    """Idempotently bring ONE binary to the unified set: import Fortification (base) + full D2MOO,
-    then delete the runtime duplicates, then stamp the unified marker. Safe to re-run -- this is
-    what the 'Load types' button must call so it can never re-introduce the D2MOO duplicates."""
-    import d2moo_types as dt
-    import fort_types as ft
-    dups, _backfill = plan()
-    fort_header = ft.emit_fort_header()[0]
-    d2_header = dt.emit_header()[0]
-    added = 0
-    for hdr in (fort_header, d2_header):
-        res = _post("/import_data_types", {"source": hdr}, program)
-        try:
-            added += json.loads(res).get("types_added", 0)
-        except Exception:
-            pass
-    apply_to(program, dups)
-    _post("/set_program_option", {"group": MARKER_GROUP, "name": MARKER_OPTION,
-                                  "value": unified_marker()}, program)
-    try:
-        _post("/save_program", {}, program)
-    except Exception:
-        pass
-    return {"program": program, "added": added, "deleted_dups": len(dups), "marker": unified_marker()}
+    return UNIFIER.load_unified(program)
 
 
-def _post(path, body, program):
-    url = f"{GHIDRA}{path}?program=" + urllib.parse.quote(program, safe="")
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read().decode("utf-8", "replace")
-
-
-def _get(path, **params):
-    url = f"{GHIDRA}{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
-    with urllib.request.urlopen(url, timeout=60) as r:
-        raw = r.read().decode("utf-8", "replace")
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-
-
-def _open_programs():
-    d = _get("/list_open_programs")
-    progs = d if isinstance(d, list) else d.get("programs", d.get("open_programs", []))
-    out = [(p if isinstance(p, str) else (p.get("path") or p.get("name"))) for p in progs]
-    return sorted({p for p in out if p and p.startswith("/Mods/") and p.endswith(".dll")})
-
-
-def apply_to(program, dups):
-    """Delete each duplicate; a few passes handle the type-graph reference ordering."""
-    remaining = list(dups)
-    deleted = 0
-    for _pass in range(4):
-        still = []
-        for name in remaining:
-            r = _post("/delete_data_type", {"type_name": name}, program)
-            if "deleted successfully" in r or "not found" in r.lower():
-                deleted += 1 if "deleted successfully" in r else 0
-            else:
-                still.append(name)
-        remaining = still
-        if not remaining:
-            break
-    return {"program": program, "deleted": deleted, "left": len(remaining)}
-
-
+# ---- CLI -------------------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--plan", action="store_true")
@@ -180,38 +109,37 @@ def main():
                     help="idempotent full unified load (Fortification + D2MOO backfill) on every open binary")
     ap.add_argument("--program", default="/Mods/PD2-S12/D2Common.dll")
     args = ap.parse_args()
-    dups, backfill = plan()
+
+    dups, backfill = UNIFIER.plan()
     if args.plan:
         print(f"Fortification = base. D2MOO structs: {len(dups)} DELETE (duplicate), "
               f"{len(backfill)} KEEP (backfill, no PD2 twin)")
-        print(f"\nKEEP / backfill ({len(backfill)}):")
-        print("  " + ", ".join(backfill))
-        print(f"\nDELETE / duplicates ({len(dups)}):")
-        print("  " + ", ".join(dups))
+        print(f"\nKEEP / backfill ({len(backfill)}):\n  " + ", ".join(backfill))
+        print(f"\nDELETE / duplicates ({len(dups)}):\n  " + ", ".join(dups))
         return 0
     if args.stamp_all:
-        marker = unified_marker()
+        marker = UNIFIER.unified_marker()
         print(f"stamping unified marker {marker} + saving...")
-        for p in _open_programs():
-            _post("/set_program_option", {"group": MARKER_GROUP, "name": MARKER_OPTION, "value": marker}, p)
-            try:
-                _post("/save_program", {}, p)
-            except Exception:
-                pass
+        for p in UNIFIER.open_programs():
+            UNIFIER.stamp(p); UNIFIER.save(p)
             print(f"  {os.path.basename(p):16} marked + saved")
         return 0
     if args.load_unified:
-        for p in _open_programs():
-            r = load_unified(p)
+        for p in UNIFIER.open_programs():
+            r = UNIFIER.load_unified(p)
             print(f"  {os.path.basename(p):16} +{r['added']} imported, {r['deleted_dups']} dups removed, marked")
         return 0
-    targets = _open_programs() if (args.apply_all or args.restore) else [args.program]
+
+    targets = UNIFIER.open_programs() if (args.apply_all or args.restore) else [args.program]
     if args.restore:
-        reload_full_d2moo(targets)
-        print()
+        print(f"re-importing full D2MOO header into {len(targets)} binary(ies), then deleting {len(dups)} dups...")
+        for p in targets:
+            r = UNIFIER.restore(p)
+            print(f"  {os.path.basename(p):16} +{r['added']} re-imported, deleted {r['deleted']}, {r['left']} left")
+        return 0
     print(f"deleting {len(dups)} duplicate D2MOO structs from {len(targets)} binary(ies)...")
     for p in targets:
-        r = apply_to(p, dups)
+        r = UNIFIER.delete_dups(p, dups)
         print(f"  {os.path.basename(p):16} deleted {r['deleted']}, {r['left']} left")
     return 0
 
