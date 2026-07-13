@@ -74,6 +74,16 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
     register ABIs the v1 marshaller can't express."""
     inputs = param_layout.get("inputs", [])
     outputs = param_layout.get("outputs", [])
+    # The model sometimes emits a malformed layout where an input/output entry
+    # is a LIST (e.g. ["nIndex","ECX"]) instead of a {name,register} dict --
+    # `i.get(...)` then AttributeError'd and crashed the candidate
+    # (2026-07-13, DATATBLS_GetLvlPrestDataField28). A malformed layout is an
+    # UNSUPPORTED ABI (handled: the caller drops the candidate cleanly), not a
+    # crash.
+    if not all(isinstance(i, dict) for i in list(inputs) + list(outputs)):
+        raise UnsupportedLiveABI(
+            f"{name}: malformed layout -- input/output entries must be objects "
+            f"with name/register, got a non-object entry")
     regs = [str(i.get("register", "")).upper() for i in inputs]
 
     # Classify the calling convention from the input register pattern.
@@ -111,14 +121,33 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
             f"{name}: output registers {out_regs} beyond EAX not comparable live yet")
     signed = any(o.get("signed") for o in outputs if str(o.get("register", "")).upper() == "EAX")
 
-    args = [{"id": i["name"], "kind": "i32"} for i in inputs]
+    # Class B (2026-07-13, capability loop): an input may be a pure OUT-buffer
+    # param -- `kind: "outbuf"` (+ optional `bytes`, default 4) in the drafted
+    # layout. The oracle has ALWAYS supported buf args + buf compare channels
+    # (see D2Debugger.LiveDispatch POST /oracle: {"kind":"buf","bytes":N},
+    # compare ["ret","x"]); only THIS translator was i32/EAX-only, which is why
+    # every void out-param writer (GetBeltTxtEntry, MONSTER_GetInvGridSize, the
+    # ROOM coordinate pairs) dead-ended as unprovable. Out-buffers join the
+    # compare set, so a void-return writer becomes a MEANINGFUL proof (and a
+    # meaningful shadow dispatcher) via its written bytes. input_sets carry
+    # ONLY the scalar params -- the oracle allocates fresh scratch buffers per
+    # call for buf args.
+    outbufs = [i for i in inputs if str(i.get("kind", "")).lower() == "outbuf"]
+    args = []
+    for i in inputs:
+        if str(i.get("kind", "")).lower() == "outbuf":
+            args.append({"id": i["name"], "kind": "buf",
+                         "bytes": int(i.get("bytes") or 4)})
+        else:
+            args.append({"id": i["name"], "kind": "i32"})
+    compare = (["ret"] if outputs else []) + [b["name"] for b in outbufs]
     spec = {
         "name": name,
         "addr": _int(address),
         "callconv": callconv,
         "ret": ("i32" if signed else "u32") if outputs else "void",
         "args": args,
-        "compare": ["ret"] if outputs else [],
+        "compare": compare,
     }
     if orig_regs:
         spec["orig_regs"] = orig_regs
@@ -345,6 +374,18 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
     parts.append(example)
     parts.append("```")
     parts.append("")
+    parts.append("## OUT-PARAM (pointer the function only WRITES through)")
+    parts.append(
+        "If a parameter is a pointer the function ONLY WRITES results into (an out-buffer -- e.g. "
+        "`uint *pnWidth`, a record struct the fn fills), declare it in param_layout.inputs with "
+        "`\"kind\": \"outbuf\"` and `\"bytes\": <written size>` (the full byte size the function writes; "
+        "a plain `*p = x` dword is 4). The prover allocates a fresh buffer per call, passes its address "
+        "in that arg slot to BOTH original and reimpl, and COMPARES THE WRITTEN BYTES -- so a void-return "
+        "writer is still a real proof. In your reimpl, declare that param as the pointer it is and write "
+        "through it exactly like the decompile. input_sets must contain ONLY the scalar params (never the "
+        "outbuf ones). If the function READS meaningful data through a pointer param (not just writes), "
+        "it is NOT an outbuf -- reply with the single word UNSUPPORTED instead of guessing.")
+    parts.append("")
     parts.append("## Output")
     parts.append("BLOCK 1 -- ```cpp: the complete reimpl (include + marker + function, all in one block).")
     parts.append(
@@ -480,9 +521,23 @@ def _is_provider_reimpl(cpp: str) -> bool:
     extern-C symbol: written as a provider candidate it makes the .def export a symbol
     the DLL never defines -> LNK2001 -> the WHOLE provider build fails for every
     function (found 2026-07-08: SKILLS_GetSkillNodeRecord poisoned the build). Treating
-    such a draft as malformed here keeps it out of the provider dir entirely."""
+    such a draft as malformed here keeps it out of the provider dir entirely.
+
+    Also rejects a TRUNCATED draft (2026-07-13, capability loop): the model
+    sometimes emits an incomplete reimpl (cut off mid-body), which the parser
+    accepted, wrote to candidates/, and the compiler then failed with C1075
+    ('{' no matching token) / C1004 (unexpected EOF) -- and because the provider
+    is ONE shared DLL, that truncated file fails the build for EVERY function
+    (the provider-compile-cascade). A balanced brace/paren count is a cheap,
+    reliable truncation signal; rejecting here forces a re-draft and keeps the
+    broken file out of the shared build entirely."""
     c = cpp or ""
-    return 'extern "C"' in c and "namespace D2Lib" not in c
+    if 'extern "C"' not in c or "namespace D2Lib" in c:
+        return False
+    code = re.sub(r"//[^\n]*", "", c)   # ignore braces inside line comments
+    if code.count("{") != code.count("}") or code.count("(") != code.count(")"):
+        return False
+    return True
 
 
 def _json_loads_lenient(s: str):

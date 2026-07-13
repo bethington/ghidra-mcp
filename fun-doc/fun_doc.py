@@ -6648,8 +6648,37 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                 output_parts.append(cleaned)
                 bus_emit("model_text", {"text": cleaned[:500]})
             else:
-                # All content was think-tags — model reasoning only, no actionable output
-                print(f"  [minimax] (reasoning only, no output text)", flush=True)
+                # All content was think-tags. For the PORT draft prompts the
+                # model often emits the ENTIRE ```cpp/```json deliverable
+                # INSIDE the think block -- dropping it produced 9 of the
+                # capability loop's malformed_response outcomes (iters 1-6,
+                # 2026-07-13). Salvage fenced code blocks from the reasoning;
+                # the surrounding prose stays dropped.
+                # Keep only the LAST cpp block and LAST json block. The model
+                # iterates on its draft MANY times inside <think> (seen: 23-28
+                # blocks); concatenating them all made parse_live_response pick
+                # cpp[0]/js[0] -- an early INCOMPLETE draft -- so the salvage
+                # "fired" but still malformed (2026-07-13, PATH_GetDirectionScaled).
+                # The final block of each language is the model's actual answer.
+                lang_blocks = re.findall(r"```([a-zA-Z]*)\r?\n([\s\S]*?)```",
+                                         message.content)
+                last = {}
+                for lang, body in lang_blocks:
+                    key = (lang or "").lower()
+                    bucket = ("cpp" if key in ("cpp", "c", "c++")
+                              else "json" if key in ("json", "") else key)
+                    last[bucket] = f"```{lang}\n{body}```"
+                if last:
+                    salvaged = "\n\n".join(
+                        last[k] for k in ("cpp", "json") if k in last) \
+                        or "\n\n".join(last.values())
+                    print(f"  [minimax] (reasoning-only; salvaged final "
+                          f"{len(last)} block(s) of {len(lang_blocks)})", flush=True)
+                    output_parts.append(salvaged)
+                    bus_emit("model_text", {"text": salvaged[:500]})
+                else:
+                    # reasoning only, and no code blocks anywhere -> truly empty
+                    print(f"  [minimax] (reasoning only, no output text)", flush=True)
         else:
             print(
                 f"  [minimax] (empty content, finish_reason={choice.finish_reason})",
@@ -11141,6 +11170,26 @@ def run_globals_worker_pass(
 # / port_live_prove.py / prove_doc.py for the drivers.
 # ==========================================================================
 
+def _unknown_resolve_names(reimpl_code):
+    """D2MOO_Resolve name(s) in a drafted reimpl that the generated resolve table
+    does NOT know. Such a draft is GUARANTEED wrong at runtime: D2MOO_Resolve
+    returns NULL, the reimpl returns its 0-sentinel on every vector, and the
+    prove fails as an all-zeros 'mismatch' that the divergence-feedback loop
+    can't diagnose. (2026-07-12, DATATBLS_GetBodyLocPropertyByte: the model
+    'canonicalized' g_dat_6fdef0a8 to g_abBodyLocPropertyTbl -- the current
+    Ghidra name -- but the resolve table predates the rename.) Empty set when
+    the table can't be read (fail OPEN: the compile/prove will still catch it)."""
+    try:
+        import abi_static
+        known = set(abi_static.resolve_reverse_map().values())
+    except Exception:
+        return set()
+    if not known:
+        return set()
+    used = set(re.findall(r'D2MOO_Resolve\(\s*"([^"]+)"', reimpl_code or ""))
+    return used - known
+
+
 def process_global_leaf_live(program, address, func_name, decompiled, *,
                              provider, model=None, max_turns=15, worker_id=None,
                              max_fix_attempts=3, static_abi=None, abort_class=False):
@@ -11250,6 +11299,23 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                 return "blocked"
             reimpl, layout, input_sets = plp.parse_live_response(text or "")
             if reimpl:
+                # RESOLVE-NAME GATE: an unknown D2MOO_Resolve name is a guaranteed
+                # all-zeros mismatch (see _unknown_resolve_names). Reject the draft
+                # and retry with an explicit correction instead of burning a prove.
+                unknown = _unknown_resolve_names(reimpl)
+                if unknown:
+                    _log("unresolved_resolve_name_retry", attempt=attempts,
+                         names=sorted(unknown))
+                    prompt += (
+                        "\n\n## CORRECTION (draft rejected before proving): you called "
+                        f"D2MOO_Resolve on name(s) the resolve table does NOT contain: "
+                        f"{', '.join(sorted(unknown))}. D2MOO_Resolve would return NULL. "
+                        "Use EXACTLY the verified name(s) listed in the GLOBAL-RESOLVE "
+                        "section above -- even when Ghidra now shows a nicer name for "
+                        "the same address, the resolve table's name is the only one "
+                        "that resolves at runtime. Re-emit both blocks.")
+                    reimpl = None
+                    continue
                 break
             _log("malformed_response_retry", attempt=attempts)
 
@@ -11280,7 +11346,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     # "the model tested what it implemented" self-consistency bias). Any divergence
     # flows through the same fix-retry loop below. Best-effort + on by default for
     # the live path; FUNDOC_ADVERSARIAL_VET=0 to disable.
-    input_names = [i.get("name") for i in (layout.get("inputs") or []) if i.get("name")]
+    input_names = [i.get("name") for i in (layout.get("inputs") or [])
+                   if isinstance(i, dict) and i.get("name")]
     if abort_class:
         # ABORT CLASS: the out-of-range branch is FATAL (_exit/CleanupAndAbort) --
         # adversarial widening would kill the game/bridge (it did, 3x, on
@@ -11312,13 +11379,15 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     if abort_class:
         try:
             import abi_static
-            input_sets, dropped = abi_static.clamp_abort_vectors(input_sets)
+            input_sets, dropped = abi_static.clamp_abort_vectors(
+                input_sets, decompiled_text=decompiled)
             _log("abort_vectors_clamped", dropped=dropped, kept=len(input_sets))
         except Exception:
             pass
 
     live = None
     prove_attempts = 0
+    clamp_retried = False
     while prove_attempts < max(1, max_fix_attempts):
         prove_attempts += 1
         try:
@@ -11337,6 +11406,25 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
             return "error"
         if live.get("ok") or prove_attempts >= max(1, max_fix_attempts):
             break
+        # MARSHAL-FAULT CLAMP RETRY (2026-07-13, capability-loop iter 3): an
+        # UNBOUNDED table getter (no bounds check, no abort branch -> not
+        # abort_class) SEH-faults the ORIGINAL on extreme index vectors
+        # (skillId=-1/0x7FFFFFFF), reported as marshal_fault even when the
+        # reimpl is CORRECT. 7 of the loop's first-two-iteration failures were
+        # exactly this. Before burning a redraft, retry ONCE with the vectors
+        # clamped to the conservative valid envelope (sparse-switch aware) --
+        # a pass is a valid-domain proof, same standard as the abort class.
+        if live.get("failure_stage") == "marshal_fault" and not clamp_retried:
+            clamp_retried = True
+            try:
+                import abi_static
+                input_sets, _dropped = abi_static.clamp_abort_vectors(
+                    input_sets, decompiled_text=decompiled)
+                _log("marshal_fault_clamp_retry", dropped=_dropped,
+                     kept=len(input_sets))
+                continue
+            except Exception as e:
+                _log("marshal_fault_clamp_retry_error", error=str(e))
         # diverged -> feed the oracle output back and re-draft once more
         fix_prompt = plp.build_live_fix_prompt(func_name, decompiled, reimpl, live.get("output", ""))
         text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
@@ -11346,20 +11434,49 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         new_reimpl, new_layout, new_inputs = plp.parse_live_response(text or "")
         if not new_reimpl:
             break  # malformed fix -> stop, report the last real prove result
+        if _unknown_resolve_names(new_reimpl):
+            # a "fix" that swaps in an unknown resolve name is guaranteed worse
+            # than what it replaces -- keep the last real prove result instead.
+            _log("unresolved_resolve_name_fix_rejected",
+                 names=sorted(_unknown_resolve_names(new_reimpl)))
+            break
         reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
         try:  # the fix draft gets the same ABI override + abort clamp as the first
             import abi_static
             layout, input_sets, _n = abi_static.apply_static_abi(layout, input_sets, static_abi)
             if abort_class:
-                input_sets, _d = abi_static.clamp_abort_vectors(input_sets)
+                input_sets, _d = abi_static.clamp_abort_vectors(
+                    input_sets, decompiled_text=decompiled)
         except Exception:
             pass
         _log("live_prove_fix_retry", attempt=prove_attempts)
 
     if live.get("ok"):
+        # WS-6c shadow staging, LIVE-path leg (2026-07-12): the static-harness path
+        # has had this hook since the plan landed, but every global_leaf/live proof
+        # returned here WITHOUT staging -- which is why a whole proven batch was
+        # absent from shadow_manifest.json. Same contract as the static-path call:
+        # gated by FUNDOC_SHADOW_PROMOTE=1, STAGES only (no build/restart), and a
+        # promotion failure never fails the proof. run_live_prove returns the spec
+        # (res["spec"]) for exactly this caller.
+        shadow_status = "skipped"
+        if live.get("spec") and os.environ.get("FUNDOC_SHADOW_PROMOTE") == "1":
+            try:
+                import shadow_promote as sp
+                promo = sp.maybe_promote(func_name, address, live["spec"], decompiled)
+                shadow_status = ("staged" if promo.get("promoted")
+                                 else f"deferred: {promo.get('reason')}")
+                bus_emit("shadow_promote_result", {
+                    "key": key, "name": func_name, "promoted": promo.get("promoted"),
+                    "reason": promo.get("reason")})
+                _log("shadow_promote", **promo)
+            except Exception as e:  # never fail the proof over a promotion bug
+                shadow_status = f"error: {e}"
+                _log("shadow_promote_error", error=str(e))
         update_function_state(key, {
             "port_status": "proven_live_pending_review", "port_attempts": attempts,
             "port_live_status": "proven_live",
+            "port_shadow_status": shadow_status,
             "port_last_result": f"live {live.get('passed')}/{live.get('total')}"})
         bus_emit("port_live_prove_result", {
             "key": key, "name": func_name, "ok": True,
@@ -12456,9 +12573,35 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 _log("delegate_route_skip", error=str(e))
         # Struct-pointer params / deep pointer chains / unnamed DAT_ globals --
         # need a live captured game object, out of the automatable scope for now
-        # (leave to the manual d2-port-function skill).
-        update_function_state(key, {"port_status": "stateful_skip"})
-        _log("stateful_skip", classification=classification)
+        # (leave to the manual d2-port-function skill). Log WHY (bucket code) so
+        # the capability loop knows which prove capability to build next.
+        try:
+            skip_reason = pp.stateful_reason(decompiled)
+        except Exception:
+            skip_reason = "other"
+        # CLASS B ROUTE (2026-07-13, capability loop): a PURE OUT-PARAM writer
+        # ('ptr_write') is live-provable now that translate_layout_to_spec
+        # supports outbuf args (the oracle allocates scratch buffers and
+        # compares the WRITTEN BYTES; it always could -- only the translator
+        # was EAX-only). GATE: only a pure writer whose pointer params are
+        # WRITTEN, not READ. A `->` field READ (pUnit->dwType) means a live
+        # HANDLE input -- that is the handle+outbuf HYBRID class (needs the
+        # handle path extended to carry out-bufs, a LATER capability), NOT the
+        # global/scalar outbuf path here. Misrouting MONSTER_GetInvGridSize
+        # (reads pUnit->dwType AND writes *pnWidth) to the global path would
+        # just fail to marshal the unit -- so exclude `->`-reading writers.
+        # (Refinement surfaced by the GetInvGridSize pilot, 2026-07-13.)
+        if (skip_reason == "ptr_write" and "->" not in (decompiled or "")
+                and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            _log("outbuf_route", classification=classification)
+            return process_global_leaf_live(
+                program, address, func_name, decompiled,
+                provider=provider, model=model, worker_id=worker_id,
+                max_fix_attempts=max_fix_attempts,
+                static_abi=static_abi, abort_class=abort_class)
+        update_function_state(key, {"port_status": "stateful_skip",
+                                    "port_last_result": f"stateful: {skip_reason}"})
+        _log("stateful_skip", classification=classification, reason=skip_reason)
         return "stateful_skip"
     if classification == "global_leaf":
         # Reads NAMED globals -> not statically provable, but provable LIVE against
@@ -12519,6 +12662,24 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 return "handle_abort_hazard_skip"
         except Exception:
             pass
+        # SCALAR-INDEX ABORT HAZARD (2026-07-12, CONFIRMED LIVE CRASH TWICE --
+        # DATATBLS_GetOverlayRecordByte50): a handle-getter that ALSO takes a scalar
+        # index into a sparse switch (`if(i<0x10) switch(i){case 1,2,3,4,8,9; default:
+        # break;} CleanupAndAbort()`) aborts on ANY scalar the switch doesn't handle
+        # -- 0, interior gaps, out-of-range. The handle-prove path sweeps that scalar
+        # arg, so it drives the ORIGINAL straight into the fatal Halt and kills the
+        # game/bridge. The global_leaf path clamps abort vectors to the switch cases
+        # (abi_static.clamp_abort_vectors), but the handle path's scalar sweep does
+        # NOT -- and safely clamping a mixed handle+scalar vector set here is more
+        # invasive than it's worth. These ARE shadow-provable (real play only ever
+        # supplies valid scalars), so DEFER to shadow-first rather than direct-prove.
+        if abort_class:
+            update_function_state(key, {
+                "port_status": "shadow_leaf_pending",
+                "port_last_result": "abort-class scalar-index handle-getter: unsafe to sweep "
+                                    "directly (sparse-switch abort); queued for shadow-first"})
+            _log("abort_class_handle_defer", classification=classification)
+            return "shadow_leaf_pending"
         # With the live oracle, PROVE it now via the handle path (a real captured
         # live object passed to both original + reimpl -- the UNIT_GetMode
         # mechanism). Without it, just leave it queued in the shadow backlog.
@@ -12533,6 +12694,37 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             "port_last_result": "live-pointer getter: shadow-provable; recorded to shadow_leaf_backlog"})
         _log("shadow_leaf_pending", classification=classification)
         return "shadow_leaf_pending"
+
+    # LEAF-WITH-POINTERS is not a pure leaf. The static /emulate harness can't
+    # supply or compare pointer params, so drafting one against it just churns
+    # malformed_response/no_vectors (2026-07-13: PATH_GetDirectionScaled -- 2
+    # out-params + a delegate -- classified 'leaf' ONLY because 2 pointers fail
+    # shadow_leaf's total==1 gate). Route a PURE out-param writer (writes through
+    # a pointer, no field READ `->`, no delegate) to the Class B outbuf live
+    # path; bucket the rest (delegate / multi-read) as a composed-capability gap
+    # instead of burning an LLM draft against a harness that cannot prove them.
+    if classification == "leaf":
+        _hdr, _, _body = (decompiled or "").partition("{")
+        _pt = pp._extract_signature_params(_hdr)
+        _has_ptr = bool(pp._POINTER_PARAM_RE.search(_pt)
+                        or pp._scalar_params_used_as_ptr(_pt, _body))
+        if _has_ptr:
+            _pure_write = ("->" not in (decompiled or "")
+                           and not pp._has_delegate_call(_body)
+                           and pp._PTR_WRITE_RE.search(_body))
+            if _pure_write and os.environ.get("FUNDOC_LIVE_PROVE") == "1":
+                _log("outbuf_route", classification="leaf_outbuf")
+                return process_global_leaf_live(
+                    program, address, func_name, decompiled,
+                    provider=provider, model=model, worker_id=worker_id,
+                    max_fix_attempts=max_fix_attempts,
+                    static_abi=static_abi, abort_class=abort_class)
+            update_function_state(key, {
+                "port_status": "stateful_skip",
+                "port_last_result": "leaf-with-pointers: out-param + delegate/multi-read -- "
+                                    "needs composed Class B + delegate capability"})
+            _log("stateful_skip", classification=classification, reason="leaf_ptr_composed")
+            return "stateful_skip"
 
     if not model:
         try:

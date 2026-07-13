@@ -66,6 +66,19 @@ _ABORT_DECOMPILE_RE = re.compile(
     r"Subroutine does not return|_exit\s*\(|CleanupAndAbort|ExitProcess|\babort\s*\(",
     re.IGNORECASE)
 
+# Decompiler NULL-FOLD artifact: `iRam00000034` / `uRam00000010` etc. -- Ghidra
+# proved a register is 0 along some branch and folded `[reg+0x34]` into a load
+# from ABSOLUTE address 0x34. At runtime that branch is a wild low-address read
+# -> SEH fault. Catchable (unlike a real abort dialog), but any prove vector that
+# reaches it still fails the whole prove as marshal_fault, so vectors must stay
+# in the valid envelope exactly like the _exit class. (2026-07-12,
+# SKILLS_GetSkillDescField0x34: the out-of-range return is `iRam00000034` -- the
+# planner filed it provable-now, the adversarial vet fed it 0x7FFFFFFF, the
+# original faulted.) Only LOW absolute addresses qualify (Ram0000xxxx < 0x10000):
+# image-range Ram names (uRam00097858) are relocation artifacts on globals the
+# running code reads fine.
+_NULL_FOLD_RAM_RE = re.compile(r"\b[a-zA-Z]{1,3}Ram0000[0-9a-fA-F]{4}\b")
+
 # The D2Common 1.13c abort-idiom helpers (GetReturnAddress / CleanupAndAbort /
 # _exit). Every fatal out-of-range branch this session called exactly these three,
 # and they are NOT delegates in the delegate-rung sense -- they're unreachable
@@ -97,8 +110,13 @@ def detect_abort_path(decompiled_text: str) -> bool:
     stay strictly in the valid envelope and V1 adversarial sweeps must skip it.
     (GetAnimSequenceRecord killed the :8790 bridge 3x before this was automated;
     contrast GetItemDataRecord whose out-of-range path RETURNS NULL -> full-range
-    vectors are safe. The decompile states which one you have.)"""
-    return bool(_ABORT_DECOMPILE_RE.search(decompiled_text or ""))
+    vectors are safe. The decompile states which one you have.)
+
+    Also true for the NULL-FOLD wild-read class (_NULL_FOLD_RAM_RE): not a
+    process-killing abort, but an out-of-envelope vector faults the original
+    all the same, so it gets the identical clamp treatment."""
+    text = decompiled_text or ""
+    return bool(_ABORT_DECOMPILE_RE.search(text) or _NULL_FOLD_RAM_RE.search(text))
 
 
 # A dwType (or ->dwType) comparison anywhere in the body. Combined with
@@ -1035,6 +1053,31 @@ def apply_static_abi(layout: dict, input_sets: list, abi: dict) -> tuple:
     if not isinstance(inputs, list):
         return layout, input_sets, notes
 
+    # REGISTER-EXPLICIT ABI (2026-07-13, capability loop): the disasm reads the
+    # arg(s) from GP register(s) with NO stack slots (Ghidra's vestigial-thiscall
+    # getters -- index in EAX, RET 0). The model almost always mis-guesses these
+    # as stack/stdcall, so the oracle pushed the arg on the stack while the
+    # ORIGINAL reads EAX -> marshal_fault (SKILLS_GetBaseManaCost pilot). Force
+    # each input's register to the disasm's reg_args so translate_layout_to_spec
+    # emits orig_regs and the oracle marshals into the right register. Only when
+    # there are genuinely no stack slots (a mixed reg+stack ABI is out of scope
+    # for the v1 marshaller and stays as the model drafted it).
+    reg_args = abi.get("reg_args") or []
+    if reg_args and abi.get("slots") == 0 and str(abi.get("callconv", "")).lower() != "stdcall":
+        for idx, i in enumerate(inputs[:len(reg_args)]):
+            cur = str(i.get("register", "")).upper()
+            if cur != reg_args[idx]:
+                notes.append(f"forced input '{i.get('name')}' register {cur or '(none)'} "
+                             f"-> {reg_args[idx]} (disasm: register-explicit, RET 0, no stack)")
+                i["register"] = reg_args[idx]
+        # drop any stack-typed extras the model invented (there are no stack args)
+        keep = [i for i in inputs if str(i.get("register", "")).upper() in reg_args]
+        if keep and len(keep) != len(inputs):
+            layout["inputs"] = keep
+            notes.append(f"trimmed {len(inputs) - len(keep)} non-register input(s) "
+                         f"(disasm shows only register args {reg_args})")
+        return layout, input_sets, notes
+
     if abi["callconv"] == "stdcall":
         for i in inputs:
             reg = str(i.get("register", "")).upper()
@@ -1057,11 +1100,61 @@ def apply_static_abi(layout: dict, input_sets: list, abi: dict) -> tuple:
     return layout, input_sets, notes
 
 
-def clamp_abort_vectors(input_sets: list, max_index: int = 32) -> tuple:
-    """For an ABORT-CLASS function: keep only vectors whose every value lies in
-    [0, max_index); if none survive, synthesize a dense in-range sweep. The valid
-    upper bound is a LIVE global we can't read statically, so this is deliberately
-    conservative -- small indices into any populated game table are in-range."""
+_SWITCH_CASE_RE = re.compile(r"\bcase\s+(0x[0-9a-fA-F]+|\d+)\s*:")
+
+
+def abort_safe_case_values(decompiled_text: str) -> list:
+    """Valid switch-case index values for a SPARSE-SWITCH abort-class getter.
+    Such a function -- `if (i < 0x10) switch(i){case 1:..case 4:..case 8:..case 9:..
+    default: break;} CleanupAndAbort();` -- aborts on ANY value NOT in the case set,
+    which INCLUDES 0 and the interior gaps (5,6,7). A synthesized contiguous
+    [0,N) sweep therefore drives it straight into the Halt (2026-07-12,
+    DATATBLS_GetOverlayRecordByte50: valid set {1,2,3,4,8,9}, and vector
+    nOverlayId=0 fired the game's unrecoverable-error dialog and killed the
+    bridge). Returns the sorted case values so the prover can use EXACTLY the
+    valid inputs; [] when the decompile shows no switch (a plain range-check
+    abort, where the old contiguous clamp is appropriate)."""
+    vals = set()
+    for m in _SWITCH_CASE_RE.finditer(decompiled_text or ""):
+        try:
+            vals.add(int(m.group(1), 0))
+        except ValueError:
+            pass
+    return sorted(vals)
+
+
+def clamp_abort_vectors(input_sets: list, max_index: int = 32,
+                        decompiled_text: str = None) -> tuple:
+    """For an ABORT-CLASS function: restrict vectors to inputs that CANNOT reach
+    the fatal branch.
+
+    SPARSE SWITCH (decompile has `case N:` labels): the ONLY safe inputs are the
+    case values themselves -- every other value (0, interior gaps, out-of-range)
+    hits `default`/the range guard and aborts. Restrict to the case set and, if
+    the single varying param can be identified, synthesize vectors from it. NEVER
+    fall back to a contiguous [0,N) sweep here -- that is exactly what crashed the
+    game (see abort_safe_case_values).
+
+    PLAIN RANGE CHECK (no switch): keep vectors in [0, max_index); if none survive,
+    synthesize a small in-range sweep. The valid upper bound is a live global we
+    can't read statically, so this stays deliberately conservative -- small indices
+    into any populated game table are in-range."""
+    cases = abort_safe_case_values(decompiled_text)
+    if cases:
+        case_set = set(cases)
+        safe = [s for s in (input_sets or [])
+                if all(isinstance(v, int) and v in case_set for v in s.values())]
+        dropped = len(input_sets or []) - len(safe)
+        if not safe:
+            # rebuild from the valid case values on the single scalar index param
+            names = sorted({k for s in (input_sets or []) for k in s}) or ["value"]
+            if len(names) == 1:
+                safe = [{names[0]: v} for v in cases]
+            else:
+                # multi-arg sparse switch we can't safely enumerate -> prove nothing
+                # rather than guess a crashing combination.
+                safe = []
+        return safe, dropped
     safe = [s for s in (input_sets or [])
             if all(isinstance(v, int) and 0 <= v < max_index for v in s.values())]
     dropped = len(input_sets or []) - len(safe)
