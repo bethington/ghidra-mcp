@@ -26,7 +26,7 @@ python fun_doc.py --provider claude
 python web.py
 ```
 
-The dashboard is available at `http://127.0.0.1:5001/` by default.
+The dashboard is available at `http://127.0.0.1:5000/` by default.
 
 ## Prerequisites
 

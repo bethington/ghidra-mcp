@@ -215,6 +215,17 @@ not `g_dwLastError`). If the harness tells you your chosen name collides,
 pick a *more specific* name — never resolve a collision by appending a
 counter or address suffix.
 
+**`g_dwLastError` is the canonical trap — never use the bare name.** A
+production audit found it applied to **47 different addresses** in one
+binary (plus dozens more across others). Windows binaries have many
+distinct error-holding slots — one per subsystem, not one global. When a
+global stores a `GetLastError()`-style value, disambiguate by the
+subsystem that owns it, taken from the writing function(s):
+`g_dwOverlayCacheLastError`, `g_dwArchiveLoadLastError`,
+`g_dwSocketLastError`. The same rule applies to any generic status word
+(`g_dwState`, `g_dwFlags`, `g_dwCount`, `g_dwResult`): a shared-looking
+name almost always means you haven't identified what *this* one is for.
+
 ### Generic fallback names are forbidden
 
 Do not fall back to `g_dwLastError`, `g_dwFlags`, `g_dwState`, `g_dwData`,

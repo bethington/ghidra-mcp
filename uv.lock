@@ -685,7 +685,7 @@ debugger = [
 ]
 dev = [
     { name = "black", specifier = ">=24.0.0" },
-    { name = "clang", specifier = ">=18.1.8,<19" },
+    { name = "clang", specifier = ">=18.1.8,<22" },
     { name = "coverage", specifier = ">=7.15.0" },
     { name = "flake8", specifier = ">=6.0.0" },
     { name = "libclang", specifier = ">=18.1.1,<19" },
@@ -713,7 +713,7 @@ fun-doc = [
     { name = "sqlalchemy", specifier = ">=2.0.50,<3.0" },
 ]
 test = [
-    { name = "clang", specifier = ">=18.1.8,<19" },
+    { name = "clang", specifier = ">=18.1.8,<22" },
     { name = "coverage", specifier = ">=7.15.0" },
     { name = "libclang", specifier = ">=18.1.1,<19" },
     { name = "pytest", specifier = ">=9.1.1" },

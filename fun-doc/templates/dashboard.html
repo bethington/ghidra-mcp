@@ -468,6 +468,16 @@
                         </div>
                         {% endif %}
 
+                        {% if stats.run_stats.globals_today and stats.run_stats.globals_today.runs > 0 %}
+                        <div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-light); border-radius: 4px; font-size: 0.65rem;">
+                            <strong style="color: var(--accent-gold);">Globals today:</strong>
+                            <span class="mono" style="color: var(--color-set);">{{ stats.run_stats.globals_today.completed }}</span> completed ·
+                            <span class="mono">{{ stats.run_stats.globals_today.skipped }}</span> skipped ·
+                            <span class="mono" style="color: {% if stats.run_stats.globals_today.failed > 0 %}var(--accent-red-light){% else %}var(--text-muted){% endif %};">{{ stats.run_stats.globals_today.failed }}</span> failed ·
+                            <span class="mono">{{ stats.run_stats.globals_today.renames }}</span> renames
+                        </div>
+                        {% endif %}
+
                         <!-- Per-provider cards (enriched) -->
                         {% for provider, pstats in stats.run_stats.by_provider.items() %}
                         <div class="provider-card" style="flex-wrap: wrap;">
@@ -569,6 +579,7 @@
                         <h2 style="margin: 0;">Global  Variables Inventory</h2>
                         <span id="globalInventoryHeaderState" style="font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono);" title="Background global-variable auditor — enabled, paused, or disabled">disabled</span>
                         <button class="btn icon-btn" id="btnGlobalInventoryForceOn" onclick="toggleGlobalInventoryForceOn()" style="margin-left: auto;" title="Force on — override pause conditions and keep the scorer running (also bypasses doc-worker pause)">⚡</button>
+                        <button class="btn icon-btn" id="btnGlobalInventoryResetAll" onclick="resetAllGlobalInventory()" title="Re-walk ALL binaries: drop every inventory record so the scorer re-audits the whole project under the current counting rules">↻ all</button>
                         <button class="btn icon-btn" id="btnGlobalInventoryToggle" onclick="toggleGlobalScorer()" title="Enable scorer">▶</button>
                     </div>
                     <div class="panel-content" id="globalInventoryPanel" style="max-height: 300px; overflow-y: auto;">
@@ -589,6 +600,41 @@
                             </thead>
                             <tbody id="globalInventoryTableBody">
                                 <tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No global-inventory data yet — enable the scorer.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h2 style="margin: 0;">Recent Global Renames</h2>
+                        <span style="font-size: 0.6rem; color: var(--text-muted);" title="Review feed: every rename the globals worker applied, newest first. Flags mark names that collided with an existing symbol (dup) or use a placeholder/offset descriptor (ph).">review feed</span>
+                        <button class="btn icon-btn" style="margin-left: auto;" onclick="refreshGlobalRenames()" title="Refresh from runs.jsonl">↻</button>
+                    </div>
+                    <div class="panel-content" style="max-height: 260px; overflow-y: auto;">
+                        <table class="data-table">
+                            <thead><tr><th>When</th><th>Binary</th><th>Address</th><th>Before</th><th>After</th><th>Flags</th></tr></thead>
+                            <tbody id="globalRenamesBody">
+                                <tr><td colspan="6" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h2 style="margin: 0;">Globals Cleanup Queue</h2>
+                        <span id="globalCleanupCounts" style="font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono);"></span>
+                        <select class="header-select" id="globalCleanupKind" onchange="renderGlobalCleanup()" style="margin-left: auto;">
+                            <option value="duplicates" selected>Duplicate names</option>
+                            <option value="placeholders">Placeholder names</option>
+                            <option value="array_candidates">Array candidates (structuring)</option>
+                        </select>
+                        <button class="btn icon-btn" onclick="refreshGlobalCleanup()" title="Recompute from full runs.jsonl history (a few seconds)">↻</button>
+                    </div>
+                    <div class="panel-content" style="max-height: 260px; overflow-y: auto;">
+                        <table class="data-table">
+                            <thead><tr><th>Binary</th><th>Name</th><th>Addresses</th><th></th></tr></thead>
+                            <tbody id="globalCleanupBody">
+                                <tr><td colspan="4" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">Click ↻ to compute (scans full run history).</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1138,7 +1184,7 @@
                     <td style="width: 100px;"><div style="width: 100%; height: 8px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;"><div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 2px;"></div></div></td>
                     <td class="mono">${(r.fully_documented || 0).toLocaleString()}</td>
                     <td class="mono">${(r.total_documentable || 0).toLocaleString()}</td>
-                    <td class="mono" style="color: ${(r.with_issues || 0) > 0 ? 'var(--accent-red-light)' : 'var(--text-muted)'};">${(r.with_issues || 0).toLocaleString()}</td>
+                    <td class="mono" style="color: ${(r.with_issues || 0) > 0 ? 'var(--accent-red-light)' : 'var(--text-muted)'};" title="${r.pending != null ? `pending (hard/medium): ${r.pending} • soft-only: ${r.soft_only || 0} • OS-canonical: ${r.os_canonical || 0} • code labels: ${r.code_labels || 0} • clean: ${r.clean || 0}` : 'scanned under old counting rules — re-scan for a category breakdown'}">${(r.with_issues || 0).toLocaleString()}</td>
                     <td class="mono">${pct}%</td>
                     <td class="mono" style="color: ${statusColor};">${escapeHtml(r.status || '')}</td>
                     <td class="mono" style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(last)}</td>
@@ -1148,8 +1194,113 @@
             body.innerHTML = rows;
             if (totalsLine) {
                 const overall = totals.total_documentable > 0 ? Math.round(1000 * totals.fully_documented / totals.total_documentable) / 10 : 0;
-                totalsLine.textContent = `${(totals.fully_documented || 0).toLocaleString()} / ${(totals.total_documentable || 0).toLocaleString()} fully documented (${overall}%) • ${(totals.with_issues || 0).toLocaleString()} globals with issues • ${totals.binaries_complete || 0} / ${binaries.length} binaries complete`;
+                // Category composition (v2 counting bar). "with issues" alone
+                // overstated real work by ~70% — most of it was OS-canonical
+                // labels and soft cosmetics the worker rightly skips.
+                const comp = (totals.pending != null && (totals.pending + (totals.soft_only||0) + (totals.os_canonical||0)) > 0)
+                    ? ` • ${(totals.pending || 0).toLocaleString()} pending • ${(totals.soft_only || 0).toLocaleString()} soft-only • ${(totals.os_canonical || 0).toLocaleString()} OS-canonical`
+                    : ` • ${(totals.with_issues || 0).toLocaleString()} globals with issues`;
+                totalsLine.textContent = `${(totals.fully_documented || 0).toLocaleString()} / ${(totals.total_documentable || 0).toLocaleString()} fully documented (${overall}%)${comp} • ${totals.binaries_complete || 0} / ${binaries.length} binaries complete`;
             }
+        }
+
+        function resetAllGlobalInventory() {
+            if (!confirm('Re-walk ALL binaries? This drops every global-inventory record so the scorer re-audits the whole project under the current counting rules.')) return;
+            fetch('/api/global_inventory/reset_all', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+                .then(r => r.json())
+                .then(d => {
+                    showBanner(d.ok ? `Global inventory cleared (${d.removed} binaries) — scorer will re-walk` : `Reset failed: ${d.error || 'unknown'}`);
+                    setTimeout(hideBanner, 4000);
+                    refreshGlobalInventory && refreshGlobalInventory();
+                })
+                .catch(e => { showBanner(`Reset failed: ${e}`); setTimeout(hideBanner, 4000); });
+        }
+
+        // --- Recent global renames review feed ---
+        function refreshGlobalRenames() {
+            const body = document.getElementById('globalRenamesBody');
+            if (!body) return;
+            fetch('/api/globals/renames?limit=200')
+                .then(r => r.json())
+                .then(d => {
+                    const rows = (d.renames || []).map(r => {
+                        const flags = [];
+                        if (r.duplicate_name) flags.push('<span style="color: var(--accent-red-light);" title="Name collides with an existing symbol at another address">dup</span>');
+                        if (r.placeholder_name) flags.push('<span style="color: var(--accent-gold);" title="Placeholder / offset-derived descriptor — cleanup candidate">ph</span>');
+                        const ts = (r.timestamp || '').replace('T', ' ').slice(5, 16);
+                        const prog = (r.program || '').split('/').pop();
+                        return `<tr>
+                            <td class="mono" style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(ts)}</td>
+                            <td>${escapeHtml(prog)}</td>
+                            <td class="mono" style="font-size: 0.6rem;">${escapeHtml(r.address || '')}</td>
+                            <td class="mono" style="color: var(--text-muted);">${escapeHtml(r.name_before || '')}</td>
+                            <td class="mono" style="color: var(--accent-gold);">${escapeHtml(r.name || '')}</td>
+                            <td>${flags.join(' ') || ''}</td>
+                        </tr>`;
+                    }).join('');
+                    body.innerHTML = rows || '<tr><td colspan="6" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No renames in the recent run history.</td></tr>';
+                })
+                .catch(() => { body.innerHTML = '<tr><td colspan="6" style="color: var(--accent-red-light); text-align: center; padding: 0.6rem;">Failed to load renames.</td></tr>'; });
+        }
+
+        // --- Globals cleanup queue (duplicates + placeholders) ---
+        let _globalCleanupData = null;
+        function refreshGlobalCleanup() {
+            const body = document.getElementById('globalCleanupBody');
+            if (body) body.innerHTML = '<tr><td colspan="4" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">Computing (scans full run history)…</td></tr>';
+            fetch('/api/globals/cleanup')
+                .then(r => r.json())
+                .then(d => { _globalCleanupData = d; renderGlobalCleanup(); })
+                .catch(() => { if (body) body.innerHTML = '<tr><td colspan="4" style="color: var(--accent-red-light); text-align: center; padding: 0.6rem;">Failed to compute cleanup queue.</td></tr>'; });
+        }
+        function renderGlobalCleanup() {
+            const body = document.getElementById('globalCleanupBody');
+            const counts = document.getElementById('globalCleanupCounts');
+            if (!body || !_globalCleanupData) return;
+            const kind = (document.getElementById('globalCleanupKind') || {}).value || 'duplicates';
+            if (counts) counts.textContent = `${_globalCleanupData.duplicate_total || 0} dup names • ${_globalCleanupData.placeholder_total || 0} placeholders • ${_globalCleanupData.array_candidate_total || 0} array groups`;
+            let rows;
+            if (kind === 'array_candidates') {
+                // Structuring tasks, not per-address fixes: a run of
+                // offset-suffixed placeholders is one array to reinterpret in
+                // Ghidra. No Fix button — dispatching the worker per-address
+                // would just re-create the same offset names.
+                rows = (_globalCleanupData.array_candidates || []).map(c => `<tr>
+                    <td>${escapeHtml((c.program || '').split('/').pop())}</td>
+                    <td class="mono" style="color: var(--accent-gold);" title="${escapeHtml((c.sample_names || []).join(', '))}">${escapeHtml(c.base)}[] <span style="color: var(--text-muted);">×${c.count}</span></td>
+                    <td class="mono" style="font-size: 0.6rem;">${escapeHtml(c.addr_first)}–${escapeHtml(c.addr_last)}</td>
+                    <td><span style="color: var(--text-muted); font-size: 0.6rem;" title="Reinterpret this address range as a single array/struct in Ghidra (create_struct / apply array type), then document once. Do NOT run the per-address worker on these.">structure in Ghidra</span></td>
+                </tr>`).join('');
+                body.innerHTML = rows || '<tr><td colspan="4" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No array clusters detected.</td></tr>';
+                return;
+            }
+            if (kind === 'duplicates') {
+                rows = (_globalCleanupData.duplicates || []).map(d => {
+                    const addrs = d.addresses || [];
+                    const shown = addrs.slice(0, 4).join(', ') + (addrs.length > 4 ? ` … (+${addrs.length - 4})` : '');
+                    return `<tr>
+                        <td>${escapeHtml((d.program || '').split('/').pop())}</td>
+                        <td class="mono" style="color: var(--accent-red-light);">${escapeHtml(d.name)} <span style="color: var(--text-muted);">×${addrs.length}</span></td>
+                        <td class="mono" style="font-size: 0.6rem;" title="${escapeHtml(addrs.join(', '))}">${escapeHtml(shown)}</td>
+                        <td><button class="btn" onclick="fixGlobalEntry('${escapeHtml(d.program)}', '${escapeHtml(addrs.join(','))}')" title="Dispatch a targeted globals worker on these addresses (bypasses the clean cache)">Fix</button></td>
+                    </tr>`;
+                }).join('');
+            } else {
+                rows = (_globalCleanupData.placeholders || []).map(d => `<tr>
+                    <td>${escapeHtml((d.program || '').split('/').pop())}</td>
+                    <td class="mono" style="color: var(--accent-gold);">${escapeHtml(d.name)}</td>
+                    <td class="mono" style="font-size: 0.6rem;">${escapeHtml(d.address)}</td>
+                    <td><button class="btn" onclick="fixGlobalEntry('${escapeHtml(d.program)}', '${escapeHtml(d.address)}')" title="Dispatch a targeted globals worker on this address (bypasses the clean cache)">Fix</button></td>
+                </tr>`).join('');
+            }
+            body.innerHTML = rows || '<tr><td colspan="4" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">Nothing in this queue. 🎉</td></tr>';
+        }
+        function fixGlobalEntry(program, addressesCsv) {
+            const addresses = addressesCsv.split(',').map(s => s.trim()).filter(Boolean);
+            const provider = (document.getElementById('workerProvider') || {}).value || 'minimax';
+            socket.emit('request_fix_global', {program, addresses, provider});
+            showBanner(`Targeted fix dispatched: ${addresses.length} address(es) in ${program.split('/').pop()}`);
+            setTimeout(hideBanner, 4000);
         }
 
         function toggleGlobalScorer() {
@@ -1748,6 +1899,29 @@
                 ? `Worker ${d.reason}: ${completed} completed — ${exitLabel}`
                 : `Worker ${d.reason}: ${completed} completed`;
             appendToPane(d.worker_id, summary, d.reason === 'finished' ? 'success' : 'neutral');
+            // Globals workers: render the full outcome breakdown so
+            // "0 processed" is distinguishable from "worker did nothing" —
+            // a drained binary shows exactly WHY (clean / OS-canonical /
+            // soft-only / cache-skipped).
+            if (d.mode === 'globals' && d.summary) {
+                const t = d.summary.totals || {};
+                const sr = d.summary.skip_reasons || {};
+                const parts = [];
+                if (t.completed) parts.push(`${t.completed} completed`);
+                if (t.improved) parts.push(`${t.improved} improved`);
+                const failed = (t.no_change || 0) + (t.audit_fail || 0) + (t.regressed || 0) + (t.lateral_change || 0);
+                if (failed) parts.push(`${failed} failed`);
+                const skipBits = [];
+                if (sr.already_clean) skipBits.push(`${sr.already_clean} clean`);
+                if (sr.soft_issues_only) skipBits.push(`${sr.soft_issues_only} soft-only`);
+                if (sr.os_canonical_label) skipBits.push(`${sr.os_canonical_label} OS-canonical`);
+                if (sr.function_label) skipBits.push(`${sr.function_label} code labels`);
+                if (t.skipped) parts.push(`${t.skipped} skipped${skipBits.length ? ' (' + skipBits.join(', ') + ')' : ''}`);
+                if (t.cache_skipped) parts.push(`${t.cache_skipped} cache-skipped`);
+                if (sr.duplicate_retry) parts.push(`${sr.duplicate_retry} duplicate retries`);
+                const reason = d.summary.stopped_reason ? ` — ${d.summary.stopped_reason.replace(/_/g, ' ')}` : '';
+                appendToPane(d.worker_id, `  ${parts.join(' • ') || 'no globals dispatched'}${reason}`, 'neutral');
+            }
             markPaneFinished(d.worker_id, d.reason, d.exit_reason);
             if (_focusedWorkerId === d.worker_id) unfocusWorker();
             refreshStats();
@@ -2222,6 +2396,10 @@
             _refreshGlobalsWorkerButton();
             const sel = document.getElementById('binarySelect');
             if (sel) sel.addEventListener('change', _refreshGlobalsWorkerButton);
+            // Renames feed is cheap server-side (cached tail scan) — load it
+            // with the page. The cleanup queue's full-history scan stays
+            // click-to-compute.
+            refreshGlobalRenames();
         });
         function toggleSettingsPanel(forceOpen) {
             const popout = document.getElementById('settingsPopout');
@@ -2258,9 +2436,32 @@
             });
         }
 
-        socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
-        socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
+        socket.on('worker_started_ack', d => {
+            // Positive confirmation the server accepted the launch — before
+            // this, a click gave no feedback until (or unless) the worker's
+            // own events arrived.
+            const what = d.targeted ? `targeted fix (${d.targeted} address${d.targeted > 1 ? 'es' : ''})` : (d.mode === 'globals' ? 'globals worker' : 'worker');
+            showBanner(`Started ${what} #${d.worker_id}`);
+            setTimeout(hideBanner, 3000);
+        });
+        socket.on('worker_error', d => {
+            showBanner(`Worker error: ${d.error}`);
+            setTimeout(hideBanner, 5000);
+            // Failed launch: re-enable the globals button immediately instead
+            // of leaving it dead until the blind 2 s timeout expires.
+            if (typeof _refreshGlobalsWorkerButton === 'function') _refreshGlobalsWorkerButton();
+        });
         socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
+        // The single activity feed was replaced by per-worker panes
+        // (commit 1536856) but these handlers kept calling the deleted
+        // addActivity(), throwing "addActivity is not defined" on every
+        // worker start/progress/stop since. The panes already render all
+        // of this, so route to the console for debugging and surface only
+        // errors as a banner.
+        function addActivity(msg, kind) {
+            if (kind === 'error') { showBanner(msg); setTimeout(hideBanner, 5000); }
+            console.debug(`[activity:${kind || 'info'}] ${msg}`);
+        }
         socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.restored ? 'restored ' : ''}${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
         socket.on('worker_progress', d => {
             if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
