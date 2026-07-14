@@ -1975,6 +1975,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         for key, func in funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
                 continue
+            # Rows written by disposition-only passes (STUB/THUNK triage) can
+            # lack a name; one such row must not 500 the stats path — the
+            # socket connect handler shares it, so a crash here kills every
+            # dashboard socket ("offline" dot, dead Start button).
+            if not func.get("name"):
+                continue
             func_list.append(
                 {
                     "key": key,
