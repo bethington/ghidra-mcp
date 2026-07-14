@@ -5340,7 +5340,8 @@ def _tool_error_preview(result, limit=500):
 
 
 def _invoke_provider_direct(
-    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None,
+    use_tools=True,
 ):
     effective_provider = provider or AI_PROVIDER
     selected_model = _require_model_name(model, effective_provider)
@@ -5383,7 +5384,8 @@ def _invoke_provider_direct(
         # yields (None, {tool_calls: -1, ...}) which propagates as a clean
         # "no provider output" failure instead of an opaque traceback.
         result = _wrap_result(_invoke_minimax(
-            prompt, selected_model, max_turns, complexity_tier=complexity_tier
+            prompt, selected_model, max_turns, complexity_tier=complexity_tier,
+            use_tools=use_tools,
         ))
     elif effective_provider == "codex":
         result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
@@ -5439,6 +5441,7 @@ def _provider_worker_entry(
     log_dir=None,
     events_queue=None,
     worker_id=None,
+    use_tools=True,
 ):
     _restore_debug_context_for_worker(debug_ctx, log_dir)
     # Wire up cross-process event propagation. Every bus_emit in this
@@ -5462,6 +5465,7 @@ def _provider_worker_entry(
                     max_turns=max_turns,
                     provider=provider,
                     complexity_tier=complexity_tier,
+                    use_tools=use_tools,
                 ),
             }
         )
@@ -5477,7 +5481,8 @@ def _provider_worker_entry(
 
 
 def _invoke_provider_with_watchdog(
-    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None,
+    use_tools=True,
 ):
     effective_provider = provider or AI_PROVIDER
     timeout_secs = _provider_timeout_seconds(effective_provider, complexity_tier)
@@ -5543,6 +5548,7 @@ def _invoke_provider_with_watchdog(
             str(LOG_DIR),
             events_queue,
             parent_worker_id,
+            use_tools,
         ),
     )
     worker.start()
@@ -5649,7 +5655,8 @@ def _invoke_provider_with_watchdog(
 
 
 def invoke_claude(
-    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None,
+    use_tools=True,
 ):
     """Invoke the configured AI provider."""
     return _invoke_provider_with_watchdog(
@@ -5658,6 +5665,7 @@ def invoke_claude(
         max_turns=max_turns,
         provider=provider,
         complexity_tier=complexity_tier,
+        use_tools=use_tools,
     )
 
 
@@ -6174,7 +6182,8 @@ _MINIMAX_DOC_TOOL_ALLOWLIST = {
 }
 
 
-def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
+def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
+                    use_tools=True):
     """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
 
     Fetches Ghidra MCP tool schemas, converts them to OpenAI function definitions,
@@ -6202,9 +6211,13 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
         return None
 
     # --- Build OpenAI function schemas from Ghidra MCP schema ---
-    schema = ghidra_get("/mcp/schema", timeout=10)
+    # use_tools=False (single-shot generations like port drafts): skip the
+    # schema fetch AND the ~47kB tool payload per turn — the output contract
+    # is "reply with N fenced blocks", so tools only add cost, latency, and
+    # watchdog pressure.
     tools_openai = []
     tool_endpoint_map = {}  # tool_name -> {path, method, params}
+    schema = ghidra_get("/mcp/schema", timeout=10) if use_tools else None
 
     if schema and isinstance(schema, dict):
         endpoints = schema.get("tools", schema.get("endpoints", []))
@@ -6384,11 +6397,12 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
     total_output_tokens = 0
     tool_call_count = 0
 
-    # Dynamic max_tokens: bump for complex/massive functions
-    if complexity_tier in ("complex", "massive"):
-        max_output_tokens = 32768
-    else:
-        max_output_tokens = 16384
+    # Dynamic max_tokens: bump for complex/massive functions.
+    # Floor raised 16384 -> 32768 (2026-07-14): M3 reasons at length before
+    # answering, and MiniMax's own coding evals run 32K output; at 16K the
+    # think phase starved the deliverable and finish_reason="length" mid-code-
+    # block surfaced as malformed_response after the truncation guard.
+    max_output_tokens = 32768
 
     # Context compression constants. After COMPRESS_AFTER tool exchanges the
     # conversation history balloons (each Ghidra response can be 5-20 kB).
@@ -6425,8 +6439,15 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
             kwargs = {
                 "model": model,
                 "messages": messages,
-                "temperature": 1.0,  # MiniMax recommends 1.0
+                "temperature": 1.0,  # MiniMax recommends 1.0 / 0.95 / 40 together
+                "top_p": 0.95,
                 "max_tokens": max_output_tokens,
+                # reasoning_split: keep M3's thinking OUT of message.content
+                # (goes to reasoning_details instead). Without it, <think>
+                # blocks in content are the documented default on the OpenAI-
+                # compat endpoint and were the top malformed_response source
+                # (answer buried in reasoning, unclosed think on truncation).
+                "extra_body": {"reasoning_split": True, "top_k": 40},
             }
             if tools_openai:
                 kwargs["tools"] = tools_openai
@@ -6680,10 +6701,36 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                     # reasoning only, and no code blocks anywhere -> truly empty
                     print(f"  [minimax] (reasoning only, no output text)", flush=True)
         else:
-            print(
-                f"  [minimax] (empty content, finish_reason={choice.finish_reason})",
-                flush=True,
-            )
+            # With reasoning_split=True the answer should be in content and
+            # the thinking in reasoning_details/reasoning_content — but if the
+            # model put the whole deliverable in its reasoning, content comes
+            # back empty. Salvage fenced code blocks from the reasoning text
+            # (same last-block-wins rule as the <think> salvage above).
+            _reasoning = getattr(message, "reasoning_content", None)
+            if not _reasoning:
+                _details = (message.model_dump() or {}).get("reasoning_details") or []
+                _reasoning = "\n".join(
+                    d.get("text", "") for d in _details if isinstance(d, dict))
+            _blocks = re.findall(r"```([a-zA-Z+#]*)\r?\n([\s\S]*?)```", _reasoning or "")
+            if _blocks:
+                last = {}
+                for lang, body in _blocks:
+                    key = (lang or "").lower()
+                    bucket = ("cpp" if key in ("cpp", "c", "c++")
+                              else "json" if key in ("json", "") else key)
+                    last[bucket] = f"```{lang}\n{body}```"
+                salvaged = "\n\n".join(
+                    last[k] for k in ("cpp", "json") if k in last) \
+                    or "\n\n".join(last.values())
+                print(f"  [minimax] (content empty; salvaged final {len(last)} "
+                      f"block(s) of {len(_blocks)} from reasoning_split)", flush=True)
+                output_parts.append(salvaged)
+                bus_emit("model_text", {"text": salvaged[:500]})
+            else:
+                print(
+                    f"  [minimax] (empty content, finish_reason={choice.finish_reason})",
+                    flush=True,
+                )
 
         if choice.finish_reason in ("stop", "end_turn", None):
             break
@@ -11313,8 +11360,12 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     if not reimpl:
         while attempts < max(1, max_fix_attempts):
             attempts += 1
+            # "complex" tier: port drafts are long generations (reasoning +
+            # full reimpl + layout); the doc-tuned 300s watchdog was killing
+            # M3 sessions mid-draft and logging them as malformed_response.
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
-                                       provider=provider, complexity_tier=None)
+                                       provider=provider, complexity_tier="complex",
+                                       use_tools=False)
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked",
                                             "port_last_result": "quota_paused"})
@@ -11380,7 +11431,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         try:
             adv_prompt = plp.build_adversarial_vectors_prompt(func_name, decompiled, input_names)
             atext, _ = invoke_claude(adv_prompt, model=model, max_turns=max_turns,
-                                     provider=provider, complexity_tier=None)
+                                     provider=provider, complexity_tier="complex",
+                                     use_tools=False)
             adv_inputs = plp.parse_adversarial_vectors(atext, input_names)
             if adv_inputs:
                 seen, merged = set(), []
@@ -11455,7 +11507,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         # diverged -> feed the oracle output back and re-draft once more
         fix_prompt = plp.build_live_fix_prompt(func_name, decompiled, reimpl, live.get("output", ""))
         text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
-                                   provider=provider, complexity_tier=None)
+                                   provider=provider, complexity_tier="complex",
+                                   use_tools=False)
         if (meta or {}).get("quota_paused"):
             break
         new_reimpl, new_layout, new_inputs = plp.parse_live_response(text or "")
@@ -12335,8 +12388,12 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
     else:
         while attempts < max(1, max_fix_attempts):
             attempts += 1
+            # "complex" tier: port drafts are long generations (reasoning +
+            # full reimpl + layout); the doc-tuned 300s watchdog was killing
+            # M3 sessions mid-draft and logging them as malformed_response.
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
-                                       provider=provider, complexity_tier=None)
+                                       provider=provider, complexity_tier="complex",
+                                       use_tools=False)
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 _log("blocked", reason="quota_paused")
@@ -12401,7 +12458,8 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                    "synthetic object -- re-derive the offset(s) carefully from the disassembly above.")
         for _a in range(max(1, max_fix_attempts)):
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
-                                       provider=provider, complexity_tier=None)
+                                       provider=provider, complexity_tier="complex",
+                                       use_tools=False)
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 return "blocked"
@@ -12436,7 +12494,8 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             break
         fix_prompt = plp.build_handle_fix_prompt(func_name, decompiled, reimpl, live.get("output", ""))
         text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
-                                   provider=provider, complexity_tier=None)
+                                   provider=provider, complexity_tier="complex",
+                                   use_tools=False)
         outcome = plp.provider_outcome(text, meta)
         if outcome == "quota":
             break
@@ -12605,6 +12664,32 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     except Exception:
         pass
 
+    # VOID-RETURN MUTATOR GUARD (2026-07-14, iter28 near-miss): a void-return
+    # function that derefs a pointer param (`->`) or delegates has NOTHING to
+    # compare (no EAX) and almost certainly MUTATES -- STAT_RecalculateVitalCosts
+    # (in-place stat-list clamp), STAT_ImportStateFlagsFromBuffer (frees +
+    # reallocs a stat-list extension: wild frees in-process under synthetic
+    # args), DATATBLS_GetRandomStringB (loops STATLIST_AddStat despite the
+    # "Get" name) all reached draft lanes; only flaky malformed responses kept
+    # them from being live-called. Genuinely-mutating fns need state-diff
+    # capture (unbuilt) -- skip them BEFORE any prove/shadow routing. The pure
+    # out-param writer lane (leaf_outbuf: void, no `->`, no delegate) is
+    # intentionally NOT caught by this guard.
+    try:
+        _sig_hdr, _, _sig_body = (decompiled or "").partition("{")
+        _is_void_ret = bool(re.search(
+            r"^\s*void\s+(?:__\w+\s+)?\w+\s*\(", _sig_hdr.splitlines()[-1] if _sig_hdr.splitlines() else "", re.M)) \
+            or bool(re.search(r"\bvoid\s+(?:__\w+\s+)?" + re.escape(func_name) + r"\s*\(", _sig_hdr))
+        if _is_void_ret and ("->" in _sig_body or pp._has_delegate_call(_sig_body)):
+            update_function_state(key, {
+                "port_status": "stateful_skip",
+                "port_last_result": "void-return mutator (derefs/delegates, no comparable "
+                                    "output) -- out of scope until state-diff capture exists"})
+            _log("void_mutator_skip")
+            return "stateful_skip"
+    except Exception:
+        pass
+
     classification = pp.classify_function(decompiled)
     if classification == "stateful":
         # DELEGATE pre-check: "stateful" often just means "calls a subroutine". If that
@@ -12730,8 +12815,57 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                     _route_handle = True
             except Exception:
                 pass
+            # UNRESOLVABLE-DELEGATE -> SHADOW-FIRST (2026-07-14): a delegate
+            # getter whose callee is NOT in the resolve table cannot call
+            # through from the standalone provider, and the callee's internals
+            # are unknown from the wrapper body -- the STATS ISC family
+            # (STAT_GetGoldBankMax et al.) delegates to an EBX-implicit helper
+            # that deep-walks pUnit->pStats' live stat list, the exact
+            # uncatchable-fault class the deep-deref guard exists for, hidden
+            # one call down where the regex can't see it. stateful_skip is a
+            # dead bucket for these; SHADOW can prove them (the game supplies
+            # the real, correctly-typed unit and the original runs its own
+            # callee). Route to the shadow backlog instead.
+            if not _route_handle:
+                try:
+                    repo = Path(os.environ.get("FUNDOC_D2MOO_REPO",
+                                               r"C:\Users\benam\source\cpp\D2MOO"))
+                    bl = repo / "conformance" / "profiler" / "shadow_leaf_backlog.jsonl"
+                    bl.parent.mkdir(parents=True, exist_ok=True)
+                    with open(bl, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({"program": program, "address": address,
+                                            "name": func_name,
+                                            "reason": "unresolvable_delegate"}) + "\n")
+                except OSError:
+                    pass
+                update_function_state(key, {
+                    "port_status": "shadow_leaf_pending",
+                    "port_last_result": "delegate getter with UNRESOLVABLE callee -- can't "
+                                        "call through from the provider and callee depth is "
+                                        "unknown (EBX-implicit stat-list walkers hide here); "
+                                        "deferred to shadow-first"})
+                _log("delegate_unresolvable_defer", classification=classification,
+                     reason=skip_reason)
+                return "shadow_leaf_pending"
         if (_route_handle
                 and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            # CAST-STYLE DEEP-DEREF DEFER (2026-07-14, iter29: two SEH-caught
+            # oracle faults -- DATATBLS_GetBinkBufferErrorCode, DATATBLS_
+            # GetNestedStructValues): untyped decompiles spell a depth>=2 chain
+            # as `*(int *)(*(int *)(ctx + 0x10) + 0x48)`, which the `->` deep-
+            # chain regexes above can't see. Depth>=2 on a round-robin captured
+            # handle is the same wrong-type wild-read hazard either way (these
+            # two happened to fault SEH-catchably; nothing guarantees that).
+            # Single-level `*(int *)((int)p + 0x5c)` reads stay routed.
+            if re.search(r"\*\s*\(\s*\w+\s*\*+\s*\)\s*\(\s*\*", _dec):
+                update_function_state(key, {
+                    "port_status": "shadow_leaf_pending",
+                    "port_last_result": "cast-style depth>=2 handle deref -- unsafe on "
+                                        "round-robin capture (SEH fault class); deferred "
+                                        "to shadow-first"})
+                _log("cast_deep_deref_defer", classification=classification,
+                     reason=skip_reason)
+                return "shadow_leaf_pending"
             # ABORT-CLASS DEFER (2026-07-13, safety hardening): an abort-class
             # handle-getter is DANGEROUS to direct-prove. The oracle round-robins
             # DISTINCT captured object types for coverage; if the fatal branch is

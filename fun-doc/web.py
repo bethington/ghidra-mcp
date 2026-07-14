@@ -1094,6 +1094,24 @@ class WorkerManager:
         try:
             from fun_doc import run_port_worker_pass
 
+            # Live-prove parity with the --port CLI (which defaults these ON):
+            # without FUNDOC_LIVE_PROVE the dashboard's Prove lane is static-
+            # harness-only -- global/handle getters (the main CONF_LIVE
+            # producers) all skip with "needs FUNDOC_LIVE_PROVE=1". Gate on
+            # the oracle actually answering so a dead game degrades to the
+            # old static-only behavior instead of failing every candidate.
+            try:
+                from port_live_prove import check_oracle_alive
+
+                if check_oracle_alive():
+                    os.environ.setdefault("FUNDOC_LIVE_PROVE", "1")
+                    os.environ.setdefault("FUNDOC_SHADOW_PROMOTE", "1")
+                    print(f"  [port-worker {worker_id}] live oracle up -> live-prove enabled", flush=True)
+                else:
+                    print(f"  [port-worker {worker_id}] live oracle DOWN -> static-only pass", flush=True)
+            except Exception:
+                pass
+
             worker["status"] = "running"
             self._set_phase(worker_id, "port_running")
             self._emit_status()
