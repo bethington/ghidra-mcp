@@ -908,5 +908,97 @@
     "unresolved_reason": "three byte-identical clones differing only in static skip-array operand (6fddcfb0/6fddcec0/6fddcdd0) \u2014 clones of ONE flat bounds-array overlap routine cloned per call context. No D2MOO signature match: DRLGMAZE_CheckRoomNotOverlaping (DrlgDrlgRoom.cpp:436) walks Room2 links, not a flat 16-byte bounds array. Current name is fun-doc-invented; left pending a D2MOO match."
    }
   }
+ },
+ "phase4": {
+  "date": "2026-07-14",
+  "method": "identity-rich fingerprints (partial report) + D2MOO body matching; g_pDataTables(+off) table identity was the main discriminator",
+  "renames_applied": [
+   {
+    "address": "6fd51770",
+    "new": "DATATBLS_GetStatesTxtRecord",
+    "evidence": "reads sgptDataTables pStatesTxt(+0xBC)/count(+0xC4); NOT ItemTypes"
+   },
+   {
+    "address": "6fd51800",
+    "new": "DATATBLS_GetSetItemsTxtRecord",
+    "evidence": "reads pSetItemsTxt(+0xC18)/count(+0xC1C), stride 0x1B8"
+   },
+   {
+    "address": "6fdd2ce0",
+    "new": "DATATBLS_GetOverlayTxtRecord",
+    "evidence": "pOverlayTxt(+0xBBC)/count(+0xBC0), stride 0x84 record ptr; OverlayTbls.cpp:167"
+   },
+   {
+    "address": "6fdbccc0",
+    "new": "DATATBLS_GetLevelsTxtRecord",
+    "evidence": "pLevelsTxt(+0xC58)/count(+0xC5C), stride 0x220 record ptr; def @10631"
+   },
+   {
+    "address": "6fdbcc90",
+    "new": "DATATBLS_GetRainFromLevelsTxt",
+    "evidence": "LevelsTxt[n].nRain byte +0x5; LevelsTbls.cpp:297"
+   },
+   {
+    "address": "6fd9e520",
+    "new": "SKILLS_GetPlayerSkillCount",
+    "evidence": "0<=class<7 -> nClassSkillCount[class] (+0xBA4); D2Skills.cpp:3483 exact body"
+   },
+   {
+    "address": "6fd88a80",
+    "new": "STATLIST_GetTotalStat_6FDB63E0",
+    "evidence": "body verified: touches offset 0x48 per phase-3 analysis"
+   },
+   {
+    "address": "6fd88b00",
+    "new": "STATLIST_GetBaseStat_6FDB6340",
+    "evidence": "body verified: touches offset 0x24 per phase-3 analysis"
+   }
+  ],
+  "rename_failures": [],
+  "unresolved": {
+   "BinkBufferSetHWND": "3x 'XOR EAX,EAX; RET 8' honest 2-arg stubs keep name; 6fd87e00 is a 1-arg (RET 4) flag-setter (ORs 0x100 into [[arg+0x5c]+0x10]) -- misnamed, no D2MOO match",
+   "COLLISION_ClearCollisionMask": "6fd84d70 reads Path nDirection/nNewDirection (+0x64/+0x65) + flag 0x34 -- a PATH function, not collision; 6fd9be10 is a mode-dispatch (0-3) clear -- plausible owner",
+   "COLLISION_ClearMaskFlags": "6fd9b280 fastcall wraps FindRoomByCoordinates; 6fd9bab0 stdcall rect iterator; need D2Collision.cpp body diff",
+   "COLLISION_GetMaskFlags": "twins: mode<=3 vs mode<=5 jump tables, both call GetMaskFlagAtCoordinate -- likely Get vs GetLowest/aggregate variants",
+   "COLL_TestFlagsIn3x3Aggregate": "twins differ only in callee (ClearMaskFlagsRecursive vs other) -- 3x3 rect wrappers over different ops",
+   "DATATBLS_FreeMonStatsTable": "identical pool-free bodies differing only in freed global (6fdf0b08 vs 6fdf0950) -- only one can be MonStats",
+   "DATATBLS_GetMonsterTypeRecord": "6fdc14d0 keeps by default (stride 0x20 indexed table w/ error path) -- unproven; twin resolved as SKILLS_GetPlayerSkillCount",
+   "DATATBLS_GetOverlayRecordByte50": "6fd93710 keeps by default: index<0x10 jump-table reading [arg2+2] byte etc -- name is offset-derived, no D2MOO match found",
+   "DATATBLS_GetSetItemRecord": "6fd73f40 validates unit magic+quality==5(SET); 6fda43c0 clamps idx 0..2 -- neither proven to D2MOO",
+   "DATATBLS_HaveFireResBonus(6fd6e630)": "magic 0x1020304 + unit-type-4 validator returning level>10 -- inventory/item validator, misnamed, no match",
+   "DATATBLS_LoadCompositTextFile": "twin BinFieldDesc loaders, same shape different table -- need string operands",
+   "DATATBLS_LookupWallFileIndex": "identical lookups over different name tables (6fddbc20 vs 6fddb9e0) -- wall vs floor/other file index",
+   "DRLG_GenerateCliffExitLayout": "identical RNG(0x6ac690c5)+AND 3 heads; differ later -- act-variant exit generators",
+   "DRLG_ProcessAct1OutdoorPresets": "twin DRLG_GenerateRoomLayers drivers with different preset tables/callbacks -- act/layer variants",
+   "FindUnitInRoomsByTypeAndId": "6fd73700 is a tiny +0x4a field getter (misnamed); 6fd9f160 is the real type-dispatch room search -- keeps",
+   "FreeLinkedResourceList": "6fd8b000 abort-guarded field access; 6fd8d450 real 0x3C-node list walker -- keeps",
+   "GetStructField0x04": "offset-derived name; 2 null-safe +0x04 getters (clones, share honestly) + 1 abort-variant -- all lack D2MOO identity",
+   "INVENTORY_DestroyInventory": "6fd71b40 real destroyer (magic check + INV_RemoveItemFromInventory loop) keeps; 6fd87430 abort-guarded +0x4 getter misnamed",
+   "INV_AppendInventoryRecord": "6fd6ddd0 real allocator (magic + AllocateAndValidateResourceSlot) keeps; 6fd9dee0 abort-guarded getter misnamed",
+   "ITEMS_CanItemBeGroupMatched": "6fd74b20 real (unit-type asserts 0x9a7/0x9a8) keeps; 6fd8b3f0 abort-guarded misnamed",
+   "ITEMS_GetBodyLocation": "6fd74240 validating wrapper, 6fd81260 146-instr worker -- wrapper/worker pair, worker needs own name",
+   "ITEMS_GetItemRecordField108": "6fd72970 real ([ItemDataRecord+0x108] via GetItemDataRecord) keeps; 6fd87470 abort-guarded misnamed",
+   "ITEMS_GetItemRecordField13E": "6fd72880 direct 0x1a8-stride table read keeps-ish; 6fd745d0 unit-validated variant -- offset-derived names both",
+   "ITEMS_GetItemRecordFieldE4": "similar 0x1a8 table vs +0x50-guarded pair -- offset-derived names",
+   "ITEMS_GetRandomInRangeFromUnitEx": "twins identical in fingerprint head; diverge later -- min/max ordering variants suspected",
+   "MONSTER_IsRevivable": "twins identical heads (unit type1 + mode 0xC death) -- differ in tail table read; revive vs other death-check",
+   "OVERLAY_UpdateLinkedListFlagsReverse": "twins differ ONLY in node field read (+0xc vs +0x14) -- forward/reverse or X/Y variant pair",
+   "ROOM_GetRoomAtCoords": "twins: null-guarded +0x4c grid vs unguarded +0x5c/+0x64 bounds -- client vs server room lookup suspected",
+   "ROOM_LoadRoomTilesAndGetCacheHandle": "identical flag-driven loaders; differ in tail callee -- client/server twin",
+   "SKILLS_EncodeExpressionToBufferB": "identical 0x400-buffer encoders w/ same token tables; differ later -- A/B pair",
+   "SKILLS_GetSkillDataRecord(6fd8d060)": "keeps by default: null-asserted (0xED/0xEE) record+buffer copier -- unproven",
+   "SKILLS_GetSkillDescField0x34(6fd89b30)": "reads [[unit+0x5c]+0x10], calls STATS_CalcStatWithFormulas -- a stat calc, misnamed, no match yet",
+   "SKILLS_RemoveSkillFromUnit": "6fda2c80 is a thin wrapper calling 6fda28b0(flag=1) -- wrapper needs its own D2MOO name (Remove vs RemoveAll variants)",
+   "SKILLS_SetOrAssignSkillLevel": "559-instr worker vs 66-instr list-walker -- different functions entirely",
+   "STATS_ApplyMaxDamageStats": "356-instr twins byte-similar (assert 0x1505) -- min/max or weapon-slot variants; need tail diff",
+   "STATS_GetSlotElementPtr": "twins: slots<12 base+0xc vs slots<3 base+0x24 -- different slot arrays (stat vs mod?)",
+   "STAT_GetStatListOwnerId": "2 clones (+0x18 null-safe getter, share honestly) + 6fda3050 59-instr search -- search member misnamed",
+   "StubNoOp": "RET 0xC group (4) vs RET 0x4 group (4) -- honest clone families of different arity; renaming would invent names"
+  },
+  "notes": [
+   "Recurring impostor pattern: abort-guarded field getters (CleanupAndAbort/_exit prologue) stamped with a neighboring real function's name -- 6 instances recorded.",
+   "6fd51770 (now DATATBLS_GetStatesTxtRecord) is shadow-dispatcher slot 15 under the OLD name with 13810 clean hits -- proof is of the BODY (disasm-translated reimpl); conformance artifacts need repointing on next resolve-table regen.",
+   "DATATBLS_GetItemTypeTxtRecord name is now UNBOUND in D2Common -- the real ItemTypes getter (stride sizeof(ItemTypesTxt), pItemTypesTxt table) is yet to be located."
+  ]
  }
 }
