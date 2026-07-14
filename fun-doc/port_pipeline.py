@@ -1035,7 +1035,11 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
         if key in conformance_protected:
             continue
         binary_name = func.get("program_name", "") or ""
-        if active_binary and binary_name != active_binary:
+        # active_binary arrives as a bare name from CLI callers but as the
+        # full program path (/Mods/.../D2Common.dll) from the pipeline UI's
+        # Prove lane — accept both, else the UI's port worker always exits
+        # no_eligible_candidates.
+        if active_binary and active_binary not in (binary_name, func.get("program") or ""):
             continue
 
         score = func.get("effective_score", func.get("score", 0)) or 0
