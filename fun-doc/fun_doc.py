@@ -11170,6 +11170,29 @@ def run_globals_worker_pass(
 # / port_live_prove.py / prove_doc.py for the drivers.
 # ==========================================================================
 
+_DRAFTMETA_DIR = (Path(os.environ.get("FUNDOC_D2MOO_REPO", r"C:\Users\benam\source\cpp\D2MOO"))
+                  / "conformance" / "reimpl_provider" / "draftmeta")
+
+
+def _draft_only_dump(reimpl, func_name, address, layout, input_sets, abort_class, prove_kind):
+    """PARALLEL-SET DRAFTING (2026-07-14): when FUNDOC_DRAFT_ONLY=1, write the
+    candidate + a draftmeta sidecar and STOP before build/prove. The parallel-set
+    harness runs many of these CONCURRENTLY (the LLM draft is the per-function
+    bottleneck; build+prove is a shared serial resource), then batch-builds the
+    provider ONCE and proves each serially via run_live/handle_prove(build=False).
+    Reuses the FULL classification/routing/capability/guard logic -- the drafter
+    only reaches this point for functions the pipeline actually decided to prove."""
+    import port_live_prove as plp
+    plp.write_candidate(reimpl, func_name)
+    _DRAFTMETA_DIR.mkdir(parents=True, exist_ok=True)
+    (_DRAFTMETA_DIR / f"{func_name}.json").write_text(json.dumps({
+        "name": func_name, "address": address, "reimpl": reimpl,
+        "layout": layout, "input_sets": input_sets,
+        "abort_class": bool(abort_class), "prove_kind": prove_kind,
+    }, indent=1), encoding="utf-8")
+    return True
+
+
 def _unknown_resolve_names(reimpl_code):
     """D2MOO_Resolve name(s) in a drafted reimpl that the generated resolve table
     does NOT know. Such a draft is GUARANTEED wrong at runtime: D2MOO_Resolve
@@ -11385,6 +11408,10 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         except Exception:
             pass
 
+    if os.environ.get("FUNDOC_DRAFT_ONLY") == "1":
+        _draft_only_dump(reimpl, func_name, address, layout, input_sets, abort_class, "live")
+        _log("drafted_only", prove_kind="live")
+        return "drafted"
     live = None
     prove_attempts = 0
     clamp_retried = False
@@ -11510,6 +11537,13 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
 # for human review, never overwritten with a model guess (annotate-don't-overwrite).
 # ---------------------------------------------------------------------------
 _AUTO_NAME_RE = re.compile(r"^(FUN_|Ordinal_|SUB_|LAB_|UNK_|DAT_)", re.IGNORECASE)
+
+# A comparison against a captured object's TYPE FIELD (`pRec->nType == 4`,
+# `pUnit->dwType != 1`, `p->type == ...`). Combined with abort_class this is the
+# round-robin-capture crash hazard (a wrong-type captured object hits the fatal
+# branch). Broader than abi_static.detect_handle_abort_hazard, which only keys
+# on `dwType`. Used by the handle-getter routes to DEFER such getters.
+_TYPE_FIELD_CMP_RE = re.compile(r"->\s*\w*[Tt]ype\b\s*(?:==|!=|<|>)")
 
 
 def _is_auto_name(name):
@@ -12174,6 +12208,24 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         import abi_static
         if static_abi or abort_class:
             prompt += "\n\n" + abi_static.abi_prompt_block(static_abi, abort_class)
+        # HANDLE + GLOBAL (2026-07-13, stateful-unlock capability): a read-only
+        # getter can BOTH deref a captured live pointer AND read a named global
+        # table (e.g. MONSTER props: `pUnit->dwTxtFileNo` indexes
+        # `g_pDataTables->pMonStatsTxt`). The base handle-draft prompt says "no
+        # resolver", so these dead-ended in stateful_skip (reason global_plus_ptr).
+        # Inject the same resolvable-global + call-through hints the global_leaf
+        # path uses -- the reimpl reads the captured pointer for its fields AND
+        # D2MOO_Resolve()s any global it also touches.
+        _dis = ghidra_get("/disassemble_function",
+                          params={"address": f"0x{address}", "program": program})
+        if _dis and not _is_error_response(_dis):
+            _globs = abi_static.resolvable_globals(str(_dis))
+            if _globs:
+                prompt += abi_static.global_resolve_prompt_block(_globs)
+                _log("handle_global_hint_injected", globals=[n for _a, n in _globs])
+            _callees = abi_static.resolvable_callees(str(_dis))
+            if _callees:
+                prompt += abi_static.callthrough_prompt_block(_callees)
     except Exception:
         pass
 
@@ -12362,6 +12414,10 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                                         "port_last_result": "synth fallback: no parseable draft"})
             return "malformed_response"
 
+    if os.environ.get("FUNDOC_DRAFT_ONLY") == "1":
+        _draft_only_dump(reimpl, func_name, address, layout, input_sets, abort_class, "handle")
+        _log("drafted_only", prove_kind="handle")
+        return "drafted"
     live = None
     prove_attempts = 0
     best = plp.BestDraft()          # keep the highest-scoring draft across retries
@@ -12595,6 +12651,113 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
             _log("outbuf_route", classification=classification)
             return process_global_leaf_live(
+                program, address, func_name, decompiled,
+                provider=provider, model=model, worker_id=worker_id,
+                max_fix_attempts=max_fix_attempts,
+                static_abi=static_abi, abort_class=abort_class)
+        # HANDLE + GLOBAL ROUTE (2026-07-13, stateful-unlock capability): a
+        # READ-ONLY getter that takes a live pointer AND reads a named global
+        # (`global_plus_ptr`) is provable via the HANDLE path now that it injects
+        # resolver-global hints -- the oracle passes the captured live object,
+        # the reimpl reads its fields AND D2MOO_Resolve()s the global table it
+        # indexes (e.g. MONSTER props: pUnit->dwTxtFileNo -> g_pDataTables->
+        # pMonStatsTxt[idx]). global_plus_ptr already implies read-only (ptr_write
+        # and delegate_call are checked first in stateful_reason), so no mutation
+        # hazard. GUARD: a dwType-gated fatal abort would crash the round-robin
+        # capture -- skip those (same as the shadow_leaf branch).
+        # The read-only handle-getter reasons: single/simple live-pointer field
+        # reads (`struct_arrow`, `named_struct_ptr`) and unit+global-table reads
+        # (`global_plus_ptr`). All are read-only -- ptr_write and delegate_call
+        # are checked FIRST in stateful_reason, so none mutate or delegate.
+        # Attempting them via the handle path is SAFE: worst case is a failed
+        # prove (mismatch / SEH-caught wild read), never corruption. delegate_call
+        # (needs the delegate lane), deep_deref and multi_ptr_params (need
+        # multi-handle capture) and dat_global (needs a resolver entry) stay
+        # skipped for their own capabilities.
+        _HANDLE_GETTER_REASONS = {"global_plus_ptr", "struct_arrow", "named_struct_ptr"}
+        _route_handle = skip_reason in _HANDLE_GETTER_REASONS
+        # DELEGATE LANE (2026-07-13): a read-only getter that CALLS another
+        # D2Common function and returns/reads its result (`delegate_call`) --
+        # e.g. `return GetItemDataRecord(rec->classId)->field`. The ITEMS/DATATBLS
+        # record-getter family is dominated by these (13/15 skips in iter 22).
+        # Provable via the handle path, which already injects call-through hints
+        # (resolvable_callees + callthrough_prompt_block): the reimpl
+        # D2MOO_Resolve()s the callee and calls it. GATE: route ONLY when the
+        # callee is RESOLVABLE (in the resolve table) -- an unresolvable delegate
+        # can't be called from the standalone provider (unresolved symbol -> build
+        # fails), so those stay skipped. abort-class delegates DEFER via the guard
+        # below (DATATBLS_GetItemDataByte's rec->nType abort).
+        # DELEGATE-LANE DEEP-DEREF GUARD (2026-07-13, CONFIRMED LIVE CRASH --
+        # DATATBLS_IsItemQuantityDepleted killed the oracle): a delegate getter
+        # that ALSO navigates a SUB-POINTER of the captured handle (`pUnit->pStats`
+        # then walks the StatList) and calls the delegate on that chain is NOT
+        # safe to direct-prove. On a degenerate/idle capture the sub-pointer chain
+        # (or the delegate reading a mis-sized global-derived pointer) faults
+        # UNCATCHABLY -> process termination, not an SEH-catchable wild read.
+        # A `->\w+->` (deref of a deref) is the signature. Such delegate getters
+        # DEFER to shadow-first (real gameplay supplies fully-populated objects);
+        # only SHALLOW delegate getters (call on a flat field, e.g.
+        # GetItemDataRecord(rec->classId)) route directly.
+        # Dangerous patterns (ANY -> defer): an adjacent deref-of-deref
+        # (`pUnit->pStats->x`), OR pointer arithmetic on a struct pointer-member
+        # (`->pItemStatCostCompiledBase + 0x1626`) whose result is passed to the
+        # delegate -- both walk memory the reimpl derives from a possibly-degenerate
+        # capture / not-fully-populated global, faulting UNCATCHABLY. Only a
+        # delegate called on a FLAT scalar field with a flat result read is safe.
+        _dec = decompiled or ""
+        _deep_handle_chain = bool(
+            re.search(r"->\s*\w+\s*->", _dec)              # pX->y->z adjacent chain
+            or re.search(r"->\s*p[A-Z]\w*\s*\+", _dec)     # ->pMember + offset (ptr arith)
+            or re.search(r"->\s*\w+\s*\+\s*0x[0-9a-fA-F]{3,}", _dec))  # ->member + big offset
+        if (skip_reason == "delegate_call" and _deep_handle_chain
+                and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            update_function_state(key, {
+                "port_status": "shadow_leaf_pending",
+                "port_last_result": "delegate getter with deep captured-handle chain -- "
+                                    "unsafe to direct-prove (uncatchable fault on degenerate "
+                                    "capture); deferred to shadow-first"})
+            _log("delegate_deep_deref_defer", classification=classification,
+                 reason=skip_reason)
+            return "shadow_leaf_pending"
+        if (skip_reason == "delegate_call"
+                and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            try:
+                import abi_static
+                _dis = ghidra_get("/disassemble_function",
+                                  params={"address": f"0x{address}", "program": program})
+                if _dis and not _is_error_response(_dis) and \
+                        abi_static.resolvable_callees(str(_dis)):
+                    _route_handle = True
+            except Exception:
+                pass
+        if (_route_handle
+                and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            # ABORT-CLASS DEFER (2026-07-13, safety hardening): an abort-class
+            # handle-getter is DANGEROUS to direct-prove. The oracle round-robins
+            # DISTINCT captured object types for coverage; if the fatal branch is
+            # gated on the captured object's TYPE FIELD (dwType/nType/->type),
+            # that diversity itself feeds a wrong-type object into an UNCATCHABLE
+            # CleanupAndAbort -> game process termination (the confirmed
+            # STAT_GetUnitCalculatedStat crash class). DATATBLS_GetItemDataByte
+            # (`if (rec->nType==4) ... else CleanupAndAbort()`) is exactly this.
+            # detect_handle_abort_hazard catches dwType; the broader type-field
+            # check below catches nType/->type too. Either way an abort-class
+            # handle-getter DEFERS to shadow-first, never a direct sweep.
+            try:
+                import abi_static
+                _type_gated = (abi_static.detect_handle_abort_hazard(decompiled)
+                               or (abort_class and _TYPE_FIELD_CMP_RE.search(decompiled or "")))
+            except Exception:
+                _type_gated = abort_class
+            if abort_class or _type_gated:
+                update_function_state(key, {
+                    "port_status": "shadow_leaf_pending",
+                    "port_last_result": "abort-class handle-getter: type-gated fatal abort unsafe "
+                                        "for round-robin capture -- deferred to shadow-first"})
+                _log("handle_abort_defer", classification=classification, reason=skip_reason)
+                return "shadow_leaf_pending"
+            _log("handle_global_route", classification=classification, reason=skip_reason)
+            return process_handle_leaf_live(
                 program, address, func_name, decompiled,
                 provider=provider, model=model, worker_id=worker_id,
                 max_fix_attempts=max_fix_attempts,

@@ -1,0 +1,1829 @@
+{
+ "iteration": 27,
+ "cursor": 451,
+ "attempted": {
+  "SetPlayerTargetPosition": "iter1",
+  "SEED_GetRandomNumberAlt": "iter1",
+  "SEED_GetRandomInRange": "iter2",
+  "COMMON_ScaledMultiplyDivide": "iter1",
+  "ValidateMonsterClassIndex": "iter1",
+  "GetItemTypeTxtRecord": "iter1",
+  "DATATBLS_TestMonSoundExtendedFlag": "iter3",
+  "MONSOUND_TestFlagByMonStats": "iter3",
+  "SKILLS_GetBaseMinDamage": "retry_queued",
+  "SKILLS_CalculateLeveledManaCost": "iter3",
+  "UNITS_GetMonsterClass": "iter3",
+  "MONSTATS2_GetFlag": "iter3",
+  "MONSTATS2_GetBaseTypeAtLevel": "iter3",
+  "SKILLS_GetMinDamagePerLevel": "iter2",
+  "SKILLS_GetBaseMaxDamage": "iter2",
+  "SKILLS_GetMaxDamagePerLevel": "iter2",
+  "SKILLS_CalculateLeveledMinDamage": "iter2",
+  "SKILLS_HasRequiredSkill": "iter2",
+  "__initterm": "library",
+  "__cinit": "library",
+  "_exit": "library",
+  "__exit": "library",
+  "__cexit": "library",
+  "_atol_6FD51EBB": "library",
+  "__stricmp": "library",
+  "FID_conflict:_wprintf": "library",
+  "__fsopen": "library",
+  "__fwrite_lk": "library",
+  "_fwrite": "library",
+  "LOG_CloseLogFileHandle": "iter3",
+  "CRTUnlockExitLockIfNeeded": "iter3",
+  "shortsort": "iter3",
+  "ConfigureSubsystemParameters": "iter3",
+  "LOG_UnlockLogFile": "iter3",
+  "FOpenShared": "iter3",
+  "LOG_UnlockFileHandle": "iter3",
+  "__fclose_lk": "library",
+  "_fclose": "library",
+  "STRCHR_FindChar": "library",
+  "FID_conflict:__time32": "library",
+  "_strcspn": "library",
+  "_strncpy": "library",
+  "_vsprintf": "library",
+  "__flush": "library",
+  "__fflush_lk": "library",
+  "CRT__flsall": "library",
+  "ReleaseStreamLock": "library",
+  "_fflush": "library",
+  "___tolower_mt": "library",
+  "_tolower": "library",
+  "CRT_Init": "library",
+  "__amsg_exit": "library",
+  "__mtinitlocks": "library",
+  "__mtdeletelocks": "library",
+  "LOG_ReleaseCriticalSectionByIndex": "library",
+  "__mtinitlocknum": "library",
+  "ReleaseInitSyncLock": "library",
+  "__lock": "library",
+  "__onexit_lk": "library",
+  "___onexitinit": "library",
+  "__onexit": "library",
+  "_atexit": "library",
+  "__SEH_prolog": "library",
+  "__SEH_epilog": "library",
+  "__seh_longjmp_unwind@4": "library",
+  "___isctype_mt": "library",
+  "___freetlocinfo": "library",
+  "___updatetlocinfo_lk": "library",
+  "___updatetlocinfo": "library",
+  "AllocateTlsSlot": "library",
+  "__mtterm": "library",
+  "__initptd": "library",
+  "__getptd": "library",
+  "__freefls@4": "library",
+  "__freeptd": "library",
+  "__mtinit": "library",
+  "__allmul": "library",
+  "___ascii_stricmp": "library",
+  "CRT_flsbuf": "library",
+  "__lock_file": "library",
+  "__lock_file2": "library",
+  "__unlock_file": "library",
+  "__unlock_file2": "library",
+  "__stbuf": "library",
+  "__ftbuf": "library",
+  "__openfile": "library",
+  "GetDosErrnoPtr": "library",
+  "__dosmaperr": "library",
+  "__getstream": "library",
+  "LOG_AcquireLogFileLock": "library",
+  "AcquireCriticalSectionByIndex04": "library",
+  "__close_lk": "library",
+  "__close": "library",
+  "__freebuf": "library",
+  "__aulldiv": "library",
+  "__commit": "library",
+  "STRING_LocaleMapString": "library",
+  "AllocateMemory": "library",
+  "__ioinit": "library",
+  "__ioterm": "library",
+  "__setenvp": "library",
+  "__setargv": "library",
+  "___heap_select": "library",
+  "__heap_init": "library",
+  "__heap_term": "library",
+  "__XcptFilter": "library",
+  "DisplayRuntimeError": "library",
+  "__FF_MSGBANNER": "library",
+  "__heap_alloc": "library",
+  "LOG_AcquireCriticalSectionByIndex": "library",
+  "__nh_malloc": "library",
+  "__global_unwind2": "library",
+  "__local_unwind2": "library",
+  "__msize": "library",
+  "AcquireCriticalSectionByIndex4": "library",
+  "___free_lc_time": "library",
+  "___free_lconv_num": "library",
+  "___free_lconv_mon": "library",
+  "StringConcatenate": "library",
+  "ExitHandlerCleanup": "library",
+  "RunCrtInitializers": "library",
+  "write_char": "library",
+  "write_multi_char": "library",
+  "write_string": "library",
+  "FormatStringProcessor": "library",
+  "WriteFileWithTextModeConversion": "library",
+  "FILEIO_Write": "library",
+  "parse_cmdline": "library",
+  "StoreSehContext": "library",
+  "ReallocateMemory": "library",
+  "EH3_ValidateHandler": "library",
+  "CopyStringOptimized": "library",
+  "report_failure": "library",
+  "_strpbrk": "library",
+  "STRING_InitializeLocaleCharacterMaps": "library",
+  "STRING_SetupCodePage": "library",
+  "__setmbcp": "library",
+  "___initmbctable": "library",
+  "__lseek_lk": "library",
+  "__getbuf": "library",
+  "__isatty": "library",
+  "___wctomb_mt": "library",
+  "_wctomb": "library",
+  "__aulldvrm": "library",
+  "__tsopen_lk": "library",
+  "__sopen": "library",
+  "UnlockFileHandleIfNeeded": "library",
+  "__lseeki64_lk": "library",
+  "__set_osfhnd": "library",
+  "__free_osfhnd": "library",
+  "__get_osfhandle": "library",
+  "__lock_fhandle": "library",
+  "LOG_AcquireCriticalSectionIndex10": "library",
+  "__unlock_fhandle": "library",
+  "__alloc_osfhnd": "library",
+  "AcquireCriticalSectionIndex10": "library",
+  "AcquireCriticalSectionByIndexB": "library",
+  "___sbh_heap_init": "library",
+  "___sbh_find_block": "library",
+  "___sbh_free_block": "library",
+  "___sbh_alloc_new_region": "library",
+  "___sbh_alloc_new_group": "library",
+  "___sbh_resize_block": "library",
+  "___sbh_alloc_block": "library",
+  "GetLocaleDefaultCodePage": "library",
+  "STRING_ConvertStringBetweenCodePages": "library",
+  "__resetstkoflw": "library",
+  "__callnewh": "library",
+  "DisplaySecurityErrorDialog": "library",
+  "__fptrap": "library",
+  "_isdigit": "library",
+  "___ascii_strnicmp": "library",
+  "__setmode_lk": "library",
+  "FormatStringBuffer": "library",
+  "CleanupAndAbort": "library",
+  "InitializeModule": "library",
+  "CRITSEC_AcquireIndex4": "library",
+  "setSBCS": "library",
+  "FileLseek": "library",
+  "ExtendFileWithZeros": "library",
+  "ReadTextFile": "library",
+  "RtlUnwind_6FD591FE": "library",
+  "CompareStringsIgnoreCase": "library",
+  "CopyMemoryAndDetectTerminator": "library",
+  "GetReturnAddress": "library",
+  "SearchBinaryTreeForTransformedKey": "library",
+  "BinarySearchInSortedArray": "library",
+  "AllocateAndInitializePoolSlot": "library",
+  "AllocateConditionalResource": "library",
+  "InitializeAndInsertBSTNode": "library",
+  "AllocateMemoryWithTracking": "library",
+  "PRESET_AllocateAndValidateResourceSlot": "iter4",
+  "DeallocateResourceBuffer": "iter4",
+  "EncodeExpressionTokenStack": "iter4",
+  "DeallocateResourcePoolTree": "iter4",
+  "InsertSortedValueIntoArray": "iter4",
+  "FindAndValidateD2ExpMpq": "iter4",
+  "InterpretBytecodeProgram": "iter4",
+  "GetFloatFromLookupTable": "iter4",
+  "GetWrappedTableValue": "iter4",
+  "DeallocateResourceElementPair": "iter4",
+  "GetFieldAt8": "iter4",
+  "ProcessFormatStringData": "iter4",
+  "LookupIndexedString": "iter4",
+  "ParseTabDelimitedText": "iter4",
+  "InitializeCharacterFilterBuffer": "library",
+  "EnterCriticalSectionWrapper": "library",
+  "GetBitValue": "import_thunk",
+  "ClearBitInArray": "import_thunk",
+  "SetBitInArray": "import_thunk",
+  "ProcessActivePoolSlot": "import_thunk",
+  "ExtractSignedBitsFromStream": "import_thunk",
+  "EncodeBitsToFilterBuffer": "import_thunk",
+  "ExtractBitsFromStreamWrapper": "import_thunk",
+  "GetAdjustedCountValue": "import_thunk",
+  "Unwind@6fddc1d0_6FD592DC": "import_thunk",
+  "Unwind@6fddc1d0_6FD592E2": "import_thunk",
+  "ValidateStringId": "import_thunk",
+  "Unwind@6fddc1d0_6FD592EE": "import_thunk",
+  "Unwind@6fddc1d0_6FD592F4": "import_thunk",
+  "Unwind@6fddc1d0_6FD592FA": "import_thunk",
+  "Unwind@6fddc1d0_6FD59300": "import_thunk",
+  "_strrchr": "library",
+  "ReleaseFileHandleWithRefCount": "library",
+  "InitializeAsyncEventListeners": "library",
+  "Unwind@6fddc1d0_6FD59306": "import_thunk",
+  "Unwind@6fddc1d0_6FD5930C": "import_thunk",
+  "Unwind@6fddc1d0_6FD59312": "import_thunk",
+  "Unwind@6fddc1d0_6FD59318": "import_thunk",
+  "Unwind@6fddc1d0_6FD5931E": "import_thunk",
+  "FILE_ArchiveOpenByPath": "import_thunk",
+  "SafeCopyDataWithLocking": "import_thunk",
+  "FILE_PathConcatenate": "import_thunk",
+  "FindCharInString": "import_thunk",
+  "GetDefaultResourceCount_6FD59382": "import_thunk",
+  "ValidateParameterOrShutdown": "import_thunk",
+  "BuildProjectPathThunk": "import_thunk",
+  "SetFilePosition": "import_thunk",
+  "GetDefaultResourceCount_6FD5939A": "import_thunk",
+  "STRING_GetPathFilename": "library",
+  "STRING_CopyUntilWhitespace": "library",
+  "STRING_SkipWhitespace": "library",
+  "STRING_ParseInteger": "library",
+  "CHAR_GetClassBit0": "iter6",
+  "PATH_RemoveFilename": "iter6",
+  "ASYNC_ValidateEventListeners": "iter6",
+  "SOCKET_BindOrAbort": "iter6",
+  "RESOURCE_GetCountOrAbort": "iter6",
+  "PATH_BuildProjectPathOrAbort": "iter7",
+  "RESOURCE_AllocateAndOpen": "iter6",
+  "DRLG_GetRoomInnerField20": "iter6",
+  "GetDrlgDataRecordOffset": "iter7",
+  "GetPointerFromOffset0x20": "iter7",
+  "GetRoomDataOffsetEC": "iter7",
+  "SetDrlgDataField4": "iter7",
+  "GetDrlgDataField4": "iter7",
+  "CalculateRoomSubtileBounds": "iter7",
+  "GetRoomDrlgMazeData": "iter7",
+  "MONSTER_GetInvGridSize": "classB_hybrid_deferred",
+  "PRESET_DecrementAndFreePresetData": "import_thunk",
+  "InitializeRoomWarpPositions": "library",
+  "AllocatePresetWithRandomSubEntry": "library",
+  "ROOM_AllocateRoomObject": "iter9",
+  "ROOM_ProcessLightingByPosition": "iter9",
+  "DRLG_FreeDrlgRoomChainAndResources": "iter9",
+  "DATATBLS_GetLvlTypeField2C": "iter9",
+  "DATATBLS_GetLvlPrestDataField28": "iter9",
+  "DRLG_SetupRoomGridData": "iter9",
+  "ROOM_AllocateAndLinkDrlgRoom": "iter9",
+  "DRLG_FreeGridBuffersIfExists": "iter9",
+  "ROOM_FreeDrlgRoomDataComplete": "iter9",
+  "ROOM_CreateDrlgRoomWaypointObject": "iter9",
+  "DRLG_CreateRoomBorderObjects": "iter9",
+  "CreateDrlgRoomColumnObjects": "iter9",
+  "PRESET_ProcessObjectsWithRandom": "iter9",
+  "PRESET_LoadAndParseArchive": "iter9",
+  "PRESET_CreateRoomFromLevelType": "iter9",
+  "InitializePresetLevelRooms": "library",
+  "DRLG_GenerateRoomColumnsAndBorders": "iter10",
+  "PRESET_GetOrCreateFileCacheEntry": "iter10",
+  "ROOM_LoadPresetAndGenerateRoomContent": "iter10",
+  "PRESET_ProcessRoomObjectsAndTiles": "iter10",
+  "CreateDrlgRoomsFromPreset": "iter10",
+  "ROOM_ProcessTileGridsAndAnimation": "iter10",
+  "GetPathFlagBit3": "iter10",
+  "UNITS_UpdateVelocity": "iter11",
+  "PATH_CalcDirectionAndAngle": "iter11",
+  "MISSILE_CalcProximityScore": "iter11",
+  "PATH_GetDirectionScaled": "iter11",
+  "PATH_CheckMoveCollision": "iter11",
+  "PATH_ResetToOrigin": "iter11",
+  "PATH_TraceMoveWithCollision": "iter11",
+  "PATH_SetCurrentRoom": "iter11",
+  "ROOM_UpdateUnitRoomByCoordinates": "iter11",
+  "AdvanceUnitPathStep": "iter11",
+  "PATH_AdvanceAlongPath": "iter11",
+  "PATH_SetPosition": "iter11",
+  "PATH_SyncUnitPositionFromPath": "iter11",
+  "PATH_SetWorldPositionFromFixedPoint": "iter11",
+  "PATH_ValidateProgress": "iter11",
+  "PATH_SnapToTile": "iter12",
+  "PATH_SetPositionAndSnapToGrid": "iter12",
+  "PATH_TeleportToPosition": "iter12",
+  "PATH_MoveToPositionWithFlags": "iter12",
+  "PATH_ClearAndSnapToGrid": "iter12",
+  "PATH_GetNodeNextPtr": "iter12",
+  "PATH_HandleForceTeleport": "iter12",
+  "COLLISION_HandleTeleport": "iter12",
+  "PATH_StepUnitAlongPath": "iter12",
+  "DATATBLS_ClearUnitWeaponTable": "iter12",
+  "ROOM_SetRoomExitOrientation": "iter12",
+  "DRLG_SetRoomExitCoordinates": "iter12",
+  "ROOM_IsRoomExitAvailable": "iter12",
+  "CheckWeaponModeSwapActive": "iter12",
+  "ROOM_FindAndUpdateRoomExit": "iter12",
+  "ROOM_ComputeTilesetSelection": "iter13",
+  "RandomizeTilesetSelections": "iter13",
+  "ROOM_TryCreateRandomRoomConnection": "iter13",
+  "DRLG_InitializeLevelWarpForUnit": "iter13",
+  "DRLG_SelectRandomMazeTileVariant": "iter13",
+  "ROOM_CalculatePositionAndCheckCollision": "iter13",
+  "DRLG_CreateMazeRoomWithExit": "iter13",
+  "DRLG_CreateAdjacentRoomWithAnim": "iter13",
+  "DRLG_MAZE_CreateRoomAndSetExitCoords": "iter13",
+  "DRLG_FinalizeRoomTileSelection": "iter13",
+  "GenerateMazeRoomGrid": "iter13",
+  "DRLG_GenerateFourDirectionRooms": "iter13",
+  "DRLG_GenerateCrossRoomLayout": "iter13",
+  "DRLG_GenerateRoomsWithAllExits": "iter13",
+  "DRLG_ExpandMazeRoomsRandomly": "iter13",
+  "DRLG_GenerateCatacombsExitLayout": "iter16",
+  "DRLG_GenerateCatacombsRoomExits": "iter16",
+  "DRLG_GenerateMazeExits": "iter16",
+  "DRLG_GenerateTowerExitLayout": "iter16",
+  "DRLG_GenerateAct3DungeonLayout": "iter16",
+  "DRLG_GenerateAct1DungeonLayout": "iter16",
+  "DRLG_GenerateCliffExitLayout": "iter16",
+  "DRLG_GenerateDesertExitLayout": "iter16",
+  "ROOM_GenerateTombExitLayout": "iter16",
+  "DRLG_GenerateOutdoorExitLayout": "iter16",
+  "DRLG_GenerateMazeLevelComplete": "iter16",
+  "FreeTrackedPoolAllocation": "iter16",
+  "UNIT_InitUnitFindCtx": "iter16",
+  "UNITS_GrowFindArray": "iter16",
+  "ROOM_CollectFilteredRoomUnits": "iter16",
+  "LOG_WriteDebugMessage": "library",
+  "LOG_FormatTimestamp": "library",
+  "LOG_OpenLogFileHandle": "library",
+  "LOG_WriteDebugLogEntry": "library",
+  "LOG_InitializeLogFile": "library",
+  "UNITS_CheckAABBOverlap": "iter17",
+  "UNITS_CheckInsideAABB": "iter17",
+  "UNITS_FindUnitInRoomCollection": "iter17",
+  "GetSubStructDimension": "iter17",
+  "ITEMS_CanItemFitInStoragePage": "iter17",
+  "UNIT_FindUnitInAreaFilter": "iter17",
+  "UNITS_FindUnitsInRooms": "iter17",
+  "SetGlobalValue11103": "iter17",
+  "ShutdownLogFile": "iter17",
+  "FormatAndWriteDebugLogEntry": "iter17",
+  "WriteDebugLogEntry": "iter17",
+  "ToggleGlobalLogFile": "iter17",
+  "DRLG_PropagateRoomConnectionValue": "iter17",
+  "OVERLAY_UpdateAnimationFrameIndices": "iter17",
+  "ProcessAnimationTiles": "iter17",
+  "DRLG_CreateAnimatedTileEntries": "iter18",
+  "DRLG_CreateAllAnimatedTiles": "iter18",
+  "DATATBLS_CopyLevelTileRecord": "iter18",
+  "BELTS_ValidateRecordIndex": "iter18",
+  "DATATBLS_GetBeltTxtEntry": "iter18",
+  "DATATBLS_LoadBeltsTxtData": "iter18",
+  "DRLG_CompareRoomsByField04": "iter18",
+  "PRESET_CalcTilePosition": "iter18",
+  "PRESET_InitPositionFromContext": "iter18",
+  "PRESET_GetExitTypeFromFlags": "iter18",
+  "PRESET_CheckCollisionDirectional": "iter18",
+  "PRESET_CheckCollisionD": "iter18",
+  "PRESET_CheckCollisionWithMargin": "iter18",
+  "SKILLS_GetManaCostPerLevel": "iter20",
+  "DATATBLS_GetLCIDFromCodePage": "iter20",
+  "DATATBLS_GetDataTableRowValue": "iter20",
+  "INV_GetInventoryPageDimensions": "iter20",
+  "DATATBLS_GetMonsterPropertyBit6": "iter20",
+  "DATATBLS_GetMonsterPropBit": "iter20",
+  "DATATBLS_GetMonsterLevelTilePropBit7": "iter20",
+  "SKILLS_ResolveItemCodeOverride": "iter20",
+  "INV_CountOccupiedCellsInArea": "iter20",
+  "INV_IsGridRectangleEmpty": "iter20",
+  "ITEMS_GetItemDimensions": "iter20",
+  "INV_AddItemInventoryRecord": "iter20",
+  "INV_GetItemAtBodyLoc": "iter20",
+  "ITEMS_GetInventoryData": "iter20",
+  "INV_CountItemsByClassIdBelowQuality": "iter20",
+  "INV_GetGridSlotUnit": "iter21",
+  "ITEMS_GetItemClassIndex": "iter21",
+  "INV_HasItemType3InInventory": "iter21",
+  "INV_GetAlternateWeapon": "iter21",
+  "INV_GetEquippedItemByBodyLoc": "iter21",
+  "UNITS_GetBlockChance": "iter21",
+  "ITEMS_GetStatBonusValueWrapper": "iter21",
+  "ITEMS_GetItemRecordSubtype": "iter21",
+  "DATATBLS_GetItemDataByte": "iter21",
+  "ITEMS_TestItemRecordBodyLocationFlag": "iter21",
+  "DATATBLS_GetItemEquipType": "iter21",
+  "ITEMS_GetItemDataField": "iter21",
+  "ITEMS_GetItemDynPathData": "iter21",
+  "ITEMS_GetItemRecordFlags": "iter21",
+  "ITEMS_GetItemRecordFlagDCBit3": "iter21",
+  "DATATBLS_GetObjectDataField0A": "iter23",
+  "ITEMS_AreItemsInSameCodeGroup": "iter23",
+  "ITEMS_GetItemRecordFieldByte": "iter23",
+  "ITEMS_GetMissileDataField": "iter23",
+  "ITEMS_GetItemCode": "iter23",
+  "DATATBLS_GetItemTypeFromUnit": "iter23",
+  "DATATBLS_GetItemTypeStorageDimensions": "iter23",
+  "ITEMS_GetItemRecordCode": "iter23",
+  "ITEMS_GetUnitItemField0xC4": "iter23",
+  "DATATBLS_GetStateFlagBit": "iter23",
+  "ITEMS_GetItemEffectiveCode": "iter23",
+  "DATATBLS_GetMonsterMaxComponentVisualTier": "iter23",
+  "ITEMS_TestItemFlags": "iter23",
+  "DATATBLS_GetItemPropertyRecord0x94": "iter23",
+  "INV_CountFilledSockets": "iter23",
+  "ITEMS_HasValidInventoryContainer": "iter24",
+  "ITEMS_GetBodyLocation": "iter24",
+  "DATATBLS_GetItemStorePage": "iter24",
+  "DATATBLS_GetItemTypeClass": "iter24",
+  "DATATBLS_GetItemTypeField9IfStorable": "iter24",
+  "ITEMS_GetCollisionGfxTier": "iter24",
+  "DATATBLS_GetItemTypeDataByte": "iter24",
+  "ITEMS_GetItemRecordFlag137": "iter24",
+  "ITEMS_GetActionTargetType": "iter24",
+  "ITEMS_GetUnitItemRecordField": "iter24",
+  "ITEMS_GetItemTableFieldEC": "iter24",
+  "ITEMS_AccumulateInventoryCost": "iter24",
+  "ITEMS_IsItemAtBaseTier": "iter24",
+  "ITEMS_GetItemTypeSubArrayEntry": "iter24",
+  "DATATBLS_GetItemTypeField13_ByUnit": "iter24",
+  "DATATBLS_GetItemTypeEquiv2": "iter25",
+  "DATATBLS_GetItemTypeEquiv1": "iter25",
+  "ITEMS_IsEquippedWeapon": "iter25",
+  "ITEMS_CountSocketedItems": "iter25",
+  "ITEMS_GetUnwindWithPackedDirection": "iter25",
+  "ITEMS_EncodeItemDataToBits": "iter25",
+  "DATATBLS_GetItemStatCostEntryC2": "iter25",
+  "DATATBLS_GetItemStatValueCapped": "iter25",
+  "DATATBLS_GetItemAffixLevelRequirement_ByPlayer": "iter25",
+  "ITEMS_AccumulateSocketedStatValue": "iter25",
+  "DATATBLS_GetItemAffixLevelRequirement": "iter25",
+  "STATS_GetStatByMode": "iter25",
+  "ITEMS_EncodeUnitDataToBitBuffer": "iter25",
+  "ITEMS_EncodeItemToBitStream": "iter25",
+  "ITEMS_GetEncodedItemStreamSize": "iter25",
+  "DATATBLS_IsItemQuantityDepleted": "iter26",
+  "ITEMS_ParseItemFromBitStream": "iter26",
+  "STATS_GetTableValue64": "iter26",
+  "DATATBLS_GetDataTablePropertyStat": "iter26",
+  "DATATBLS_GetLevelRecordField": "iter26",
+  "DATATBLS_GetItemAffixLevelRequirementWrapper": "iter26",
+  "INV_GetInventoryBaseOffset": "iter26",
+  "INV_GetInventoryItemAtPosition": "iter26",
+  "DATATBLS_GetSkillDescField0x98": "iter26",
+  "DATATBLS_GetRoomConnectionAtCoords": "iter26",
+  "UNITS_GetWeaponClassIndex": "iter26",
+  "UNITS_GetGraphicsModeField8": "iter26",
+  "UNITS_GetGraphicsModeField0": "iter26",
+  "DATATBLS_GetObjectRecordField7C": "iter26",
+  "DATATBLS_GetMissileTypeDataDword14": "iter26"
+ },
+ "retry_queue": [],
+ "buckets": {
+  "malformed_response": [
+   "ITEMS_CanItemFitInStoragePage",
+   "SetGlobalValue11103",
+   "ToggleGlobalLogFile"
+  ],
+  "mismatch": [
+   "ValidateMonsterClassIndex",
+   "GetItemTypeTxtRecord",
+   "SKILLS_GetMinDamagePerLevel",
+   "SKILLS_GetBaseMaxDamage",
+   "SKILLS_GetMaxDamagePerLevel",
+   "SKILLS_CalculateLeveledMinDamage",
+   "SKILLS_HasRequiredSkill",
+   "MONSTATS2_GetBaseTypeAtLevel"
+  ],
+  "marshal_fault": [],
+  "stateful_ptr_write": [
+   "SetPlayerTargetPosition"
+  ],
+  "stateful_struct_arrow": [
+   "PATH_CheckMoveCollision",
+   "PATH_ResetToOrigin",
+   "PATH_TraceMoveWithCollision",
+   "PATH_SetCurrentRoom",
+   "ROOM_UpdateUnitRoomByCoordinates",
+   "AdvanceUnitPathStep",
+   "PATH_AdvanceAlongPath",
+   "PATH_SetPosition",
+   "PATH_SyncUnitPositionFromPath",
+   "PATH_SetWorldPositionFromFixedPoint",
+   "PATH_ValidateProgress"
+  ],
+  "library": [
+   "__initterm",
+   "__cinit",
+   "_exit",
+   "__exit",
+   "__cexit",
+   "_atol_6FD51EBB",
+   "__stricmp",
+   "FID_conflict:_wprintf",
+   "__fsopen",
+   "__fwrite_lk",
+   "_fwrite",
+   "LOG_CloseLogFileHandle",
+   "CRTUnlockExitLockIfNeeded",
+   "shortsort",
+   "ConfigureSubsystemParameters",
+   "LOG_UnlockLogFile",
+   "FOpenShared",
+   "__fclose_lk",
+   "_fclose",
+   "STRCHR_FindChar",
+   "FID_conflict:__time32",
+   "_strcspn",
+   "_strncpy",
+   "_vsprintf",
+   "__flush",
+   "__fflush_lk",
+   "CRT__flsall",
+   "ReleaseStreamLock",
+   "_fflush",
+   "___tolower_mt",
+   "_tolower",
+   "CRT_Init",
+   "__amsg_exit",
+   "__mtinitlocks",
+   "__mtdeletelocks",
+   "LOG_ReleaseCriticalSectionByIndex",
+   "__mtinitlocknum",
+   "ReleaseInitSyncLock",
+   "__lock",
+   "__onexit_lk",
+   "___onexitinit",
+   "__onexit",
+   "_atexit",
+   "__SEH_prolog",
+   "__SEH_epilog",
+   "__seh_longjmp_unwind@4",
+   "___isctype_mt",
+   "___freetlocinfo",
+   "___updatetlocinfo_lk",
+   "___updatetlocinfo",
+   "AllocateTlsSlot",
+   "__mtterm",
+   "__initptd",
+   "__getptd",
+   "__freefls@4",
+   "__freeptd",
+   "__mtinit",
+   "__allmul",
+   "___ascii_stricmp",
+   "CRT_flsbuf",
+   "__lock_file",
+   "__lock_file2",
+   "__unlock_file",
+   "__unlock_file2",
+   "__stbuf",
+   "__ftbuf",
+   "__openfile",
+   "GetDosErrnoPtr",
+   "__dosmaperr",
+   "__getstream",
+   "LOG_AcquireLogFileLock",
+   "AcquireCriticalSectionByIndex04",
+   "__close_lk",
+   "__close",
+   "__freebuf",
+   "__aulldiv",
+   "__commit",
+   "STRING_LocaleMapString",
+   "AllocateMemory",
+   "__ioinit",
+   "__ioterm",
+   "__setenvp",
+   "__setargv",
+   "___heap_select",
+   "__heap_init",
+   "__heap_term",
+   "__XcptFilter",
+   "DisplayRuntimeError",
+   "__FF_MSGBANNER",
+   "__heap_alloc",
+   "LOG_AcquireCriticalSectionByIndex",
+   "__nh_malloc",
+   "__global_unwind2",
+   "__local_unwind2",
+   "__msize",
+   "AcquireCriticalSectionByIndex4",
+   "___free_lc_time",
+   "___free_lconv_num",
+   "___free_lconv_mon",
+   "StringConcatenate",
+   "ExitHandlerCleanup",
+   "RunCrtInitializers",
+   "write_char",
+   "write_multi_char",
+   "write_string",
+   "FormatStringProcessor",
+   "WriteFileWithTextModeConversion",
+   "FILEIO_Write",
+   "parse_cmdline",
+   "StoreSehContext",
+   "ReallocateMemory",
+   "EH3_ValidateHandler",
+   "CopyStringOptimized",
+   "report_failure",
+   "_strpbrk",
+   "STRING_InitializeLocaleCharacterMaps",
+   "STRING_SetupCodePage",
+   "__setmbcp",
+   "___initmbctable",
+   "__lseek_lk",
+   "__getbuf",
+   "__isatty",
+   "___wctomb_mt",
+   "_wctomb",
+   "__aulldvrm",
+   "__tsopen_lk",
+   "__sopen",
+   "UnlockFileHandleIfNeeded",
+   "__lseeki64_lk",
+   "__set_osfhnd",
+   "__free_osfhnd",
+   "__get_osfhandle",
+   "__lock_fhandle",
+   "LOG_AcquireCriticalSectionIndex10",
+   "__unlock_fhandle",
+   "__alloc_osfhnd",
+   "AcquireCriticalSectionIndex10",
+   "AcquireCriticalSectionByIndexB",
+   "___sbh_heap_init",
+   "___sbh_find_block",
+   "___sbh_free_block",
+   "___sbh_alloc_new_region",
+   "___sbh_alloc_new_group",
+   "___sbh_resize_block",
+   "___sbh_alloc_block",
+   "GetLocaleDefaultCodePage",
+   "STRING_ConvertStringBetweenCodePages",
+   "__resetstkoflw",
+   "__callnewh",
+   "DisplaySecurityErrorDialog",
+   "__fptrap",
+   "_isdigit",
+   "___ascii_strnicmp",
+   "__setmode_lk",
+   "FormatStringBuffer",
+   "CleanupAndAbort",
+   "InitializeModule",
+   "CRITSEC_AcquireIndex4",
+   "setSBCS",
+   "FileLseek",
+   "ExtendFileWithZeros",
+   "ReadTextFile",
+   "RtlUnwind_6FD591FE",
+   "CompareStringsIgnoreCase",
+   "CopyMemoryAndDetectTerminator",
+   "GetReturnAddress",
+   "SearchBinaryTreeForTransformedKey",
+   "BinarySearchInSortedArray",
+   "AllocateAndInitializePoolSlot",
+   "AllocateConditionalResource",
+   "InitializeAndInsertBSTNode",
+   "AllocateMemoryWithTracking",
+   "InitializeCharacterFilterBuffer",
+   "EnterCriticalSectionWrapper",
+   "_strrchr",
+   "ReleaseFileHandleWithRefCount",
+   "InitializeAsyncEventListeners",
+   "STRING_GetPathFilename",
+   "STRING_CopyUntilWhitespace",
+   "STRING_SkipWhitespace",
+   "STRING_ParseInteger",
+   "InitializeRoomWarpPositions",
+   "AllocatePresetWithRandomSubEntry",
+   "InitializePresetLevelRooms",
+   "LOG_WriteDebugMessage",
+   "LOG_FormatTimestamp",
+   "LOG_OpenLogFileHandle",
+   "LOG_WriteDebugLogEntry",
+   "LOG_InitializeLogFile"
+  ],
+  "marshal_fault_postclamp": [
+   "SKILLS_CalculateLeveledManaCost",
+   "UNITS_GetMonsterClass",
+   "MONSTATS2_GetFlag"
+  ],
+  "import_thunk_external": [
+   "PRESET_AllocateAndValidateResourceSlot",
+   "DeallocateResourceBuffer",
+   "EncodeExpressionTokenStack",
+   "DeallocateResourcePoolTree",
+   "InsertSortedValueIntoArray",
+   "FindAndValidateD2ExpMpq",
+   "InterpretBytecodeProgram",
+   "GetFloatFromLookupTable",
+   "GetWrappedTableValue",
+   "DeallocateResourceElementPair",
+   "GetFieldAt8",
+   "ProcessFormatStringData",
+   "LookupIndexedString",
+   "GetBitValue",
+   "ClearBitInArray",
+   "SetBitInArray",
+   "ProcessActivePoolSlot",
+   "ExtractSignedBitsFromStream",
+   "EncodeBitsToFilterBuffer",
+   "ExtractBitsFromStreamWrapper",
+   "GetAdjustedCountValue",
+   "Unwind@6fddc1d0_6FD592DC",
+   "Unwind@6fddc1d0_6FD592E2",
+   "ValidateStringId",
+   "Unwind@6fddc1d0_6FD592EE",
+   "Unwind@6fddc1d0_6FD592F4",
+   "Unwind@6fddc1d0_6FD592FA",
+   "Unwind@6fddc1d0_6FD59300",
+   "Unwind@6fddc1d0_6FD59306",
+   "Unwind@6fddc1d0_6FD5930C",
+   "Unwind@6fddc1d0_6FD59312",
+   "Unwind@6fddc1d0_6FD59318",
+   "Unwind@6fddc1d0_6FD5931E",
+   "FILE_ArchiveOpenByPath",
+   "SafeCopyDataWithLocking",
+   "FILE_PathConcatenate",
+   "FindCharInString",
+   "GetDefaultResourceCount_6FD59382",
+   "ValidateParameterOrShutdown",
+   "BuildProjectPathThunk",
+   "SetFilePosition",
+   "GetDefaultResourceCount_6FD5939A",
+   "PRESET_DecrementAndFreePresetData"
+  ],
+  "stateful_delegate_call": [
+   "ParseTabDelimitedText",
+   "INV_GetAlternateWeapon",
+   "INV_GetEquippedItemByBodyLoc",
+   "UNITS_GetBlockChance",
+   "ITEMS_GetStatBonusValueWrapper",
+   "DATATBLS_GetItemDataByte",
+   "ITEMS_GetItemRecordFlagDCBit3"
+  ],
+  "no_vectors": [
+   "PATH_RemoveFilename",
+   "SOCKET_BindOrAbort"
+  ],
+  "prove_failed": [
+   "RESOURCE_AllocateAndOpen",
+   "DRLG_GetRoomInnerField20"
+  ],
+  "shape_unsupported": [
+   "SEED_GetRandomInRange",
+   "COMMON_ScaledMultiplyDivide",
+   "MONSOUND_TestFlagByMonStats",
+   "CHAR_GetClassBit0",
+   "ASYNC_ValidateEventListeners",
+   "RESOURCE_GetCountOrAbort"
+  ],
+  "nondeterministic": [
+   "SEED_GetRandomNumberAlt"
+  ],
+  "register_explicit_outparam": [
+   "GetDrlgDataRecordOffset",
+   "GetPointerFromOffset0x20",
+   "GetRoomDataOffsetEC",
+   "GetDrlgDataField4",
+   "GetRoomDrlgMazeData"
+  ],
+  "classB_primitive_ready": [
+   "MONSTER_GetInvGridSize"
+  ],
+  "classB_struct_needs_masking": [
+   "DATATBLS_GetBeltTxtEntry"
+  ],
+  "classB_handle_outbuf_hybrid": [
+   "MONSTER_GetInvGridSize"
+  ],
+  "stateful_constructor": [
+   "ROOM_AllocateRoomObject",
+   "ROOM_ProcessLightingByPosition",
+   "DRLG_FreeDrlgRoomChainAndResources",
+   "DRLG_SetupRoomGridData",
+   "ROOM_AllocateAndLinkDrlgRoom",
+   "DRLG_FreeGridBuffersIfExists",
+   "ROOM_FreeDrlgRoomDataComplete",
+   "ROOM_CreateDrlgRoomWaypointObject",
+   "DRLG_CreateRoomBorderObjects",
+   "CreateDrlgRoomColumnObjects",
+   "PRESET_ProcessObjectsWithRandom",
+   "PRESET_LoadAndParseArchive",
+   "PRESET_CreateRoomFromLevelType",
+   "DRLG_GenerateRoomColumnsAndBorders",
+   "PRESET_GetOrCreateFileCacheEntry",
+   "ROOM_LoadPresetAndGenerateRoomContent",
+   "PRESET_ProcessRoomObjectsAndTiles",
+   "CreateDrlgRoomsFromPreset",
+   "ROOM_ProcessTileGridsAndAnimation"
+  ],
+  "malformed_calc_band": [],
+  "leaf_outparam_delegate": [
+   "UNITS_UpdateVelocity",
+   "PATH_CalcDirectionAndAngle",
+   "MISSILE_CalcProximityScore",
+   "PATH_GetDirectionScaled"
+  ],
+  "stateful_mutator": [
+   "PATH_SnapToTile",
+   "PATH_SetPositionAndSnapToGrid",
+   "PATH_TeleportToPosition",
+   "PATH_MoveToPositionWithFlags",
+   "PATH_ClearAndSnapToGrid",
+   "PATH_GetNodeNextPtr",
+   "PATH_HandleForceTeleport",
+   "COLLISION_HandleTeleport",
+   "PATH_StepUnitAlongPath",
+   "DATATBLS_ClearUnitWeaponTable",
+   "ROOM_SetRoomExitOrientation",
+   "DRLG_SetRoomExitCoordinates",
+   "ROOM_IsRoomExitAvailable",
+   "CheckWeaponModeSwapActive",
+   "ROOM_FindAndUpdateRoomExit"
+  ],
+  "stateful_generator": [
+   "ROOM_ComputeTilesetSelection",
+   "RandomizeTilesetSelections",
+   "ROOM_TryCreateRandomRoomConnection",
+   "DRLG_InitializeLevelWarpForUnit",
+   "DRLG_SelectRandomMazeTileVariant",
+   "ROOM_CalculatePositionAndCheckCollision",
+   "DRLG_CreateMazeRoomWithExit",
+   "DRLG_CreateAdjacentRoomWithAnim",
+   "DRLG_MAZE_CreateRoomAndSetExitCoords",
+   "DRLG_FinalizeRoomTileSelection",
+   "GenerateMazeRoomGrid",
+   "DRLG_GenerateFourDirectionRooms",
+   "DRLG_GenerateCrossRoomLayout",
+   "DRLG_GenerateRoomsWithAllExits",
+   "DRLG_ExpandMazeRoomsRandomly",
+   "DRLG_GenerateCatacombsExitLayout",
+   "DRLG_GenerateCatacombsRoomExits",
+   "DRLG_GenerateMazeExits",
+   "DRLG_GenerateTowerExitLayout",
+   "DRLG_GenerateAct3DungeonLayout",
+   "DRLG_GenerateAct1DungeonLayout",
+   "DRLG_GenerateCliffExitLayout",
+   "DRLG_GenerateDesertExitLayout",
+   "ROOM_GenerateTombExitLayout",
+   "DRLG_GenerateOutdoorExitLayout",
+   "DRLG_GenerateMazeLevelComplete",
+   "FreeTrackedPoolAllocation",
+   "UNIT_InitUnitFindCtx",
+   "UNITS_GrowFindArray",
+   "ROOM_CollectFilteredRoomUnits"
+  ],
+  "stateful_collision_find": [
+   "UNITS_CheckAABBOverlap",
+   "UNITS_CheckInsideAABB",
+   "UNITS_FindUnitInRoomCollection",
+   "GetSubStructDimension",
+   "UNIT_FindUnitInAreaFilter",
+   "UNITS_FindUnitsInRooms"
+  ]
+ },
+ "journal": [
+  {
+   "iter": 1,
+   "batch": 15,
+   "proven": 6,
+   "staged": 6,
+   "tally": {
+    "proven": 6,
+    "stateful": 2,
+    "malformed": 2,
+    "mismatch": 2,
+    "marshal_fault": 2,
+    "error_int_parse": 1
+   },
+   "improvement": "stateful_reason instrumentation (5/5 validated) + emulator error-string int() crash fix",
+   "notes": "unfiltered pool start = shadow-reachable rich; all 6 proofs staged"
+  },
+  {
+   "iter": 2,
+   "batch": 15,
+   "proven": 1,
+   "tally": {
+    "proven": 1,
+    "marshal_fault": 5,
+    "mismatch": 5,
+    "stateful": 3,
+    "malformed": 1
+   },
+   "improvement": "marshal-fault clamp-retry (validated): unbounded getters retry once with clamped vectors",
+   "notes": "ALL loop marshal_faults are fastcall unbounded table getters; mismatch family = SKILLS damage getters returning 0 where orig returns small ints (drafting/table-offset issue, next capability candidate)"
+  },
+  {
+   "iter": 3,
+   "batch": 15,
+   "proven": 1,
+   "tally": {
+    "proven": 1,
+    "marshal_fault": 3,
+    "mismatch": 1,
+    "malformed": 2,
+    "no_vectors": 5,
+    "crash_keyerror": 1,
+    "stateful": 1
+   },
+   "improvement": "library guard extension (CRT/LOG leakage) + mint_vectors register-KeyError crash guard",
+   "notes": "clamp-retry VALIDATED: SKILLS_GetBaseMinDamage 2x-fault -> PROVEN; GetBaseTypeAtLevel fault->mismatch. 3 fns still fault after clamp = suspect under-typed ptr param swept as scalar (iter-5 investigation). Pool cursor in CRT land; library guard added + triage feedback."
+  },
+  {
+   "iter": 4,
+   "batch": 15,
+   "proven": 1,
+   "tally": {
+    "proven": 1,
+    "no_vectors": 10,
+    "malformed": 2,
+    "stateful": 1,
+    "crash_int_empty": 1
+   },
+   "improvement": "import-thunk detection (JMP dword ptr [IAT] = cross-DLL stub -> EXTERNAL triage feedback) + input-side int-parse guard",
+   "notes": "0x6fd5922x band = Fog/Storm import thunks, 10 no_vectors in one iter; DATATBLS_GetLCIDFromCodePage proven via static harness"
+  },
+  {
+   "iter": 5,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "import_thunk": 15
+   },
+   "improvement": "thunk check moved into batch builder (selection-time, zero batch cost)",
+   "notes": "entire iter-5 batch was Fog/Storm import thunks, skipped in seconds; thunk band being burned through at selection time now"
+  },
+  {
+   "iter": 6,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 7,
+    "malformed": 4,
+    "no_vectors": 2,
+    "prove_failed": 2
+   },
+   "improvement": "minimax reasoning-only salvage: extract fenced cpp/json blocks from think-tag-wrapped responses (validated with parse_live_response)",
+   "notes": "0x6fd594xx-0x6fd59bxx band = file/archive/resource system code, mostly legit-hard; malformed bucket hit 9 -> capability built"
+  },
+  {
+   "iter": 7,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "malformed": 6,
+    "no_vectors": 2,
+    "stateful": 4,
+    "prove_failed": 2,
+    "harness_failed": 1
+   },
+   "improvement": "salvage validated (8 firings, 1 conversion); DIAGNOSIS: remaining malformed = shape-unsupported fns (i64/void/rand), not parse; room band = register-explicit out-param writers",
+   "notes": "oracle already supports buf args+compare -> Class B (out-param capture) is the next big unlock; foundation build starting iter 8"
+  },
+  {
+   "iter": "8-capability",
+   "improvement": "Class B FOUNDATION: translate_layout_to_spec outbuf support (kind=outbuf -> oracle buf arg + compare channel); validated + regression-safe. Next: draft-prompt contract + ptr_write routing + pilot on GetBeltTxtEntry; later: shadow generator Class B",
+   "notes": "oracle supported bufs all along; only the translator was EAX-only"
+  },
+  {
+   "iter": "8-classB-pilot",
+   "result": "live_prove_failed[mismatch] BUT mechanism validated",
+   "finding": "Class B works end-to-end: outbuf_route+clamp+BUF-BYTE-COMPARE all fired live. Mismatch cause: (1) model declared a ret output on a void fn (EAX noise); (2) BeltTxtEntry out-buffer CONTAINS POINTERS -> differ per run (degenerate, buffer form). Next capability: pointer-masking in buf compare (skip/mask fields that are addresses) OR restrict Class B to primitive-only out-params (uint*/int* dims like MONSTER_GetInvGridSize) first.",
+   "notes": "foundation is correct + reusable; refinement is a real research item, parked as next capability"
+  },
+  {
+   "iter": 9,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 13,
+    "malformed": 1,
+    "crash_attrerror": 1
+   },
+   "improvement": "malformed-layout crash guard (2 sites: translate_layout_to_spec + input_names) -- list-instead-of-dict layout entry now UnsupportedLiveABI not crash",
+   "notes": "0x6fd5axxx-0x6fd5bxxx = DRLG room CONSTRUCTION band (Allocate/Free/Create/Setup) -- legit-hard ptr_write constructors/destructors, NOT getters; correctly stateful. Class B route -> gate held (all have -> reads). ptr_write bucket now dominated by constructors, not out-param getters."
+  },
+  {
+   "iter": 10,
+   "batch": 15,
+   "proven": 1,
+   "tally": {
+    "stateful": 10,
+    "proven": 1,
+    "malformed": 4
+   },
+   "improvement": "salvage refinement: keep LAST cpp+json block not all (model iterates 23-28 drafts in <think>; parse_live_response took cpp[0]=incomplete). Validated: final draft now selected.",
+   "notes": "GetPathFlagBit3 proven. malformed retries queued -- should convert with last-block salvage."
+  },
+  {
+   "iter": 11,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "malformed": 4,
+    "stateful": 11
+   },
+   "improvement": "last-block salvage shipped (correct fix) but the 4 PATH/MISSILE Calc fns STILL malformed -> not a block-ordering issue; last block itself fails parse_live_response (investigating: _is_provider_reimpl? layout shape? struct-type in reimpl?). Capture running.",
+   "notes": "PATH movement band (0x6fd5cxxx-0x6fd5dxxx) heavily stateful (unit-ptr + fixed-point math). malformed Calc fns parked pending capture diagnosis."
+  },
+  {
+   "iter": "11-diagnosis",
+   "improvement": "leaf-with-pointers routing: a leaf carrying pointer params is NOT a pure leaf -> pure out-param writer goes to Class B, delegate/multi-read buckets cleanly (no wasted static-harness draft). The 4 Calc malformeds were leaf+outparam+delegate, correctly beyond current capability.",
+   "notes": "root cause of the malformed Calc band found: misrouted to static harness. Not a parse bug. Composed capability (Class B outbuf + delegate in one fn) is the frontier."
+  },
+  {
+   "iter": 12,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 13,
+    "marshal_fault": 1,
+    "shadow_leaf_pending": 1
+   },
+   "improvement": "(no new failure mode -- band is correctly-classified unit mutators; advanced coverage, honest bucketing)",
+   "notes": "0x6fd5dxxx-0x6fd5exxx = PATH movement/teleport + ROOM exit MUTATORS (SnapToTile/Teleport/MoveToPosition/SetExit). Low getter yield, all correctly stateful. Cursor moving through a mutation-heavy region."
+  },
+  {
+   "iter": 13,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 15
+   },
+   "improvement": "(no new failure mode; DRLG/ROOM tileset generators, all stateful)",
+   "notes": "3rd low-yield stateful band in a row (DRLG/ROOM construction 0x6fd59-5e). The address-sequential cursor is in a mutation-heavy region. Getter-rich subsystems (ITEMS/STAT/SKILLS) are elsewhere in the address space. Biggest REAL bucket now = stateful_struct_arrow (26) = unit-HANDLE getters, provable via the handle path if extended -- the highest-leverage next capability."
+  },
+  {
+   "iter": "14-capability",
+   "improvement": "VESTIGIAL-THIS capability (user-directed: build handle/getter unlock): Ghidra __thiscall(void* this, arg) where this is UNUSED = a register-arg global-table getter mistyped. Drop the phantom this -> routes the whole SKILLS mana/damage family + 26-bucket shape to global_leaf. Validated: SKILLS getters -> global_leaf, real-this stays shadow_leaf, pure leaf unchanged. Pilot running.",
+   "notes": "unlocks stateful_struct_arrow bucket (the biggest real frontier). Next: batch-retry the bucket once pilot confirms."
+  },
+  {
+   "iter": "16-capability",
+   "improvement": "REGISTER-EXPLICIT ABI propagation: apply_static_abi now forces input register to disasm reg_args when slots==0 (was stdcall-only). Composes with capability 15 (vestigial-this): SKILLS getter arg in EAX now marshals via orig_regs. Validated + regression-safe. Re-pilot running.",
+   "notes": "capabilities 15+16 together should unlock the whole register-arg global-getter family (SKILLS mana/damage + 26 bucket). Batch-retry pending pilot confirmation."
+  },
+  {
+   "iter": "16-pilot",
+   "result": "SKILLS_GetBaseManaCost PROVEN 15/15 via composed capabilities 15+16",
+   "notes": "batch-retrying 15 bucketed register-arg getters"
+  },
+  {
+   "iter": 14,
+   "batch": 15,
+   "proven": 0,
+   "net": "0 (cascade-poisoned)",
+   "tally": {
+    "live_prove_failed": 6,
+    "stateful": 8,
+    "malformed": 1
+   },
+   "improvement": "CANDIDATES-DIR HYGIENE (capability 17): purged 26 orphan candidates (128->102); added pre-batch purge to builder. Root cause of iter-14 failures = provider-compile-cascade: SKILLS_GetBaseManaCost PROVED alone but marshal_faulted in-batch because sibling build_candidate failures (truncated drafts) poisoned the shared provider DLL build.",
+   "notes": "LESSON: capability 15+16 CONFIRMED (isolated pilot 15/15) but batch conversion masked by cascade. Also: retry queue was polluted -- hand-bucketed struct_arrow included genuine stateful (PATH_HasReachedTarget/UNITS_CheckUnitTypeFlags), which correctly re-skipped. Clean re-pilot of sibling running."
+  },
+  {
+   "iter": "18-capability",
+   "improvement": "truncated-draft rejection: _is_provider_reimpl now rejects brace/paren-unbalanced (truncated) reimpls at PARSE time -> they never reach the shared build, cant cascade. Validated. Third batch-reliability fix (with cascade-hygiene 17): the getter-family batch conversion was masked by truncated drafts + accumulated orphans poisoning the shared provider build.",
+   "notes": "core getter unlock (15+16) proven in isolation; batch reliability now hardened (17 hygiene + 18 truncation). Getter family will re-attempt cleaner. Advancing cursor for steady progress."
+  },
+  {
+   "iter": 16,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 14,
+    "malformed": 1
+   },
+   "improvement": "boot-recovery readiness fix (playbook): wait on charSelectReady+charListLoaded before load_character (menuPumpHooked goes true too early -> SEH-fault through boot window). Diagnosed live 2026-07-13.",
+   "notes": "RESUMED after crash+recovery. iter 16 = DRLG level-gen band (Generate*Layout), 0 proofs, all stateful. 2nd straight 0-proof iter; DRLG subsystem is a long low-yield stretch. cursor 416."
+  },
+  {
+   "iter": 17,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 10,
+    "malformed": 3,
+    "handle_abort_skip": 1,
+    "no_vectors": 1
+   },
+   "improvement": "(no new failure mode; correctly-classified stateful collision/unit-find/logging)",
+   "notes": "3rd straight 0-proof iter. Region 0x6fd62xxx = UNITS collision/AABB, unit-finders, debug logging -- all stateful. Getter-rich code (ITEMS-data/STAT/SKILLS-table/DATATBLS) is at other address ranges. User chose sequential/completeness sweep."
+  },
+  {
+   "iter": 18,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 13,
+    "prove_failed": 2
+   },
+   "notes": "4th straight 0-proof. DATATBLS_CopyLevelTileRecord mismatch; BELTS_ValidateRecordIndex marshal_fault (register-arg getter, cap-16 should apply -- re-proving in isolation to check flaky-vs-bug). PRESET collision band all stateful."
+  },
+  {
+   "iter": "19-pivot",
+   "improvement": "JUMP TO GETTERS (user-directed): scanned whole pool for 281 getter-shaped fns in getter-dense subsystems; added persistent getter_queue drained before cursor. Loop now proves getters instead of grinding DRLG/PRESET stateful band. Cursor still advances underneath (completeness preserved).",
+   "notes": "getter_queue=281; first batch = SKILLS/DATATBLS/INV/ITEMS getters. SKILLS_GetManaCostPerLevel included (should prove now, clean provider + cap 15+16)."
+  },
+  {
+   "iter": "20-capability",
+   "improvement": "STATEFUL-UNLOCK (user-directed): read-only handle getters (struct_arrow/named_struct_ptr/global_plus_ptr) now route to the handle-prove path instead of stateful_skip, AND the handle-draft prompt injects resolver-global hints so a captured-unit getter can ALSO read g_pDataTables (unit-gated global-table getters like MONSTER props). Read-only-only (ptr_write/delegate checked first) so no mutation hazard; dwType-abort guarded. Compiles; pilot after iter 19 frees the oracle.",
+   "notes": "unlocks stateful_struct_arrow (11) + all future read-only handle getters. Genuinely-mutating classes (generator/constructor/mutator, ~64) deliberately NOT attempted -- they need state-diff capture (huge, corruption risk)."
+  },
+  {
+   "iter": 19,
+   "batch": 15,
+   "proven": 0,
+   "tally": {
+    "stateful": 10,
+    "malformed": 2,
+    "prove_failed": 2,
+    "harness_failed": 1
+   },
+   "notes": "getter pivot batch on OLD code = 0 proofs, BUT confirms alignment: the stateful-skipped fns (GetMonsterPropertyBit6/PropBit/LevelTilePropBit7, INV_GetItemAtBodyLoc, ITEMS_GetItemDimensions) are EXACTLY the read-only handle-getters the stateful-unlock capability targets. Iteration 20 (new code) should convert them. SKILLS_GetManaCostPerLevel marshal_fault again (register-getter, cap-16 empty-notes issue persists)."
+  },
+  {
+   "iter": 20,
+   "batch": 15,
+   "proven": 2,
+   "tally": {
+    "proven": 2,
+    "stateful": 5,
+    "malformed": 3,
+    "prove_failed": 3,
+    "harness_failed": 2
+   },
+   "improvement": "STATEFUL-UNLOCK payoff measured: handle_global_route fired 6x -> 2 PROVEN (GetMonsterPropBit, GetMonsterLevelTilePropBit7) -- previously-unprovable unit-gated global getters now functionally-equivalent. INV grid-getters routed but failed on draft quality (multi-deref grid nav, harder). Conversion ~33% of routed.",
+   "notes": "KNOWN RECURRING: SKILLS_GetManaCostPerLevel marshal_fault (register-getter, cap-16 override empty-notes in batch though works isolated -- next investigation). INV handle-getters need better handle-draft for grid/multi-deref. 5 stateful_skip = delegate_call/ptr_write/multi reasons (not handle-getter class, correctly skipped)."
+  },
+  {
+   "iter": 21,
+   "batch": 15,
+   "proven": 2,
+   "tally": {
+    "proven": 2,
+    "stateful": 9,
+    "prove_failed": 2,
+    "malformed": 1,
+    "handle_abort_skip": 1
+   },
+   "improvement": "SAFETY HARDENING: abort-class handle-getters now DEFER to shadow-first in the handle_global_route (was direct-sweep = crash risk). Added _TYPE_FIELD_CMP_RE to catch nType/->type-gated aborts (not just dwType). Prevents the STAT_GetUnitCalculatedStat crash class on the new stateful-unlock route. Validated.",
+   "notes": "iter21 proved ITEMS_TestItemRecordBodyLocationFlag + ITEMS_GetItemRecordFlags (2 handle-getters). Next unlock target = DELEGATE LANE: 6/9 skips were delegate_call (getters that call a resolvable D2Common fn). Handle path already injects call-through hints; route non-abort delegate getters next."
+  },
+  {
+   "iter": 22,
+   "batch": 15,
+   "proven": 1,
+   "tally": {
+    "proven": 1,
+    "stateful": 13,
+    "malformed": 1
+   },
+   "improvement": "DELEGATE LANE built: delegate_call getters with a RESOLVABLE callee now route to the handle-prove path (which injects call-through hints so the reimpl D2MOO_Resolves + calls the delegate). Unresolvable-callee delegates stay skipped; abort-class delegates defer via the safety guard. Pilot running.",
+   "notes": "iter22 = 13/15 skips were delegate_call -- the ITEMS/DATATBLS record-getter family is delegate-dominated (return GetItemDataRecord(id)->field). Delegate lane should unlock a large chunk. Safety defer confirmed working (0 crashes, oracle up)."
+  },
+  {
+   "iter": 23,
+   "batch": 15,
+   "proven": 6,
+   "tally": {
+    "proven": 6,
+    "shadow_deferred": 5,
+    "prove_failed": 1,
+    "stateful": 2,
+    "malformed": 1
+   },
+   "improvement": "DELEGATE LANE VALIDATED IN AGGREGATE: same batch that gave 1 proof in iter22 gave 6 proofs after the delegate lane (6x). 5 abort-class dwType-gated correctly deferred to shadow-first (0 crashes). Biggest single-batch conversion of the session.",
+   "notes": "delegate lane + stateful-unlock + safety guard compose well. ITEMS/DATATBLS record getters: ~40% direct-prove, ~33% defer-to-shadow, rest harder. Proven: AreItemsInSameCodeGroup, GetItemEffectiveCode, TestItemFlags, GetStateFlagBit, GetMonsterMaxComponentVisualTier, GetItemPropertyRecord0x94."
+  },
+  {
+   "iter": 24,
+   "batch": 15,
+   "proven": 5,
+   "tally": {
+    "proven": 5,
+    "stateful": 5,
+    "shadow_deferred": 2,
+    "malformed": 2,
+    "prove_failed": 1
+   },
+   "improvement": "(steady-state: delegate lane + stateful-unlock harvesting ~5/batch)",
+   "notes": "session 26 proofs today, 159 all-time. Consistent 5-6/getter-batch. Proven: GetItemStorePage, GetItemTypeClass, GetItemTypeDataByte, GetItemTypeField13_ByUnit, GetCollisionGfxTier. getter_queue draining."
+  },
+  {
+   "iter": 25,
+   "batch": 15,
+   "proven": 2,
+   "tally": {
+    "proven": 2,
+    "stateful": 8,
+    "shadow_deferred": 3,
+    "harness_failed": 1,
+    "malformed": 1
+   },
+   "improvement": "(no quick capability -- harder sub-region)",
+   "notes": "session 28 today, 161 all-time. iter25 skips = 5 UNRESOLVABLE-delegate (callee not in resolve table -> delegate lane cant route; FUTURE: expand resolve table via gen_resolve_table) + 5 genuine mutators/serializers (Encode*ToBitStream/Accumulate* -- need state-diff capture, out of scope). Yield varies by sub-region."
+  },
+  {
+   "iter": 26,
+   "batch": 15,
+   "proven": 0,
+   "result": "CRASH: DATATBLS_IsItemQuantityDepleted killed the oracle",
+   "improvement": "DELEGATE-LANE DEEP-DEREF GUARD (crash fix): delegate getters that navigate a sub-pointer of the captured handle (pUnit->pStats->...) OR do struct-member pointer arithmetic (->pItemStatCostCompiledBase + 0x1626) passed to the delegate now DEFER to shadow-first. Not-abort but uncatchably-faults on degenerate capture. Validated: crasher defers, shallow delegates (GetItemDataRecord) still route.",
+   "notes": "CRASH RECOVERY: relaunch #1 hit transient Diablo II Error startup dialog (lingering lock) -> dismissed + relaunched, clean. Also: charSelectReady flag is UNRELIABLE (False with char-select up); boot-recovery now polls list_characters count instead. Loaded summoner-skele, in-world."
+  }
+ ],
+ "phase": "proving",
+ "getter_queue": [
+  {
+   "name": "STATS_GetUnitBaseStatValue",
+   "address": "0x6fd88c80"
+  },
+  {
+   "name": "STATS_GetTotalStatWithModifiers",
+   "address": "0x6fd88cd0"
+  },
+  {
+   "name": "DATATBLS_GetUnitBaseStatLegacy",
+   "address": "0x6fd88dc0"
+  },
+  {
+   "name": "STAT_GetGoldBankMax",
+   "address": "0x6fd88de0"
+  },
+  {
+   "name": "DATATBLS_GetStatCostRecordValue159",
+   "address": "0x6fd88e30"
+  },
+  {
+   "name": "DATATBLS_GetStatFromISC",
+   "address": "0x6fd88e80"
+  },
+  {
+   "name": "SKILLS_GetWeaponMinDamage",
+   "address": "0x6fd88ed0"
+  },
+  {
+   "name": "STATS_GetISCStatValueByIndex",
+   "address": "0x6fd88f60"
+  },
+  {
+   "name": "STAT_GetMaxManaStatCost",
+   "address": "0x6fd890a0"
+  },
+  {
+   "name": "DATATBLS_GetItemStatCostPropertyValue",
+   "address": "0x6fd890f0"
+  },
+  {
+   "name": "STAT_GetStatBonusValue",
+   "address": "0x6fd89380"
+  },
+  {
+   "name": "DATATBLS_GetItemStatCostValue",
+   "address": "0x6fd89430"
+  },
+  {
+   "name": "DATATBLS_GetUnitBaseStatValue",
+   "address": "0x6fd89490"
+  },
+  {
+   "name": "STATS_GetUnitBaseStatValue",
+   "address": "0x6fd894e0"
+  },
+  {
+   "name": "STAT_GetStatBonusValueWrapper",
+   "address": "0x6fd89cc0"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringB",
+   "address": "0x6fd8a600"
+  },
+  {
+   "name": "STAT_RecalculateVitalCosts",
+   "address": "0x6fd8ab30"
+  },
+  {
+   "name": "STAT_ImportStateFlagsFromBuffer",
+   "address": "0x6fd8af00"
+  },
+  {
+   "name": "SKILLS_GetSkillDescriptionString",
+   "address": "0x6fd8b1a0"
+  },
+  {
+   "name": "STAT_GetUnitBaseStat",
+   "address": "0x6fd8b270"
+  },
+  {
+   "name": "DATATBLS_GetGlobalPositionData",
+   "address": "0x6fd8b470"
+  },
+  {
+   "name": "DATATBLS_GetBodyLocPropertyByte0",
+   "address": "0x6fd8b860"
+  },
+  {
+   "name": "DATATBLS_GetCoordinateX",
+   "address": "0x6fd8bad0"
+  },
+  {
+   "name": "DATATBLS_GetOverlayRecordFields",
+   "address": "0x6fd8bb10"
+  },
+  {
+   "name": "DATATBLS_GetNestedStructValues",
+   "address": "0x6fd8bb50"
+  },
+  {
+   "name": "DATATBLS_GetBinkBufferErrorCode",
+   "address": "0x6fd8bf20"
+  },
+  {
+   "name": "SKILLS_GetSkillDataRecord",
+   "address": "0x6fd8d060"
+  },
+  {
+   "name": "SKILLS_GetSkillListEntryByTypeIndex2",
+   "address": "0x6fd8d160"
+  },
+  {
+   "name": "DATATBLS_GetObjGroupRecord",
+   "address": "0x6fd8e960"
+  },
+  {
+   "name": "DATATBLS_PlaceWaypointsInLevel",
+   "address": "0x6fd91070"
+  },
+  {
+   "name": "DATATBLS_GetOverlayRecordByte50",
+   "address": "0x6fd93710"
+  },
+  {
+   "name": "ITEMS_SubstituteActItemCode",
+   "address": "0x6fd93820"
+  },
+  {
+   "name": "DATATBLS_GetWeaponClassToken",
+   "address": "0x6fd93860"
+  },
+  {
+   "name": "STAT_GetUnitWeaponClass",
+   "address": "0x6fd94350"
+  },
+  {
+   "name": "STATS_GetTableValue64",
+   "address": "0x6fd95620"
+  },
+  {
+   "name": "STATS_ShiftValueForSpecialStats",
+   "address": "0x6fd95640"
+  },
+  {
+   "name": "DATATBLS_GetItemTypeDataFlags14",
+   "address": "0x6fd95780"
+  },
+  {
+   "name": "STATS_GetMatrixElementPtr",
+   "address": "0x6fd958c0"
+  },
+  {
+   "name": "STATS_GetSlotElementPtr",
+   "address": "0x6fd95920"
+  },
+  {
+   "name": "STATS_GetSlotElementPtr",
+   "address": "0x6fd95950"
+  },
+  {
+   "name": "ITEMS_ExecuteProperty",
+   "address": "0x6fd95990"
+  },
+  {
+   "name": "ITEMS_GetItemRecordForUnit",
+   "address": "0x6fd95a40"
+  },
+  {
+   "name": "STATS_GetSlotByMode",
+   "address": "0x6fd95b80"
+  },
+  {
+   "name": "ITEMS_GetItemRecordFlagBit1",
+   "address": "0x6fd95be0"
+  },
+  {
+   "name": "ITEMS_IsItemTypeAllowed",
+   "address": "0x6fd95e50"
+  },
+  {
+   "name": "ITEMS_InvokePropertyCallback",
+   "address": "0x6fd960b0"
+  },
+  {
+   "name": "ITEMS_GetRandomInRangeFromUnitEx",
+   "address": "0x6fd963f0"
+  },
+  {
+   "name": "ITEMS_GetRandomInRangeFromUnitEx",
+   "address": "0x6fd964d0"
+  },
+  {
+   "name": "ITEMS_GetRandomFromUnitSeed",
+   "address": "0x6fd965b0"
+  },
+  {
+   "name": "SKILLS_GetSkillDamageBonus",
+   "address": "0x6fd96600"
+  },
+  {
+   "name": "SKILLS_GetClassSkillOffset",
+   "address": "0x6fd9dd10"
+  },
+  {
+   "name": "SKILLS_GetMonsterSkillLevel",
+   "address": "0x6fd9e060"
+  },
+  {
+   "name": "DATATBLS_GetItemTypeSubArrayEntry",
+   "address": "0x6fd9e0e0"
+  },
+  {
+   "name": "SKILLS_GetSkillNodeField8Safe",
+   "address": "0x6fd9e180"
+  },
+  {
+   "name": "SKILLS_GetSkillNodeRecord",
+   "address": "0x6fd9e1c0"
+  },
+  {
+   "name": "SKILLS_GetSkillNodeField",
+   "address": "0x6fd9e240"
+  },
+  {
+   "name": "DATATBLS_GetNestedField0xA8x14",
+   "address": "0x6fd9e2e0"
+  },
+  {
+   "name": "SKILLS_GetNodeField08",
+   "address": "0x6fd9e460"
+  },
+  {
+   "name": "SKILLS_GetBestSkillByType",
+   "address": "0x6fd9e480"
+  },
+  {
+   "name": "DATATBLS_GetMonsterTypeRecord",
+   "address": "0x6fd9e520"
+  },
+  {
+   "name": "SKILLS_GetBitFlag1",
+   "address": "0x6fd9e5a0"
+  },
+  {
+   "name": "SKILLS_GetItemSkillStat",
+   "address": "0x6fd9e5e0"
+  },
+  {
+   "name": "DATATBLS_GetGlobalTableEntry",
+   "address": "0x6fd9e630"
+  },
+  {
+   "name": "SKILLS_GetGlobalTableEntry6FD9E680",
+   "address": "0x6fd9e680"
+  },
+  {
+   "name": "DATATBLS_GetLevelTileYProperty",
+   "address": "0x6fd9e6d0"
+  },
+  {
+   "name": "DATATBLS_GetItemTypeFieldC",
+   "address": "0x6fd9e900"
+  },
+  {
+   "name": "SKILLS_HasSkillId",
+   "address": "0x6fd9eb40"
+  },
+  {
+   "name": "UNITS_GetUnitProperty",
+   "address": "0x6fd9ebf0"
+  },
+  {
+   "name": "DATATBLS_GetMonStatsAnimIndex",
+   "address": "0x6fd9ec50"
+  },
+  {
+   "name": "DATATBLS_GetItemDataRecordKey",
+   "address": "0x6fd9ed60"
+  },
+  {
+   "name": "SKILLS_GetGlobalPositionData",
+   "address": "0x6fd9f080"
+  },
+  {
+   "name": "STAT_GetMaxDirectItemTypeStat",
+   "address": "0x6fd9f200"
+  },
+  {
+   "name": "DATATBLS_GetAnimLevelRequirement",
+   "address": "0x6fd9f510"
+  },
+  {
+   "name": "STAT_GetMaxItemTypeStatValueForUnit",
+   "address": "0x6fd9f640"
+  },
+  {
+   "name": "SKILLS_LookupSkillIndex",
+   "address": "0x6fd9f780"
+  },
+  {
+   "name": "SKILLS_GetSkillStatBonusAlt",
+   "address": "0x6fd9f870"
+  },
+  {
+   "name": "STAT_GetAnimDataFrameInfo",
+   "address": "0x6fd9fe80"
+  },
+  {
+   "name": "DATATBLS_GetUnitItemField",
+   "address": "0x6fda0150"
+  },
+  {
+   "name": "SKILLS_GetItemDamageBonus",
+   "address": "0x6fda0560"
+  },
+  {
+   "name": "SKILLS_GetSkillAvailability",
+   "address": "0x6fda0930"
+  },
+  {
+   "name": "STATS_GetStatByMode",
+   "address": "0x6fda0c30"
+  },
+  {
+   "name": "ITEMS_GetWeaponDamageTier",
+   "address": "0x6fda0d40"
+  },
+  {
+   "name": "SKILLS_GetEffectiveSkillLevel",
+   "address": "0x6fda0ea0"
+  },
+  {
+   "name": "DATATBLS_ResolveAttackRangeType",
+   "address": "0x6fda1000"
+  },
+  {
+   "name": "DATATBLS_GetTableRecord0x94",
+   "address": "0x6fda2ff0"
+  },
+  {
+   "name": "DATATBLS_GetItemRecordByIndex",
+   "address": "0x6fda3420"
+  },
+  {
+   "name": "OVERLAY_LookupRecordByKey",
+   "address": "0x6fda3480"
+  },
+  {
+   "name": "DATATBLS_GetItemRecordFields4A4B",
+   "address": "0x6fda3850"
+  },
+  {
+   "name": "DATATBLS_GetMonLevelStats",
+   "address": "0x6fda4a00"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa7d0"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa810"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa850"
+  },
+  {
+   "name": "DATATBLS_GetExpressionTokenIndex",
+   "address": "0x6fdadcd0"
+  },
+  {
+   "name": "DATATBLS_GetCompCodeAtIndex",
+   "address": "0x6fdae1c0"
+  },
+  {
+   "name": "DATATBLS_GetStringFromTable",
+   "address": "0x6fdae350"
+  },
+  {
+   "name": "ITEMS_GetItemName",
+   "address": "0x6fdae410"
+  },
+  {
+   "name": "DATATBLS_GetMaxItemLevelByDifficulty",
+   "address": "0x6fdae7e0"
+  },
+  {
+   "name": "DATATBLS_GetExperienceLevelForDifficulty",
+   "address": "0x6fdae810"
+  },
+  {
+   "name": "DATATBLS_GetDifficultyLevelsBIN",
+   "address": "0x6fdb03c0"
+  },
+  {
+   "name": "DATATBLS_GetItemQualityBracket",
+   "address": "0x6fdb08d0"
+  },
+  {
+   "name": "DATATBLS_GetWaypointBreakpoint",
+   "address": "0x6fdb7c90"
+  },
+  {
+   "name": "DATATBLS_ExportStateFlagsToBuffer",
+   "address": "0x6fdb7d00"
+  },
+  {
+   "name": "DATATBLS_ImportStateFlagsFromBuffer",
+   "address": "0x6fdb7d60"
+  },
+  {
+   "name": "DATATBLS_TryGetSkillRecordOverlay",
+   "address": "0x6fdb7e50"
+  },
+  {
+   "name": "DATATBLS_GetElementTransformValue",
+   "address": "0x6fdb83e0"
+  },
+  {
+   "name": "DATATBLS_GetElementTransformValue",
+   "address": "0x6fdb83f0"
+  },
+  {
+   "name": "STATS_ScaleFieldsByFactor",
+   "address": "0x6fdb9c60"
+  },
+  {
+   "name": "MISSILE_GetMissileStatByLevel",
+   "address": "0x6fdb9dc0"
+  },
+  {
+   "name": "DATATBLS_GetMissileParamByte",
+   "address": "0x6fdb9e70"
+  },
+  {
+   "name": "MISSILE_GetTargetSpeedFields",
+   "address": "0x6fdb9eb0"
+  },
+  {
+   "name": "ITEMS_GetUnitItemTableFieldEC",
+   "address": "0x6fdba010"
+  },
+  {
+   "name": "MISSILE_GetMissileTypeShort04",
+   "address": "0x6fdba0e0"
+  },
+  {
+   "name": "MISSILE_GetRemainingFrames",
+   "address": "0x6fdba240"
+  },
+  {
+   "name": "DATATBLS_GetMissileDataField10",
+   "address": "0x6fdba270"
+  },
+  {
+   "name": "MISSILE_GetMissileTypeDataShort0C",
+   "address": "0x6fdba2d0"
+  },
+  {
+   "name": "MISSILE_GetTypeDataDword14",
+   "address": "0x6fdba330"
+  },
+  {
+   "name": "MISSILE_GetParamValue",
+   "address": "0x6fdba790"
+  },
+  {
+   "name": "SKILLS_GetElementalStatBonus",
+   "address": "0x6fdbab20"
+  },
+  {
+   "name": "DATATBLS_LookupWallFileIndex",
+   "address": "0x6fdbc280"
+  },
+  {
+   "name": "DATATBLS_LookupWallFileIndex",
+   "address": "0x6fdbc300"
+  },
+  {
+   "name": "DATATBLS_BuildLevelTypeFilenameTable",
+   "address": "0x6fdbc3a0"
+  },
+  {
+   "name": "DATATBLS_GetLvlSubTxtRecord",
+   "address": "0x6fdbc4d0"
+  },
+  {
+   "name": "DATATBLS_GetLvlMazeRecordById",
+   "address": "0x6fdbc520"
+  },
+  {
+   "name": "DATATBLS_GetLevelWarpRecord",
+   "address": "0x6fdbc5d0"
+  },
+  {
+   "name": "DATATBLS_GetLvlPrestRecordById",
+   "address": "0x6fdbc950"
+  },
+  {
+   "name": "DATATBLS_GetLevelTypeString",
+   "address": "0x6fdbca70"
+  },
+  {
+   "name": "DATATBLS_GetDataRecord9C",
+   "address": "0x6fdbcb20"
+  },
+  {
+   "name": "DATATBLS_BuildLevelResultIndexTable",
+   "address": "0x6fdbcb50"
+  },
+  {
+   "name": "SKILLS_GetSkillDataRecord",
+   "address": "0x6fdbccc0"
+  },
+  {
+   "name": "DATATBLS_GetSkillRangeValue",
+   "address": "0x6fdbe0c0"
+  },
+  {
+   "name": "DATATBLS_GetRunesRecord",
+   "address": "0x6fdc0fa0"
+  },
+  {
+   "name": "DATATBLS_GetMonsterTypeRecord",
+   "address": "0x6fdc14d0"
+  },
+  {
+   "name": "DATATBLS_GetRareAffixRecord",
+   "address": "0x6fdc1790"
+  },
+  {
+   "name": "DATATBLS_GetGlobalRecordById",
+   "address": "0x6fdc1820"
+  },
+  {
+   "name": "ITEMS_GetDataByCode",
+   "address": "0x6fdc1940"
+  },
+  {
+   "name": "UNITS_IsValidPathableType",
+   "address": "0x6fdcb7f0"
+  },
+  {
+   "name": "DATATBLS_ClampDataTableFieldByType",
+   "address": "0x6fdcc760"
+  },
+  {
+   "name": "DATATBLS_GetLevelDataRecord",
+   "address": "0x6fdcfe40"
+  },
+  {
+   "name": "DATATBLS_GetLevelRecordByte0x1E",
+   "address": "0x6fdcffb0"
+  },
+  {
+   "name": "SKILLS_GetSkillDescRecordById",
+   "address": "0x6fdd1ea0"
+  },
+  {
+   "name": "DATATBLS_GetGridRecordSubEntry",
+   "address": "0x6fdd1f20"
+  },
+  {
+   "name": "DATATBLS_GetGridRecordHeader",
+   "address": "0x6fdd2030"
+  },
+  {
+   "name": "DATATBLS_GetOverlayRecordByte50",
+   "address": "0x6fdd2ce0"
+  },
+  {
+   "name": "DATATBLS_GetOverlayAnimationField",
+   "address": "0x6fdd2d20"
+  },
+  {
+   "name": "OVERLAY_GetRecordMultipleFields",
+   "address": "0x6fdd2d60"
+  },
+  {
+   "name": "DATATBLS_ComputeLevelRandomFlags",
+   "address": "0x6fdd3740"
+  },
+  {
+   "name": "DATATBLS_GetSkillDescSlotEntry",
+   "address": "0x6fdd4b40"
+  },
+  {
+   "name": "DATATBLS_GetMonsterSoundVariantByIndex",
+   "address": "0x6fdd4bd0"
+  },
+  {
+   "name": "DATATBLS_GetMonsterSkillDescSlotLimit",
+   "address": "0x6fdd4c30"
+  }
+ ]
+}
