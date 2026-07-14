@@ -30,19 +30,69 @@ PROG = "/Mods/PD2-S12/D2Common.dll"
 BINARY = "D2Common.dll"
 REPORT = Path(__file__).parent / "name_audit_report.json"
 
-_ADDR_RE = re.compile(r"\b(?:0x)?6f[0-9a-f]{6}\b", re.I)
-_HEXOFF_RE = re.compile(r"^\s*[0-9a-f]{8}:\s*", re.I | re.M)
+_ADDR_RE = re.compile(r"\b(?:0x)?(6f[0-9a-f]{6})\b", re.I)
+_HEXOFF_RE = re.compile(r"^\s*([0-9a-f]{8}):\s*", re.I | re.M)
+_FLOW_RE = re.compile(r"^(CALL|JMP|J[A-Z]{1,3})\b", re.I)
+
+_fn_name_cache = {}
+
+
+def _resolve_fn_name(addr_hex):
+    """Function name at address, or None. Cached — the audit hits the same
+    call targets repeatedly."""
+    if addr_hex in _fn_name_cache:
+        return _fn_name_cache[addr_hex]
+    r = ghidra_get("/get_function_by_address",
+                   params={"address": f"0x{addr_hex}", "program": PROG})
+    name = None
+    m = re.match(r"Function:\s+(\S+)\s+at\s+", str(r or ""))
+    if m:
+        name = m.group(1)
+    _fn_name_cache[addr_hex] = name
+    return name
 
 
 def normalized_disasm(address):
+    """Fingerprint that keeps IDENTITY and drops POSITION (phase-2 lesson:
+    masking every absolute address collapsed dispatcher wrappers that call
+    DIFFERENT targets into one body).
+
+    - per-line address prefixes: stripped (position noise)
+    - branch/jump targets INSIDE the function body: <LOC> (position noise)
+    - CALL/JMP targets outside the body: resolved to the target FUNCTION
+      NAME (identity; falls back to the raw address)
+    - all other absolute addresses (global data operands): kept RAW — within
+      one binary the address IS the global's identity
+    """
+    a = address.lstrip("0x").lower() if address.lower().startswith("0x") else address.lower()
     d = ghidra_get("/disassemble_function",
-                   params={"address": f"0x{address.lstrip('0x')}", "program": PROG})
+                   params={"address": f"0x{a}", "program": PROG})
     text = str(d or "")
     if not text or "error" in text[:60].lower():
         return None
-    text = _HEXOFF_RE.sub("", text)          # strip per-line addresses
-    text = _ADDR_RE.sub("<ADDR>", text)      # neutralize absolute addresses
-    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+    line_addrs = [m.group(1).lower() for m in _HEXOFF_RE.finditer(text)]
+    body = set(line_addrs)
+
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^([0-9a-f]{8}):\s*(.*)$", line, re.I)
+        instr = m.group(2).strip() if m else line
+        is_flow = bool(_FLOW_RE.match(instr))
+
+        def _sub(am):
+            tgt = am.group(1).lower()
+            if tgt in body:
+                return "<LOC>"                     # internal branch target
+            if is_flow:
+                return _resolve_fn_name(tgt) or tgt  # call/tail-jmp identity
+            return tgt                               # data operand: raw = identity
+
+        out.append(_ADDR_RE.sub(_sub, instr))
+    return "\n".join(out)
 
 
 def dup_sets(name_filter=None):
@@ -53,9 +103,10 @@ def dup_sets(name_filter=None):
          "AND (library_code IS NULL OR library_code=0) "
          "GROUP BY name HAVING COUNT(*) > 1")
     rows = db.execute(q, (BINARY,)).fetchall()
+    wanted = set(n.strip() for n in name_filter.split(",")) if name_filter else None
     out = {}
     for r in rows:
-        if name_filter and r["name"] != name_filter:
+        if wanted and r["name"] not in wanted:
             continue
         out[r["name"]] = sorted(set(r["addrs"].split(",")))
     return out
@@ -63,7 +114,7 @@ def dup_sets(name_filter=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--name", help="audit only this function name")
+    ap.add_argument("--name", help="audit only these function name(s), comma-separated")
     args = ap.parse_args()
 
     sets = dup_sets(args.name)
@@ -91,11 +142,14 @@ def main():
             report["differing"][name] = groups
             print(f"  DIFFERING {len(addrs)}x {name} -> {len(unique)} distinct bodies")
 
-    REPORT.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    # A filtered run must not clobber the full report (it accumulates
+    # phase2+ evidence) — write partial results alongside instead.
+    target = REPORT if not args.name else REPORT.with_suffix(".partial.json")
+    target.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\nidentical sets: {len(report['identical'])}  "
           f"differing sets: {len(report['differing'])}  "
           f"fetch failures: {len(report['fetch_failed'])}")
-    print(f"report: {REPORT}")
+    print(f"report: {target}")
 
 
 if __name__ == "__main__":
