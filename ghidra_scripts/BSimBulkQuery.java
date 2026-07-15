@@ -2,14 +2,14 @@
 // Finds functions that still have default names and queries each against BSim
 // to find matches from other ingested binaries. Returns a JSON summary.
 //
-// Script args: [0] = BSim URL (default: postgresql://10.0.10.30:5432/bsim)
+// Script args: [0] = BSim URL (required in headless/MCP mode)
 //              [1] = max matches per function (default: 5)
 //              [2] = similarity threshold 0.0-1.0 (default: 0.7)
 //              [3] = confidence/significance threshold (default: 10.0)
 //              [4] = max functions to query, 0=all (default: 0)
 //
-// Usage from MCP: run_script("BSimBulkQuery", args=["postgresql://10.0.10.30:5432/bsim"])
-// Usage from MCP: run_script("BSimBulkQuery", args=["postgresql://10.0.10.30:5432/bsim", "5", "0.7", "10.0", "100"])
+// Usage from MCP: run_script("BSimBulkQuery", args=["postgresql://127.0.0.1:5432/bsim"])
+// Usage from MCP: run_script("BSimBulkQuery", args=["postgresql://127.0.0.1:5432/bsim", "5", "0.7", "10.0", "100"])
 //@category BSim
 //@keybinding
 //@menupath
@@ -37,7 +37,6 @@ import ghidra.program.model.listing.FunctionManager;
 
 public class BSimBulkQuery extends GhidraScript {
 
-    private static final String DEFAULT_BSIM_URL = "postgresql://10.0.10.30:5432/bsim";
     private static final int DEFAULT_MAX_MATCHES = 5;
     private static final double DEFAULT_SIMILARITY = 0.7;
     private static final double DEFAULT_CONFIDENCE = 10.0;
@@ -52,7 +51,7 @@ public class BSimBulkQuery extends GhidraScript {
 
         // Parse arguments
         String[] args = getScriptArgs();
-        String bsimUrl = DEFAULT_BSIM_URL;
+        String bsimUrl = null;
         int maxMatches = DEFAULT_MAX_MATCHES;
         double similarityThresh = DEFAULT_SIMILARITY;
         double confidenceThresh = DEFAULT_CONFIDENCE;
@@ -62,7 +61,7 @@ public class BSimBulkQuery extends GhidraScript {
             bsimUrl = args[0].trim();
         } else if (!isRunningHeadless()) {
             bsimUrl = askString("BSim Bulk Query",
-                "Enter BSim database URL:", DEFAULT_BSIM_URL);
+                "Enter BSim database URL:", "").trim();
         }
         if (args != null && args.length > 1 && args[1] != null && !args[1].isEmpty()) {
             maxMatches = Integer.parseInt(args[1].trim());
@@ -75,6 +74,11 @@ public class BSimBulkQuery extends GhidraScript {
         }
         if (args != null && args.length > 4 && args[4] != null && !args[4].isEmpty()) {
             maxFunctions = Integer.parseInt(args[4].trim());
+        }
+
+        if (bsimUrl == null || bsimUrl.isEmpty()) {
+            println("{\"status\": \"error\", \"error\": \"BSim URL is required; no default destination is configured\"}");
+            return;
         }
 
         // Collect all undocumented functions (FUN_* prefix = default auto-analysis names)

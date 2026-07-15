@@ -209,10 +209,10 @@ except ImportError:
 
 GHIDRA_URL = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 
-# Cross-version doc archive (re-kb FastAPI on bsim postgres host).
-# Empty string disables Phase 2 write hooks and Phase 3 read hooks entirely
-# so unit tests / offline runs don't touch the network.
-ARCHIVE_URL = os.environ.get("RE_KB_ARCHIVE_URL", "http://10.0.10.30:8422").rstrip("/")
+# Cross-version doc archive (re-kb FastAPI). Disabled by default so ordinary
+# and offline runs never send analysis data to another service. Set a non-empty
+# RE_KB_ARCHIVE_URL to opt in to the Phase 2 write and Phase 3 read hooks.
+ARCHIVE_URL = os.environ.get("RE_KB_ARCHIVE_URL", "").strip().rstrip("/")
 
 # Project folder scope guard (Layer 1).
 #

@@ -1610,8 +1610,8 @@ public class DocumentationHashService {
     // route through the field-level merge resolution on the archive side.
     //
     // Configuration:
-    //   - Archive URL via env var GHIDRA_MCP_ARCHIVE_URL (default
-    //     http://10.0.10.30:8422). Empty string disables.
+    //   - Archive exchange is disabled by default. Set a non-empty
+    //     GHIDRA_MCP_ARCHIVE_URL to opt in to an explicitly chosen service.
     //
     // Identity scheme:
     //   - binary_name: program name (e.g. "Bnclient.dll")
@@ -1620,12 +1620,9 @@ public class DocumentationHashService {
     //                  the second segment. Override via version_override param.
     //   - address:     "0x" + hex (canonical Ghidra form)
 
-    private static final String DEFAULT_ARCHIVE_URL = "http://10.0.10.30:8422";
-
     private static String getArchiveUrl() {
         String env = System.getenv("GHIDRA_MCP_ARCHIVE_URL");
-        if (env != null && !env.isEmpty()) return env;
-        return DEFAULT_ARCHIVE_URL;
+        return env == null ? "" : env.trim();
     }
 
     /**
@@ -1663,6 +1660,9 @@ public class DocumentationHashService {
                 defaultValue = "") String versionOverride,
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build payload but skip the POST") boolean dryRun) {
+        if (!dryRun && getArchiveUrl().isEmpty()) {
+            return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
+        }
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1715,6 +1715,9 @@ public class DocumentationHashService {
                 description = "Skip functions whose name is FUN_/LAB_/etc. (default-named)") boolean skipDefault,
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build all payloads but skip the POSTs") boolean dryRun) {
+        if (!dryRun && getArchiveUrl().isEmpty()) {
+            return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
+        }
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

@@ -1,7 +1,7 @@
 // Test connectivity to a BSim PostgreSQL database and report database info as JSON.
-// Script args: [0] = BSim URL (default: postgresql://10.0.10.30:5432/bsim)
+// Script args: [0] = BSim URL (required in headless/MCP mode)
 //
-// Usage from MCP: run_script("BSimTestConnection", args=["postgresql://10.0.10.30:5432/bsim"])
+// Usage from MCP: run_script("BSimTestConnection", args=["postgresql://127.0.0.1:5432/bsim"])
 // Usage from Ghidra Script Manager: will prompt for URL if no args provided
 //@category BSim
 //@keybinding
@@ -21,11 +21,9 @@ import ghidra.features.bsim.query.protocol.ResponseInfo;
 
 public class BSimTestConnection extends GhidraScript {
 
-    private static final String DEFAULT_BSIM_URL = "postgresql://10.0.10.30:5432/bsim";
-
     @Override
     protected void run() throws Exception {
-        String bsimUrl = DEFAULT_BSIM_URL;
+        String bsimUrl = null;
 
         // Check script args first (headless/MCP mode)
         String[] args = getScriptArgs();
@@ -34,7 +32,12 @@ public class BSimTestConnection extends GhidraScript {
         } else if (!isRunningHeadless()) {
             // Interactive mode: prompt the user
             bsimUrl = askString("BSim Connection Test",
-                "Enter BSim database URL:", DEFAULT_BSIM_URL);
+                "Enter BSim database URL:", "").trim();
+        }
+
+        if (bsimUrl == null || bsimUrl.isEmpty()) {
+            println("{\"status\": \"error\", \"error\": \"BSim URL is required; no default destination is configured\"}");
+            return;
         }
 
         println("{");
