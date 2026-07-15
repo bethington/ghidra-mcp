@@ -284,6 +284,14 @@ yay -S ghidra-mcp        # or ghidra-mcp-git
 uv run bridge-mcp-ghidra          # or: python -m bridge_mcp_ghidra
 ```
 
+To add the bridge to [Autohand Code](https://github.com/autohandai/code-cli/) from a cloned checkout:
+
+```bash
+autohand mcp add ghidra uv run --directory /path/to/ghidra-mcp bridge-mcp-ghidra
+```
+
+Add `--scope project` before `ghidra` to save the server in the current project's `.autohand` configuration instead of your user configuration.
+
 #### Option 2: Streamable HTTP Transport (Recommended for web/HTTP clients)
 ```bash
 uv run bridge-mcp-ghidra --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
