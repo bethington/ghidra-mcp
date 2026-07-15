@@ -301,7 +301,10 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
         "OUTPUT CONTRACT (a machine parses your reply; a human never sees it): reply with "
         "EXACTLY TWO fenced blocks and nothing that matters outside them -- BLOCK 1 ```cpp (the "
         "reimpl), BLOCK 2 ```json (the register layout + input_sets). Tag them literally ```cpp "
-        "and ```json. No third block, no split code blocks, no trailing prose.")
+        "and ```json. No third block, no split code blocks, no trailing prose. "
+        "CRITICAL: both blocks must appear in your FINAL ANSWER message -- anything that exists "
+        "only inside your private reasoning/thinking is DISCARDED unread. Keep reasoning SHORT; "
+        "spend the output budget on the blocks.")
     parts.append("")
     parts.append("## Task: reimplement a Diablo II function for LIVE conformance proving")
     parts.append(
@@ -419,7 +422,10 @@ def build_handle_draft_prompt(func_name: str, address, decompiled_text: str) -> 
     p = []
     p.append("OUTPUT CONTRACT (a machine parses your reply): reply with EXACTLY TWO fenced blocks -- "
              "BLOCK 1 ```cpp (the reimpl), BLOCK 2 ```json (param_layout + input_sets). Tag them "
-             "literally ```cpp and ```json. Nothing else that matters outside them.")
+             "literally ```cpp and ```json. Nothing else that matters outside them. "
+             "CRITICAL: both blocks must appear in your FINAL ANSWER message -- anything that exists "
+             "only inside your private reasoning/thinking is DISCARDED unread. Keep reasoning SHORT; "
+             "spend the output budget on the blocks.")
     p.append("")
     p.append("## Task: reimplement a Diablo II LIVE-POINTER getter for handle conformance proving")
     p.append(
@@ -558,21 +564,28 @@ def parse_handle_response(text: str):
     blocks = pp._fenced_blocks(text or "")
     cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
     js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
-    if not cpp or not js:
-        return None, None, None
-    try:
-        spec = _json_loads_lenient(js[0])
-    except json.JSONDecodeError:
-        return None, None, None
-    layout = spec.get("param_layout")
-    input_sets = spec.get("input_sets")
-    if not isinstance(layout, dict) or not layout.get("handle_arg"):
+    # LAST-valid-block-wins (2026-07-14): when the deliverable is salvaged from
+    # the reasoning channel the text contains MANY draft iterations; the final
+    # one is the model's actual answer. Scanning for validity (instead of
+    # blindly taking [0]) also survives stray early snippets in normal replies.
+    layout = input_sets = None
+    for c in reversed(js):
+        try:
+            s = _json_loads_lenient(c)
+        except json.JSONDecodeError:
+            continue
+        lay = s.get("param_layout") if isinstance(s, dict) else None
+        if isinstance(lay, dict) and lay.get("handle_arg"):
+            layout, input_sets = lay, s.get("input_sets")
+            break
+    if layout is None:
         return None, None, None
     if not isinstance(input_sets, list) or not input_sets:
         input_sets = [{}]
-    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
+    body = next((c for c in reversed(cpp) if _is_provider_reimpl(c)), None)
+    if body is None:   # reject OpenD2/non-extern-C drafts (build poison)
         return None, None, None
-    reimpl = cpp[0].strip() + "\n"
+    reimpl = body.strip() + "\n"
     if 'provider_runtime.h' not in reimpl:
         reimpl = '#include "../provider_runtime.h"\n' + reimpl
     return reimpl, layout, input_sets
@@ -963,21 +976,25 @@ def parse_live_response(text: str):
     blocks = pp._fenced_blocks(text or "")
     cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
     js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
-    if not cpp or not js:
+    # LAST-valid-block-wins — see parse_handle_response for rationale.
+    layout = input_sets = None
+    for c in reversed(js):
+        try:
+            s = _json_loads_lenient(c)
+        except json.JSONDecodeError:
+            continue
+        lay = s.get("param_layout") if isinstance(s, dict) else None
+        ins = s.get("input_sets") if isinstance(s, dict) else None
+        if (isinstance(lay, dict) and "inputs" in lay and "outputs" in lay
+                and isinstance(ins, list) and ins):
+            layout, input_sets = lay, ins
+            break
+    if layout is None:
         return None, None, None
-    try:
-        spec = _json_loads_lenient(js[0])
-    except json.JSONDecodeError:
+    body = next((c for c in reversed(cpp) if _is_provider_reimpl(c)), None)
+    if body is None:   # reject OpenD2/non-extern-C drafts (build poison)
         return None, None, None
-    layout = spec.get("param_layout")
-    input_sets = spec.get("input_sets")
-    if not isinstance(layout, dict) or not isinstance(input_sets, list) or not input_sets:
-        return None, None, None
-    if "inputs" not in layout or "outputs" not in layout:
-        return None, None, None
-    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
-        return None, None, None
-    reimpl = cpp[0].strip() + "\n"
+    reimpl = body.strip() + "\n"
     if 'provider_runtime.h' not in reimpl:  # ensure the resolver header is present
         reimpl = '#include "../provider_runtime.h"\n' + reimpl
     return reimpl, layout, input_sets

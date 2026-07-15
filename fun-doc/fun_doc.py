@@ -6393,6 +6393,13 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
     ]
 
     output_parts = []
+    # Reasoning channel of the FINAL turn, returned to the caller via
+    # meta["reasoning_text"]. Port drafts frequently land partially or wholly
+    # inside M3's reasoning (observed 2026-07-14: CHAT_AllocResourceSlot's
+    # content held only block 1 of 3 while ~18K tokens went to reasoning) —
+    # the port lanes re-parse against this when the content-only parse fails.
+    reasoning_parts = []
+    raw_final_message = None
     total_input_tokens = 0
     total_output_tokens = 0
     tool_call_count = 0
@@ -6658,10 +6665,46 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
             continue  # Next turn — model needs to process tool results
 
         # No tool calls — this is the final text response
+        # Capture the reasoning channel regardless of how content parses:
+        # reasoning_split puts it in reasoning_content/reasoning_details,
+        # non-split puts it in <think> tags inside content.
+        try:
+            _dump = message.model_dump() or {}
+            _r = getattr(message, "reasoning_content", None)
+            if not _r:
+                _details = _dump.get("reasoning_details") or []
+                _r = "\n".join(
+                    d.get("text", "") for d in _details if isinstance(d, dict))
+            if not _r:
+                # Field-shape drift guard (2026-07-14: 6K reasoning tokens
+                # were billed but neither reasoning_content nor
+                # reasoning_details[].text held them): scan every string
+                # field of the raw message except content for fenced blocks.
+                _r = "\n".join(
+                    v for k, v in _dump.items()
+                    if k != "content" and isinstance(v, str) and "```" in v)
+            _thinks = re.findall(r"<think>([\s\S]*?)</think>", message.content or "")
+            if _thinks:
+                _r = ((_r or "") + "\n" + "\n".join(_thinks)).strip()
+            if _r:
+                reasoning_parts.append(_r)
+            # Raw final message (sans content) for transcript diagnostics —
+            # reveals the endpoint's actual reasoning field shape, and
+            # finish_reason distinguishes "model chose to stop" (early stop
+            # after block 1) from "hit the token cap" (truncation).
+            raw_final_message = json.dumps(
+                {"finish_reason": getattr(choice, "finish_reason", None),
+                 **{k: v for k, v in _dump.items() if k != "content"}},
+                default=str)[:40000]
+        except Exception:
+            pass
         if message.content:
-            # Strip <think>...</think> reasoning blocks — keep only user-facing text
-            import re
-
+            # Strip <think>...</think> reasoning blocks — keep only user-facing text.
+            # NOTE: never `import re` locally here — a function-local import makes
+            # `re` local for the WHOLE function, so the reasoning-capture block
+            # above (which runs before this line) died with a silently-swallowed
+            # UnboundLocalError, leaving meta["reasoning_text"] permanently None
+            # (found 2026-07-14 via the empty transcripts). Module-level re only.
             cleaned = re.sub(r"<think>[\s\S]*?</think>", "", message.content).strip()
             if cleaned:
                 safe_text = cleaned.encode("ascii", errors="replace").decode("ascii")
@@ -6748,6 +6791,10 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
             "tool_calls": tool_call_count,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
+            # Capped: reasoning can run tens of KB; the tail is where the
+            # final draft iteration lives (last-block-wins parsing).
+            "reasoning_text": ("\n".join(reasoning_parts))[-120000:] or None,
+            "raw_final_message": raw_final_message,
         },
     )
 
@@ -7354,6 +7401,63 @@ def _rescore_and_sync(func, address, program):
         _sync_func_state(func, fresh, new_score, deductions)
         return new_score, fresh
     return None, None
+
+
+def _note_shadow_backlog(program, address, func_name, reason):
+    """Append a shadow-first deferral to D2MOO's shadow_leaf_backlog.jsonl —
+    the build list for the next shadow-dispatcher batch. Deduplicates by
+    address+name (now that shadow_leaf_pending is selector-terminal each
+    function writes once, but the backlog already holds rows from the
+    re-selection era). Best-effort; never fails the caller."""
+    try:
+        repo = Path(os.environ.get("FUNDOC_D2MOO_REPO",
+                                   r"C:\Users\benam\source\cpp\D2MOO"))
+        bl = repo / "conformance" / "profiler" / "shadow_leaf_backlog.jsonl"
+        bl.parent.mkdir(parents=True, exist_ok=True)
+        if bl.exists():
+            tag = f'"address": {json.dumps(address)}'
+            name_tag = f'"name": {json.dumps(func_name)}'
+            with open(bl, encoding="utf-8") as f:
+                for line in f:
+                    if tag in line and name_tag in line:
+                        return
+        with open(bl, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"program": program, "address": address,
+                                "name": func_name, "reason": reason}) + "\n")
+    except OSError:
+        pass
+
+
+def _persist_port_transcript(func_name, address, lane, attempt, text, meta):
+    """Write the full model response (+ reasoning channel) of a FAILED
+    port-draft parse to logs/debug/port/<date>/ so malformed responses are
+    diagnosable after the fact — before this, only a 500-char tail survived
+    in runs.jsonl and the reasoning was dropped entirely (2026-07-14,
+    CHAT_AllocResourceSlot). Best-effort; never fails the caller."""
+    try:
+        d = LOG_DIR / "debug" / "port" / datetime.now().strftime("%Y-%m-%d")
+        d.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%H%M%S")
+        p = d / f"{func_name}__{address}__{lane}__a{attempt}__{stamp}.md"
+        m = meta or {}
+        body = [
+            f"# {func_name} @ {address} — {lane} draft attempt {attempt}",
+            f"tokens: {m.get('input_tokens')} in / {m.get('output_tokens')} out; "
+            f"timed_out={m.get('timed_out', False)}",
+            "",
+            "## content",
+            "",
+            text or "(empty)",
+        ]
+        if m.get("reasoning_text"):
+            body += ["", "## reasoning", "", m["reasoning_text"]]
+        if m.get("raw_final_message"):
+            body += ["", "## raw final message (sans content)", "",
+                     "```json", m["raw_final_message"], "```"]
+        p.write_text("\n".join(body), encoding="utf-8")
+        return str(p)
+    except Exception:
+        return None
 
 
 def _append_run_log(entry):
@@ -11303,11 +11407,12 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
             model = None
 
     bus_emit("port_drafted", {
-        "key": key, "name": func_name, "address": address,
+        "key": key, "name": func_name, "address": address, "worker_id": worker_id,
         "program": Path(program).name, "program_path": program, "status": "drafting (live)",
     })
 
     prompt = plp.build_live_draft_prompt(func_name, address, decompiled)
+    _globs = []   # verified resolvable globals; the resolve-name gate below needs this
     try:
         import abi_static
         if static_abi or abort_class:
@@ -11358,6 +11463,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         _log("global_table_skip", error=str(e))
 
     if not reimpl:
+        _timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
         while attempts < max(1, max_fix_attempts):
             attempts += 1
             # "complex" tier: port drafts are long generations (reasoning +
@@ -11371,12 +11477,50 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                                             "port_last_result": "quota_paused"})
                 _log("blocked", reason="quota_paused")
                 return "blocked"
+            if (meta or {}).get("timed_out"):
+                # A provider timeout is not a bad draft -- refund the attempt so
+                # a slow-provider blip can't exhaust the budget (2026-07-15: a fn
+                # was lost to malformed_response after 1 real try + 2 timeouts).
+                # Capped so a dead provider can't loop forever.
+                _timeouts += 1
+                _log("provider_timeout_retry", attempt=attempts,
+                     timeout_secs=(meta or {}).get("timeout_secs"))
+                if _timeouts <= max(2, max_fix_attempts):
+                    attempts -= 1
+                continue
             reimpl, layout, input_sets = plp.parse_live_response(text or "")
+            if not reimpl and (meta or {}).get("reasoning_text"):
+                # Chronological order, no separator — heals reasoning_split's
+                # mid-fence cut (see the static-lane comment).
+                reimpl, layout, input_sets = plp.parse_live_response(
+                    meta["reasoning_text"] + (text or ""))
+                if reimpl:
+                    _log("reasoning_salvage_parse", attempt=attempts)
             if reimpl:
                 # RESOLVE-NAME GATE: an unknown D2MOO_Resolve name is a guaranteed
                 # all-zeros mismatch (see _unknown_resolve_names). Reject the draft
                 # and retry with an explicit correction instead of burning a prove.
                 unknown = _unknown_resolve_names(reimpl)
+                if unknown and not _globs:
+                    # The model NEEDED a game global but the resolve table has
+                    # no verified name for ANY global this function touches --
+                    # the correction below would reference a GLOBAL-RESOLVE
+                    # section that was never injected, so every retry is doomed
+                    # to invent another name (observed 2026-07-14: DRLG_
+                    # GetDirectionFromDelta, ValidateTableEntryA/B burned 3
+                    # attempts each). Shadow-first can prove these (the game
+                    # reads its own globals); defer instead of retrying.
+                    _note_shadow_backlog(program, address, func_name, "unresolvable_global")
+                    update_function_state(key, {
+                        "port_status": "shadow_leaf_pending",
+                        "port_last_result": "reads game global(s) with no resolve-table "
+                                            "name (model invented "
+                                            + ", ".join(sorted(unknown))
+                                            + ") -- unprovable from the provider; "
+                                            "deferred to shadow-first"})
+                    _log("unresolvable_global_defer", names=sorted(unknown),
+                         attempt=attempts)
+                    return "shadow_leaf_pending"
                 if unknown:
                     _log("unresolved_resolve_name_retry", attempt=attempts,
                          names=sorted(unknown))
@@ -11391,7 +11535,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                     reimpl = None
                     continue
                 break
-            _log("malformed_response_retry", attempt=attempts)
+            _persist_port_transcript(func_name, address, "port_live", attempts, text, meta)
+            _log("malformed_response_retry", attempt=attempts, output=(text or "")[-500:])
 
     if not reimpl:
         update_function_state(key, {"port_status": "malformed_response",
@@ -11467,6 +11612,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     live = None
     prove_attempts = 0
     clamp_retried = False
+    hiccups = 0   # provider timeouts/empties during fix drafts -- capped free retries
     while prove_attempts < max(1, max_fix_attempts):
         prove_attempts += 1
         try:
@@ -11511,8 +11657,27 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                                    use_tools=False)
         if (meta or {}).get("quota_paused"):
             break
+        # PROVIDER hiccup (timeout/empty) is not a bad reimpl -- retry the fix
+        # without consuming a prove attempt (mirrors the handle lane's loop),
+        # capped so a dead provider can't spin this loop forever.
+        if plp.provider_outcome(text, meta) == "hiccup":
+            hiccups += 1
+            if hiccups > max(1, max_fix_attempts):
+                break
+            prove_attempts -= 1
+            _log("provider_hiccup_retry", attempt=prove_attempts, stage="live_fix")
+            continue
         new_reimpl, new_layout, new_inputs = plp.parse_live_response(text or "")
+        if not new_reimpl and (meta or {}).get("reasoning_text"):
+            # Same reasoning_split heal as the draft loops (chronological
+            # order, no separator -- reconstitutes a mid-fence cut).
+            new_reimpl, new_layout, new_inputs = plp.parse_live_response(
+                meta["reasoning_text"] + (text or ""))
+            if new_reimpl:
+                _log("reasoning_salvage_parse", stage="live_fix")
         if not new_reimpl:
+            _persist_port_transcript(func_name, address, "port_live_fix",
+                                     prove_attempts, text, meta)
             break  # malformed fix -> stop, report the last real prove result
         if _unknown_resolve_names(new_reimpl):
             # a "fix" that swaps in an unknown resolve name is guaranteed worse
@@ -11547,7 +11712,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                 shadow_status = ("staged" if promo.get("promoted")
                                  else f"deferred: {promo.get('reason')}")
                 bus_emit("shadow_promote_result", {
-                    "key": key, "name": func_name, "promoted": promo.get("promoted"),
+                    "key": key, "name": func_name, "worker_id": worker_id,
+                    "promoted": promo.get("promoted"),
                     "reason": promo.get("reason")})
                 _log("shadow_promote", **promo)
             except Exception as e:  # never fail the proof over a promotion bug
@@ -11559,7 +11725,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
             "port_shadow_status": shadow_status,
             "port_last_result": f"live {live.get('passed')}/{live.get('total')}"})
         bus_emit("port_live_prove_result", {
-            "key": key, "name": func_name, "ok": True,
+            "key": key, "name": func_name, "ok": True, "worker_id": worker_id,
             "passed": live.get("passed"), "total": live.get("total")})
         _log("proven_live_pending_review", passed=live.get("passed"),
              total=live.get("total"))
@@ -12257,6 +12423,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             model = None
 
     prompt = plp.build_handle_draft_prompt(func_name, address, decompiled)
+    _globs = []   # verified resolvable globals; the resolve-name gate below needs this
     try:
         import abi_static
         if static_abi or abort_class:
@@ -12279,6 +12446,24 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             _callees = abi_static.resolvable_callees(str(_dis))
             if _callees:
                 prompt += abi_static.callthrough_prompt_block(_callees)
+    except Exception:
+        pass
+
+    # PRE-DRAFT unresolvable-global gate (2026-07-15, backlog #6): if the fn
+    # reads game global(s) but NONE resolve to a verified name, every draft is
+    # doomed to invent a name and defer AFTER the fact -- observed burning a
+    # 600s provider timeout per doomed draft. Detect it statically here and
+    # defer to shadow-first BEFORE spending any generation.
+    try:
+        if (static_abi and (static_abi.get("data_globals") or [])) and not _globs:
+            _note_shadow_backlog(program, address, func_name, "unresolvable_global_predraft")
+            update_function_state(key, {
+                "port_status": "shadow_leaf_pending",
+                "port_last_result": "handle draft needs game global(s), none resolvable "
+                                    "(pre-draft gate) -- deferred to shadow-first"})
+            _log("unresolvable_global_predraft_defer",
+                 data_globals=[f"0x{g:x}" for g in (static_abi.get("data_globals") or [])])
+            return "shadow_leaf_pending"
     except Exception:
         pass
 
@@ -12386,6 +12571,12 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         _log("mech_translated", chain=mech.get("chain"), ret=mech.get("ret"),
              detail=mech.get("reason"))
     else:
+        bus_emit("port_drafted", {
+            "key": key, "name": func_name, "address": address, "worker_id": worker_id,
+            "program": Path(program).name, "program_path": program,
+            "status": "drafting (handle)",
+        })
+        _timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
         while attempts < max(1, max_fix_attempts):
             attempts += 1
             # "complex" tier: port drafts are long generations (reasoning +
@@ -12398,11 +12589,54 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 _log("blocked", reason="quota_paused")
                 return "blocked"
+            if (meta or {}).get("timed_out"):
+                # Refund the attempt on a provider timeout (see live-lane note).
+                _timeouts += 1
+                _log("provider_timeout_retry", attempt=attempts,
+                     timeout_secs=(meta or {}).get("timeout_secs"))
+                if _timeouts <= max(2, max_fix_attempts):
+                    attempts -= 1
+                continue
             reimpl, layout, input_sets = plp.parse_handle_response(text or "")
+            if not reimpl and (meta or {}).get("reasoning_text"):
+                # Chronological order, no separator — heals reasoning_split's
+                # mid-fence cut (see the static-lane comment).
+                reimpl, layout, input_sets = plp.parse_handle_response(
+                    meta["reasoning_text"] + (text or ""))
+                if reimpl:
+                    _log("reasoning_salvage_parse", attempt=attempts)
             if reimpl:
+                # RESOLVE-NAME GATE (2026-07-14, mirrored from the live lane):
+                # an unknown D2MOO_Resolve name resolves NULL -> guaranteed
+                # mismatch; catch it BEFORE burning a prove. With no verified
+                # names available at all, retries can only invent -- defer to
+                # shadow-first instead.
+                unknown = _unknown_resolve_names(reimpl)
+                if unknown and not _globs:
+                    _note_shadow_backlog(program, address, func_name, "unresolvable_global")
+                    update_function_state(key, {
+                        "port_status": "shadow_leaf_pending",
+                        "port_last_result": "handle draft needs game global(s) with no "
+                                            "resolve-table name (model invented "
+                                            + ", ".join(sorted(unknown))
+                                            + ") -- deferred to shadow-first"})
+                    _log("unresolvable_global_defer", names=sorted(unknown),
+                         attempt=attempts)
+                    return "shadow_leaf_pending"
+                if unknown:
+                    _log("unresolved_resolve_name_retry", attempt=attempts,
+                         names=sorted(unknown))
+                    prompt += (
+                        "\n\n## CORRECTION (draft rejected before proving): you called "
+                        f"D2MOO_Resolve on unknown name(s): {', '.join(sorted(unknown))}. "
+                        "Use EXACTLY the verified name(s) in the GLOBAL-RESOLVE section "
+                        "above. Re-emit both blocks.")
+                    reimpl = None
+                    continue
                 layout, _pads = _apply_handle_abi(layout)
                 break
-            _log("malformed_response_retry", attempt=attempts)
+            _persist_port_transcript(func_name, address, "port_handle", attempts, text, meta)
+            _log("malformed_response_retry", attempt=attempts, output=(text or "")[-500:])
 
     if not reimpl:
         update_function_state(key, {"port_status": "malformed_response", "port_attempts": attempts,
@@ -12509,7 +12743,15 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                 continue
             break
         new_reimpl, new_layout, new_inputs = plp.parse_handle_response(text or "")
+        if not new_reimpl and (meta or {}).get("reasoning_text"):
+            # Reasoning_split heal, chronological order (see live-fix comment).
+            new_reimpl, new_layout, new_inputs = plp.parse_handle_response(
+                meta["reasoning_text"] + (text or ""))
+            if new_reimpl:
+                _log("reasoning_salvage_parse", stage="handle_fix")
         if not new_reimpl:
+            _persist_port_transcript(func_name, address, "port_handle_fix",
+                                     prove_attempts, text, meta)
             break
         new_layout, _pads = _apply_handle_abi(new_layout)   # fix drafts too
         reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
@@ -12796,6 +13038,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             or re.search(r"->\s*\w+\s*\+\s*0x[0-9a-fA-F]{3,}", _dec))  # ->member + big offset
         if (skip_reason == "delegate_call" and _deep_handle_chain
                 and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+            _note_shadow_backlog(program, address, func_name, "delegate_deep_deref")
             update_function_state(key, {
                 "port_status": "shadow_leaf_pending",
                 "port_last_result": "delegate getter with deep captured-handle chain -- "
@@ -12827,17 +13070,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             # the real, correctly-typed unit and the original runs its own
             # callee). Route to the shadow backlog instead.
             if not _route_handle:
-                try:
-                    repo = Path(os.environ.get("FUNDOC_D2MOO_REPO",
-                                               r"C:\Users\benam\source\cpp\D2MOO"))
-                    bl = repo / "conformance" / "profiler" / "shadow_leaf_backlog.jsonl"
-                    bl.parent.mkdir(parents=True, exist_ok=True)
-                    with open(bl, "a", encoding="utf-8") as f:
-                        f.write(json.dumps({"program": program, "address": address,
-                                            "name": func_name,
-                                            "reason": "unresolvable_delegate"}) + "\n")
-                except OSError:
-                    pass
+                _note_shadow_backlog(program, address, func_name, "unresolvable_delegate")
                 update_function_state(key, {
                     "port_status": "shadow_leaf_pending",
                     "port_last_result": "delegate getter with UNRESOLVABLE callee -- can't "
@@ -12858,6 +13091,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             # two happened to fault SEH-catchably; nothing guarantees that).
             # Single-level `*(int *)((int)p + 0x5c)` reads stay routed.
             if re.search(r"\*\s*\(\s*\w+\s*\*+\s*\)\s*\(\s*\*", _dec):
+                _note_shadow_backlog(program, address, func_name, "cast_deep_deref")
                 update_function_state(key, {
                     "port_status": "shadow_leaf_pending",
                     "port_last_result": "cast-style depth>=2 handle deref -- unsafe on "
@@ -12884,6 +13118,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             except Exception:
                 _type_gated = abort_class
             if abort_class or _type_gated:
+                _note_shadow_backlog(program, address, func_name, "handle_abort_type_gated")
                 update_function_state(key, {
                     "port_status": "shadow_leaf_pending",
                     "port_last_result": "abort-class handle-getter: type-gated fatal abort unsafe "
@@ -12905,11 +13140,18 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         # the running game via the D2MOO resolver. Needs the live oracle
         # (FUNDOC_LIVE_PROVE=1); without it these can't be proven at all -> skip.
         if os.environ.get("FUNDOC_LIVE_PROVE") != "1":
+            # NON-terminal defer (2026-07-15, found by the self-improving loop):
+            # a global_leaf IS live-provable -- it's only unprovable RIGHT NOW
+            # because the oracle/game is down. Stamping the terminal
+            # stateful_skip here permanently lost these from the pool even after
+            # the game returned (7 lost in one game-down session). oracle_unavailable
+            # is non-terminal; the selector excludes it only while the oracle is
+            # down and re-admits it when FUNDOC_LIVE_PROVE=1.
             update_function_state(key, {
-                "port_status": "stateful_skip",
-                "port_last_result": "global_leaf: needs FUNDOC_LIVE_PROVE=1 (live oracle)"})
-            _log("stateful_skip", classification=classification, reason="live_prove_disabled")
-            return "stateful_skip"
+                "port_status": "oracle_unavailable",
+                "port_last_result": "global_leaf: deferred -- live oracle down (retried when up)"})
+            _log("oracle_unavailable", classification=classification, reason="live_prove_disabled")
+            return "oracle_unavailable"
         return process_global_leaf_live(
             program, address, func_name, decompiled,
             provider=provider, model=model, worker_id=worker_id,
@@ -12951,6 +13193,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         try:
             import abi_static
             if abi_static.detect_handle_abort_hazard(decompiled):
+                _note_shadow_backlog(program, address, func_name, "handle_abort_dwType")
                 update_function_state(key, {
                     "port_status": "handle_abort_hazard_skip",
                     "port_last_result": "type-gated fatal abort on the captured object's dwType -- "
@@ -12971,6 +13214,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         # invasive than it's worth. These ARE shadow-provable (real play only ever
         # supplies valid scalars), so DEFER to shadow-first rather than direct-prove.
         if abort_class:
+            _note_shadow_backlog(program, address, func_name, "abort_class_scalar_index")
             update_function_state(key, {
                 "port_status": "shadow_leaf_pending",
                 "port_last_result": "abort-class scalar-index handle-getter: unsafe to sweep "
@@ -12986,6 +13230,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 provider=provider, model=model, worker_id=worker_id,
                 max_fix_attempts=max_fix_attempts,
                 static_abi=static_abi, abort_class=abort_class)
+        _note_shadow_backlog(program, address, func_name, "live_pointer_getter")
         update_function_state(key, {
             "port_status": "shadow_leaf_pending",
             "port_last_result": "live-pointer getter: shadow-provable; recorded to shadow_leaf_backlog"})
@@ -13030,7 +13275,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             model = None
 
     bus_emit("port_drafted", {
-        "key": key, "name": func_name, "address": address,
+        "key": key, "name": func_name, "address": address, "worker_id": worker_id,
         "program": prog_name, "program_path": program, "status": "drafting",
     })
 
@@ -13044,18 +13289,53 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     header = dispatch = spec = None
     draft_attempts = 0
     max_draft_attempts = max(1, max_fix_attempts)
+    _draft_timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
     while draft_attempts < max_draft_attempts:
         draft_attempts += 1
+        # "complex" tier (600s watchdog): port drafts are long generations
+        # (reasoning + full reimpl + layout) — the doc-tuned 300s limit kills
+        # sessions mid-draft and logs them as malformed_response. The live and
+        # handle lanes already run at this tier; the static lane was missed.
+        # use_tools=False (2026-07-14): the full decompile is IN the prompt, so
+        # tools only add the ~47kB schema payload per turn plus tool-call
+        # round-trips (observed: a static draft burning 3 tool calls and 122K
+        # input tokens). The handle/live lanes already draft tool-less.
         text, meta = invoke_claude(
-            prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
+            prompt, model=model, max_turns=max_turns, provider=provider,
+            complexity_tier="complex", use_tools=False,
         )
         if (meta or {}).get("quota_paused"):
             update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
             _log("blocked", reason="quota_paused")
             return "blocked"
+        # A watchdog kill is not a malformed response — logging it as one
+        # hid the real failure mode (2026-07-14: CHAT_AllocResourceSlot's
+        # "malformed" attempts 1+3 were 600s API timeouts).
+        if (meta or {}).get("timed_out"):
+            # Refund the attempt on a provider timeout (see live-lane note),
+            # capped so a dead provider can't loop forever.
+            _draft_timeouts += 1
+            _log("provider_timeout_retry", attempt=draft_attempts,
+                 timeout_secs=(meta or {}).get("timeout_secs"))
+            if _draft_timeouts <= max(2, max_fix_attempts):
+                draft_attempts -= 1
+            continue
         header, dispatch, spec = pp.parse_port_response_full(text or "")
+        if not header and (meta or {}).get("reasoning_text"):
+            # M3 frequently leaves part or all of the deliverable in its
+            # reasoning channel — and the endpoint's reasoning_split can cut
+            # MID-FENCE (confirmed 2026-07-14: reasoning ends "...```",
+            # content starts "cpp\n..."). Re-parse in CHRONOLOGICAL order
+            # (reasoning first, content after, NO separator) so a split
+            # fence reconstitutes and content-aware last-block-wins parsing
+            # still prefers the final (content) blocks.
+            header, dispatch, spec = pp.parse_port_response_full(
+                meta["reasoning_text"] + (text or ""))
+            if header:
+                _log("reasoning_salvage_parse", attempt=draft_attempts)
         if header:
             break
+        _persist_port_transcript(func_name, address, "port", draft_attempts, text, meta)
         _log("malformed_response_retry", attempt=draft_attempts, output=(text or "")[-500:])
 
     if not header:
@@ -13080,7 +13360,8 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         return "no_vectors"
 
     bus_emit("port_vectors_minted", {
-        "key": key, "name": func_name, "count": len(vectors), "errors": len(mint_errors),
+        "key": key, "name": func_name, "worker_id": worker_id,
+        "count": len(vectors), "errors": len(mint_errors),
     })
 
     system_name = pp.pascal_to_snake_case(symbol)
@@ -13094,8 +13375,13 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         fix_prompt = pp.build_port_fix_prompt(
             func_name, address, program, decompiled, header, dispatch, harness["output"]
         )
+        # "complex" tier here too: a harness-fix regeneration is the same
+        # long-form generation as the initial draft. Observed 2026-07-14
+        # (STAT_CopyStatString): the fix attempt was hard-killed at 300s,
+        # ending the candidate as harness_failed after a single attempt.
         text, meta = invoke_claude(
-            fix_prompt, model=model, max_turns=max_turns, provider=provider, complexity_tier=None
+            fix_prompt, model=model, max_turns=max_turns, provider=provider,
+            complexity_tier="complex", use_tools=False,
         )
         if (meta or {}).get("quota_paused"):
             update_function_state(key, {
@@ -13105,8 +13391,23 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             _log("blocked", reason="quota_paused_retry", attempts=attempts)
             return "blocked"
 
+        if (meta or {}).get("timed_out"):
+            # Honest label: a watchdog kill of the fix generation is not a
+            # malformed response. Bounded loop -> report the last real
+            # harness result rather than spinning.
+            _log("provider_timeout_fix", attempts=attempts,
+                 timeout_secs=(meta or {}).get("timeout_secs"))
+            break
         new_header, new_dispatch = pp.parse_port_response(text or "")
+        if not new_header and (meta or {}).get("reasoning_text"):
+            # Same reasoning_split heal as the draft loop (chronological
+            # order, no separator — reconstitutes a mid-fence cut).
+            new_header, new_dispatch = pp.parse_port_response(
+                meta["reasoning_text"] + (text or ""))
+            if new_header:
+                _log("reasoning_salvage_parse", stage="fix", attempts=attempts)
         if not new_header:
+            _persist_port_transcript(func_name, address, "port_fix", attempts, text, meta)
             break  # malformed fix response -- stop retrying, report the last real harness result
         header, dispatch = new_header, new_dispatch
         draft_paths = pp.write_draft(module, symbol, header, dispatch, vectors)
@@ -13114,7 +13415,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         attempts += 1
 
     bus_emit("port_harness_result", {
-        "key": key, "name": func_name, "ok": harness["ok"],
+        "key": key, "name": func_name, "ok": harness["ok"], "worker_id": worker_id,
         "passed": harness["passed"], "total": harness["total"], "attempts": attempts,
     })
 
@@ -13141,7 +13442,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 oracle_spec = live.get("spec")  # for shadow_promote.py below (WS-6c)
                 live_status = "proven_live" if live["ok"] else "live_prove_failed"
                 bus_emit("port_live_prove_result", {
-                    "key": key, "name": func_name, "ok": live["ok"],
+                    "key": key, "name": func_name, "ok": live["ok"], "worker_id": worker_id,
                     "passed": live.get("passed"), "total": live.get("total"),
                 })
                 _log("live_prove", ok=live["ok"], passed=live.get("passed"),
@@ -13171,7 +13472,8 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             promo = sp.maybe_promote(func_name, address, oracle_spec, decompiled)
             shadow_status = "staged" if promo.get("promoted") else f"deferred: {promo.get('reason')}"
             bus_emit("shadow_promote_result", {
-                "key": key, "name": func_name, "promoted": promo.get("promoted"),
+                "key": key, "name": func_name, "worker_id": worker_id,
+                "promoted": promo.get("promoted"),
                 "reason": promo.get("reason"),
             })
             _log("shadow_promote", **promo)
@@ -13188,7 +13490,8 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             "port_shadow_status": shadow_status,
         })
         bus_emit("port_proven_pending_review", {
-            "key": key, "name": func_name, "header_path": draft_paths["header_path"],
+            "key": key, "name": func_name, "worker_id": worker_id,
+            "header_path": draft_paths["header_path"],
         })
         _log("proven_pending_review", attempts=attempts,
              passed=harness["passed"], total=harness["total"])
@@ -13249,6 +13552,16 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
     if conformance_protected is None:
         conformance_protected = load_conformance_protected()
 
+    def _log_pass_done():
+        try:
+            from event_log import log_event
+            log_event("port.pass_done", worker_id=worker_id,
+                      processed=summary["processed"], count=count,
+                      stopped_reason=summary["stopped_reason"],
+                      totals=summary["totals"])
+        except Exception:
+            pass
+
     def _poll_battletest():
         if not battletest_poll:
             return
@@ -13272,6 +13585,21 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 on_started(program, address, func_name)
             except Exception:
                 pass
+
+        # Candidate lifecycle audit (events.jsonl). runs.jsonl rows record
+        # RESULTS but nothing records when a candidate STARTED — a candidate
+        # that spends 9 minutes inside retry loops (observed 2026-07-14:
+        # IsPathNodePositionValidAndOpen, 3 malformed retries, 11:50->11:59)
+        # left no way to attribute the silent stretch. Best-effort, never
+        # fails the pass.
+        _cand_t0 = time.time()
+        try:
+            from event_log import log_event
+            log_event("port.candidate_started", worker_id=worker_id,
+                      program=program, address=address, function=func_name,
+                      processed_so_far=processed, count=count)
+        except Exception:
+            pass
 
         # Found by hand 2026-07-07: an unexpected exception deep in one
         # candidate's pipeline (e.g. a malformed model response tripping a
@@ -13297,6 +13625,14 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         summary["totals"][result] = summary["totals"].get(result, 0) + 1
         if result != "stateful_skip":
             processed += 1
+        try:
+            from event_log import log_event
+            log_event("port.candidate_done", worker_id=worker_id,
+                      program=program, address=address, function=func_name,
+                      result=result, duration_sec=round(time.time() - _cand_t0, 1),
+                      processed_so_far=processed, count=count)
+        except Exception:
+            pass
         if on_progress:
             try:
                 on_progress(program, address, result, processed, count)
@@ -13318,6 +13654,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         )
         if not candidates:
             summary["stopped_reason"] = "no_eligible_candidates"
+            _log_pass_done()
             return summary
 
         for cand in candidates:
@@ -13335,6 +13672,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         summary["processed"] = processed
         if summary["stopped_reason"] is None:
             summary["stopped_reason"] = "count_reached" if processed >= count else "exhausted"
+        _log_pass_done()
         return summary
 
     # Continuous mode: re-select candidates each time the pool is drained;
@@ -13373,6 +13711,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
     summary["processed"] = processed
     if summary["stopped_reason"] is None:
         summary["stopped_reason"] = "stop_flag"
+    _log_pass_done()
     return summary
 
 

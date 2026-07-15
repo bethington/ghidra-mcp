@@ -678,6 +678,12 @@ _DRAFT_RUNNER_TEMPLATE = '''\
 
 #include <cstdio>
 #include <cstdint>
+#include <cinttypes>   // PRIXPTR / PRId64 / PRIu32 etc. -- models use these pointer/
+                       // width format macros in FAIL-diagnostic printfs; without
+                       // this the whole draft_runner fails to compile with
+                       // "'PRIXPTR': undeclared identifier" and the candidate is
+                       // scored harness_failed (found by the self-improving loop
+                       // 2026-07-15: SafeDereferencePointer, 3 wasted attempts).
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -1002,6 +1008,22 @@ _PORT_TERMINAL_STATUSES = frozenset({
     "no_vectors",                  # /emulate_function couldn't mint any vectors
     "unknown_skip",                # decompile fetch failed
     "error",                       # unexpected pipeline exception (guarded per-candidate)
+    # WAIT-STATES owned by the shadow pipeline (2026-07-14): the routing that
+    # produces these is deterministic (decompile regexes + resolve-table
+    # lookups), so re-selecting them re-derives the identical verdict every
+    # pass -- observed burning 3 of 5 count slots in EVERY dashboard batch.
+    # They advance via a shadow-dispatcher build + battletest, not this
+    # worker; the shadow batch builder reads them from the state DB /
+    # shadow_leaf_backlog.jsonl, and include_terminal=True re-admits them.
+    "shadow_leaf_pending",         # deferred to shadow-first; awaiting a shadow batch build
+    "handle_abort_hazard_skip",    # type-gated fatal abort; unsafe until capture pinning exists
+    # CONFIRMED shadow-unreachable (2026-07-14 triage): 0 hits across a full
+    # instrumented playthrough AND 0 static callers in Ghidra — the game
+    # inlined every call site. A shadow dispatcher would idle forever; the
+    # planner's shadow_unreachable_risk PREDICTION is upgraded to fact.
+    # Terminal for the port worker; the offline CONF_REGRESSION lane owns
+    # these (conformance/CONF_REGRESSION_OFFLINE_SUITE.md).
+    "shadow_unreachable",
 })
 
 
@@ -1048,6 +1070,15 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
 
         if not include_terminal and func.get("port_status") in _PORT_TERMINAL_STATUSES:
             continue  # already resolved -- don't re-select (loop must advance)
+
+        # oracle_unavailable (2026-07-15): a live-provable fn skipped ONLY because
+        # the oracle was down. NON-terminal -- never lost -- but excluded from
+        # selection WHILE the oracle is down (else it churns the same fns every
+        # pass). Re-admitted the moment FUNDOC_LIVE_PROVE=1 so it proves when the
+        # game is back. See fun_doc.process_port_candidate global_leaf branch.
+        if (not include_terminal and func.get("port_status") == "oracle_unavailable"
+                and os.environ.get("FUNDOC_LIVE_PROVE") != "1"):
+            continue
 
         # "program" must be the full project path (func["program"], e.g.
         # /Mods/PD2-S12/D2Common.dll), NOT the bare binary name: the PORT
@@ -1122,7 +1153,11 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
         "Tag them literally ```cpp / ```cpp / ```json (NOT ```c++, ```C, or untagged). Produce "
         "exactly two cpp blocks and exactly one json block -- no more, no fewer. If you must think, "
         "do it briefly BEFORE block 1; put nothing between or after the blocks. Getting this shape "
-        "wrong wastes the whole attempt.")
+        "wrong wastes the whole attempt.\n"
+        "CRITICAL: all three blocks must appear in your FINAL ANSWER message. Anything that exists "
+        "only inside your private reasoning/thinking is DISCARDED unread -- drafting the blocks "
+        "while thinking and then not restating them in the answer is the #1 wasted attempt. Keep "
+        "your reasoning SHORT (a few sentences); spend your output budget on the blocks themselves.")
     sections.append("")
     sections.append(
         "You are drafting an OpenD2 C++ port of a Ghidra-analyzed PD2-S12 function. This draft "
@@ -1289,35 +1324,93 @@ def _fenced_blocks(response_text):
     return [(lang.lower(), content) for lang, content in _CODE_BLOCK_RE.findall(response_text)]
 
 
+# The dispatch snippet is structurally unmistakable: it opens with the
+# run_case pattern `if (fn == "Name")`. Header code never references `fn`.
+# Classifying by CONTENT (instead of demanding an exact block count in an
+# exact order) tolerates the failure shapes observed live 2026-07-14:
+# extra/iterated blocks (M3 redrafts inside its reasoning), reordered
+# blocks, and salvage output where only the final iteration of each block
+# survives. Last-of-each-kind wins -- the model's final iteration is its
+# actual answer.
+_DISPATCH_MARKER_RE = re.compile(r"if\s*\(\s*fn\s*==")
+
+_SPEC_KEYS = ("fn", "param_layout", "input_sets")
+
+# Bare hex integer literals (0xCAFEBABE) rewritten to decimal before
+# json.loads: the model habitually puts hex in input_sets even though JSON
+# has no hex literals, which made a PERFECTLY-SHAPED 3-block draft score
+# malformed_response (2026-07-14: SetLinkedListFieldForAll, all 3 attempts;
+# same class the handle lane fixed 2026-07-08 for GetAnimSequenceRecord).
+# The lookbehind avoids touching hex inside quoted strings/identifiers.
+_HEX_LITERAL_RE = re.compile(r'(?<![\w"])0[xX][0-9a-fA-F]+')
+
+
+def json_loads_lenient(s):
+    """json.loads with bare-hex-literal tolerance. Raises JSONDecodeError
+    like json.loads on anything still malformed."""
+    return json.loads(_HEX_LITERAL_RE.sub(
+        lambda m: str(int(m.group(0), 16)), s or ""))
+
+
+def _is_json_dict(text):
+    try:
+        return isinstance(json_loads_lenient(text), dict)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+def _classify_cpp_blocks(cpp_blocks):
+    """Return (header, dispatch): last non-dispatch block, last dispatch block.
+    Blocks that parse as a JSON dict are excluded -- an UNTAGGED vector spec
+    lands in the cpp-family bucket (lang "" is in _CPP_LANGS) and must not
+    displace the real header as "last non-dispatch block"."""
+    code = [b for b in cpp_blocks if not _is_json_dict(b)]
+    headers = [b for b in code if not _DISPATCH_MARKER_RE.search(b)]
+    dispatches = [b for b in code if _DISPATCH_MARKER_RE.search(b)]
+    return (headers[-1] if headers else None,
+            dispatches[-1] if dispatches else None)
+
+
+def _extract_vector_spec(blocks):
+    """Last block (any tag -- models mis-tag json as ``` or ```jsonc) that
+    parses as JSON with the required spec keys, or None."""
+    for _lang, content in reversed(blocks):
+        try:
+            spec = json_loads_lenient(content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(spec, dict):
+            continue
+        if all(k in spec for k in _SPEC_KEYS) and \
+                all(k in spec["param_layout"] for k in ("inputs", "outputs")):
+            return spec
+    return None
+
+
 def parse_port_response(response_text):
     """Extract (header_content, dispatch_body) from a build_port_fix_prompt
-    response (2 blocks: header, dispatch -- no vector spec on a retry, since
-    vectors must not change once minted). Returns (None, None) if fewer than
-    two cpp-family blocks are found."""
+    response. Content-classified: header = last cpp-family block WITHOUT the
+    `if (fn ==` dispatch marker, dispatch = last block WITH it. Returns
+    (None, None) if either is missing."""
     cpp_blocks = [content for lang, content in _fenced_blocks(response_text) if lang in _CPP_LANGS]
-    if len(cpp_blocks) < 2:
+    header, dispatch = _classify_cpp_blocks(cpp_blocks)
+    if not header or not dispatch:
         return None, None
-    return cpp_blocks[0].strip() + "\n", cpp_blocks[1].strip()
+    return header.strip() + "\n", dispatch.strip()
 
 
 def parse_port_response_full(response_text):
     """Extract (header_content, dispatch_body, vector_spec) from a
-    build_port_prompt response (3 blocks: ```cpp header, ```cpp dispatch,
-    ```json vector spec with {fn, param_layout, input_sets}). Returns
-    (None, None, None) on any parse failure -- malformed JSON, missing
-    blocks, or a vector spec missing required keys -- so callers treat it
-    uniformly as "retry the draft", not a partial success."""
+    build_port_prompt response (```cpp header, ```cpp dispatch, ```json
+    vector spec with {fn, param_layout, input_sets}). Blocks are classified
+    by content (see _classify_cpp_blocks / _extract_vector_spec), so extra,
+    reordered, or mis-tagged blocks no longer sink an otherwise-good draft.
+    Returns (None, None, None) if any of the three pieces is missing, so
+    callers treat it uniformly as "retry the draft", not a partial success."""
     blocks = _fenced_blocks(response_text)
     cpp_blocks = [content for lang, content in blocks if lang in _CPP_LANGS]
-    json_blocks = [content for lang, content in blocks if lang in _JSON_LANGS]
-    if len(cpp_blocks) < 2 or not json_blocks:
+    header, dispatch = _classify_cpp_blocks(cpp_blocks)
+    spec = _extract_vector_spec(blocks)
+    if not header or not dispatch or spec is None:
         return None, None, None
-    try:
-        spec = json.loads(json_blocks[0])
-    except json.JSONDecodeError:
-        return None, None, None
-    if not all(k in spec for k in ("fn", "param_layout", "input_sets")):
-        return None, None, None
-    if not all(k in spec["param_layout"] for k in ("inputs", "outputs")):
-        return None, None, None
-    return cpp_blocks[0].strip() + "\n", cpp_blocks[1].strip(), spec
+    return header.strip() + "\n", dispatch.strip(), spec

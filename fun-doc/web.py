@@ -60,6 +60,13 @@ class WorkerManager:
         # write streams (port never touches Ghidra function names/comments).
         self._port_active_binaries = set()
         self._bus.on("provider_timeout", self._handle_provider_timeout)
+        # Every runs.jsonl row (drafts, retries, sub-step results) refreshes the
+        # owning worker's heartbeat. Without this, a PORT candidate that spends
+        # many minutes inside one function (e.g. 3 malformed-response retries at
+        # ~4 min each) looks stalled to the watchdog — observed 2026-07-14:
+        # stale_sec climbed to 506s on a healthy worker, 900s would have
+        # false-killed it.
+        self._bus.on("run_logged", self._handle_run_logged)
         self._watchdog_stop = threading.Event()
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop,
@@ -67,6 +74,15 @@ class WorkerManager:
             daemon=True,
         )
         self._watchdog_thread.start()
+
+    def _handle_run_logged(self, data):
+        worker_id = (data or {}).get("worker_id")
+        if not worker_id:
+            return
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if worker and worker.get("status") in ("starting", "running"):
+                worker["last_heartbeat_at"] = datetime.now().isoformat()
 
     def _set_phase(self, worker_id, phase):
         with self._lock:
@@ -1135,6 +1151,23 @@ class WorkerManager:
                 with self._lock:
                     worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
+                # Close the pane's per-function block, exactly like the
+                # document lane does. Without this the Prove pane never showed
+                # candidate outcomes at all — a batch looked like it "attempted
+                # the first function and stopped" while 20+ skips flew by
+                # invisibly (observed 2026-07-14, worker 85903b12).
+                cur = worker["progress"].get("current") or {}
+                self._bus.emit("function_complete", {
+                    "worker_id": worker_id,
+                    "name": cur.get("name") or address,
+                    "address": address,
+                    "result": bucket if bucket != "failed" else result,
+                    "skip_type": result if bucket == "skipped" else None,
+                    "reason": result,
+                    "mode": "port",
+                    "processed": processed,
+                    "total": total,
+                })
 
             def _on_started(program, address, name):
                 worker["progress"]["current"] = {
@@ -1146,6 +1179,14 @@ class WorkerManager:
                 with self._lock:
                     worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
+                # Open a per-function block in the pane (mirrors document lane).
+                self._bus.emit("function_started", {
+                    "worker_id": worker_id,
+                    "name": name or address,
+                    "address": address,
+                    "program": Path(program).name,
+                    "mode": "port",
+                })
 
             summary = run_port_worker_pass(
                 worker_id=worker_id,
@@ -1157,13 +1198,24 @@ class WorkerManager:
                 on_progress=_on_progress,
                 on_started=_on_started,
             )
-            if summary.get("stopped_reason") == "no_eligible_candidates":
-                worker["exit_reason"] = "no_eligible_candidates"
+            # Surface WHY the pass ended for every exit, not just an empty
+            # queue. "exhausted" (candidate pool consumed before `count`
+            # completions) previously vanished silently — the worker just
+            # disappeared from the dashboard with 0 completed and no
+            # explanation (2026-07-14).
+            worker["exit_reason"] = summary.get("stopped_reason")
             print(
                 f"  [port-worker {worker_id}] done: {summary['processed']} processed "
                 f"(reason={summary.get('stopped_reason')}) totals={summary.get('totals')}",
                 flush=True,
             )
+            self._bus.emit("port_pass_done", {
+                "worker_id": worker_id,
+                "processed": summary.get("processed"),
+                "count": worker.get("count"),
+                "stopped_reason": summary.get("stopped_reason"),
+                "totals": summary.get("totals") or {},
+            })
         except Exception as e:
             self._bus.emit(
                 "worker_stopped",
@@ -1275,7 +1327,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         "port_drafted",
         "port_vectors_minted",
         "port_harness_result",
+        "port_live_prove_result",
+        "shadow_promote_result",
         "port_proven_pending_review",
+        "port_pass_done",
         "tool_result",
         "model_text",
         "score_update",

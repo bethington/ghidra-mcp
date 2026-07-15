@@ -1170,6 +1170,25 @@
     socket.on("function_complete", d=>_endBlock(d, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
     socket.on("global_complete",   d=>_endBlock(d, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`Complete: ${d.result||'done'}${d.fixed!=null?' (fixed '+d.fixed+')':''}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
     socket.on("provider_timeout",  d=>{ if(d.worker_id){ getOrCreatePane(d.worker_id,d.provider,null); appendToPane(d.worker_id, `[watchdog] ${d.message||'provider timeout'} — killed stalled session`, 'error'); setPaneAlert(d.worker_id, d); } });
+    // --- Prove (port) lane: per-step progress inside the current function block ---
+    socket.on("port_drafted",        d=>appendToPane(d.worker_id, `drafting${d.status?' ('+d.status+')':''}…`, 'neutral'));
+    socket.on("port_vectors_minted", d=>appendToPane(d.worker_id, `vectors: ${d.count} minted${d.errors?` (${d.errors} mint errors)`:''}`, d.count?'tool':'error'));
+    socket.on("port_harness_result", d=>appendToPane(d.worker_id, `harness: ${d.passed??'?'}/${d.total??'?'} ${d.ok?'OK':'FAILED'} (${d.attempts||1} attempt${(d.attempts||1)==1?'':'s'})`, d.ok?'success':'error'));
+    socket.on("port_live_prove_result", d=>appendToPane(d.worker_id, `live prove: ${d.passed??'?'}/${d.total??'?'} ${d.ok?'OK':'FAILED'}`, d.ok?'success':'error'));
+    socket.on("shadow_promote_result",  d=>appendToPane(d.worker_id, d.promoted?'shadow: staged for battletest':`shadow: deferred${d.reason?' ('+d.reason+')':''}`, d.promoted?'success':'neutral'));
+    socket.on("port_proven_pending_review", d=>appendToPane(d.worker_id, `PROVEN — pending review${d.header_path?': '+d.header_path:''}`, 'success'));
+    socket.on("port_pass_done", d=>{
+      const totals=Object.entries(d.totals||{}).map(([k,v])=>`${v} ${k}`).join(', ');
+      appendToPane(d.worker_id, `prove pass done: ${d.processed||0}/${d.count||'?'} processed — ${d.stopped_reason||'done'}${totals?' | '+totals:''}`, (d.processed||0)>0?'success':'error');
+      flash(`prove pass done (${d.stopped_reason||'done'})`);
+    });
+    // Retries (e.g. malformed model responses) land as runs.jsonl rows with a
+    // *_retry result — surface them live so a multi-minute retry loop is
+    // visibly "still working", not silently hung.
+    socket.on("run_logged", d=>{
+      if(d && d.worker_id && typeof d.result==='string' && /_retry$/.test(d.result) && /^port/.test(d.mode||''))
+        appendToPane(d.worker_id, `retry: ${d.result}${d.mode?' ['+d.mode+']':''}`, 'error');
+    });
     // --- triage/assess: not WorkerManager workers; stream their subprocess output into a synthetic pane ---
     socket.on("triage_started", d=>{
       const id=d.id||'triage', label=d.label||id; syntheticPanes.add(String(id));
