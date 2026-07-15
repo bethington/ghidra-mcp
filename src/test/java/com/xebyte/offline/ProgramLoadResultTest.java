@@ -120,9 +120,9 @@ public class ProgramLoadResultTest extends TestCase {
     // -------------------------------------------------------------------
 
     public void testServerBindingInfoBound() {
-        ServerBindingInfo b = new ServerBindingInfo(true, "10.0.10.30:13100", "diablo2");
+        ServerBindingInfo b = new ServerBindingInfo(true, "192.0.2.10:13100", "diablo2");
         assertTrue(b.serverBound);
-        assertEquals("10.0.10.30:13100", b.serverInfo);
+        assertEquals("192.0.2.10:13100", b.serverInfo);
         assertEquals("diablo2", b.repoName);
     }
 

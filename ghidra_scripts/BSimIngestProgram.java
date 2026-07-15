@@ -2,9 +2,9 @@
 // This generates BSim feature vectors (LSH signatures) for every function and
 // inserts them into the database's exetable/desctable. One-time per binary.
 //
-// Script args: [0] = BSim URL (default: postgresql://10.0.10.30:5432/bsim)
+// Script args: [0] = BSim URL (required in headless/MCP mode)
 //
-// Usage from MCP: run_script("BSimIngestProgram", args=["postgresql://10.0.10.30:5432/bsim"])
+// Usage from MCP: run_script("BSimIngestProgram", args=["postgresql://127.0.0.1:5432/bsim"])
 // Usage from Ghidra Script Manager: will prompt for URL if no args provided
 //
 // IMPORTANT: The program must be saved before ingestion. BSim needs a stable
@@ -36,8 +36,6 @@ import ghidra.program.model.listing.FunctionManager;
 
 public class BSimIngestProgram extends GhidraScript {
 
-    private static final String DEFAULT_BSIM_URL = "postgresql://10.0.10.30:5432/bsim";
-
     @Override
     protected void run() throws Exception {
         if (currentProgram == null) {
@@ -45,7 +43,7 @@ public class BSimIngestProgram extends GhidraScript {
             return;
         }
 
-        String bsimUrl = DEFAULT_BSIM_URL;
+        String bsimUrl = null;
 
         // Check script args first (headless/MCP mode)
         String[] args = getScriptArgs();
@@ -53,7 +51,12 @@ public class BSimIngestProgram extends GhidraScript {
             bsimUrl = args[0].trim();
         } else if (!isRunningHeadless()) {
             bsimUrl = askString("BSim Ingest Program",
-                "Enter BSim database URL:", DEFAULT_BSIM_URL);
+                "Enter BSim database URL:", "").trim();
+        }
+
+        if (bsimUrl == null || bsimUrl.isEmpty()) {
+            println("{\"status\": \"error\", \"error\": \"BSim URL is required; no default destination is configured\"}");
+            return;
         }
 
         String programName = currentProgram.getName();

@@ -78,6 +78,11 @@ Complete version history for the Ghidra MCP Server project.
   clean checkout. Covered by `tests/unit/test_setup_ghidra.py`.
 
 - **Thunk no-return metadata repair.** `set_function_no_return` now synchronizes the requested flag across every thunk hop and its terminal target instead of relying on Ghidra's asymmetric delegated setter/local getter behavior. Successful responses include verified `function_no_return` and `terminal_no_return` values, allowing later flow repair to restore valid call fallthrough.
+- **Outbound archive and BSim defaults now fail closed.** Removed the
+  maintainer-specific private archive/database address from runtime code,
+  examples, and documentation. Cross-version archive exchange is disabled
+  unless its URL is explicitly configured, and headless BSim scripts now
+  require a database URL instead of silently selecting a destination.
 - **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
   shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the
   fast path, and their design docs assumed contradictory models of how a
@@ -1725,8 +1730,8 @@ time, capped at -20 aggregate per function:
   tools and skips the LLM. Bus events `archive_pushed`,
   `archive_lookup`, `archive_applied`, `archive_apply_failed`,
   `archive_push_failed` for dashboard visibility.
-- Required env: `RE_KB_ARCHIVE_URL` (defaults to
-  `http://10.0.10.30:8422`); empty disables both hooks.
+- Archive exchange is disabled by default. Set `RE_KB_ARCHIVE_URL` to opt
+  fun-doc into the read and write hooks.
 
 ### Changed
 

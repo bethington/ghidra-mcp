@@ -16,7 +16,7 @@ plus the ``FUN_DOC_DB_URL`` env var, which always wins when set:
       "config": {
         "storage": {
           "backend": "postgres",
-          "url": "postgresql://re_kb:***@10.0.10.30:5432/bsim",
+          "url": "postgresql://re_kb:***@127.0.0.1:5432/bsim",
           "schema": "fun_doc"
         }
       }

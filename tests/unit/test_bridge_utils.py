@@ -930,7 +930,7 @@ class TestValidateServerUrl(unittest.TestCase):
         self.assertFalse(self._validate("http://localhost"))
 
     def test_rejects_non_local_host(self):
-        self.assertFalse(self._validate("http://10.0.10.30:8089"))
+        self.assertFalse(self._validate("http://192.0.2.10:8089"))
         self.assertFalse(self._validate("http://evil.example.com:8089"))
 
     def test_rejects_malformed_url(self):

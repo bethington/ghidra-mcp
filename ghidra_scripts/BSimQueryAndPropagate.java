@@ -2,13 +2,12 @@
 // Designed for use in the RE loop PROPAGATE phase to find cross-version matches.
 //
 // Script args: [0] = function address (hex, e.g. "0x10001000")
-//              [1] = BSim URL (default: postgresql://10.0.10.30:5432/bsim)
+//              [1] = BSim URL (required in headless/MCP mode)
 //              [2] = max matches per function (default: 10)
 //              [3] = similarity threshold 0.0-1.0 (default: 0.7)
 //              [4] = confidence/significance threshold (default: 0.0)
 //
-// Usage from MCP: run_script("BSimQueryAndPropagate", args=["0x10001000"])
-// Usage from MCP: run_script("BSimQueryAndPropagate", args=["0x10001000", "postgresql://10.0.10.30:5432/bsim", "10", "0.7", "0.0"])
+// Usage from MCP: run_script("BSimQueryAndPropagate", args=["0x10001000", "postgresql://127.0.0.1:5432/bsim", "10", "0.7", "0.0"])
 //@category BSim
 //@keybinding
 //@menupath
@@ -33,7 +32,6 @@ import ghidra.program.model.listing.Function;
 
 public class BSimQueryAndPropagate extends GhidraScript {
 
-    private static final String DEFAULT_BSIM_URL = "postgresql://10.0.10.30:5432/bsim";
     private static final int DEFAULT_MAX_MATCHES = 10;
     private static final double DEFAULT_SIMILARITY = 0.7;
     private static final double DEFAULT_CONFIDENCE = 0.0;
@@ -48,7 +46,7 @@ public class BSimQueryAndPropagate extends GhidraScript {
         // Parse arguments
         String[] args = getScriptArgs();
         String addressStr = null;
-        String bsimUrl = DEFAULT_BSIM_URL;
+        String bsimUrl = null;
         int maxMatches = DEFAULT_MAX_MATCHES;
         double similarityThresh = DEFAULT_SIMILARITY;
         double confidenceThresh = DEFAULT_CONFIDENCE;
@@ -78,6 +76,15 @@ public class BSimQueryAndPropagate extends GhidraScript {
                 // Use current address in headless mode
                 addressStr = currentAddress != null ? currentAddress.toString() : null;
             }
+        }
+
+        if (bsimUrl == null && !isRunningHeadless()) {
+            bsimUrl = askString("BSim Query",
+                "Enter BSim database URL:", "").trim();
+        }
+        if (bsimUrl == null || bsimUrl.isEmpty()) {
+            println("{\"status\": \"error\", \"error\": \"BSim URL is required; no default destination is configured\"}");
+            return;
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
