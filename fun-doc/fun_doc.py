@@ -5245,6 +5245,12 @@ def _provider_timeout_seconds(provider, complexity_tier=None):
         timeout_secs += 600
     elif complexity_tier == "complex":
         timeout_secs += 300
+    elif complexity_tier == "medium":
+        # +150 headroom (2026-07-15): the doc lane's medium-tier functions were
+        # hitting the 300s base under 3-worker concurrent MiniMax load (slower
+        # API) -> false session timeouts. Keeps the deliberate anti-hang base for
+        # simple functions untouched; only medium gets breathing room.
+        timeout_secs += 150
     return timeout_secs
 
 
@@ -6614,8 +6620,17 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                     fn_args = {}
 
                 tool_call_count += 1
-                # Hard cap: stop runaway tool call loops (e.g., 90+ set_local_variable_type)
-                if tool_call_count > 50:
+                # Runaway backstop tied to the UI-configurable per-provider turn
+                # limit (provider_max_turns in the dashboard settings; passed here
+                # as max_turns) instead of a separate hardcoded number. The old
+                # hardcoded 50 fired BEFORE the UI's 70 -- silently overriding the
+                # setting and BLOCKING doc work at 51 calls (2026-07-15). Now the
+                # UI value actually governs; a small headroom over max_turns allows
+                # the occasional multi-tool-call turn to finish rather than be cut
+                # mid-turn. FUNDOC_TOOL_CALL_CAP still hard-overrides if set.
+                _env_cap = os.environ.get("FUNDOC_TOOL_CALL_CAP")
+                _tool_cap = int(_env_cap) if _env_cap else max(max_turns + 10, 30)
+                if tool_call_count > _tool_cap:
                     print(
                         f"  [minimax] Tool call cap reached ({tool_call_count}), stopping",
                         flush=True,
