@@ -1,10 +1,38 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+REQUIRED_JAVA_MAJOR = 21
+
+
+def ensure_maven_java_supported(maven_command: Path) -> bool:
+    completed = subprocess.run(
+        [str(maven_command), "-version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = f"{completed.stdout}\n{completed.stderr}"
+    match = re.search(r"(?im)^Java version:\s*(?:1\.)?(\d+)", output)
+    if not match or int(match.group(1)) >= REQUIRED_JAVA_MAJOR:
+        return True
+
+    print(
+        f"Java {REQUIRED_JAVA_MAJOR}+ is required to build ghidra-mcp; "
+        f"Maven is running on Java {match.group(1)}.",
+        file=sys.stderr,
+    )
+    print(
+        "Set JAVA_HOME to a JDK 21 install and put %JAVA_HOME%\\bin first on PATH.",
+        file=sys.stderr,
+    )
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +170,13 @@ def find_maven_command() -> Path:
 
 
 def run_maven(repo_root: Path, goals: list[str], dry_run: bool = False) -> int:
-    command = [str(find_maven_command()), *goals]
+    maven_command = find_maven_command()
+    command = [str(maven_command), *goals]
     if dry_run:
         print("DRY RUN:", " ".join(command))
         return 0
+    if not ensure_maven_java_supported(maven_command):
+        return 1
 
     completed = subprocess.run(command, cwd=repo_root, check=False)
     return completed.returncode
