@@ -108,8 +108,9 @@ state when modal dialogs may be present.
 ## Running the MCP Server
 
 ```bash
-uv run bridge-mcp-ghidra                       # stdio (recommended for AI tools)
-uv run bridge-mcp-ghidra --transport sse       # SSE (web/HTTP clients)
+uv run bridge-mcp-ghidra                                  # stdio (recommended for AI tools)
+uv run bridge-mcp-ghidra --transport streamable-http      # HTTP (web clients, MCP Inspector)
+uv run bridge-mcp-ghidra --transport sse                  # SSE (deprecated compat only)
 uv run python -m bridge_mcp_ghidra             # equivalent module form
 uv sync --group debugger                       # optional debugger deps
 uv run python -m debugger                      # standalone debugger server on :8099

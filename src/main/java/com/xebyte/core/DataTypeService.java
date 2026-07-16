@@ -3844,6 +3844,16 @@ public class DataTypeService {
         List<String> enforcementWarnings = new ArrayList<>();
         if (newName != null && !newName.isEmpty()) {
             String typeForCheck = (typeName != null && !typeName.isEmpty()) ? typeName : null;
+            // array_length arrives as a separate param, so `char` + array_length=35
+            // is really `char[35]` — a string that DOES satisfy an `sz`/array
+            // Hungarian prefix. Fold the array shape into the type used for the
+            // name-quality gate, else `g_sz*`/array globals get spuriously
+            // rejected as prefix_type_mismatch against the bare scalar base type,
+            // and the model oscillates set_global/audit_global trying to satisfy
+            // an unsatisfiable check (observed 2026-07-15, g_szPresetSrcPath).
+            if (typeForCheck != null && arrayLength > 0) {
+                typeForCheck = typeForCheck + "[" + arrayLength + "]";
+            }
             // If type isn't being set, fall back to whatever's already at the address.
             if (typeForCheck == null) {
                 Data existing = program.getListing().getDefinedDataAt(addr);

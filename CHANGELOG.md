@@ -23,6 +23,21 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
+- **Browser MCP clients (MCP Inspector) couldn't connect over the HTTP
+  transports — CORS preflight got 405.** The stock SDK apps behind
+  `mcp.run()` carry no CORS middleware, so the `OPTIONS` preflight every
+  browser sends before a cross-origin POST was rejected with
+  405 Method Not Allowed, and even successful responses never exposed
+  `mcp-session-id` to scripts. The bridge now builds the Starlette app
+  itself for `streamable-http`/`sse` and wraps it in `CORSMiddleware`:
+  preflights are answered, `mcp-session-id`/`mcp-protocol-version` are
+  exposed, and allowed origins mirror the Host-header policy (loopback on
+  any port always; plus the bind host, the machine's own hostnames on
+  wildcard binds, and `GHIDRA_MCP_ALLOWED_HOSTS` entries). Foreign origins
+  still get no CORS approval, and the SDK's DNS-rebinding protection is
+  unchanged. Regression coverage in `tests/unit/test_bridge_cli.py`
+  (origin-regex matrix + a real preflight driven through the wrapped app).
+
 - **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
   shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the
   fast path, and their design docs assumed contradictory models of how a

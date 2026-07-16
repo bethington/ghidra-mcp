@@ -317,6 +317,12 @@ MCP client config for the HTTP transport (add to your client's MCP config file):
 }
 ```
 
+Browser-based clients (e.g. [MCP Inspector](https://github.com/modelcontextprotocol/inspector))
+work out of the box: the HTTP transports answer CORS preflight (`OPTIONS`) requests and expose
+the `mcp-session-id` / `mcp-protocol-version` headers to scripts. Allowed origins mirror the
+Host-header policy — loopback on any port is always permitted, plus the bind host and any
+hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
+
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 ```bash
 uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
@@ -950,11 +956,11 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   AI/Automation │◄──►│   MCP Bridge    │◄──►│  Ghidra Plugin  │
 │     Tools       │    │ (bridge_mcp_    │    │ (GhidraMCP.jar) │
-│  (Claude, etc.) │    │  ghidra.py)     │    │                 │
+│  (Claude, etc.) │    │  ghidra/)       │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
         │                       │                       │
    MCP Protocol            HTTP REST              Ghidra API
-   (stdio/SSE)          (localhost:8089)      (Program, Listing)
+(stdio/streamable-http) (localhost:8089)      (Program, Listing)
 ```
 
 ### Components
