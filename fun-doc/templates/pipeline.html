@@ -475,28 +475,6 @@
       <button class="btn primary" onclick="triage(0)">Triage all &#9654;</button>
     </div></div>
 
-    <!-- RECOMMENDED NEXT (forward) beside ADVANCEMENT QUEUE (backward); each Functions | Globals -->
-    <div class="two-eq">
-      <div class="panel">
-        <div class="panel-header"><h2>Recommended next</h2><span class="hint">1 auto pick &middot; closest to advancing &middot; + your pins</span></div>
-        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
-          <div class="subcols">
-            <div class="subcol"><div class="reco-sec">Functions</div><div id="recoFn"></div></div>
-            <div class="subcol"><div class="reco-sec">Globals</div><div id="recoGlob"></div></div>
-          </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-header"><h2>Advancement queue</h2><span class="hint">recently advanced</span></div>
-        <div class="panel-content" style="max-height:440px;overflow-y:auto;padding-top:.3rem">
-          <div class="subcols">
-            <div class="subcol"><div class="reco-sec">Functions</div><div id="queueFn"></div></div>
-            <div class="subcol"><div class="reco-sec">Globals</div><div id="queueGlob"></div></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- INVENTORIES: functions (wider, has CONF) + globals (narrower, no CONF) side by side -->
     <div class="inv-row">
       <div class="panel">
@@ -515,7 +493,7 @@
           <span class="hint" id="globHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
-          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th><th></th></tr></thead>
+          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th></tr></thead>
           <tbody id="globBody"></tbody></table>
         </div>
       </div>
@@ -730,45 +708,19 @@
   }
   const jsq=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const addrCell=a=>`<span class="mono" style="color:var(--text-muted);font-size:.6rem">${a}</span>`;
-  // Advancement queue: what has already advanced. Functions = proven; Globals = reached a DOC rung.
-  async function renderQueue(){
-    const inv=await api("/inventory?q=&limit=300")||SAMPLE.inventory;
-    const proven=(inv.rows||[]).filter(r=>r.conf!=='none').slice(0,40);
-    document.getElementById("queueFn").innerHTML=proven.map(f=>
-      `<div class="qrow" onclick="openFn('${f.address}')"><div><div class="nm">${f.name}</div><div class="badges">${badge(f.doc)}${badge(f.conf)}</div></div>${addrCell(f.address)}</div>`).join("")
-      ||'<div class="worker-empty">none yet</div>';
-    // globals advance by reaching a DOC rung -- none until the globals-doc pass runs
-    const g=await api("/globals?q=&limit=500")||SAMPLE_GLOB;
-    const adv=(g.rows||[]).filter(r=>r.doc!=='none').slice(0,40);
-    document.getElementById("queueGlob").innerHTML=adv.map(r=>
-      `<div class="qrow"><div><div class="nm">${r.name}</div><div class="badges"><span class="gtype-mini ${r.typed?'':'untyped'}">${r.type||'-'}</span>${badge(r.doc)}</div></div>${addrCell(r.address)}</div>`).join("")
-      ||'<div class="worker-empty">none yet &middot; globals-doc pass pending</div>';
-  }
-  // Recommended next: 1 auto pick per entity (closest to advancing) + user pins.
-  const SAMPLE_RECO={functions:{auto:{kind:"fn",address:"0x6fd84c00",name:"PATH_GetDirection",action:"document",conf:"CONF_REGRESSION",doc:"none",reason:"proven (REGRESSION) but undocumented → document"},pins:[]},
-    globals:{auto:{kind:"glob",address:"0x6fdda728",name:"g_szDrlgLogicSourceFile",action:"document",type:"char[39]",doc:"none",reason:"typed (char[39]), 555 xrefs → document"},pins:[]}};
-  function recoRow(it,isAuto){
-    const clk=it.kind==='fn'?`onclick="openFn('${it.address}')"`:'';
-    const right=isAuto?addrCell(it.address)
-      :`<button class="pin-x" title="unpin" onclick="event.stopPropagation();unpin('${it.kind}','${it.address}')">&times;</button>`;
-    let sub;
-    if(isAuto){ sub=`<div class="badges"><span class="reco-action">${it.action}</span></div><div class="reco-reason">${it.reason||''}</div>`; }
-    else if(it.kind==='fn'){ sub=`<div class="badges">${badge(it.doc)}${badge(it.conf)}</div>`; }
-    else { const prim=!it.type||/^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|bool|float|double|pointer|code)\s*$/i.test(it.type);
-      sub=`<div class="badges"><span class="gtype-mini ${prim?'untyped':''}">${it.type||'-'}</span>${badge(it.doc)}</div>`; }
-    return `<div class="qrow ${isAuto?'auto':''}" ${clk}><div><div class="nm">${isAuto?'<span class="reco-star">&#9733;</span>':''}${it.name||it.address}</div>${sub}</div>${right}</div>`;
-  }
-  function renderReco(r){
-    const f=r.functions||{}, g=r.globals||{};
-    document.getElementById("recoFn").innerHTML=
-      (f.auto?recoRow(f.auto,true):'<div class="worker-empty">all quick wins done</div>')+(f.pins||[]).map(p=>recoRow(p,false)).join("");
-    document.getElementById("recoGlob").innerHTML=
-      (g.auto?recoRow(g.auto,true):'<div class="worker-empty">all quick wins done</div>')+(g.pins||[]).map(p=>recoRow(p,false)).join("");
-  }
-  async function loadReco(){ renderReco(await api("/recommended")||SAMPLE_RECO); }
   async function postJSON(path,body){ try{ await fetch("/api/conformance"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){} }
-  async function pin(kind,address,name){ await postJSON("/pin",{kind,address,name,program:PROGRAM}); flash(`pinned ${name||address}`); loadReco(); }
-  async function unpin(kind,address){ await postJSON("/unpin",{kind,address,program:PROGRAM}); loadReco(); }
+  // Pinning STEERS the workers: a pin lands in the shared priority queue
+  // (queue["pinned"]) that BOTH the Doc selector (select_candidates) and the
+  // Prove/Port selector (select_port_candidates) honour, so a pinned function
+  // jumps the line for the Document and Prove workers. Backend resolves
+  // {program,address} -> canonical state key (handles the .0 suffix / 0x).
+  let PINNED=new Set();
+  function bareAddr(a){ return String(a).replace(/^0x/i,"").toLowerCase(); }
+  function isPinned(a){ const s="::"+bareAddr(a); for(const k of PINNED){ if(k.endsWith(s)) return true; } return false; }
+  async function loadPins(){ try{ const q=await (await fetch("/api/queue")).json(); PINNED=new Set((q&&q.pinned)||[]); }catch(e){} }
+  async function qpost(path,body){ try{ return await (await fetch("/api/queue"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json(); }catch(e){ return null; } }
+  async function pin(kind,address,name){ const r=await qpost("/pin",{program:PROGRAM,address}); if(r&&r.key){ PINNED.add(r.key); flash(`pinned ${name||address} — workers will prioritize it`); } else { flash(`could not pin ${name||address}`); } loadInv(); }
+  async function unpin(kind,address){ await qpost("/unpin",{program:PROGRAM,address}); const s="::"+bareAddr(address); for(const k of [...PINNED]){ if(k.endsWith(s)) PINNED.delete(k); } loadInv(); }
   let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
   const SAMPLE_GLOB={total:2120,shown:5,rows:[
     {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
@@ -787,7 +739,7 @@
       `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
       `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+
       `<td>${badge(r.doc)}</td>`+
-      `<td class="act"><button class="pin-btn" title="pin to Recommended next" onclick="event.stopPropagation();pin('glob','${r.address}','${jsq(r.name)}')">+</button></td></tr>`).join("")
+      `</tr>`).join("")
       ||'<div class="worker-empty">none</div>';
   }
   async function loadInv(){
@@ -796,7 +748,7 @@
     document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
       `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
-      `<td class="act"><button class="pin-btn" title="pin to Recommended next" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button></td></tr>`).join("");
+      `<td class="act">${isPinned(f.address)?`<button class="pin-btn pinned" title="pinned — unpin" onclick="event.stopPropagation();unpin('fn','${f.address}')">&#9733;</button>`:`<button class="pin-btn" title="pin — Doc &amp; Prove workers prioritize this" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button>`}</td></tr>`).join("");
   }
   async function openFn(addr){
     const f=await api("/function/"+addr)||{address:addr,doc:"none",conf:"CONF_LIVE",name:addr,proof:SAMPLE.inventory.rows[0]};
@@ -954,7 +906,7 @@
     renderBars(s,m);
     document.getElementById("intakeN").innerHTML=`${(ik.untriaged||0).toLocaleString()} <small>/ ${(ik.in_scope||0).toLocaleString()} in scope &middot; ${ik.excluded_lib||0} excluded</small>`;
     document.getElementById("workerHint").textContent=`last sync ${s.last_sync||'-'}`;
-    renderQueue(); loadReco(); loadInv(); loadGlobals();
+    loadPins(); loadInv(); loadGlobals();
     checkTypes();
   }
 

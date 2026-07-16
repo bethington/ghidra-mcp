@@ -177,11 +177,122 @@ def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
 
 from pathlib import Path as _Path
 
+# ENDPOINT CONTRACT -- everything the dashboard read layer and the conformance
+# write-backs (record_proof, sync_conformance_to_ghidra) call on the plugin. Exists
+# because 11 property/option endpoints silently vanished in a jar swap (2026-07-15)
+# and every best-effort caller swallowed the 404s for days: 404 = contract violation.
+_CONTRACT_REQUIRED = [
+    ("GET", "/check_connection"), ("GET", "/list_functions"),
+    ("GET", "/get_function_tags"), ("GET", "/decompile_function"),
+    ("GET", "/get_function_signature"), ("GET", "/search_functions_by_tag"),
+    ("GET", "/list_bookmarks"),
+    ("POST", "/set_bookmark"), ("POST", "/delete_bookmark"),
+    ("POST", "/add_function_tag"), ("POST", "/remove_function_tag"),
+    ("POST", "/rename_function_by_address"), ("POST", "/save_program"),
+]
+# the property-map/program-option store: expected ABSENT until the ghidra-mcp branch
+# feat/program-options-property-map-tools is merged + deployed
+_CONTRACT_OPTIONAL = [
+    ("GET", "/get_property"), ("GET", "/list_properties"), ("GET", "/get_program_options"),
+    ("POST", "/set_property"), ("POST", "/create_property_map"), ("POST", "/set_program_option"),
+]
+
+
+def endpoint_contract() -> dict:
+    """Probe the deployed plugin for every endpoint we depend on. A 404 means the
+    endpoint does not exist (deployment/contract error -- loud); any other status
+    (200/400/500) means it is present; connection failure means Ghidra is down."""
+    import urllib.error
+
+    def probe(method: str, path: str) -> str:
+        req = urllib.request.Request(f"{GHIDRA}{path}", method=method,
+                                     data=b"{}" if method == "POST" else None,
+                                     headers={"Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            return "present"
+        except urllib.error.HTTPError as e:
+            return "missing" if e.code == 404 else "present"
+        except OSError:
+            return "unreachable"
+
+    out = {"missing": [], "optional_missing": [], "unreachable": False}
+    for method, path in _CONTRACT_REQUIRED:
+        s = probe(method, path)
+        if s == "unreachable":
+            out["unreachable"] = True
+            break
+        if s == "missing":
+            out["missing"].append(path)
+    if not out["unreachable"]:
+        out["optional_missing"] = [p for m, p in _CONTRACT_OPTIONAL if probe(m, p) == "missing"]
+    out["ok"] = not out["missing"] and not out["unreachable"]
+    return out
+
+
 # Where the proven D2MOO reimplementations live. The Conf proof record stores a relative
 # path like "candidates/SEED_GetRandomNumber.cpp"; the code itself is read from here.
 REIMPL_DIR = os.environ.get(
     "CONF_REIMPL_DIR",
     str(_Path(__file__).resolve().parents[3] / "cpp" / "D2MOO" / "conformance" / "reimpl_provider"))
+
+
+def _extract_function_block(text: str, name: str) -> str | None:
+    """Pull one function definition (leading comment block + brace-matched body) out of a
+    multi-function provider source. Definition = a non-indented, non-comment line containing
+    `name(` -- calls are indented in these files, so this doesn't match call sites."""
+    lines = text.splitlines()
+    def_re = _re.compile(r"^[A-Za-z_(][^;]*\b" + _re.escape(name) + r"\s*\(")
+    for i, ln in enumerate(lines):
+        if not def_re.match(ln) or ln.lstrip().startswith(("//", "*", "/*")):
+            continue
+        # walk back over the contiguous comment block (and the D2MOO_REIMPL_EXPORT marker)
+        start = i
+        while start > 0:
+            prev = lines[start - 1].strip()
+            if prev.startswith(("//", "/*", "*", "\\")) or prev.endswith("*/"):
+                start -= 1
+            else:
+                break
+        # walk forward brace-matching the body
+        depth, opened, end = 0, False, i
+        for j in range(i, len(lines)):
+            depth += lines[j].count("{") - lines[j].count("}")
+            opened = opened or "{" in lines[j]
+            if opened and depth == 0:
+                end = j
+                break
+        else:
+            return None
+        return "\n".join(lines[start:end + 1])
+    return None
+
+
+def _find_reimpl_by_name(names: list[str]) -> tuple[str, str] | None:
+    """Fallback for proofs whose `reimpl` path is stale or was never a per-function file:
+    the coord family lives in coord_provider.cpp, early batches share multi-function
+    candidates (unit_field_getters.cpp, batch_shakeout.cpp), and the name-audit renamed
+    some candidate files after the proof record was written. Scans provider sources for
+    the function definition by name; returns (relpath, code) or None."""
+    root = _Path(REIMPL_DIR)
+    if not root.is_dir():
+        return None
+    sources = sorted(root.glob("*.cpp")) + sorted((root / "candidates").glob("*.cpp"))
+    for name in names:
+        if not name:
+            continue
+        for fp in sources:
+            try:
+                text = fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if name not in text:
+                continue
+            block = _extract_function_block(text, name)
+            if block:
+                rel = fp.relative_to(root).as_posix()
+                return rel, f"// [resolved by name from {rel}]\n{block}"
+    return None
 
 
 def function_detail(addr: str, program: str = None) -> dict:
@@ -211,6 +322,19 @@ def function_detail(addr: str, program: str = None) -> dict:
             out["proof"] = json.loads(p["value"])
     except (OSError, json.JSONDecodeError):
         pass
+    if out["proof"] is None:
+        # the deployed plugin has no property-map endpoints (that code lives on the
+        # unshipped ghidra-mcp branch feat/program-options-property-map-tools) -- the
+        # proof record is stored in the function's CONFORMANCE bookmark instead
+        try:
+            r = _get("/list_bookmarks", category="CONFORMANCE", program=program)
+            want = addr.lower().replace("0x", "")
+            for b in (r.get("bookmarks") or r.get("entries") or []):
+                if str(b.get("address", "")).lower().replace("0x", "") == want:
+                    out["proof"] = json.loads(b.get("comment") or "")
+                    break
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
     try:
         sig = _get("/get_function_signature", function=addr, program=program)
         out["signature"] = sig.get("signature") if isinstance(sig, dict) else None
@@ -231,9 +355,27 @@ def function_detail(addr: str, program: str = None) -> dict:
         try:
             fp = _Path(REIMPL_DIR) / rel
             if fp.exists():
-                out["reimpl_code"] = fp.read_text(encoding="utf-8", errors="replace")
+                text = fp.read_text(encoding="utf-8", errors="replace")
+                out["reimpl_code"] = text
+                # shared multi-function file (coord_provider, early batch candidates):
+                # show just the proven function, not every function in the file
+                if _Path(rel).stem != (out.get("name") or ""):
+                    for n in ((out.get("proof") or {}).get("name"), out.get("name")):
+                        block = _extract_function_block(text, n) if n else None
+                        if block:
+                            out["reimpl_code"] = f"// [from {rel}]\n{block}"
+                            break
         except OSError:
             pass
+    if out["reimpl_code"] is None:
+        # stale/absent reimpl path (coord family, multi-function candidates, name-audit
+        # renames) -- resolve by function name instead so proven code is always shown
+        names = [(out.get("proof") or {}).get("name"), out.get("name")]
+        if rel:
+            names.append(_Path(rel).stem)
+        found = _find_reimpl_by_name([n for n in dict.fromkeys(names) if n])
+        if found:
+            out["reimpl_path"], out["reimpl_code"] = found
     return out
 
 

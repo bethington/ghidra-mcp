@@ -1029,7 +1029,7 @@ _PORT_TERMINAL_STATUSES = frozenset({
 
 def select_port_candidates(funcs, conformance_protected, active_binary=None,
                             good_enough_score=80, limit=20,
-                            include_terminal=False):
+                            include_terminal=False, pinned=None):
     """Select functions eligible for Stage 2 (port) work.
 
     `funcs`: the same {key: func_dict} state fun_doc.select_candidates
@@ -1049,12 +1049,17 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
     highest caller_count (more xrefs = more valuable to prove first).
     """
     out = []
+    pinned_set = set(pinned or [])
     for key, func in funcs.items():
+        # Pinned funcs (queue["pinned"]) are user-forced: they bypass the
+        # "not ready"/"already resolved"/"conformance-tracked" skips below and
+        # sort to the very front, so a pin actually steers the Prove worker.
+        is_pinned = key in pinned_set
         if func.get("is_thunk") or func.get("is_external"):
             continue
         if func.get("library_code") or _looks_like_library_or_runtime(func.get("name")):
             continue
-        if key in conformance_protected:
+        if key in conformance_protected and not is_pinned:
             continue
         binary_name = func.get("program_name", "") or ""
         # active_binary arrives as a bare name from CLI callers but as the
@@ -1065,10 +1070,11 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
             continue
 
         score = func.get("effective_score", func.get("score", 0)) or 0
-        if score < good_enough_score:
+        if score < good_enough_score and not is_pinned:
             continue  # Stage 1 not finished yet -- not ready for Stage 2
 
-        if not include_terminal and func.get("port_status") in _PORT_TERMINAL_STATUSES:
+        if (not include_terminal and not is_pinned
+                and func.get("port_status") in _PORT_TERMINAL_STATUSES):
             continue  # already resolved -- don't re-select (loop must advance)
 
         # oracle_unavailable (2026-07-15): a live-provable fn skipped ONLY because
@@ -1092,12 +1098,15 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
             "key": key,
             "func": func,
             "program": program,
+            "pinned": is_pinned,
             "binary_priority": _BINARY_PORT_PRIORITY.get(binary_name, 99),
             "caller_count": func.get("caller_count", 0),
             "is_leaf": not func.get("callees"),
         })
 
-    out.sort(key=lambda c: (c["binary_priority"], not c["is_leaf"], -c["caller_count"]))
+    # Pinned first, then binary priority, leaves before callers, most xrefs first.
+    out.sort(key=lambda c: (not c["pinned"], c["binary_priority"],
+                            not c["is_leaf"], -c["caller_count"]))
     return out[:limit] if limit else out
 
 

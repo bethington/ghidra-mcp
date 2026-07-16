@@ -27,6 +27,42 @@ import conformance_dashboard as cd
 conf_bp = Blueprint("conformance", __name__)
 
 
+@conf_bp.route("/api/conformance/doctor")
+def _doctor():
+    """Endpoint-contract probe: which required/optional plugin endpoints are missing."""
+    return jsonify(cd.endpoint_contract())
+
+
+def _startup_contract_check():
+    """Loud one-shot preflight at import (daemon thread -- never blocks startup).
+    A missing REQUIRED endpoint is a deployment error that used to hide behind
+    best-effort error swallowing; print it where the operator will see it."""
+    try:
+        c = cd.endpoint_contract()
+    except Exception as e:                                    # never take the app down
+        print(f"[conformance doctor] preflight errored: {e}")
+        return
+    if c.get("unreachable"):
+        print("[conformance doctor] Ghidra plugin UNREACHABLE at "
+              f"{cd.GHIDRA} -- dashboard will serve fallbacks until it is up")
+    elif c.get("missing"):
+        print("[conformance doctor] DEPLOYED PLUGIN IS MISSING REQUIRED ENDPOINTS: "
+              + ", ".join(c["missing"])
+              + " -- conformance reads/writes WILL silently degrade. Wrong jar deployed?")
+    elif c.get("optional_missing"):
+        print("[conformance doctor] contract OK (property-map endpoints absent as expected"
+              " until feat/program-options-property-map-tools deploys; proof detail is in"
+              " CONFORMANCE bookmarks)")
+    else:
+        print("[conformance doctor] contract OK -- property-map endpoints PRESENT; "
+              "run sync_conformance_to_ghidra.py to migrate proof detail back off bookmarks")
+
+
+import threading as _threading
+
+_threading.Thread(target=_startup_contract_check, daemon=True).start()
+
+
 def _prog():
     """The selected binary (full program path) from ?program=, or None for the default.
     Everything is per-binary -- the dashboard focuses on ONE program at a time."""

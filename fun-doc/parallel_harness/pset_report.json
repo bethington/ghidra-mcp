@@ -1,0 +1,29 @@
+{
+ "set_size": 10,
+ "drafted": 2,
+ "draft_secs": 1214,
+ "prove_secs": 6,
+ "proven": [
+  "DATATBLS_GetLevelTileYProperty"
+ ],
+ "failed": {
+  "SKILLS_GetBitFlag1": {
+   "ok": false,
+   "passed": 7,
+   "total": 15,
+   "stage": "mismatch",
+   "detail": "original != reimpl on >=1 vector (see output)"
+  }
+ },
+ "non_drafted": {
+  "SKILLS_GetClassSkillOffset": "malformed_response",
+  "SKILLS_GetSkillNodeField": "malformed_response",
+  "DATATBLS_GetItemTypeFieldC": "malformed_response",
+  "SKILLS_HasSkillId": "malformed_response",
+  "DATATBLS_GetTableRecord0x94": "malformed_response",
+  "DATATBLS_GetItemRecordByIndex": "malformed_response",
+  "OVERLAY_LookupRecordByKey": "malformed_response",
+  "DATATBLS_GetExpressionTokenIndex": "no_vectors"
+ },
+ "halt": null
+}

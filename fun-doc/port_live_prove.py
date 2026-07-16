@@ -1160,6 +1160,32 @@ def set_doc_level(address, doc_level: str, *, program: str = "D2Common.dll") -> 
     return _set_rung(address, doc_level, DOC_TAGS, program)
 
 
+_PROP_ENDPOINTS_AVAILABLE: bool | None = None
+
+
+def _property_endpoints_available() -> bool:
+    """The Conf property-map endpoints live on the ghidra-mcp branch
+    feat/program-options-property-map-tools, which is NOT in the deployed plugin
+    (found 2026-07-15: /set_property 404'd silently since the 5.16.2 jar deploy,
+    losing every prove-time proof-detail write). Probe once per process; when the
+    endpoints are missing, the proof record goes into the function's CONFORMANCE
+    bookmark instead -- same record, same address, readable by the dashboard and
+    sync_conformance_to_ghidra.py --export. A transient unreachable Ghidra is NOT
+    cached, so a later proof re-probes."""
+    global _PROP_ENDPOINTS_AVAILABLE
+    if _PROP_ENDPOINTS_AVAILABLE is None:
+        u = urllib.parse.urlparse(GHIDRA_HTTP)
+        conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=10)
+        try:
+            conn.request("GET", "/list_properties?map=Conf")
+            _PROP_ENDPOINTS_AVAILABLE = conn.getresponse().status != 404
+        except OSError:
+            return False               # unreachable: don't cache, just fall through
+        finally:
+            conn.close()
+    return _PROP_ENDPOINTS_AVAILABLE
+
+
 def _conf_record_json(row: dict) -> str:
     """The compact proof record stored in the `Conf` property map (Ghidra = single source
     of truth for the semantic proof facts; a typed per-address map, queryable via
@@ -1236,13 +1262,23 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
     # pollution). Ensure the map exists, then set this function's record.
     try:
         rec = _conf_record_json(row)
-        p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
-        if not p.get("success") and "No property map" in str(p):
-            _ghidra_post("/create_property_map", {"name": "Conf", "type": "string", "program": program})
+        if _property_endpoints_available():
             p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+            if not p.get("success") and "No property map" in str(p):
+                _ghidra_post("/create_property_map", {"name": "Conf", "type": "string", "program": program})
+                p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+        else:
+            # property endpoints missing in the deployed plugin -> CONFORMANCE bookmark
+            # is the store (program is a QUERY param on the bookmark endpoints)
+            p = _ghidra_post("/set_bookmark?" + urllib.parse.urlencode({"program": program}),
+                             {"address": addr, "category": "CONFORMANCE", "comment": rec})
         status["property"] = "ok" if p.get("success") else p.get("error", p)
     except OSError as e:
         status["property"] = f"error: {e}"
+    if status["property"] != "ok":
+        # a swallowed contract violation hid 5 days of lost writes -- be loud, stay non-fatal
+        print(f"  [write-back WARN] Ghidra proof-detail write FAILED for {name} @ {addr}: "
+              f"{str(status['property'])[:160]}")
 
     # (3) git-tracked registry mirror.
     try:

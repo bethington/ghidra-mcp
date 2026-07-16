@@ -6312,6 +6312,37 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
         method = ep["method"]
         params_spec = ep["params"]
 
+        # Normalize common model-guessed argument aliases to the tool's real
+        # param names. MiniMax frequently passes `function_address` (by analogy
+        # with `function_name`) or `name` for a function lookup; the split loop
+        # below only forwards args whose key matches a declared param, so an
+        # unrecognized alias is silently DROPPED and the tool then hard-errors
+        # "Either function_name or address is required" — 6+ wasted iterations
+        # per draft observed 2026-07-15 (get_function_variables). Only remap
+        # when the alias is NOT itself a real param of this tool AND the
+        # canonical name IS one (and isn't already supplied), so tools that
+        # legitimately use `name`/`address` are left untouched.
+        _valid_params = {p.get("name", "") for p in params_spec}
+        _ARG_ALIASES = {
+            "function_address": "address",
+            "func_address": "address",
+            "function_addr": "address",
+            "addr": "address",
+            "func_name": "function_name",
+            "fn_name": "function_name",
+            "name": "function_name",
+        }
+        _remapped = []
+        for _alias, _canon in _ARG_ALIASES.items():
+            if (_alias in arguments and _alias not in _valid_params
+                    and _canon in _valid_params and _canon not in arguments):
+                if not _remapped:
+                    arguments = dict(arguments)
+                arguments[_canon] = arguments.pop(_alias)
+                _remapped.append(f"{_alias}->{_canon}")
+        if _remapped:
+            print(f"  [mcp] {name}: normalized args {', '.join(_remapped)}", flush=True)
+
         # Split arguments into query params and body params based on schema
         query_params = {}
         body_params = {}
@@ -13666,6 +13697,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         candidates = pp.select_port_candidates(
             state["functions"], conformance_protected, active_binary=active_binary,
             limit=max(count, 1) * 5,
+            pinned=load_priority_queue().get("pinned", []),
         )
         if not candidates:
             summary["stopped_reason"] = "no_eligible_candidates"
@@ -13698,6 +13730,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         candidates = pp.select_port_candidates(
             state["functions"], conformance_protected, active_binary=active_binary,
             limit=50,
+            pinned=load_priority_queue().get("pinned", []),
         )
         if not candidates:
             _poll_battletest()

@@ -2624,12 +2624,52 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     def get_queue():
         return jsonify(load_queue())
 
+    def _resolve_queue_key(data):
+        """Resolve a request body to the canonical priority-queue key
+        ('<program>::<addr>', addr = bare lowercase hex). Accepts either an
+        explicit {key} (legacy) or {program, address}. The frontend can't
+        reliably reconstruct the key (program carries a '.0' suffix, address
+        may be '0x'-prefixed), so we match against the real state keys here."""
+        key = data.get("key")
+        if key:
+            return key
+        address = data.get("address")
+        if not address:
+            return None
+        addr = str(address).strip().lower()
+        if addr.startswith("0x"):
+            addr = addr[2:]
+        program = data.get("program")
+        try:
+            funcs = load_state().get("functions", {})
+        except Exception:
+            funcs = {}
+        # 1) exact program::addr
+        if program:
+            cand = f"{program}::{addr}"
+            if cand in funcs:
+                return cand
+        # 2) unique state key ending in ::addr (optionally within same binary)
+        suffix = f"::{addr}"
+        matches = [k for k in funcs if k.endswith(suffix)]
+        if program and len(matches) > 1:
+            base = os.path.basename(program).split(".dll")[0]
+            pref = [k for k in matches if base and base in k]
+            if pref:
+                matches = pref
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return matches[0]
+        # 3) last resort: best-effort key so the pin still records intent
+        return f"{program}::{addr}" if program else None
+
     @app.route("/api/queue/pin", methods=["POST"])
     def pin_function():
         data = request.json
-        key = data.get("key")
+        key = _resolve_queue_key(data)
         if not key:
-            return jsonify({"error": "key required"}), 400
+            return jsonify({"error": "key or program+address required"}), 400
         queue = load_queue()
         if key not in queue["pinned"]:
             queue["pinned"].append(key)
@@ -2692,6 +2732,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception as e:
             response = {"ok": True, "status": "queued", "score_error": str(e)}
 
+        response["key"] = key
         socketio.emit(
             "queue_changed",
             {"action": "pin", "key": key, "status": response.get("status")},
@@ -2701,14 +2742,21 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     @app.route("/api/queue/unpin", methods=["POST"])
     def unpin_function():
         data = request.json
-        key = data.get("key")
+        key = _resolve_queue_key(data)
         if not key:
-            return jsonify({"error": "key required"}), 400
+            return jsonify({"error": "key or program+address required"}), 400
+        # Drop the resolved key AND any stored key for the same address, so an
+        # unpin succeeds even if the pin was recorded under a different program
+        # spelling.
+        addr_suffix = "::" + key.split("::", 1)[1] if "::" in key else None
         queue = load_queue()
-        queue["pinned"] = [k for k in queue["pinned"] if k != key]
+        queue["pinned"] = [
+            k for k in queue["pinned"]
+            if k != key and not (addr_suffix and k.endswith(addr_suffix))
+        ]
         save_queue(queue)
         socketio.emit("queue_changed", {"action": "unpin", "key": key})
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "key": key})
 
     @app.route("/api/queue/drain_done", methods=["POST"])
     def drain_done():

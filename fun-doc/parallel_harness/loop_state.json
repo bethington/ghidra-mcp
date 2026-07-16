@@ -1,5 +1,5 @@
 {
- "iteration": 27,
+ "iteration": 32,
  "cursor": 451,
  "attempted": {
   "SetPlayerTargetPosition": "iter1",
@@ -457,7 +457,7 @@
   "ITEMS_GetEncodedItemStreamSize": "iter25",
   "DATATBLS_IsItemQuantityDepleted": "iter26",
   "ITEMS_ParseItemFromBitStream": "iter26",
-  "STATS_GetTableValue64": "iter26",
+  "STATS_GetTableValue64": "iter30",
   "DATATBLS_GetDataTablePropertyStat": "iter26",
   "DATATBLS_GetLevelRecordField": "iter26",
   "DATATBLS_GetItemAffixLevelRequirementWrapper": "iter26",
@@ -469,7 +469,53 @@
   "UNITS_GetGraphicsModeField8": "iter26",
   "UNITS_GetGraphicsModeField0": "iter26",
   "DATATBLS_GetObjectRecordField7C": "iter26",
-  "DATATBLS_GetMissileTypeDataDword14": "iter26"
+  "DATATBLS_GetMissileTypeDataDword14": "iter26",
+  "DATATBLS_GetUnitBaseStatLegacy": "iter27",
+  "STATS_GetUnitBaseStatValue": "iter28",
+  "STATS_GetTotalStatWithModifiers": "iter27",
+  "STAT_GetGoldBankMax": "iter27",
+  "DATATBLS_GetStatCostRecordValue159": "iter27",
+  "DATATBLS_GetStatFromISC": "iter27",
+  "SKILLS_GetWeaponMinDamage": "iter27",
+  "STATS_GetISCStatValueByIndex": "iter27",
+  "STAT_GetMaxManaStatCost": "iter27",
+  "DATATBLS_GetItemStatCostPropertyValue": "iter27",
+  "STAT_GetStatBonusValue": "iter28",
+  "DATATBLS_GetItemStatCostValue": "iter28",
+  "DATATBLS_GetUnitBaseStatValue": "iter28",
+  "STAT_GetStatBonusValueWrapper": "iter28",
+  "DATATBLS_GetRandomStringB": "iter28",
+  "STAT_RecalculateVitalCosts": "iter28",
+  "STAT_ImportStateFlagsFromBuffer": "iter28",
+  "SKILLS_GetSkillDescriptionString": "iter28",
+  "STAT_GetUnitBaseStat": "iter28",
+  "DATATBLS_GetGlobalPositionData": "iter29",
+  "DATATBLS_GetBodyLocPropertyByte0": "iter29",
+  "DATATBLS_GetCoordinateX": "iter29",
+  "DATATBLS_GetOverlayRecordFields": "iter29",
+  "DATATBLS_GetNestedStructValues": "iter29",
+  "DATATBLS_GetBinkBufferErrorCode": "iter29",
+  "SKILLS_GetSkillDataRecord": "iter29",
+  "SKILLS_GetSkillListEntryByTypeIndex2": "iter29",
+  "DATATBLS_GetObjGroupRecord": "iter29",
+  "DATATBLS_PlaceWaypointsInLevel": "iter29",
+  "DATATBLS_GetOverlayRecordByte50": "iter30",
+  "ITEMS_SubstituteActItemCode": "iter30",
+  "DATATBLS_GetWeaponClassToken": "iter30",
+  "STAT_GetUnitWeaponClass": "iter30",
+  "STATS_ShiftValueForSpecialStats": "iter30",
+  "DATATBLS_GetItemTypeDataFlags14": "iter30",
+  "STATS_GetMatrixElementPtr": "iter30",
+  "STATS_GetSlotElementPtr": "iter30",
+  "ITEMS_ExecuteProperty": "iter31",
+  "ITEMS_GetItemRecordForUnit": "iter31",
+  "STATS_GetSlotByMode": "iter31",
+  "ITEMS_GetItemRecordFlagBit1": "iter31",
+  "ITEMS_IsItemTypeAllowed": "iter31",
+  "ITEMS_InvokePropertyCallback": "iter31",
+  "ITEMS_GetRandomInRangeFromUnitEx": "iter31",
+  "ITEMS_GetRandomFromUnitSeed": "iter31",
+  "SKILLS_GetSkillDamageBonus": "iter31"
  },
  "retry_queue": [],
  "buckets": {
@@ -1225,605 +1271,519 @@
    "result": "CRASH: DATATBLS_IsItemQuantityDepleted killed the oracle",
    "improvement": "DELEGATE-LANE DEEP-DEREF GUARD (crash fix): delegate getters that navigate a sub-pointer of the captured handle (pUnit->pStats->...) OR do struct-member pointer arithmetic (->pItemStatCostCompiledBase + 0x1626) passed to the delegate now DEFER to shadow-first. Not-abort but uncatchably-faults on degenerate capture. Validated: crasher defers, shallow delegates (GetItemDataRecord) still route.",
    "notes": "CRASH RECOVERY: relaunch #1 hit transient Diablo II Error startup dialog (lingering lock) -> dismissed + relaunched, clean. Also: charSelectReady flag is UNRELIABLE (False with char-select up); boot-recovery now polls list_characters count instead. Loaded summoner-skele, in-world."
+  },
+  {
+   "iter": 27,
+   "batch": 10,
+   "proven": 0,
+   "tally": {
+    "stateful": 6,
+    "shadow_deferred": 2,
+    "prove_failed": 1,
+    "shadow_leaf_pending": 1
+   },
+   "improvement": "UNRESOLVABLE-DELEGATE -> SHADOW-FIRST: delegate getters whose callee is not in the resolve table now route to shadow_leaf_pending + shadow backlog instead of dead-end stateful_skip. Root cause: STATS ISC family (STAT_GetGoldBankMax et al., 7 fns @6fd88cd0-6fd890f0) all delegate to EBX-implicit STATS_GetStatValueWithMinCheck @6fd88a80 which deep-walks pUnit->pStats -- the iter26 crash class hidden one call down. All 8 family members reclassified to shadow backlog in state.db.",
+   "notes": "GetUnitBaseStatLegacy direct-prove FAULTED (SEH-caught, game survived) -- confirms family hazard; bucketed shadow-first too."
+  },
+  {
+   "iter": 28,
+   "batch": 10,
+   "proven": 0,
+   "tally": {
+    "shadow_deferred": 6,
+    "malformed": 4
+   },
+   "improvement": "VOID-RETURN MUTATOR GUARD: void fns that deref params or delegate now skip BEFORE any prove/shadow routing. iter28 near-miss: 3 mutators (STAT_RecalculateVitalCosts in-place clamp, STAT_ImportStateFlagsFromBuffer free+realloc, DATATBLS_GetRandomStringB loops STATLIST_AddStat despite \"Get\" name) reached draft lanes; only flaky malformed minimax responses stopped live calls that could have done wild frees in-process. Guard verified on all 3 + 2 negative controls. Also confirmed: the 6 shadow_leaf_pending routings are the iter27 unresolvable-delegate fix working.",
+   "notes": "malformed_response burst was transient minimax API degradation (rerun parsed clean); STAT_GetStatBonusValueWrapper rerun -> no_vectors, correct terminal (register-implicit ECX/ESI passthrough, ESP+0xC layout unmintable)."
+  },
+  {
+   "iter": 29,
+   "batch": 10,
+   "proven": 2,
+   "tally": {
+    "proven": 2,
+    "stateful": 4,
+    "shadow_deferred": 2,
+    "prove_failed": 1,
+    "marshal_fault": 1
+   },
+   "improvement": "CAST-STYLE DEEP-DEREF DEFER: depth>=2 handle chains spelled as *(int*)(*(int*)(ctx+N)+M) now defer to shadow-first (the -> regexes were blind to untyped decompiles). Both iter29 SEH faults (GetBinkBufferErrorCode, GetNestedStructValues) were this class; verified 2 pos + 3 neg controls. HAND-PROOF: DATATBLS_GetObjGroupRecord 15/15 CONF_LIVE -- draft had resolved the WRONG globals (Objects.txt instead of ObjGroup; ObjGroup pair 0x6fdf0ba0/0x6fdf0b9c absent from resolve table = dat_global gap); hand reimpl reads absolute addresses. BACKLOG: add ObjGroup globals to resolve table.",
+   "notes": "SKILLS_GetSkillListEntryByTypeIndex2 proven but weak_proof-flagged (degenerate capture, same value 4/4) -- needs shadow/battletest before promotion. void-mutator guard correctly caught PlaceWaypointsInLevel + SKILLS_GetSkillDataRecord (outbuf writer w/ abort tail -- bucket right, label imprecise)."
+  },
+  {
+   "iter": 30,
+   "batch": 10,
+   "proven": 1,
+   "tally": {
+    "proven": 1,
+    "shadow_deferred": 4,
+    "stateful": 2,
+    "no_vectors": 2,
+    "malformed": 3
+   },
+   "improvement": "HAND-PROOF STATS_GetTableValue64 16/16 CONF_LIVE via orig_regs (register-explicit EAX index, unsigned JC bounds, table @0x6fde3200). Draft time 1402s + 3 malformed = minimax API degraded again tonight (correlates with slow sets). CAPABILITY GAP FOUND: in-out pointer params degenerate (oracle outbuf is zero-filled scratch -> shift of 0 == no-shift of 0); STATS_ShiftValueForSpecialStats parked until a SEEDED in-out buffer capability exists.",
+   "notes": "STAT_GetUnitWeaponClass -> shadow backlog (deep inventory walk, dwType-gated)."
+  },
+  {
+   "iter": 31,
+   "batch": 10,
+   "proven": 0,
+   "tally": {
+    "shadow_deferred": 4,
+    "stateful": 3,
+    "handle_abort": 1,
+    "malformed": 1
+   },
+   "improvement": "QUEUE REORDER (yield fix): pre-classified all 99 remaining getter_queue entries via Ghidra+classifier (no LLM): 36 global_leaf + 5 leaf = 41 direct-provable, but scattered behind handle-heavy STATS/ITEMS pockets that produced 3 near-zero sets. Queue reordered provable-first (preclass field persisted per entry).",
+   "notes": "ITEMS region = deferral-heavy as expected; guards routing correctly. minimax still slow (912s)."
   }
  ],
  "phase": "proving",
  "getter_queue": [
   {
-   "name": "STATS_GetUnitBaseStatValue",
-   "address": "0x6fd88c80"
-  },
-  {
-   "name": "STATS_GetTotalStatWithModifiers",
-   "address": "0x6fd88cd0"
-  },
-  {
-   "name": "DATATBLS_GetUnitBaseStatLegacy",
-   "address": "0x6fd88dc0"
-  },
-  {
-   "name": "STAT_GetGoldBankMax",
-   "address": "0x6fd88de0"
-  },
-  {
-   "name": "DATATBLS_GetStatCostRecordValue159",
-   "address": "0x6fd88e30"
-  },
-  {
-   "name": "DATATBLS_GetStatFromISC",
-   "address": "0x6fd88e80"
-  },
-  {
-   "name": "SKILLS_GetWeaponMinDamage",
-   "address": "0x6fd88ed0"
-  },
-  {
-   "name": "STATS_GetISCStatValueByIndex",
-   "address": "0x6fd88f60"
-  },
-  {
-   "name": "STAT_GetMaxManaStatCost",
-   "address": "0x6fd890a0"
-  },
-  {
-   "name": "DATATBLS_GetItemStatCostPropertyValue",
-   "address": "0x6fd890f0"
-  },
-  {
-   "name": "STAT_GetStatBonusValue",
-   "address": "0x6fd89380"
-  },
-  {
-   "name": "DATATBLS_GetItemStatCostValue",
-   "address": "0x6fd89430"
-  },
-  {
-   "name": "DATATBLS_GetUnitBaseStatValue",
-   "address": "0x6fd89490"
-  },
-  {
-   "name": "STATS_GetUnitBaseStatValue",
-   "address": "0x6fd894e0"
-  },
-  {
-   "name": "STAT_GetStatBonusValueWrapper",
-   "address": "0x6fd89cc0"
-  },
-  {
-   "name": "DATATBLS_GetRandomStringB",
-   "address": "0x6fd8a600"
-  },
-  {
-   "name": "STAT_RecalculateVitalCosts",
-   "address": "0x6fd8ab30"
-  },
-  {
-   "name": "STAT_ImportStateFlagsFromBuffer",
-   "address": "0x6fd8af00"
-  },
-  {
-   "name": "SKILLS_GetSkillDescriptionString",
-   "address": "0x6fd8b1a0"
-  },
-  {
-   "name": "STAT_GetUnitBaseStat",
-   "address": "0x6fd8b270"
-  },
-  {
-   "name": "DATATBLS_GetGlobalPositionData",
-   "address": "0x6fd8b470"
-  },
-  {
-   "name": "DATATBLS_GetBodyLocPropertyByte0",
-   "address": "0x6fd8b860"
-  },
-  {
-   "name": "DATATBLS_GetCoordinateX",
-   "address": "0x6fd8bad0"
-  },
-  {
-   "name": "DATATBLS_GetOverlayRecordFields",
-   "address": "0x6fd8bb10"
-  },
-  {
-   "name": "DATATBLS_GetNestedStructValues",
-   "address": "0x6fd8bb50"
-  },
-  {
-   "name": "DATATBLS_GetBinkBufferErrorCode",
-   "address": "0x6fd8bf20"
-  },
-  {
-   "name": "SKILLS_GetSkillDataRecord",
-   "address": "0x6fd8d060"
-  },
-  {
-   "name": "SKILLS_GetSkillListEntryByTypeIndex2",
-   "address": "0x6fd8d160"
-  },
-  {
-   "name": "DATATBLS_GetObjGroupRecord",
-   "address": "0x6fd8e960"
-  },
-  {
-   "name": "DATATBLS_PlaceWaypointsInLevel",
-   "address": "0x6fd91070"
-  },
-  {
-   "name": "DATATBLS_GetOverlayRecordByte50",
-   "address": "0x6fd93710"
-  },
-  {
-   "name": "ITEMS_SubstituteActItemCode",
-   "address": "0x6fd93820"
-  },
-  {
-   "name": "DATATBLS_GetWeaponClassToken",
-   "address": "0x6fd93860"
-  },
-  {
-   "name": "STAT_GetUnitWeaponClass",
-   "address": "0x6fd94350"
-  },
-  {
-   "name": "STATS_GetTableValue64",
-   "address": "0x6fd95620"
-  },
-  {
-   "name": "STATS_ShiftValueForSpecialStats",
-   "address": "0x6fd95640"
-  },
-  {
-   "name": "DATATBLS_GetItemTypeDataFlags14",
-   "address": "0x6fd95780"
-  },
-  {
-   "name": "STATS_GetMatrixElementPtr",
-   "address": "0x6fd958c0"
-  },
-  {
-   "name": "STATS_GetSlotElementPtr",
-   "address": "0x6fd95920"
-  },
-  {
-   "name": "STATS_GetSlotElementPtr",
-   "address": "0x6fd95950"
-  },
-  {
-   "name": "ITEMS_ExecuteProperty",
-   "address": "0x6fd95990"
-  },
-  {
-   "name": "ITEMS_GetItemRecordForUnit",
-   "address": "0x6fd95a40"
-  },
-  {
-   "name": "STATS_GetSlotByMode",
-   "address": "0x6fd95b80"
-  },
-  {
-   "name": "ITEMS_GetItemRecordFlagBit1",
-   "address": "0x6fd95be0"
-  },
-  {
-   "name": "ITEMS_IsItemTypeAllowed",
-   "address": "0x6fd95e50"
-  },
-  {
-   "name": "ITEMS_InvokePropertyCallback",
-   "address": "0x6fd960b0"
-  },
-  {
-   "name": "ITEMS_GetRandomInRangeFromUnitEx",
-   "address": "0x6fd963f0"
-  },
-  {
-   "name": "ITEMS_GetRandomInRangeFromUnitEx",
-   "address": "0x6fd964d0"
-  },
-  {
-   "name": "ITEMS_GetRandomFromUnitSeed",
-   "address": "0x6fd965b0"
-  },
-  {
-   "name": "SKILLS_GetSkillDamageBonus",
-   "address": "0x6fd96600"
-  },
-  {
-   "name": "SKILLS_GetClassSkillOffset",
-   "address": "0x6fd9dd10"
-  },
-  {
-   "name": "SKILLS_GetMonsterSkillLevel",
-   "address": "0x6fd9e060"
-  },
-  {
-   "name": "DATATBLS_GetItemTypeSubArrayEntry",
-   "address": "0x6fd9e0e0"
-  },
-  {
-   "name": "SKILLS_GetSkillNodeField8Safe",
-   "address": "0x6fd9e180"
-  },
-  {
-   "name": "SKILLS_GetSkillNodeRecord",
-   "address": "0x6fd9e1c0"
-  },
-  {
-   "name": "SKILLS_GetSkillNodeField",
-   "address": "0x6fd9e240"
-  },
-  {
-   "name": "DATATBLS_GetNestedField0xA8x14",
-   "address": "0x6fd9e2e0"
-  },
-  {
-   "name": "SKILLS_GetNodeField08",
-   "address": "0x6fd9e460"
-  },
-  {
-   "name": "SKILLS_GetBestSkillByType",
-   "address": "0x6fd9e480"
-  },
-  {
-   "name": "DATATBLS_GetMonsterTypeRecord",
-   "address": "0x6fd9e520"
-  },
-  {
-   "name": "SKILLS_GetBitFlag1",
-   "address": "0x6fd9e5a0"
-  },
-  {
-   "name": "SKILLS_GetItemSkillStat",
-   "address": "0x6fd9e5e0"
-  },
-  {
-   "name": "DATATBLS_GetGlobalTableEntry",
-   "address": "0x6fd9e630"
-  },
-  {
-   "name": "SKILLS_GetGlobalTableEntry6FD9E680",
-   "address": "0x6fd9e680"
-  },
-  {
-   "name": "DATATBLS_GetLevelTileYProperty",
-   "address": "0x6fd9e6d0"
-  },
-  {
-   "name": "DATATBLS_GetItemTypeFieldC",
-   "address": "0x6fd9e900"
-  },
-  {
-   "name": "SKILLS_HasSkillId",
-   "address": "0x6fd9eb40"
-  },
-  {
-   "name": "UNITS_GetUnitProperty",
-   "address": "0x6fd9ebf0"
-  },
-  {
-   "name": "DATATBLS_GetMonStatsAnimIndex",
-   "address": "0x6fd9ec50"
-  },
-  {
-   "name": "DATATBLS_GetItemDataRecordKey",
-   "address": "0x6fd9ed60"
-  },
-  {
-   "name": "SKILLS_GetGlobalPositionData",
-   "address": "0x6fd9f080"
-  },
-  {
-   "name": "STAT_GetMaxDirectItemTypeStat",
-   "address": "0x6fd9f200"
-  },
-  {
-   "name": "DATATBLS_GetAnimLevelRequirement",
-   "address": "0x6fd9f510"
-  },
-  {
-   "name": "STAT_GetMaxItemTypeStatValueForUnit",
-   "address": "0x6fd9f640"
-  },
-  {
-   "name": "SKILLS_LookupSkillIndex",
-   "address": "0x6fd9f780"
-  },
-  {
-   "name": "SKILLS_GetSkillStatBonusAlt",
-   "address": "0x6fd9f870"
-  },
-  {
-   "name": "STAT_GetAnimDataFrameInfo",
-   "address": "0x6fd9fe80"
-  },
-  {
-   "name": "DATATBLS_GetUnitItemField",
-   "address": "0x6fda0150"
-  },
-  {
-   "name": "SKILLS_GetItemDamageBonus",
-   "address": "0x6fda0560"
-  },
-  {
-   "name": "SKILLS_GetSkillAvailability",
-   "address": "0x6fda0930"
-  },
-  {
-   "name": "STATS_GetStatByMode",
-   "address": "0x6fda0c30"
-  },
-  {
-   "name": "ITEMS_GetWeaponDamageTier",
-   "address": "0x6fda0d40"
-  },
-  {
-   "name": "SKILLS_GetEffectiveSkillLevel",
-   "address": "0x6fda0ea0"
-  },
-  {
-   "name": "DATATBLS_ResolveAttackRangeType",
-   "address": "0x6fda1000"
-  },
-  {
-   "name": "DATATBLS_GetTableRecord0x94",
-   "address": "0x6fda2ff0"
-  },
-  {
-   "name": "DATATBLS_GetItemRecordByIndex",
-   "address": "0x6fda3420"
-  },
-  {
-   "name": "OVERLAY_LookupRecordByKey",
-   "address": "0x6fda3480"
-  },
-  {
-   "name": "DATATBLS_GetItemRecordFields4A4B",
-   "address": "0x6fda3850"
-  },
-  {
-   "name": "DATATBLS_GetMonLevelStats",
-   "address": "0x6fda4a00"
-  },
-  {
-   "name": "DATATBLS_GetRandomStringD",
-   "address": "0x6fdaa7d0"
-  },
-  {
-   "name": "DATATBLS_GetRandomStringD",
-   "address": "0x6fdaa810"
-  },
-  {
-   "name": "DATATBLS_GetRandomStringD",
-   "address": "0x6fdaa850"
-  },
-  {
-   "name": "DATATBLS_GetExpressionTokenIndex",
-   "address": "0x6fdadcd0"
-  },
-  {
    "name": "DATATBLS_GetCompCodeAtIndex",
-   "address": "0x6fdae1c0"
+   "address": "0x6fdae1c0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetStringFromTable",
-   "address": "0x6fdae350"
-  },
-  {
-   "name": "ITEMS_GetItemName",
-   "address": "0x6fdae410"
+   "address": "0x6fdae350",
+   "preclass": "leaf"
   },
   {
    "name": "DATATBLS_GetMaxItemLevelByDifficulty",
-   "address": "0x6fdae7e0"
+   "address": "0x6fdae7e0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetExperienceLevelForDifficulty",
-   "address": "0x6fdae810"
+   "address": "0x6fdae810",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetDifficultyLevelsBIN",
-   "address": "0x6fdb03c0"
+   "address": "0x6fdb03c0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetItemQualityBracket",
-   "address": "0x6fdb08d0"
+   "address": "0x6fdb08d0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetWaypointBreakpoint",
-   "address": "0x6fdb7c90"
-  },
-  {
-   "name": "DATATBLS_ExportStateFlagsToBuffer",
-   "address": "0x6fdb7d00"
+   "address": "0x6fdb7c90",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_ImportStateFlagsFromBuffer",
-   "address": "0x6fdb7d60"
+   "address": "0x6fdb7d60",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_TryGetSkillRecordOverlay",
-   "address": "0x6fdb7e50"
+   "address": "0x6fdb7e50",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetElementTransformValue",
-   "address": "0x6fdb83e0"
+   "address": "0x6fdb83e0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetElementTransformValue",
-   "address": "0x6fdb83f0"
-  },
-  {
-   "name": "STATS_ScaleFieldsByFactor",
-   "address": "0x6fdb9c60"
+   "address": "0x6fdb83f0",
+   "preclass": "global_leaf"
   },
   {
    "name": "MISSILE_GetMissileStatByLevel",
-   "address": "0x6fdb9dc0"
+   "address": "0x6fdb9dc0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetMissileParamByte",
-   "address": "0x6fdb9e70"
-  },
-  {
-   "name": "MISSILE_GetTargetSpeedFields",
-   "address": "0x6fdb9eb0"
-  },
-  {
-   "name": "ITEMS_GetUnitItemTableFieldEC",
-   "address": "0x6fdba010"
-  },
-  {
-   "name": "MISSILE_GetMissileTypeShort04",
-   "address": "0x6fdba0e0"
-  },
-  {
-   "name": "MISSILE_GetRemainingFrames",
-   "address": "0x6fdba240"
-  },
-  {
-   "name": "DATATBLS_GetMissileDataField10",
-   "address": "0x6fdba270"
-  },
-  {
-   "name": "MISSILE_GetMissileTypeDataShort0C",
-   "address": "0x6fdba2d0"
-  },
-  {
-   "name": "MISSILE_GetTypeDataDword14",
-   "address": "0x6fdba330"
-  },
-  {
-   "name": "MISSILE_GetParamValue",
-   "address": "0x6fdba790"
-  },
-  {
-   "name": "SKILLS_GetElementalStatBonus",
-   "address": "0x6fdbab20"
+   "address": "0x6fdb9e70",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_LookupWallFileIndex",
-   "address": "0x6fdbc280"
+   "address": "0x6fdbc280",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_LookupWallFileIndex",
-   "address": "0x6fdbc300"
-  },
-  {
-   "name": "DATATBLS_BuildLevelTypeFilenameTable",
-   "address": "0x6fdbc3a0"
-  },
-  {
-   "name": "DATATBLS_GetLvlSubTxtRecord",
-   "address": "0x6fdbc4d0"
+   "address": "0x6fdbc300",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetLvlMazeRecordById",
-   "address": "0x6fdbc520"
-  },
-  {
-   "name": "DATATBLS_GetLevelWarpRecord",
-   "address": "0x6fdbc5d0"
+   "address": "0x6fdbc520",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetLvlPrestRecordById",
-   "address": "0x6fdbc950"
+   "address": "0x6fdbc950",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetLevelTypeString",
-   "address": "0x6fdbca70"
+   "address": "0x6fdbca70",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetDataRecord9C",
-   "address": "0x6fdbcb20"
-  },
-  {
-   "name": "DATATBLS_BuildLevelResultIndexTable",
-   "address": "0x6fdbcb50"
+   "address": "0x6fdbcb20",
+   "preclass": "global_leaf"
   },
   {
    "name": "SKILLS_GetSkillDataRecord",
-   "address": "0x6fdbccc0"
+   "address": "0x6fdbccc0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetSkillRangeValue",
-   "address": "0x6fdbe0c0"
+   "address": "0x6fdbe0c0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetRunesRecord",
-   "address": "0x6fdc0fa0"
+   "address": "0x6fdc0fa0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetMonsterTypeRecord",
-   "address": "0x6fdc14d0"
+   "address": "0x6fdc14d0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetRareAffixRecord",
-   "address": "0x6fdc1790"
+   "address": "0x6fdc1790",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetGlobalRecordById",
-   "address": "0x6fdc1820"
+   "address": "0x6fdc1820",
+   "preclass": "global_leaf"
   },
   {
    "name": "ITEMS_GetDataByCode",
-   "address": "0x6fdc1940"
+   "address": "0x6fdc1940",
+   "preclass": "leaf"
   },
   {
    "name": "UNITS_IsValidPathableType",
-   "address": "0x6fdcb7f0"
-  },
-  {
-   "name": "DATATBLS_ClampDataTableFieldByType",
-   "address": "0x6fdcc760"
+   "address": "0x6fdcb7f0",
+   "preclass": "leaf"
   },
   {
    "name": "DATATBLS_GetLevelDataRecord",
-   "address": "0x6fdcfe40"
-  },
-  {
-   "name": "DATATBLS_GetLevelRecordByte0x1E",
-   "address": "0x6fdcffb0"
+   "address": "0x6fdcfe40",
+   "preclass": "global_leaf"
   },
   {
    "name": "SKILLS_GetSkillDescRecordById",
-   "address": "0x6fdd1ea0"
-  },
-  {
-   "name": "DATATBLS_GetGridRecordSubEntry",
-   "address": "0x6fdd1f20"
-  },
-  {
-   "name": "DATATBLS_GetGridRecordHeader",
-   "address": "0x6fdd2030"
+   "address": "0x6fdd1ea0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetOverlayRecordByte50",
-   "address": "0x6fdd2ce0"
+   "address": "0x6fdd2ce0",
+   "preclass": "global_leaf"
   },
   {
    "name": "DATATBLS_GetOverlayAnimationField",
-   "address": "0x6fdd2d20"
+   "address": "0x6fdd2d20",
+   "preclass": "global_leaf"
+  },
+  {
+   "name": "SKILLS_GetMonsterSkillLevel",
+   "address": "0x6fd9e060",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "DATATBLS_GetItemTypeSubArrayEntry",
+   "address": "0x6fd9e0e0",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "SKILLS_GetSkillNodeField8Safe",
+   "address": "0x6fd9e180",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "SKILLS_GetSkillNodeRecord",
+   "address": "0x6fd9e1c0",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "DATATBLS_GetNestedField0xA8x14",
+   "address": "0x6fd9e2e0",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "SKILLS_GetNodeField08",
+   "address": "0x6fd9e460",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetBestSkillByType",
+   "address": "0x6fd9e480",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "DATATBLS_GetMonsterTypeRecord",
+   "address": "0x6fd9e520",
+   "preclass": "global_leaf_castdeep"
+  },
+  {
+   "name": "SKILLS_GetItemSkillStat",
+   "address": "0x6fd9e5e0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetGlobalTableEntry",
+   "address": "0x6fd9e630",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetGlobalTableEntry6FD9E680",
+   "address": "0x6fd9e680",
+   "preclass": "stateful"
+  },
+  {
+   "name": "UNITS_GetUnitProperty",
+   "address": "0x6fd9ebf0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetMonStatsAnimIndex",
+   "address": "0x6fd9ec50",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetItemDataRecordKey",
+   "address": "0x6fd9ed60",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetGlobalPositionData",
+   "address": "0x6fd9f080",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "STAT_GetMaxDirectItemTypeStat",
+   "address": "0x6fd9f200",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetAnimLevelRequirement",
+   "address": "0x6fd9f510",
+   "preclass": "stateful"
+  },
+  {
+   "name": "STAT_GetMaxItemTypeStatValueForUnit",
+   "address": "0x6fd9f640",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_LookupSkillIndex",
+   "address": "0x6fd9f780",
+   "preclass": "global_leaf_castdeep"
+  },
+  {
+   "name": "SKILLS_GetSkillStatBonusAlt",
+   "address": "0x6fd9f870",
+   "preclass": "stateful"
+  },
+  {
+   "name": "STAT_GetAnimDataFrameInfo",
+   "address": "0x6fd9fe80",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetUnitItemField",
+   "address": "0x6fda0150",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetItemDamageBonus",
+   "address": "0x6fda0560",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetSkillAvailability",
+   "address": "0x6fda0930",
+   "preclass": "stateful"
+  },
+  {
+   "name": "STATS_GetStatByMode",
+   "address": "0x6fda0c30",
+   "preclass": "stateful"
+  },
+  {
+   "name": "ITEMS_GetWeaponDamageTier",
+   "address": "0x6fda0d40",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetEffectiveSkillLevel",
+   "address": "0x6fda0ea0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_ResolveAttackRangeType",
+   "address": "0x6fda1000",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetItemRecordFields4A4B",
+   "address": "0x6fda3850",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetMonLevelStats",
+   "address": "0x6fda4a00",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa7d0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa810",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetRandomStringD",
+   "address": "0x6fdaa850",
+   "preclass": "stateful"
+  },
+  {
+   "name": "ITEMS_GetItemName",
+   "address": "0x6fdae410",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "DATATBLS_ExportStateFlagsToBuffer",
+   "address": "0x6fdb7d00",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "STATS_ScaleFieldsByFactor",
+   "address": "0x6fdb9c60",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "MISSILE_GetTargetSpeedFields",
+   "address": "0x6fdb9eb0",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "ITEMS_GetUnitItemTableFieldEC",
+   "address": "0x6fdba010",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "MISSILE_GetMissileTypeShort04",
+   "address": "0x6fdba0e0",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "MISSILE_GetRemainingFrames",
+   "address": "0x6fdba240",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "DATATBLS_GetMissileDataField10",
+   "address": "0x6fdba270",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "MISSILE_GetMissileTypeDataShort0C",
+   "address": "0x6fdba2d0",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "MISSILE_GetTypeDataDword14",
+   "address": "0x6fdba330",
+   "preclass": "shadow_leaf"
+  },
+  {
+   "name": "MISSILE_GetParamValue",
+   "address": "0x6fdba790",
+   "preclass": "stateful"
+  },
+  {
+   "name": "SKILLS_GetElementalStatBonus",
+   "address": "0x6fdbab20",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_BuildLevelTypeFilenameTable",
+   "address": "0x6fdbc3a0",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "DATATBLS_GetLvlSubTxtRecord",
+   "address": "0x6fdbc4d0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetLevelWarpRecord",
+   "address": "0x6fdbc5d0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_BuildLevelResultIndexTable",
+   "address": "0x6fdbcb50",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "DATATBLS_ClampDataTableFieldByType",
+   "address": "0x6fdcc760",
+   "preclass": "void_mutator"
+  },
+  {
+   "name": "DATATBLS_GetLevelRecordByte0x1E",
+   "address": "0x6fdcffb0",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetGridRecordSubEntry",
+   "address": "0x6fdd1f20",
+   "preclass": "stateful"
+  },
+  {
+   "name": "DATATBLS_GetGridRecordHeader",
+   "address": "0x6fdd2030",
+   "preclass": "void_mutator"
   },
   {
    "name": "OVERLAY_GetRecordMultipleFields",
-   "address": "0x6fdd2d60"
+   "address": "0x6fdd2d60",
+   "preclass": "stateful"
   },
   {
    "name": "DATATBLS_ComputeLevelRandomFlags",
-   "address": "0x6fdd3740"
+   "address": "0x6fdd3740",
+   "preclass": "stateful"
   },
   {
    "name": "DATATBLS_GetSkillDescSlotEntry",
-   "address": "0x6fdd4b40"
+   "address": "0x6fdd4b40",
+   "preclass": "global_leaf_castdeep"
   },
   {
    "name": "DATATBLS_GetMonsterSoundVariantByIndex",
-   "address": "0x6fdd4bd0"
+   "address": "0x6fdd4bd0",
+   "preclass": "global_leaf_castdeep"
   },
   {
    "name": "DATATBLS_GetMonsterSkillDescSlotLimit",
-   "address": "0x6fdd4c30"
+   "address": "0x6fdd4c30",
+   "preclass": "stateful"
   }
  ]
 }
