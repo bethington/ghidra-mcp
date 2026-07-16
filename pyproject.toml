@@ -1,6 +1,6 @@
 [project]
 name = "ghidra-mcp-bridge"
-version = "5.15.0"
+version = "5.16.0"
 description = "GhidraMCP bridge — a thin MCP↔HTTP multiplexer exposing Ghidra reverse-engineering tools to AI clients."
 readme = "README.md"
 requires-python = ">=3.10"
