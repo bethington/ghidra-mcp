@@ -4,7 +4,7 @@
 
 MCP server bridging Ghidra reverse engineering with AI tools. 267 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.16.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
+- **Package**: `com.xebyte` | **Version**: 5.17.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
 
 ## Boil the ocean
 

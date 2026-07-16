@@ -35,18 +35,23 @@ LINE_RE = re.compile(r"^(?P<name>.+?)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[(?P<kind>
 
 def gget(path, **params):
     params.setdefault("program", PROGRAM)
-    r = requests.get(f"{GHIDRA}{path}", params=params, timeout=30)
+    r = requests.get(f"{GHIDRA}{path}", params=params, timeout=45)
     r.raise_for_status()
-    ct = r.headers.get("content-type", "")
-    return r.json() if "json" in ct else r.text
+    # Ghidra serves JSON as text/plain, so try JSON first regardless of header.
+    try:
+        return r.json()
+    except ValueError:
+        return r.text
 
 
 def gpost(path, **body):
     prog = body.pop("program", PROGRAM)
-    r = requests.post(f"{GHIDRA}{path}", params={"program": prog}, json=body, timeout=30)
+    r = requests.post(f"{GHIDRA}{path}", params={"program": prog}, json=body, timeout=45)
     r.raise_for_status()
-    ct = r.headers.get("content-type", "")
-    return r.json() if "json" in ct else r.text
+    try:
+        return r.json()
+    except ValueError:
+        return r.text
 
 
 def type_size(t):
@@ -73,24 +78,16 @@ def is_undefined(t):
 
 
 def list_all_globals():
-    out, offset, page = [], 0, 500
-    while True:
-        txt = gget("/list_globals", limit=page, offset=offset,
-                   filter="all", type_filter="all", include_all_sections="false")
-        if isinstance(txt, dict):
-            txt = txt.get("text") or txt.get("result") or str(txt)
-        rows = list(LINE_RE.finditer(txt))
-        if not rows:
-            break
-        for m in rows:
-            out.append({"name": m["name"].strip(), "addr": m["addr"].lower(),
-                        "kind": m["kind"], "type": m["type"].strip(),
-                        "xrefs": int(m["xrefs"])})
-        if len(rows) < page:
-            break
-        offset += page
-        if offset > 100000:
-            break
+    # Single large pull — list_globals returns all ~2200 in one text response.
+    txt = gget("/list_globals", limit=20000,
+               filter="all", type_filter="all", include_all_sections="false")
+    if isinstance(txt, dict):
+        txt = txt.get("text") or txt.get("result") or str(txt)
+    out = []
+    for m in LINE_RE.finditer(txt):
+        out.append({"name": m["name"].strip(), "addr": m["addr"].lower(),
+                    "kind": m["kind"], "type": m["type"].strip(),
+                    "xrefs": int(m["xrefs"])})
     return out
 
 
@@ -104,42 +101,40 @@ def main():
     globs = list_all_globals()
     print(f"[fix-strings] {len(globs)} globals enumerated")
 
-    # Stage 1: cheap type filter -> string candidates
-    cands = []
-    for g in globs:
-        sz = type_size(g["type"])
-        if sz is None:
-            continue                      # struct/pointer/already-string -> skip
-        if is_undefined(g["type"]) and g["xrefs"] == 0:
-            continue                      # undefined w/o a data xref -> skip
-        cands.append((g, sz))
-    print(f"[fix-strings] {len(cands)} char/undefined candidates to inspect")
+    # Target: g_sz*/g_lpsz* NARROW-string-named globals not already typed `string`.
+    # The name is authoritative (the `sz` prefix deliberately means zero-terminated
+    # string) and avoids the is_likely_string false-positives on 2-byte g_w words.
+    # g_wsz* wide strings need the `unicode` type — reported, not touched here.
+    def is_narrow_sz(name):
+        n = name.lower()
+        return (n.startswith("g_sz") or n.startswith("g_lpsz")) and not n.startswith("g_wsz")
+
+    wide = [g for g in globs if g["name"].lower().startswith("g_wsz")]
+    cands = [g for g in globs if is_narrow_sz(g["name"]) and g["type"] != "string"]
+    print(f"[fix-strings] {len(cands)} g_sz* globals not yet typed `string` "
+          f"(+ {len(wide)} g_wsz wide-string, reported only)")
     if args.limit:
         cands = cands[: args.limit]
 
-    fixes, skipped_notstr, skipped_covered, errors = [], 0, 0, []
-    for g, cur_sz in cands:
+    fixes, skipped_notstr, errors = [], 0, []
+    for g in cands:
         addr = "0x" + g["addr"]
         try:
             info = gget("/inspect_memory_content", address=addr,
                         length=INSPECT_LEN, detect_strings="true")
         except Exception as e:
             errors.append((g["addr"], f"inspect: {e}")); continue
-        if not isinstance(info, dict):
+        det = (info.get("detected_string") if isinstance(info, dict) else "") or ""
+        slen = (info.get("string_length") if isinstance(info, dict) else 0) or 0
+        # GUARD: only apply where there is real string content at the address.
+        if not det or slen < 1:
             skipped_notstr += 1; continue
-        if not info.get("is_likely_string"):
-            skipped_notstr += 1; continue                 # GUARD: real string only
-        slen = info.get("string_length") or 0
-        if slen <= cur_sz:
-            skipped_covered += 1; continue                # already covers it
         fixes.append({"addr": g["addr"], "name": g["name"], "cur": g["type"],
-                      "cur_sz": cur_sz, "slen": slen,
-                      "text": (info.get("detected_string") or "")[:48]})
+                      "slen": slen, "text": det[:48]})
 
     print(f"\n[fix-strings] === RESULT ===")
-    print(f"  would re-type : {len(fixes)}")
-    print(f"  skipped (not a string / guard) : {skipped_notstr}")
-    print(f"  skipped (type already covers)  : {skipped_covered}")
+    print(f"  would re-type to `string` : {len(fixes)}")
+    print(f"  skipped (no string content at addr / guard) : {skipped_notstr}")
     print(f"  inspect errors : {len(errors)}")
     print(f"\n  sample of what would change (current -> string[detected_len]):")
     for f in fixes[:25]:
@@ -157,13 +152,20 @@ def main():
         try:
             res = gpost("/apply_data_type", address="0x" + f["addr"],
                         type_name="string", clear_existing=True)
-            s = str(res)
-            if '"error"' in s or "ERROR" in s or "rejected" in s:
-                fail.append((f["addr"], s[:120]))
+            # res is a parsed dict (JSON) or a str — detect failure in both.
+            err = None
+            if isinstance(res, dict):
+                err = res.get("error") or (res.get("message") if res.get("status") == "rejected" else None)
+            else:
+                low = str(res).lower()
+                if "error" in low or "conflict" in low or "rejected" in low:
+                    err = str(res)[:140]
+            if err:
+                fail.append((f["addr"], str(err)[:140]))
             else:
                 ok += 1
         except Exception as e:
-            fail.append((f["addr"], str(e)[:120]))
+            fail.append((f["addr"], str(e)[:140]))
         if i % 50 == 0:
             print(f"    {i}/{len(fixes)} ...")
     print(f"\n[fix-strings] APPLIED ok={ok} failed={len(fail)}")
