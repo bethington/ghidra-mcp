@@ -27,6 +27,12 @@ Complete version history for the Ghidra MCP Server project.
     wrapped via `ThreadingStrategy`, and covered by
     `tests/integration/test_program_storage_endpoints.py`. Endpoint catalog and
     tool count updated (256 → 267).
+- **Any-address comment tools: `/get_comment` + `/set_comment` (2 new
+  endpoints).** Read and write any of Ghidra's five comment types (plate, pre,
+  post, EOL, repeatable) at any address — data, instructions, or undefined
+  bytes — where the existing comment tools were function-scoped. Assess-globals
+  requires a comment on every documented global; these are the tools that make
+  that enforceable. Tool count 267 → 269.
 
 - **Autohand Code MCP setup documentation.** The stdio quick start now includes
   the `autohand mcp add` command for launching the bridge from a cloned checkout.

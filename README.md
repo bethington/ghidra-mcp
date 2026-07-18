@@ -20,13 +20,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **267 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **269 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **267 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **269 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -56,7 +56,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **267 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **269 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -608,7 +608,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 267 tools fully implemented
+- **MCP Tools**: 269 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -619,24 +619,35 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-256 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+269 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
 ### Program & Session Management
 
 - `analysis_status` - Get auto-analysis status for open programs
 - `close_program` - Close an open program by project path or name
+- `create_property_map` - Create a user property map to store typed values keyed by address
+- `delete_property_map` - Delete a user property map and all values it holds
 - `exit_ghidra` - Save and exit Ghidra
 - `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
 - `get_current_program_info` - Get current program info
 - `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
+- `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
+- `get_property` - Read the value stored at an address in a property map
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
 - `list_open_programs` - List open programs
+- `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
+- `list_properties` - List (address, value) entries stored in a property map, with pagination
+- `list_property_maps` - List user-defined property maps — typed per-address key→value stores
 - `open_program` - Open program from project
 - `reanalyze` - Trigger full auto-analysis on a program
+- `remove_program_option` - Remove an option from a program option group
+- `remove_property` - Remove the value stored at a single address in a property map
 - `save_all_programs` - Save all open programs
 - `save_program` - Save current program
 - `set_image_base` - Set the base address of the program (rebases all addresses)
+- `set_program_option` - Set a typed program option
+- `set_property` - Set a value at an address in a property map
 - `switch_program` - Switch current program
 
 ### Project Organization
@@ -809,8 +820,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
 - `delete_bookmark` - Delete bookmark
+- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function)
 - `get_plate_comment` - Get plate comment
 - `set_bookmark` - Set bookmark
+- `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
 - `set_decompiler_comment` - Set PRE_COMMENT
 - `set_disassembly_comment` - Set EOL_COMMENT
 - `set_plate_comment` - Set plate comment

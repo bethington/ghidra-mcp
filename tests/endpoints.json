@@ -1,7 +1,7 @@
 {
   "version": "5.17.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 267,
+  "total_endpoints": 269,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -237,6 +237,16 @@
       "description": "Bulk-ingest every function in a program into the cross-version documentation archive. Posts each to /v1/doc_archive/upsert. Returns per-binary counts (created / updated / conflicts_enqueued / errors)."
     },
     {
+      "path": "/archive_project",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "output_dir",
+        "output_name"
+      ],
+      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+    },
+    {
       "path": "/audit_global",
       "method": "GET",
       "category": "datatype",
@@ -414,6 +424,17 @@
       "category": "utility",
       "params": [],
       "description": "Health check endpoint"
+    },
+    {
+      "path": "/checkin_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "path",
+        "comment",
+        "keep_checked_out"
+      ],
+      "description": "Check an open program back in to the shared Ghidra Server as a new version"
     },
     {
       "path": "/clear_function_comments",
@@ -622,6 +643,17 @@
         "name"
       ],
       "description": "Create a new Ghidra project"
+    },
+    {
+      "path": "/create_property_map",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "name",
+        "type",
+        "program"
+      ],
+      "description": "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist."
     },
     {
       "path": "/create_struct",
@@ -890,6 +922,16 @@
       "description": "Delete a Ghidra project"
     },
     {
+      "path": "/delete_property_map",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "name",
+        "program"
+      ],
+      "description": "Delete a user property map and all values it holds. Call save_program to persist."
+    },
+    {
       "path": "/detect_array_bounds",
       "method": "POST",
       "category": "analysis",
@@ -1005,6 +1047,17 @@
       "category": "program",
       "params": [],
       "description": "Save and exit Ghidra"
+    },
+    {
+      "path": "/export_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "program_name",
+        "output_dir",
+        "output_name"
+      ],
+      "description": "Export an open or project-resident program to a Ghidra Zip File (.gzf). Looks up the program in the open-programs map first (so it works on file-loaded programs without a project), then falls back to the open project's DomainFile."
     },
     {
       "path": "/extract_iocs_with_context",
@@ -1145,6 +1198,16 @@
         "program"
       ],
       "description": "Get xrefs for multiple addresses"
+    },
+    {
+      "path": "/get_comment",
+      "method": "GET",
+      "category": "comment",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
     },
     {
       "path": "/get_current_address",
@@ -1430,6 +1493,16 @@
       "description": "Get plate comment"
     },
     {
+      "path": "/get_program_options",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "group",
+        "program"
+      ],
+      "description": "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names."
+    },
+    {
       "path": "/get_project_info",
       "method": "GET",
       "category": "headless",
@@ -1437,15 +1510,15 @@
       "description": "Get info about the currently open project"
     },
     {
-      "path": "/checkin_program",
-      "method": "POST",
-      "category": "headless",
+      "path": "/get_property",
+      "method": "GET",
+      "category": "program",
       "params": [
-        "path",
-        "comment",
-        "keep_checked_out"
+        "map",
+        "address",
+        "program"
       ],
-      "description": "Check an open program back in to the shared Ghidra Server as a new version"
+      "description": "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property."
     },
     {
       "path": "/get_struct_layout",
@@ -1521,7 +1594,8 @@
       "category": "datatype",
       "params": [
         "source",
-        "format"
+        "format",
+        "program"
       ],
       "description": "Import data types from GDT"
     },
@@ -1537,6 +1611,18 @@
         "auto_analyze"
       ],
       "description": "Import a binary file from disk into the current Ghidra project and open it. For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default')."
+    },
+    {
+      "path": "/import_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "gzf_path",
+        "target_folder",
+        "target_name",
+        "overwrite"
+      ],
+      "description": "Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/'). Refuses to overwrite a program that is currently loaded in memory."
     },
     {
       "path": "/inspect_memory_content",
@@ -1762,6 +1848,15 @@
       "description": "List open programs"
     },
     {
+      "path": "/list_option_groups",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries."
+    },
+    {
       "path": "/list_project_files",
       "method": "GET",
       "category": "program",
@@ -1778,6 +1873,29 @@
         "searchDir"
       ],
       "description": "List available Ghidra projects"
+    },
+    {
+      "path": "/list_properties",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "map",
+        "start",
+        "end",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end."
+    },
+    {
+      "path": "/list_property_maps",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
     },
     {
       "path": "/list_scripts",
@@ -1997,6 +2115,28 @@
       "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition — use delete_function_tag for that."
     },
     {
+      "path": "/remove_program_option",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "group",
+        "name",
+        "program"
+      ],
+      "description": "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist."
+    },
+    {
+      "path": "/remove_property",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "map",
+        "address",
+        "program"
+      ],
+      "description": "Remove the value stored at a single address in a property map. Call save_program to persist."
+    },
+    {
       "path": "/remove_reference",
       "method": "POST",
       "category": "xref",
@@ -2148,6 +2288,17 @@
         "program"
       ],
       "description": "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders."
+    },
+    {
+      "path": "/restore_project",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "gar_path",
+        "parent_dir",
+        "project_name"
+      ],
+      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
     },
     {
       "path": "/run_analysis",
@@ -2478,6 +2629,18 @@
       "description": "Set bookmark"
     },
     {
+      "path": "/set_comment",
+      "method": "POST",
+      "category": "comment",
+      "params": [
+        "address",
+        "comment",
+        "type",
+        "program"
+      ],
+      "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; unlike set_plate_comment this can set a PLATE comment on a data global."
+    },
+    {
       "path": "/set_decompiler_comment",
       "method": "POST",
       "category": "comment",
@@ -2617,6 +2780,31 @@
       "description": "Set plate comment"
     },
     {
+      "path": "/set_program_option",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "group",
+        "name",
+        "value",
+        "type",
+        "program"
+      ],
+      "description": "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist."
+    },
+    {
+      "path": "/set_property",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "map",
+        "address",
+        "value",
+        "program"
+      ],
+      "description": "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist."
+    },
+    {
       "path": "/set_variable_storage",
       "method": "POST",
       "category": "datatype",
@@ -2716,171 +2904,6 @@
         "program"
       ],
       "description": "Validate function prototype"
-    },
-    {
-      "path": "/archive_project",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "output_dir",
-        "output_name"
-      ],
-      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
-    },
-    {
-      "path": "/export_program",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "program_name",
-        "output_dir",
-        "output_name"
-      ],
-      "description": "Export an open or project-resident program to a Ghidra Zip File (.gzf). Looks up the program in the open-programs map first (so it works on file-loaded programs without a project), then falls back to the open project's DomainFile."
-    },
-    {
-      "path": "/import_program",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "gzf_path",
-        "target_folder",
-        "target_name",
-        "overwrite"
-      ],
-      "description": "Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/'). Refuses to overwrite a program that is currently loaded in memory."
-    },
-    {
-      "path": "/restore_project",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "gar_path",
-        "parent_dir",
-        "project_name"
-      ],
-      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
-    },
-    {
-      "path": "/list_option_groups",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries."
-    },
-    {
-      "path": "/get_program_options",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "group",
-        "program"
-      ],
-      "description": "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names."
-    },
-    {
-      "path": "/set_program_option",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "group",
-        "name",
-        "value",
-        "type",
-        "program"
-      ],
-      "description": "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist."
-    },
-    {
-      "path": "/remove_program_option",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "group",
-        "name",
-        "program"
-      ],
-      "description": "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist."
-    },
-    {
-      "path": "/list_property_maps",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "description": "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
-    },
-    {
-      "path": "/create_property_map",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "name",
-        "type",
-        "program"
-      ],
-      "description": "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist."
-    },
-    {
-      "path": "/delete_property_map",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "name",
-        "program"
-      ],
-      "description": "Delete a user property map and all values it holds. Call save_program to persist."
-    },
-    {
-      "path": "/set_property",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "map",
-        "address",
-        "value",
-        "program"
-      ],
-      "description": "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist."
-    },
-    {
-      "path": "/get_property",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "map",
-        "address",
-        "program"
-      ],
-      "description": "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property."
-    },
-    {
-      "path": "/remove_property",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "map",
-        "address",
-        "program"
-      ],
-      "description": "Remove the value stored at a single address in a property map. Call save_program to persist."
-    },
-    {
-      "path": "/list_properties",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "map",
-        "start",
-        "end",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end."
     }
   ]
 }

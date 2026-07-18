@@ -727,7 +727,7 @@ def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
     monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
-        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0})()
+        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
     monkeypatch.setattr(cli.shutil, "which", lambda name: None)
 
@@ -748,7 +748,7 @@ def test_cmd_preflight_maven_passes_without_ghidra_path(tmp_path, monkeypatch):
         cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
     monkeypatch.setattr(
-        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0})()
+        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
     monkeypatch.setattr(
         cli.shutil, "which", lambda name: "/usr/bin/java" if name == "java" else None
@@ -766,7 +766,7 @@ def test_cmd_preflight_gradle_routes_to_run_gradle(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
     monkeypatch.setattr(
-        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0})()
+        subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
 
     recorded: dict = {}
