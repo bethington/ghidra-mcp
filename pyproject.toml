@@ -149,3 +149,42 @@ target-version = ["py310"]
 [tool.uv]
 # The bridge package is the project's distribution; install it editable.
 package = true
+
+[tool.coverage.run]
+# Excluded from ALL coverage ratios (unit + fun-doc offline ratchets):
+#   1. Vendored third-party code -- not ours to test.
+#   2. Standalone operational scripts the offline tier cannot execute at all:
+#      one-shot CLIs that drive a live Ghidra instance (or an LLM) end-to-end.
+#      Keeping their 0% in the denominator makes the ratchet measure "how many
+#      live-only scripts exist" instead of "how tested is the runtime code."
+# Importable engines/libraries (type_unifier, d2moo_types, port_pipeline, ...)
+# deliberately stay IN the denominator even when poorly covered -- that is the
+# test debt the ratchet exists to squeeze. Do not add runtime modules here.
+omit = [
+    "*/vendored/*",
+    "fun-doc/audit_globals_typing.py",
+    "fun-doc/batch_assess.py",
+    "fun-doc/batch_picker.py",
+    "fun-doc/battletest_promoter.py",
+    "fun-doc/conformance_workbench.py",
+    "fun-doc/dedup_global_labels.py",
+    "fun-doc/document_array_globals.py",
+    "fun-doc/document_record_pointers.py",
+    "fun-doc/fix_string_globals.py",
+    "fun-doc/fort_types.py",
+    "fun-doc/gen_fort_rename_map.py",
+    "fun-doc/name_audit.py",
+    "fun-doc/plate_diff.py",
+    "fun-doc/port_live_prove.py",
+    "fun-doc/port_targets.py",
+    "fun-doc/recanonicalize.py",
+    "fun-doc/retag_library_functions.py",
+    "fun-doc/shadow_promote.py",
+    "fun-doc/struct_registry.py",
+    "fun-doc/submission_api.py",
+    "fun-doc/unify_types.py",
+    "fun-doc/workbench_selftest.py",
+    "fun-doc/scripts/gen_conformance_protected.py",
+    "fun-doc/scripts/sync_vendored_gemini.py",
+    "fun-doc/scripts/v58_smoke.py",
+]

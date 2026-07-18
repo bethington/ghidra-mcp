@@ -128,7 +128,9 @@ def _base(type_str: str) -> str:
     """Strip pointer/array/const decoration -> the base type name (best effort)."""
     s = _DECORATOR.sub(" ", str(type_str or "")).strip()
     s = re.sub(r"\s*\*[\s\*]*$", "", s)            # trailing pointer stars
-    s = re.sub(r"\s*(\[\s*\d*\s*\])+\s*$", "", s)  # trailing array dims
+    # NB: [\s\d]* (single char class) not \s*\d*\s* — the latter's ambiguous
+    # split inside a repeated group is exponential-backtracking bait (ReDoS).
+    s = re.sub(r"\s*(?:\[[\s\d]*\])+\s*$", "", s)  # trailing array dims
     s = re.sub(r"\s*\*[\s\*]*", "", s)             # any remaining stars
     return s.strip()
 

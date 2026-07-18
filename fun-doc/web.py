@@ -3187,8 +3187,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             global_scorer.clear_blacklist(path)
             socketio.emit("global_inventory_reset", {"ok": True, "path": path})
             return jsonify({"ok": True, "removed": removed, "path": path})
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+        except Exception:  # noqa: BLE001
+            app.logger.exception("global inventory reset failed")
+            return jsonify({"error": "internal error -- see dashboard server log"}), 500
 
     @app.route("/api/global_inventory/reset_all", methods=["POST"])
     def global_inventory_reset_all():
@@ -3206,8 +3207,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             global_scorer.clear_blacklist(None)
             socketio.emit("global_inventory_reset", {"ok": True, "path": None})
             return jsonify({"ok": True, "removed": removed})
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+        except Exception:  # noqa: BLE001
+            app.logger.exception("global inventory reset_all failed")
+            return jsonify({"error": "internal error -- see dashboard server log"}), 500
 
     # --- Provider quota pauses (Q1-Q11) ---
     from provider_pause import get_default_manager as _get_pause_mgr
@@ -3381,8 +3383,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             }
             candidates.sort(key=lambda c: order.get(c["port_status"], 9))
             return jsonify({"candidates": candidates})
-        except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
-            return jsonify({"error": str(exc), "candidates": []})
+        except Exception:  # noqa: BLE001 - report, don't 500 the dashboard
+            app.logger.exception("conformance pipeline listing failed")
+            return jsonify({"error": "internal error -- see dashboard server log",
+                            "candidates": []})
 
     @app.route("/api/conformance/draft_content", methods=["GET"])
     def conformance_draft_content():
@@ -3397,15 +3401,19 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         try:
             import port_pipeline as pp
 
-            candidate = Path(raw_path).resolve()
-            allowed_root = pp.GENERATED_CANDIDATES_DIR.resolve()
-            if allowed_root not in candidate.parents and candidate != allowed_root:
+            # realpath + prefix barrier: resolves symlinks and ../ before the
+            # containment check, so no post-check re-resolution can escape.
+            allowed_root = os.path.realpath(str(pp.GENERATED_CANDIDATES_DIR))
+            candidate = os.path.realpath(raw_path)
+            if not candidate.startswith(allowed_root + os.sep):
                 return jsonify({"error": "path outside the staged-candidates directory"}), 403
-            if not candidate.exists():
+            if not os.path.isfile(candidate):
                 return jsonify({"error": "file not found (may have been overwritten by a newer candidate)"}), 404
-            return jsonify({"path": str(candidate), "content": candidate.read_text(encoding="utf-8")})
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": str(exc)}), 500
+            with open(candidate, "r", encoding="utf-8") as f:
+                return jsonify({"path": candidate, "content": f.read()})
+        except Exception:  # noqa: BLE001
+            app.logger.exception("draft_content failed for %r", raw_path)
+            return jsonify({"error": "internal error -- see dashboard server log"}), 500
 
     @app.route("/api/conformance/sidebyside", methods=["GET"])
     def conformance_sidebyside():

@@ -249,6 +249,10 @@ jobs:
         # The fail-under floor is a RATCHET: measured baseline was 29% on
         # 2026-07-03 with these exclusions — raise it as fun_doc.py/web.py
         # subsystems get extracted and tested, never lower it.
+        # The denominator excludes vendored code and live-only one-shot
+        # operational scripts via [tool.coverage.run] omit in pyproject.toml
+        # (re-measured 29.18% on 2026-07-18 after the port-pipeline/globals
+        # script wave) — see the policy comment there before adding entries.
         $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=26 \
           --ignore=tests/performance/test_batch_scoring_consistency.py \
           --ignore=tests/performance/test_health_endpoint.py \
