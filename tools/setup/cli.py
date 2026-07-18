@@ -16,7 +16,7 @@ from .ghidra import (
     start_ghidra,
 )
 from .python_env import detect_repo_root, find_repo_python
-from .maven import find_maven_command, run_gradle, run_maven
+from .maven import ensure_maven_java_supported, find_maven_command, run_gradle, run_maven
 from .requirements import (
     ensure_uv_available,
     execute_install_plan,
@@ -385,6 +385,8 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         return 1
     print(f"Python: {python_executable}")
     print(f"Maven: {maven_command}")
+    if not ensure_maven_java_supported(maven_command):
+        return 1
     try:
         ensure_uv_available()
     except FileNotFoundError as exc:
