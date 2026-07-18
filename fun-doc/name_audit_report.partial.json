@@ -1,0 +1,704 @@
+{
+ "identical": {},
+ "differing": {
+  "BinkBufferSetHWND": [
+   {
+    "addresses": [
+     "6fd71f60",
+     "6fd84e10",
+     "6fdbc210"
+    ],
+    "disasm": "XOR EAX,EAX ; Set EAX to 0 (success)\nRET 0x8 ; Return, cleanup 8 bytes"
+   },
+   {
+    "addresses": [
+     "6fd87e00"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4] ; Set EAX to 0 (success)\nTEST EAX,EAX ; Return, cleanup 8 bytes\nJZ <LOC>\nMOV EAX,dword ptr [EAX + 0x5c]\nTEST EAX,EAX\nJZ <LOC>\nOR dword ptr [EAX + 0x10],0x100 ; /* 0x100: window-associated flag in Bink flags field */\nRET 0x4"
+   }
+  ],
+  "COLLISION_ClearCollisionMask": [
+   {
+    "addresses": [
+     "6fd84d70"
+    ],
+    "disasm": "MOV ECX,dword ptr [ESP + 0x4]\nMOV AL,byte ptr [ECX + 0x65]\nPUSH EBX\nMOV BL,byte ptr [ECX + 0x64]\nCMP BL,AL\nJZ <LOC>\nTEST byte ptr [ECX + 0x34],0x40 ; 0x40 = collision update flag mask\nJNZ <LOC>\nMOV DL,byte ptr [ECX + 0x66]\nMOV AL,DL\nADD AL,BL\nMOV BL,byte ptr [ECX + 0x65]\nAND AL,0x3f ; 0x3f = modulo 64 wrap\nMOV byte ptr [ECX + 0x64],AL\nSUB AL,BL\nAND AL,0x3f ; 0x3f = modulo 64 wrap\nCMP AL,0x1f ; 0x1f = half-range (31)\nJBE <LOC>\nCMP DL,0x3f ; 0x3f = max direction boundary\nJA <LOC>\nCMP AL,0x1f ; 0x1f = half-range (31)\nJNC <LOC>\nCMP DL,0x3f ; 0x3f = max direction boundary\nJNC <LOC>\nMOV byte ptr [ECX + 0x64],BL\nPOP EBX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd9be10"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x14]\nCMP EAX,0x3 ; Mode 3 = 3x3 region clear\nJA <LOC>\nJMP dword ptr [EAX*0x4 + 6fd9be74]\nMOV EAX,dword ptr [ESP + 0xc]\nMOV ECX,dword ptr [ESP + 0x18]\nMOV EDX,dword ptr [ESP + 0x10]\nPUSH EAX\nMOV EAX,ESI\nCALL COLLISION_ClearMaskFlagAtPoint2\nPOP ESI\nRET 0x14 ; RET 0x14 = cleanup 5 params (stdcall)\nMOV ECX,dword ptr [ESP + 0x18]\nMOV EDX,dword ptr [ESP + 0xc]\nPUSH ECX\nPUSH EDX\nPUSH ESI\nMOV ESI,dword ptr [ESP + 0x1c]\nCALL DRLG_ClearMaskFlagsCross\nPOP ESI\nRET 0x14 ; RET 0x14 = cleanup 5 params (stdcall)\nMOV EAX,dword ptr [ESP + 0x18]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x10]\nPUSH ECX\nMOV ECX,ESI\nCALL COLL_TestFlagsIn3x3Aggregate\nPOP ESI\nRET 0x14 ; RET 0x14 = cleanup 5 params (stdcall)"
+   }
+  ],
+  "COLLISION_ClearMaskFlags": [
+   {
+    "addresses": [
+     "6fd9b280"
+    ],
+    "disasm": "SUB ESP,0x34\nPUSH EBX\nPUSH ESI\nMOV ESI,EDX\nMOV EBX,dword ptr [ESI]\nPUSH EDI\nMOV EDI,dword ptr [ESI + 0x4]\nMOV EAX,ECX\nCALL FindRoomByCoordinates\nMOV EDI,EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EAX,dword ptr [EDI + 0x20]\nTEST EAX,EAX\nMOV dword ptr [ESP + 0xc],EAX\nJZ <LOC>\nLEA ECX,[ESP + 0x10]\nMOV EDX,ESI\nMOV EAX,EDI\nCALL COLLISION_SubdivideRectangle\nMOV EBX,EAX\nTEST EBX,EBX\nJLE <LOC>\nMOV EAX,dword ptr [ESP + 0xc]\nPUSH EBP\nMOV EBP,dword ptr [ESP + 0x48]\nPUSH EBP\nLEA EDX,[ESP + 0x18]\nCALL COLL_SetGridFlagsInRect\nCMP EBX,0x1\nJLE <LOC>\nLEA ESI,[ESP + 0x24]\nDEC EBX\nPUSH EBP\nMOV EDX,ESI\nMOV ECX,EDI\nCALL <LOC>\nADD ESI,0x10\nDEC EBX\nJNZ <LOC>\nPOP EBP\nPOP EDI\nPOP ESI\nPOP EBX\nADD ESP,0x34\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd9bab0"
+    ],
+    "disasm": "MOV EDX,dword ptr [ESP + 0x10]\nSUB ESP,0x10\nTEST EDX,EDX\nJLE <LOC> ; int nLineNumber for CleanupAndAbort\nMOV ECX,dword ptr [ESP + 0x24]\nTEST ECX,ECX ; void * pContext for CleanupAndAbort\nJLE <LOC> ; int nErrorCode for CleanupAndAbort\nCMP EDX,0x1\nJNZ <LOC>\nCMP ECX,EDX\nJNZ <LOC>\nMOV EAX,dword ptr [ESP + 0x18]\nMOV ECX,dword ptr [ESP + 0x28]\nMOV EDX,dword ptr [ESP + 0x1c]\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x18]\nCALL COLLISION_ClearMaskFlagAtPoint2\nADD ESP,0x10\nRET 0x18 ; stack cleanup: 6 params * 4 bytes\nMOV EAX,dword ptr [ESP + 0x18]\nPUSH ESI\nMOV ESI,EDX\nSHR ESI,0x1\nSUB EAX,ESI\nLEA EDX,[EAX + EDX*0x1 + -0x1]\nMOV dword ptr [ESP + 0xc],EDX\nMOV EDX,ECX\nMOV dword ptr [ESP + 0x4],EAX\nMOV EAX,dword ptr [ESP + 0x20]\nSHR EDX,0x1\nSUB EAX,EDX\nMOV dword ptr [ESP + 0x8],EAX\nLEA EAX,[EAX + ECX*0x1 + -0x1]\nMOV ECX,dword ptr [ESP + 0x2c]\nPUSH ECX\nMOV ECX,dword ptr [ESP + 0x1c]\nLEA EDX,[ESP + 0x8]\nMOV dword ptr [ESP + 0x14],EAX\nCALL COLL_ClearMaskFlagsRecursive\nPOP ESI\nADD ESP,0x10\nRET 0x18 ; stack cleanup: 6 params * 4 bytes"
+   }
+  ],
+  "COLLISION_GetMaskFlags": [
+   {
+    "addresses": [
+     "6fd9ce00"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x10]\nCMP EAX,0x3 ; mode==3 threshold\nJA <LOC>\nJMP dword ptr [EAX*0x4 + 6fd9ce80]\nMOV EAX,dword ptr [ESP + 0x14]\nMOV ECX,dword ptr [ESP + 0xc]\nMOV EDX,dword ptr [ESP + 0x8]\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x8]\nCALL GetMaskFlagAtCoordinate\nRET 0x14 ; ret 0x14: stdcall cleanup\nMOV ECX,dword ptr [ESP + 0x14]\nMOV EDX,dword ptr [ESP + 0x8]\nMOV EAX,dword ptr [ESP + 0x4]\nPUSH ECX\nMOV ECX,dword ptr [ESP + 0x10]\nCALL GetMaskFlagAtCoordinate\nRET 0x14 ; ret 0x14: stdcall cleanup\nMOV EDX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [ESP + 0xc]\nMOV ECX,dword ptr [ESP + 0x8]\nPUSH EDX\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0xc]\nPUSH ECX\nCALL ROOM_GetMaskFlagsOrBitsCross\nRET 0x14 ; ret 0x14: stdcall cleanup\nMOV EDX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [ESP + 0xc]\nMOV ECX,dword ptr [ESP + 0x4]\nPUSH EDX\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x10]\nCALL TestCollisionFlagsIn3x3Area\nRET 0x14 ; ret 0x14: stdcall cleanup\nOR AX,0xffff ; 0xFFFF = all flags for invalid mode\nRET 0x14 ; ret 0x14: stdcall cleanup"
+   },
+   {
+    "addresses": [
+     "6fd9cf40"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x10]\nSUB ESP,0x10\nCMP EAX,0x5 ; nMode >= 6 is invalid\nJA <LOC>\nJMP dword ptr [EAX*0x4 + 6fd9cff0]\nMOV EAX,dword ptr [ESP + 0x24]\nMOV ECX,dword ptr [ESP + 0x1c]\nMOV EDX,dword ptr [ESP + 0x18]\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x18]\nCALL GetMaskFlagAtCoordinate\nADD ESP,0x10\nRET 0x14 ; stdcall: cleanup 0x14 bytes (5 params)\nMOV ECX,dword ptr [ESP + 0x24]\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV EAX,dword ptr [ESP + 0x18]\nPUSH ECX\nPUSH EDX\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x20]\nCALL ROOM_GetMaskFlagsOrBitsCross\nADD ESP,0x10\nRET 0x14 ; stdcall: cleanup 0x14 bytes (5 params)\nMOV EAX,dword ptr [ESP + 0x18]\nMOV ECX,dword ptr [ESP + 0x24]\nDEC EAX\nMOV dword ptr [ESP],EAX\nADD EAX,0x2\nMOV dword ptr [ESP + 0x8],EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nDEC EAX\nMOV dword ptr [ESP + 0x4],EAX\nADD EAX,0x2\nPUSH ECX\nMOV ECX,dword ptr [ESP + 0x18]\nLEA EDX,[ESP + 0x4]\nMOV dword ptr [ESP + 0x10],EAX\nCALL COLLISION_CollectMaskFlagsRecursive\nADD ESP,0x10\nRET 0x14 ; stdcall: cleanup 0x14 bytes (5 params)\nMOV EDX,dword ptr [ESP + 0x24]\nMOV EAX,dword ptr [ESP + 0x1c]\nMOV ECX,dword ptr [ESP + 0x18]\nPUSH EDX\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPUSH ECX\nCALL ROOM_GetMaskFlagsOrBitsCross\nADD ESP,0x10\nRET 0x14 ; stdcall: cleanup 0x14 bytes (5 params)\nOR AX,0xffff ; Error return: 0xFFFF\nADD ESP,0x10\nRET 0x14 ; stdcall: cleanup 0x14 bytes (5 params)"
+   }
+  ],
+  "COLL_TestFlagsIn3x3Aggregate": [
+   {
+    "addresses": [
+     "6fd9bb30"
+    ],
+    "disasm": "SUB ESP,0x10 ; pCollGrid in ECX\nDEC EAX ; nLeft = centerX - 1\nMOV dword ptr [ESP],EAX\nADD EAX,0x2 ; nRight = centerX + 1\nMOV dword ptr [ESP + 0x8],EAX\nMOV EAX,dword ptr [ESP + 0x14] ; nBottom = Y + 1\nDEC EAX ; nTop = centerY - 1\nMOV dword ptr [ESP + 0x4],EAX\nADD EAX,0x2 ; ClearMaskFlagsRecursive\nMOV dword ptr [ESP + 0xc],EAX\nMOV EAX,dword ptr [ESP + 0x18] ; Load dwFlags from stack\nPUSH EAX\nLEA EDX,[ESP + 0x4] ; EDX = &rect (nLeft)\nCALL COLL_ClearMaskFlagsRecursive ; ClearMaskFlagsRecursive\nADD ESP,0x10\nRET 0x8 ; Ret, clean 8 bytes (2 params)"
+   },
+   {
+    "addresses": [
+     "6fd9c100"
+    ],
+    "disasm": "SUB ESP,0x10 ; Allocate 16-byte rect\nDEC EAX ; nRectLeft = X - 1\nMOV dword ptr [ESP],EAX ; nRectLeft = X - 1\nADD EAX,0x2 ; nRectRight = X + 1\nMOV dword ptr [ESP + 0x8],EAX ; nRectTop = Y - 1\nMOV EAX,dword ptr [ESP + 0x14] ; Load nTileY param\nDEC EAX ; nRectTop = Y - 1\nMOV dword ptr [ESP + 0x4],EAX\nADD EAX,0x2 ; nRectBottom = Y + 1\nMOV dword ptr [ESP + 0xc],EAX\nMOV EAX,dword ptr [ESP + 0x18] ; Load dwCollFlags param\nPUSH EAX\nLEA EDX,[ESP + 0x4] ; EDX = &rect struct\nCALL COLLISION_CheckMaskFlagsRecursive ; CheckMaskFlagsRecursive\nADD ESP,0x10\nRET 0x8 ; Clean 2 stack params"
+   }
+  ],
+  "DATATBLS_FreeMonStatsTable": [
+   {
+    "addresses": [
+     "6fda3b80"
+    ],
+    "disasm": "MOV EDX,dword ptr [6fdf0b08]\nTEST EDX,EDX\nJZ <LOC>\nMOV EAX,[6fde9e20]\nXOR ECX,ECX\nTEST EAX,EAX\nPUSH ECX\nJZ <LOC>\nPUSH 0x8f6 ; 0x8F6: pool slot size for >0x1000 entries\nADD EDX,-0x4 ; 0xFFFFFFFC (-4): adjusts pool slot pointer for indexing\nJMP <LOC>\nPUSH 0x8f8 ; 0x8F8: pool slot size for <=0x1000 entries\nPUSH 6fde1828 ; 6fde1828: DeallocateResourcePoolTree function pointer\nCALL DeallocateResourceBuffer\nMOV EAX,[6fdf0b04]\nPUSH EAX\nCALL DeallocateResourcePoolTree\nMOV dword ptr [6fdf0b0c],0x0\nRET"
+   },
+   {
+    "addresses": [
+     "6fda40e0"
+    ],
+    "disasm": "MOV EDX,dword ptr [6fdf0950]\nTEST EDX,EDX\nJZ <LOC>\nMOV EAX,[6fde9e20]\nXOR ECX,ECX\nTEST EAX,EAX\nPUSH ECX\nJZ <LOC>\nPUSH 0x8f6\nADD EDX,-0x4\nJMP <LOC>\nPUSH 0x8f8\nPUSH 6fde1828\nCALL DeallocateResourceBuffer\nMOV EAX,[6fdf0954]\nPUSH EAX\nCALL DeallocateResourcePoolTree\nMOV dword ptr [6fdf0950],0x0\nRET"
+   }
+  ],
+  "DATATBLS_GetItemTypeTxtRecord": [
+   {
+    "addresses": [
+     "6fd51770"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc4]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbc]\nIMUL EAX,EAX,0x3c ; 0x3C = ItemTypes.txt record stride (60 bytes)\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd51800"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc1c]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xc18]\nIMUL EAX,EAX,0x1b8\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   }
+  ],
+  "DATATBLS_GetMonStatsTxtRecord": [
+   {
+    "addresses": [
+     "6fd512a0"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xa80]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xa78]\nIMUL EAX,EAX,0x1a8 ; MonStats.txt record stride (0x1A8 bytes per record)\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd512d0"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xbc8]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbc4]\nIMUL EAX,EAX,0xc4 ; Stride: sizeof(MonStatsTxtRec) = 196 bytes\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd517d0"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc10]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xc0c]\nIMUL EAX,EAX,0x128 ; 0x128 = MonStatsTxt record stride (296 bytes)\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd51830"
+    ],
+    "disasm": "TEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc28]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xc24]\nIMUL EAX,EAX,0x14c\nADD EAX,EDX\nRET\nXOR EAX,EAX\nRET"
+   }
+  ],
+  "DATATBLS_GetMonsterTypeRecord": [
+   {
+    "addresses": [
+     "6fd9e520"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJL <LOC>\nCMP EAX,0x7 ; Maximum valid monster type index (7 total types: 0-6)\nJGE <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nMOV EDX,dword ptr [ECX + 0xba4]\nMOV EAX,dword ptr [EDX + EAX*0x4]\nRET 0x4\nXOR EAX,EAX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fdc14d0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nCMP EAX,dword ptr [6fdefda0]\nJGE <LOC>\nCMP EAX,-0x1\nJZ <LOC>\nMOV ECX,dword ptr [6fdefda4]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x59c ; ERR_TABLE_NULL (0x59C)\nJMP <LOC>\nSHL EAX,0x5 ; Multiply by 32 (stride per monster type record)\nADD EAX,ECX\nJNZ <LOC>\nPUSH 0x59d ; ERR_RECORD_NULL (0x59D)\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; GetReturnAddress call\nCALL CleanupAndAbort\nADD ESP,0xc ; Stack cleanup: 3 args * 4 bytes = 0xC\nPUSH -0x1\nCALL _exit\nXOR EAX,EAX\nRET 0x4"
+   }
+  ],
+  "DATATBLS_GetOverlayRecordByte50": [
+   {
+    "addresses": [
+     "6fd93710"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nCMP EAX,0x10\nJL <LOC>\nPUSH 0x265\nJMP <LOC>\nDEC EAX\nCMP EAX,0x8\nJA <LOC>\nJMP dword ptr [EAX*0x4 + 6fd93790]\nMOV EAX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [EAX + 0x2]\nRET 0x8\nMOV ECX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [ECX + 0x3]\nRET 0x8\nMOV EDX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [EDX]\nRET 0x8\nMOV EAX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [EAX + 0x1]\nRET 0x8\nMOV ECX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [ECX + 0x4]\nRET 0x8\nMOV EDX,dword ptr [ESP + 0x8]\nMOVZX EAX,byte ptr [EDX + 0x5]\nRET 0x8\nPUSH 0x274\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc\nPUSH -0x1\nCALL _exit"
+   },
+   {
+    "addresses": [
+     "6fdd2ce0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xbc0]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbbc]\nIMUL EAX,EAX,0x84 ; OverlayRecord stride (132 bytes)\nADD EAX,EDX\nTEST EAX,EAX\nJNZ <LOC>\nXOR EAX,EAX\nRET 0x4\nMOVZX EAX,byte ptr [EAX + 0x50]\nRET 0x4"
+   }
+  ],
+  "DATATBLS_GetRandomStringD": [
+   {
+    "addresses": [
+     "6fdaa7d0"
+    ],
+    "disasm": "TEST ECX,ECX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; g_pPadStringD fallback\nRET\nPUSH ESI\nMOV ESI,dword ptr [6fdf0b7c]\nTEST ESI,ESI\nJLE <LOC>\nADD ECX,0x20 ; RNG seed offset +0x20\nCALL SEED_GetRandomNumberAlt\nMOV ECX,dword ptr [6fdf0b6c]\nMOV CX,word ptr [ECX + EAX*0x2]\nTEST CX,CX\nJZ <LOC>\nCALL ValidateStringId\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; g_pPadStringD fallback\nPOP ESI\nRET"
+   },
+   {
+    "addresses": [
+     "6fdaa810"
+    ],
+    "disasm": "TEST ECX,ECX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; g_pPadStringD fallback pointer\nRET\nPUSH ESI\nMOV ESI,dword ptr [6fdf0b78]\nTEST ESI,ESI\nJLE <LOC>\nADD ECX,0x20 ; Seed offset in pSeedCtx (+0x20)\nCALL SEED_GetRandomNumberAlt\nMOV ECX,dword ptr [6fdf0b68]\nMOV CX,word ptr [ECX + EAX*0x2]\nTEST CX,CX\nJZ <LOC>\nCALL ValidateStringId\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; g_pPadStringD fallback\nPOP ESI\nRET"
+   },
+   {
+    "addresses": [
+     "6fdaa850"
+    ],
+    "disasm": "TEST ECX,ECX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; = g_pPadStringD (fallback padding string)\nRET\nPUSH ESI\nMOV ESI,dword ptr [6fdf0b74]\nTEST ESI,ESI\nJLE <LOC>\nADD ECX,0x20 ; RNG seed offset in pSeedCtx structure\nCALL SEED_GetRandomNumberAlt\nMOV ECX,dword ptr [6fdf0b64]\nMOV CX,word ptr [ECX + EAX*0x2]\nTEST CX,CX\nJZ <LOC>\nCALL ValidateStringId\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,6fdf1484 ; = g_pPadStringD (fallback if validation fails)\nPOP ESI\nRET"
+   }
+  ],
+  "DATATBLS_GetSetItemRecord": [
+   {
+    "addresses": [
+     "6fd73f40"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX]\nCMP ECX,0x4\nJNZ <LOC>\nMOV ECX,dword ptr [EAX + 0x14]\nTEST ECX,ECX\nJZ <LOC>\nCMP dword ptr [ECX],0x5 ; 0x5 = Set quality level\nJNZ <LOC>\nPUSH EAX\nCALL GetItemProperty\nTEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc1c]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xc18]\nIMUL EAX,EAX,0x1b8 ; SetItems record stride = 440 bytes\nADD EAX,EDX\nRET 0x4\nXOR EAX,EAX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fda43c0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nPUSH ESI\nJG <LOC>\nXOR EAX,EAX ; Clamp unit idx to 0 (was < 1)\nMOV ESI,EAX\nJMP <LOC>\nCMP EAX,0x2\nJGE <LOC>\nMOV ESI,EAX\nJMP <LOC>\nMOV ESI,0x2 ; Clamp unit idx to 2 (was > 1)\nMOV EAX,dword ptr [ESP + 0xc]\nTEST EAX,EAX\nJG <LOC>\nXOR EAX,EAX ; Clamp set index to 0 (was < 1)\nMOV EDX,EAX\nJMP <LOC>\nCMP EAX,0x4\nJGE <LOC>\nMOV EDX,EAX\nJMP <LOC>\nMOV EDX,0x4 ; Clamp set index to 4 (was > 3)\nMOV EAX,dword ptr [ESP + 0x10]\nTEST EAX,EAX\nJLE <LOC>\nCMP EAX,0x2\nMOV ECX,EAX\nJL <LOC>\nMOV ECX,0x2 ; Clamp property idx to 2 (was > 1)\nLEA EAX,[EDX + ESI*0x4]\nADD EAX,ESI\nLEA ECX,[ECX + EAX*0x2]\nADD ECX,EAX ; Table lookup: return SetItems pointer at computed index\nMOV EAX,dword ptr [ECX*0x4 + 6fdf089c]\nPOP ESI\nRET 0xc ; 0xC = 12 bytes stack cleanup (3 params * 4 bytes)\nXOR ECX,ECX ; Clamp property idx to 0 (was <= 0)\nJMP <LOC>"
+   }
+  ],
+  "DATATBLS_HaveFireResBonus": [
+   {
+    "addresses": [
+     "6fd6e630"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4] ; Fire resistance bonus check: verifies record index sentinel 0x1020304, unit type object, returns level if > 10\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x1020304 ; 0x1020304: magic sentinel (fire res bonus record ID)\nJNZ <LOC>\nMOV ECX,dword ptr [ESP + 0x8]\nTEST ECX,ECX\nJZ <LOC>\nCMP dword ptr [ECX],0x4\nJNZ <LOC>\nCALL UNITS_GetUnitLevel\nXOR ECX,ECX\nCMP EAX,0xb ; 0xB: level threshold (11 = level 10 + 1 in encoded form)\nSETGE CL\nDEC ECX\nAND EAX,ECX\nRET 0x8\nXOR EAX,EAX\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fdbcc90"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJLE <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc5c]\nJGE <LOC>\nMOV ECX,dword ptr [ECX + 0xc58]\nIMUL EAX,EAX,0x220 ; 0x220: Record stride size (struct array element size)\nMOV AL,byte ptr [ECX + EAX*0x1 + 0x5]\nRET 0x4\nXOR AL,AL\nRET 0x4"
+   }
+  ],
+  "DATATBLS_LoadCompositTextFile": [
+   {
+    "addresses": [
+     "6fd69090"
+    ],
+    "disasm": "SUB ESP,0x3c ; 0x3C = sizeof(BinFieldDesc)\nXOR EAX,EAX\nPUSH 0x34 ; 0x34 = armtype table row width\nPUSH EAX\nMOV dword ptr [ESP + 0x14],EAX\nMOV dword ptr [ESP + 0x18],EAX\nMOV dword ptr [ESP + 0x24],EAX\nMOV dword ptr [ESP + 0x2c],EAX\nMOV dword ptr [ESP + 0x34],EAX\nMOV dword ptr [ESP + 0x38],EAX\nMOV dword ptr [ESP + 0x3c],EAX\nMOV dword ptr [ESP + 0x40],EAX\nLEA EAX,[ESP + 0x8]\nPUSH EAX\nPUSH 6fde4fb8 ; g_pCompCodeTable destination\nPUSH ECX\nMOV dword ptr [ESP + 0x14],6fddeb44 ; field desc array addr\nMOV dword ptr [ESP + 0x18],0x1\nMOV dword ptr [ESP + 0x1c],0x1f ; 0x1F = SPECIAL_FLAGS (0x10|0x08|0x04|0x02|0x01)\nMOV dword ptr [ESP + 0x28],6fde508c ; table name \"armtype\"\nMOV dword ptr [ESP + 0x2c],0x9 ; type=9 TOKEN field\nMOV dword ptr [ESP + 0x34],0x20 ; 0x20 = token field offset\nMOV dword ptr [ESP + 0x3c],6fdda3e0 ; pArchive pointer\nCALL DATATBLS_CompileTxtDataTable\nMOV [6fdf13d4],EAX\nADD ESP,0x3c ; 0x3C = sizeof(BinFieldDesc)\nRET"
+   },
+   {
+    "addresses": [
+     "6fd69110"
+    ],
+    "disasm": "SUB ESP,0x3c ; 0x3C=60: stack frame size for BinFieldDesc[3]\nXOR EAX,EAX\nPUSH 0x34 ; 0x34=52: field desc array size (BinFieldDesc[3])\nPUSH EAX\nMOV dword ptr [ESP + 0x14],EAX\nMOV dword ptr [ESP + 0x18],EAX\nMOV dword ptr [ESP + 0x24],EAX\nMOV dword ptr [ESP + 0x2c],EAX\nMOV dword ptr [ESP + 0x34],EAX\nMOV dword ptr [ESP + 0x38],EAX\nMOV dword ptr [ESP + 0x3c],EAX\nMOV dword ptr [ESP + 0x40],EAX\nLEA EAX,[ESP + 0x8]\nPUSH EAX\nPUSH 6fde4fc0 ; s_szName: \"armtype\" string pointer (BinFieldDesc[0].szName)\nPUSH ECX\nMOV dword ptr [ESP + 0x14],6fddeb44 ; BinFieldDesc[0].dwFlags=0 (composit field has no flags)\nMOV dword ptr [ESP + 0x18],0x1\nMOV dword ptr [ESP + 0x1c],0x1f ; BinFieldDesc[0].dwType=0x1f=31 (armor type field)\nMOV dword ptr [ESP + 0x28],6fde508c ; \"token\" string pointer (BinFieldDesc[1].szName)\nMOV dword ptr [ESP + 0x2c],0x9 ; BinFieldDesc[1].dwExtra=9 (token max 9 chars)\nMOV dword ptr [ESP + 0x34],0x20 ; BinFieldDesc[1].dwType=0x20=32 (token string)\nMOV dword ptr [ESP + 0x3c],6fdda3e0 ; s_endSentinel: \"end\" string pointer (BinFieldDesc[2].szName)\nCALL DATATBLS_CompileTxtDataTable\nMOV [6fdf13d8],EAX\nADD ESP,0x3c ; 0x3C=60: stack cleanup size\nRET"
+   }
+  ],
+  "DATATBLS_LookupWallFileIndex": [
+   {
+    "addresses": [
+     "6fdbc280"
+    ],
+    "disasm": "CMP byte ptr [EAX],0x30 ; check if first char == '0'\nJNZ <LOC>\nXOR EAX,EAX\nRET\nPUSH EBP\nPUSH EDI\nPUSH EBX\nXOR EBP,EBP\nMOV EDI,6fddbc20 ; wall tile table base\nPUSH ESI\nMOV ESI,EDI\nMOV ECX,EAX\nMOV BL,byte ptr [ECX]\nMOV DL,BL\nCMP BL,byte ptr [ESI]\nJNZ <LOC>\nTEST DL,DL\nJZ <LOC>\nMOV BL,byte ptr [ECX + 0x1]\nMOV DL,BL\nCMP BL,byte ptr [ESI + 0x1]\nJNZ <LOC>\nADD ECX,0x2\nADD ESI,0x2\nTEST DL,DL\nJNZ <LOC>\nXOR ECX,ECX\nJMP <LOC>\nSBB ECX,ECX\nSBB ECX,-0x1\nTEST ECX,ECX\nJZ <LOC>\nADD EDI,0x8\nINC EBP\nCMP EDI,6fddbcc0 ; table end boundary\nJL <LOC>\nPUSH 0x4e1 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; pop 3 args\nPUSH -0x1\nCALL _exit\nPOP ESI\nPOP EBX\nPOP EDI\nMOV EAX,EBP\nPOP EBP\nRET"
+   },
+   {
+    "addresses": [
+     "6fdbc300"
+    ],
+    "disasm": "CMP byte ptr [EAX],0x30 ; 0x30 = '0' (ASCII digit zero) -- special case: return index 0 if first char matches\nJNZ <LOC>\nXOR EAX,EAX\nRET\nPUSH EBP\nPUSH EDI\nPUSH EBX\nXOR EBP,EBP\nMOV EDI,6fddb9e0 ; g_pWallTileNameTable: load wall tile name table base pointer\nPUSH ESI\nMOV ESI,EDI\nMOV ECX,EAX\nMOV BL,byte ptr [ECX]\nMOV DL,BL\nCMP BL,byte ptr [ESI]\nJNZ <LOC>\nTEST DL,DL\nJZ <LOC>\nMOV BL,byte ptr [ECX + 0x1]\nMOV DL,BL\nCMP BL,byte ptr [ESI + 0x1]\nJNZ <LOC>\nADD ECX,0x2\nADD ESI,0x2\nTEST DL,DL\nJNZ <LOC>\nXOR ECX,ECX\nJMP <LOC>\nSBB ECX,ECX\nSBB ECX,-0x1\nTEST ECX,ECX\nJZ <LOC>\nADD EDI,0x10\nINC EBP\nCMP EDI,6fddbc20 ; Boundary: 6fddbc20. If pWallName > boundary, abort\nJL <LOC>\nPUSH 0x4b6 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = 12: stack cleanup (stdcall callee cleans up 3 pointer args)\nPUSH -0x1\nCALL _exit\nPOP ESI\nPOP EBX\nPOP EDI\nMOV EAX,EBP\nPOP EBP\nRET"
+   }
+  ],
+  "DRLG_GenerateCliffExitLayout": [
+   {
+    "addresses": [
+     "6fd61170"
+    ],
+    "disasm": "PUSH ECX\nMOV EAX,dword ptr [ESI + 0x1c4]\nMOV ECX,0x6ac690c5 ; RNG LCG multiplier constant\nMUL ECX\nMOV ECX,dword ptr [ESI + 0x1c8]\nPUSH EDI\nXOR EDI,EDI\nADD EAX,ECX\nADC EDX,EDI\nMOV dword ptr [ESI + 0x1c8],EDX\nMOV dword ptr [ESI + 0x1c4],EAX\nAND EAX,0x3 ; mask for 4 exit choices (0-3)\nLEA EDX,[ESP + 0x4]\nPUSH EDX\nMOV EDX,EAX\nSHL EDX,0x4\nADD EDX,6fde6188 ; cliff exit position table base\nPUSH ESI\nMOV dword ptr [ESP + 0xc],EAX\nCALL ROOM_UpdateOrCreateRoomExit\nCMP dword ptr [ESI + 0x1d0],0x81 ; special room type check (0x81)\nPOP EDI\nJNZ <LOC>\nMOV EDX,dword ptr [ESP]\nLEA EAX,[ESP]\nPUSH EAX\nSHL EDX,0x4\nADD EDX,6fde61c8 ; alternate cliff exit table\nPUSH ESI\nCALL ROOM_UpdateOrCreateRoomExit\nPOP ECX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd61940"
+    ],
+    "disasm": "PUSH ECX\nMOV EAX,dword ptr [ESI + 0x1c4]\nMOV ECX,0x6ac690c5 ; RNG LCG multiplier constant\nMUL ECX\nMOV ECX,dword ptr [ESI + 0x1c8]\nPUSH EDI\nXOR EDI,EDI\nADD EAX,ECX\nADC EDX,EDI\nMOV dword ptr [ESI + 0x1c8],EDX ; Store new rng state hi\nMOV dword ptr [ESI + 0x1c4],EAX ; Store new rng state lo\nAND EAX,0x3 ; Mask for 4-exit selection (0-3)\nLEA EDX,[ESP + 0x4]\nPUSH EDX\nMOV EDX,EAX\nSHL EDX,0x4 ; Primary exit: select from 4 exits in g_abCliffExitTablePrimary\nADD EDX,6fde6888 ; Primary cliff exit table\nPUSH ESI\nMOV dword ptr [ESP + 0xc],EAX\nCALL ROOM_UpdateOrCreateRoomExit ; ROOM_UpdateOrCreateRoomExit(primary)\nCMP dword ptr [ESI + 0x1d0],0x23 ; Level variant check (0x23)\nPOP EDI\nJNZ <LOC>\nMOV EDX,dword ptr [ESP]\nLEA EAX,[ESP]\nPUSH EAX\nSHL EDX,0x4\nADD EDX,6fde68c8 ; Secondary cliff exit table\nPUSH ESI\nCALL ROOM_UpdateOrCreateRoomExit ; ROOM_UpdateOrCreateRoomExit(secondary)\nPOP ECX\nRET"
+   }
+  ],
+  "DRLG_ProcessAct1OutdoorPresets": [
+   {
+    "addresses": [
+     "6fd67aa0"
+    ],
+    "disasm": "PUSH ESI\nPUSH 0x0\nPUSH 6fd64870 ; PRESET_CheckCollisionD handler for outdoor preset layer 1\nMOV ESI,EAX\nPUSH 6fddcdc8 ; Outdoor preset layer 1 room data\nCALL DRLG_GenerateRoomLayers\nPUSH 0x0\nPUSH 6fd647e0 ; PRESET_CheckCollisionD handler for outdoor preset layer 2\nPUSH 6fddceb8 ; Outdoor preset layer 2 room data\nCALL DRLG_GenerateRoomLayers\nPUSH 0x2e ; Max room range for exit linking (46)\nPUSH 0x28 ; Min room range for exit linking (40)\nPUSH ESI\nCALL ROOM_LinkExitsInRange\nPOP ESI\nRET"
+   },
+   {
+    "addresses": [
+     "6fd67ae0"
+    ],
+    "disasm": "PUSH ESI\nPUSH 6fd63fd0 ; callback_CheckCollisionAndDuplicates (same as 6fd63fd0)\nPUSH 6fd64a00 ; unknown callback (second group collision)\nMOV ESI,EAX\nPUSH 6fddcbe8 ; preset_table_Act1CollideAndDuplicate\nCALL DRLG_GenerateRoomLayers\nPUSH 6fd63fd0 ; callback_CheckCollisionAndDuplicates (duplicate pointer)\nPUSH 6fd64900 ; unknown callback (second group margin)\nPUSH 6fddccd8 ; preset_table_Act1MarginCollision\nCALL DRLG_GenerateRoomLayers\nPUSH 0x11 ; max_level_id (0x11=17, Monastery Gate)\nPUSH 0x1\nPUSH ESI\nCALL ROOM_LinkExitsInRange\nPOP ESI\nRET"
+   }
+  ],
+  "FindUnitInRoomsByTypeAndId": [
+   {
+    "addresses": [
+     "6fd73700"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EAX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nADD EAX,0x4a\nRET 0x4\nXOR EAX,EAX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd9f160"
+    ],
+    "disasm": "MOV EDX,dword ptr [ESP + 0xc] ; pUnit = Stack[0xc]\nMOV EAX,dword ptr [EDX] ; dwType = pUnit+0x00\nSUB ESP,0x10\nCMP EAX,0x2 ; type == 2 (missile)?\nPUSH ESI\nPUSH EDI\nJZ <LOC>\nCMP EAX,0x3 ; type == 3 (object)?\nJLE <LOC>\nCMP EAX,0x5 ; type <= 5 (tile)?\nJLE <LOC>\nMOV ECX,dword ptr [EDX + 0x2c] ; pPath = pUnit+0x2C\nTEST ECX,ECX\nJZ <LOC>\nMOVZX EDI,word ptr [ECX + 0x6] ; Y = path+0x06 (ushort)\nJMP <LOC>\nXOR EDI,EDI\nJMP <LOC>\nMOV ECX,dword ptr [EDX + 0x2c] ; pPath = pUnit+0x2C\nMOV EDI,dword ptr [ECX + 0x10] ; Y = path+0x10 (dword)\nCMP EAX,0x2 ; type == 2 (missile)?\nJZ <LOC>\nCMP EAX,0x3 ; type == 3 (object)?\nJLE <LOC>\nCMP EAX,0x5 ; type <= 5 (tile)?\nJLE <LOC>\nTEST ECX,ECX\nJZ <LOC>\nMOVZX ESI,word ptr [ECX + 0x2] ; X = path+0x02 (ushort)\nJMP <LOC>\nXOR ESI,ESI\nJMP <LOC>\nMOV ESI,dword ptr [ECX + 0xc] ; X = path+0x0C (dword)\nPUSH EDX\nCALL HaveLightResBonus ; GetUnitRoom(pUnit)\nMOV ECX,dword ptr [ESP + 0x1c]\nMOV EDX,dword ptr [ESP + 0x20]\nMOV dword ptr [ESP + 0x10],ECX\nMOV ECX,dword ptr [ESP + 0x28]\nPUSH ECX\nMOV dword ptr [ESP + 0x18],EDX\nLEA EDX,[ESP + 0xc]\nPUSH EDX\nLEA ECX,[ESP + 0x18]\nPUSH ECX\nPUSH EAX\nMOV dword ptr [ESP + 0x18],ESI\nMOV dword ptr [ESP + 0x1c],EDI\nCALL COLLISION_CheckLineCollision ; SearchRoomsForUnit\nNEG EAX ; NEG EAX; set CF if found\nSBB EAX,EAX ; SBB: EAX=-1 if found\nPOP EDI\nINC EAX ; INC: 0=found, 1=not found\nPOP ESI\nADD ESP,0x10\nRET 0x10"
+   }
+  ],
+  "FreeLinkedResourceList": [
+   {
+    "addresses": [
+     "6fd8b000"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x67f ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; Stack cleanup: pop 12 bytes (3 push ops) before exit\nPUSH -0x1\nCALL _exit\nMOV ECX,dword ptr [ESP + 0x8]\nMOV dword ptr [EAX + 0x4c],ECX\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fd8d450"
+    ],
+    "disasm": "PUSH EDI\nMOV EDI,dword ptr [ESP + 0x8]\nMOV EDX,dword ptr [EDI + 0x8]\nTEST EDX,EDX ; int nLineNumber for CleanupAndAbort\nJZ <LOC>\nPUSH ESI ; void * pContext for CleanupAndAbort\nLEA ECX,[ECX] ; int nErrorCode for CleanupAndAbort\nMOV ECX,dword ptr [EDI]\nMOV ESI,dword ptr [EDX + 0x8]\nPUSH 0x0\nPUSH 0x3c ; 0x3C: node size (60 bytes)\nPUSH 6fde4060 ; 6fde4060: memory pool/token for node deallocation\nCALL DeallocateResourceBuffer\nTEST ESI,ESI\nMOV EDX,ESI\nJNZ <LOC>\nPOP ESI\nMOV ECX,dword ptr [EDI]\nPUSH 0x0\nPUSH 0x4c ; 0x4C: struct size (76 bytes)\nPUSH 6fde4060 ; 6fde4060: memory pool/token for struct deallocation\nMOV EDX,EDI\nMOV word ptr [EDI + 0x4],0x0\nCALL DeallocateResourceBuffer\nPOP EDI\nRET 0x4"
+   }
+  ],
+  "GetStructField0x04": [
+   {
+    "addresses": [
+     "6fd6dec0",
+     "6fd9e3b0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nRET 0x4\nMOV EAX,dword ptr [EAX + 0x4]\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd84b20"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x6b3 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = sizeof(int) for pointer arithmetic to reach field at +0x04\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [EAX + 0x4]\nRET 0x4"
+   }
+  ],
+  "INVENTORY_DestroyInventory": [
+   {
+    "addresses": [
+     "6fd71b40"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nJZ <LOC>\nCMP dword ptr [ESI],0x1020304 ; 0x1020304 = magic header validation\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x20]\nTEST EAX,EAX\nJZ <LOC>\nCALL INV_RemoveItemFromInventory\nMOV EAX,dword ptr [ESI + 0xc]\nTEST EAX,EAX\nJZ <LOC>\nLEA ESP,[ESP]\nCALL INV_RemoveItemFromInventory\nMOV EAX,dword ptr [ESI + 0xc]\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x18]\nPUSH EBX\nXOR EBX,EBX\nTEST EAX,EAX\nPUSH EDI\nJLE <LOC>\nXOR EDI,EDI\nLEA ESP,[ESP]\nMOV EAX,dword ptr [ESI + 0x14]\nADD EAX,EDI\nMOV EAX,dword ptr [EAX + 0xc]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [ESI + 0x4]\nPUSH 0x0\nPUSH 0x262 ; uint dwResourceBuffer for DeallocateResourceBuffer\nPUSH 6fde486c ; void * pResourceContext for DeallocateResourceBuffer\nMOV EDX,EAX\nCALL DeallocateResourceBuffer\nMOV EAX,dword ptr [ESI + 0x18]\nINC EBX\nADD EDI,0x10\nCMP EBX,EAX\nJL <LOC>\nMOV EDX,dword ptr [ESI + 0x14]\nTEST EDX,EDX\nJZ <LOC>\nMOV ECX,dword ptr [ESI + 0x4]\nPUSH 0x0\nPUSH 0x268 ; uint dwResourceBuffer for DeallocateResourceBuffer\nPUSH 6fde486c ; void * pResourceContext for DeallocateResourceBuffer\nCALL DeallocateResourceBuffer\nMOV EAX,dword ptr [ESI + 0x8]\nTEST EAX,EAX\nJZ <LOC>\nMOV dword ptr [EAX + 0x60],0x0\nMOV EDX,dword ptr [ESI + 0x2c]\nTEST EDX,EDX\nJZ <LOC>\nLEA ECX,[ECX]\nMOV ECX,dword ptr [ESI + 0x4]\nMOV EDI,dword ptr [EDX + 0x4]\nPUSH 0x0\nPUSH 0x274 ; uint dwResourceBuffer for DeallocateResourceBuffer\nPUSH 6fde486c ; void * pResourceContext for DeallocateResourceBuffer\nCALL DeallocateResourceBuffer\nTEST EDI,EDI\nMOV EDX,EDI\nJNZ <LOC>\nMOV EDX,dword ptr [ESI + 0x34]\nTEST EDX,EDX\nJZ <LOC>\nMOV ECX,dword ptr [ESI + 0x4]\nMOV EDI,dword ptr [EDX + 0xc]\nPUSH 0x0\nPUSH 0x27c ; uint dwResourceBuffer for DeallocateResourceBuffer\nPUSH 6fde486c ; void * pResourceContext for DeallocateResourceBuffer\nCALL DeallocateResourceBuffer\nTEST EDI,EDI\nMOV EDX,EDI\nJNZ <LOC>\nMOV ECX,dword ptr [ESI + 0x4]\nPUSH 0x0\nPUSH 0x280 ; uint dwResourceBuffer for DeallocateResourceBuffer\nPUSH 6fde486c ; void * pResourceContext for DeallocateResourceBuffer\nMOV EDX,ESI\nCALL DeallocateResourceBuffer\nPOP EDI\nPOP EBX\nPOP ESI\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd87430"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x547 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [EAX + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nRET 0x4\nMOV EAX,dword ptr [EAX + 0x14]\nRET 0x4"
+   }
+  ],
+  "INV_AppendInventoryRecord": [
+   {
+    "addresses": [
+     "6fd6ddd0"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nJZ <LOC>\nCMP dword ptr [ESI],0x1020304 ; inventory struct magic (0x1020304)\nJNZ <LOC> ; slot.pNext = 0\nMOV ECX,dword ptr [ESI + 0x4]\nPUSH EDI\nMOV EDI,dword ptr [ESI + 0x38]\nPUSH 0x0 ; slot.pNext -> pNewSlot\nPUSH 0xfeb ; char * param_1 for AllocateAndValidateResourceSlot\nPUSH 6fde486c ; void * this for AllocateAndValidateResourceSlot\nMOV EDX,0x10\nCALL PRESET_AllocateAndValidateResourceSlot\nXOR ECX,ECX\nMOV EDX,EAX\nMOV dword ptr [EDX],ECX\nMOV dword ptr [EDX + 0x4],ECX\nMOV dword ptr [EDX + 0x8],ECX\nMOV dword ptr [EDX + 0xc],ECX\nMOV ECX,dword ptr [ESP + 0x18]\nMOV EDX,dword ptr [ESP + 0x10]\nMOV dword ptr [EAX],ECX\nMOV ECX,dword ptr [ESP + 0x14]\nMOV dword ptr [EAX + 0x4],EDX\nMOV dword ptr [EAX + 0x8],ECX\nMOV dword ptr [EAX + 0xc],0x0\nMOV ECX,dword ptr [ESI + 0x34]\nTEST ECX,ECX\nMOV dword ptr [ESI + 0x38],EAX\nJNZ <LOC>\nMOV dword ptr [ESI + 0x34],EAX\nJMP <LOC>\nMOV dword ptr [EDI + 0xc],EAX\nCMP dword ptr [EAX],0x0\nPOP EDI\nJZ <LOC>\nINC dword ptr [ESI + 0x3c]\nPOP ESI\nRET 0x10"
+   },
+   {
+    "addresses": [
+     "6fd9dee0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0xa89 ; 0xA89 = source line 2697 passed to error handler\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; 6fdda728 = caller address / context ref passed to CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = error code 12 passed to abort handler\nPUSH -0x1\nCALL _exit ; int nLineNumber for CleanupAndAbort\nMOV ECX,dword ptr [ESP + 0x8]\nMOV dword ptr [EAX + 0x20],ECX ; void * pContext for CleanupAndAbort\nRET 0x8 ; int nErrorCode for CleanupAndAbort"
+   }
+  ],
+  "INV_FindSlotBackwardAuto": [
+   {
+    "addresses": [
+     "6fd70520",
+     "6fd70560"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nPUSH EBX\nMOV BL,byte ptr [ESP + 0xc]\nJNZ <LOC>\nPOP EBX\nRET 0x8\nMOV EAX,dword ptr [EAX + 0x8]\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x0\nJNZ <LOC>\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindBestFitSlotForward\nPOP EBX\nRET 0x8\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindEmptySlotForward\nPOP EBX\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fd705a0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nPUSH EBX\nMOV BL,byte ptr [ESP + 0xc]\nJNZ <LOC>\nPOP EBX\nRET 0x8\nMOV EAX,dword ptr [EAX + 0x8] ; Load grid page pointer from pInventory[2].field_0x00\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x0\nJNZ <LOC> ; If *pGridPage != 0, dispatch to empty slot finder; else best-fit finder\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindBestFitSlotForward ; INV_FindBestFitSlotForward - best-fit search path (returns bool)\nPOP EBX\nRET 0x8\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindEmptySlotForward ; INV_FindEmptySlotForward - empty slot search path (returns int)\nPOP EBX\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fd705e0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nPUSH EBX\nMOV BL,byte ptr [ESP + 0xc]\nJNZ <LOC>\nPOP EBX\nRET 0x8\nMOV EAX,dword ptr [EAX + 0x8]\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x0\nJNZ <LOC>\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindBestFitSlotBackward\nPOP EBX\nRET 0x8\nPUSH ECX\nPUSH EDX\nPUSH ESI\nPUSH EDI\nCALL INV_FindEmptySlotBackward\nPOP EBX\nRET 0x8"
+   }
+  ],
+  "ITEMS_CanItemBeGroupMatched": [
+   {
+    "addresses": [
+     "6fd74b20"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0xc]\nTEST ESI,ESI\nJNZ <LOC>\nPUSH 0x9a7 ; 0x9A7 = abort code: NULL pUnit\nJMP <LOC>\nCMP dword ptr [ESI],0x4\nJZ <LOC>\nPUSH 0x9a8 ; 0x9A8 = abort code: invalid unit type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x9aa ; 0x9AA = abort code: missing item record\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = error code: no match in code group\nPUSH -0x1\nCALL _exit\nMOV CL,byte ptr [EAX + 0x131]\nTEST CL,CL\nJNZ <LOC>\nMOV EAX,dword ptr [ESP + 0x8]\nPUSH ESI\nPUSH EAX\nCALL HasMatchingItemInCodeGroup\nCMP EAX,-0x1\nJNZ <LOC>\nXOR EAX,EAX\nPOP ESI\nRET 0x8\nMOV EAX,0x1\nPOP ESI\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fd8b3f0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x438 ; 0x438 = NULL ptr error code\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; 6fdda728 = error context ptr\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = stack cleanup (12 bytes)\nPUSH -0x1\nCALL _exit\nMOV ECX,dword ptr [ESP + 0x8]\nTEST ECX,ECX\nMOV ECX,dword ptr [EAX + 0x34]\nJZ <LOC>\nOR ECX,0x2\nMOV dword ptr [EAX + 0x34],ECX\nRET 0x8 ; void * pContext for CleanupAndAbort\nAND ECX,0xfffffffd ; int nErrorCode for CleanupAndAbort\nMOV dword ptr [EAX + 0x34],ECX\nRET 0x8"
+   }
+  ],
+  "ITEMS_GetBodyLocation": [
+   {
+    "addresses": [
+     "6fd74240"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x1163\nJMP <LOC>\nCMP dword ptr [EAX],0x4 ; pItem == NULL?\nJZ <LOC>\nPUSH 0x1164\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [EAX + 0x4]\nMOV dword ptr [ESP + 0x4],EAX ; sub-type 5 = weapon class\nJMP ITEMS_TestItemRecordBodyLocationFlag"
+   },
+   {
+    "addresses": [
+     "6fd81260"
+    ],
+    "disasm": "PUSH EBX\nPUSH EBP\nMOV EBP,dword ptr [ESP + 0x10]\nTEST EBP,EBP\nPUSH ESI\nPUSH EDI ; pItem == NULL?\nJZ <LOC>\nCMP dword ptr [EBP],0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EBP + 0x14] ; void * pContext for CleanupAndAbort\nTEST EAX,EAX ; int nErrorCode for CleanupAndAbort\nJZ <LOC>\nMOV AL,byte ptr [EAX + 0x44]\nJMP <LOC>\nXOR AL,AL\nMOVZX EAX,AL\nCMP EAX,0x5 ; sub-type 5 = weapon class\nJZ <LOC>\nCMP EAX,0x4\nJNZ <LOC>\nMOV EAX,dword ptr [ESP + 0x14]\nMOV EBX,dword ptr [EAX + 0x60]\nTEST EBX,EBX\nJZ <LOC>\nCMP dword ptr [EBX],0x1020304 ; Inventory validation magic 0x1020304\nJNZ <LOC>\nPUSH 6fded378 ; g_nBodyLocGridId global ID\nXOR EAX,EAX\nCALL INV_GetOrCreateGridSlot\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX + 0xc]\nMOV EAX,dword ptr [ECX + 0x10]\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,dword ptr [EAX]\nCMP EDX,0x4\nMOV EDI,EAX\nJNZ <LOC>\nMOV ECX,dword ptr [EAX + 0x14]\nTEST ECX,ECX\nJZ <LOC>\nMOV ECX,dword ptr [ECX + 0x18]\nAND ECX,0x100 ; Ethereal flag 0x100 mask\nJNZ <LOC>\nCMP EDX,0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EAX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,dword ptr [EAX + 0x18]\nAND EAX,0x4000 ; Socketed flag 0x4000 mask\nJZ <LOC>\nXOR EDI,EDI\nTEST EBX,EBX\nJZ <LOC>\nCMP dword ptr [EBX],0x1020304 ; Inventory validation magic\nJNZ <LOC>\nPUSH 6fded378 ; g_nBodyLocGridId\nXOR EAX,EAX\nCALL INV_GetOrCreateGridSlot\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,dword ptr [EAX + 0xc]\nMOV EAX,dword ptr [EDX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,dword ptr [EAX]\nCMP EDX,0x4\nMOV ESI,EAX\nJNZ <LOC>\nMOV ECX,dword ptr [EAX + 0x14]\nTEST ECX,ECX\nJZ <LOC>\nMOV ECX,dword ptr [ECX + 0x18]\nAND ECX,0x100 ; Ethereal flag (slot2)\nJNZ <LOC>\nCMP EDX,0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EAX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,dword ptr [EAX + 0x18]\nAND EAX,0x4000 ; Socketed flag (slot2)\nJZ <LOC>\nXOR ESI,ESI\nTEST EDI,EDI\nJZ <LOC>\nTEST ESI,ESI\nJZ <LOC>\nCMP dword ptr [EDI],0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EDI + 0x4]\nPUSH EAX\nCALL DATATBLS_GetItem2Handed\nTEST EAX,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nPUSH EAX\nCALL DATATBLS_GetItem2Handed\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,dword ptr [ESP + 0x14]\nPUSH EAX\nCALL UNIT_IsUnitDualWieldClass\nTEST EAX,EAX\nJZ <LOC>\nPUSH EBX\nCALL INVENTORY_FindEquippedItemByClassId\nCMP EBP,EAX\nJZ <LOC>\nPOP EDI\nPOP ESI\nPOP EBP\nMOV AL,0x6 ; Return secondary slot 6\nPOP EBX\nRET 0x8\nTEST EBP,EBP\nJNZ <LOC>\nPUSH 0x635 ; Source line 0x635\nJMP <LOC>\nCMP dword ptr [EBP],0x4\nJZ <LOC>\nPUSH 0x636 ; Source line 0x636\nJMP <LOC>\nMOV EAX,dword ptr [EBP + 0x4]\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x639 ; Source line 0x639\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; CleanupAndAbort ptr\nCALL CleanupAndAbort\nADD ESP,0xc ; Stack cleanup 0xC bytes\nPUSH -0x1\nCALL _exit\nMOV AL,byte ptr [EAX + 0x115]\nPOP EDI\nPOP ESI\nPOP EBP\nPOP EBX\nRET 0x8"
+   }
+  ],
+  "ITEMS_GetItemRecordField108": [
+   {
+    "addresses": [
+     "6fd72970"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x4\nJNZ <LOC>\nMOV EAX,dword ptr [EAX + 0x4]\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJZ <LOC>\nMOV AX,word ptr [EAX + 0x108]\nCMP AX,0x1\nJNZ <LOC>\nMOV AX,0x64 ; Fallback 0x64 (100)\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd87470"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x547 ; source line number\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; source file path\nCALL CleanupAndAbort\nADD ESP,0xc ; cleanup 12 bytes (2 push + 2 call)\nPUSH -0x1\nCALL _exit\nMOV ECX,dword ptr [EAX + 0x4]\nTEST ECX,ECX\nJNZ <LOC>\nMOV EAX,dword ptr [ESP + 0x8]\nTEST EAX,EAX\nJZ <LOC>\nMOV dword ptr [EAX],ECX\nXOR EAX,EAX\nRET 0x8\nPUSH EDI\nMOV EDI,dword ptr [ESP + 0xc]\nTEST EDI,EDI\nJZ <LOC>\nPUSH ESI\nMOV ESI,dword ptr [ECX + 0x28]\nTEST ESI,ESI\nJZ <LOC>\nMOV EAX,dword ptr [ECX + 0x8]\nCDQ\nIDIV ESI\nPOP ESI\nMOV dword ptr [EDI],EAX\nMOV EAX,dword ptr [ECX + 0x4]\nPOP EDI\nRET 0x8\nMOV dword ptr [EDI],0x0\nPOP ESI\nMOV EAX,dword ptr [ECX + 0x4]\nPOP EDI\nRET 0x8"
+   }
+  ],
+  "ITEMS_GetItemRecordField13E": [
+   {
+    "addresses": [
+     "6fd72880"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nCMP EAX,dword ptr [6fdefb94]\nJNC <LOC>\nMOV ECX,dword ptr [6fdefb98]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x1ef ; max valid record index (0x1EF = 495)\nJMP <LOC>\nIMUL EAX,EAX,0x1a8 ; item record entry size multiplier\nADD EAX,ECX\nJNZ <LOC>\nPUSH 0xf29 ; error exit status code\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; error handler address\nCALL CleanupAndAbort\nADD ESP,0xc ; stack cleanup 12 bytes\nPUSH -0x1\nCALL _exit\nMOVZX EAX,byte ptr [EAX + 0x13e]\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd745d0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0xf3e ; 0xF3E: Error code - NULL record context\nJMP <LOC>\nCMP dword ptr [EAX],0x4\nJZ <LOC>\nPUSH 0xf3f ; 0xF3F: Error code - invalid header magic (expected 0x4)\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; 6fdda728: Error context/label string\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC: Stack cleanup (3 args * 4 bytes)\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [EAX + 0x4]\nMOV dword ptr [ESP + 0x4],EAX\nJMP ITEMS_GetItemRecordField13E"
+   }
+  ],
+  "ITEMS_GetItemRecordFieldE4": [
+   {
+    "addresses": [
+     "6fd72ad0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4] ; 0x22ad0: Entry point\nCMP EAX,dword ptr [6fdefb94]\nJNC <LOC>\nMOV ECX,dword ptr [6fdefb98]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x1ef ; 0x1EF = line 495: bad state flag abort\nJMP <LOC>\nIMUL EAX,EAX,0x1a8 ; line 990: bad state flag\nADD EAX,ECX\nJNZ <LOC>\nPUSH 0xd8b ; 0xD8B = line 3523: validation failure abort\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; GetReturnAddress arg: return address pointer\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = stack cleanup: 3 push args (2 calls, each with EAX + addr)\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [EAX + 0xe4]\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd8c520"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x3dd ; line 989: NULL pStruct abort\nJMP <LOC>\nMOV ECX,dword ptr [EAX + 0x50]\nTEST ECX,ECX\nJZ <LOC>\nPUSH 0x3de ; line 990: bad state flag abort\nJMP <LOC>\nMOV EAX,dword ptr [ESP + 0x8]\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x3df ; line 991: NULL pRoom abort\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; error message constant\nCALL CleanupAndAbort\nADD ESP,0xc ; stack cleanup: 3 args * 4 bytes = 0xc\nPUSH -0x1\nCALL _exit\nMOV EDX,dword ptr [EAX + 0x10]\nCALL CheckRoomVisibilityForDrawing\nRET 0x8"
+   }
+  ],
+  "ITEMS_GetRandomInRangeFromUnitEx": [
+   {
+    "addresses": [
+     "6fd963f0"
+    ],
+    "disasm": "PUSH EBX\nMOV EBX,ECX\nCMP EAX,EBX\nJNZ <LOC>\nMOV EAX,EBX\nPOP EBX\nRET\nJGE <LOC>\nMOV ECX,EAX\nMOV EAX,EBX\nMOV EBX,ECX\nTEST EDX,EDX\nJNZ <LOC>\nPUSH 0x1505 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; cleanup 0xC bytes for CleanupAndAbort\nPUSH -0x1\nCALL _exit\nPUSH EDI\nMOV EDI,dword ptr [EDX]\nCMP EDI,0x4\nJZ <LOC>\nPUSH 0x1506 ; error code 0x1506 = unit type != item\nJMP <LOC>\nMOV ECX,dword ptr [EDX + 0x14]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x1508 ; error code 0x1508 = pItemData NULL\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; cleanup 0xC bytes for CleanupAndAbort\nPUSH -0x1\nCALL _exit\nSUB EAX,EBX\nCMP word ptr [ECX + 0x30],0x1\nPUSH ESI\nJC <LOC>\nINC EAX\nCMP EDI,0x4\nMOV ESI,EAX\nJNZ <LOC>\nTEST ECX,ECX\nJZ <LOC>\nADD ECX,EDI\nJMP <LOC>\nXOR ECX,ECX\nTEST ESI,ESI\nJG <LOC>\nPOP ESI\nXOR EDX,EDX\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET\nMOV EDI,dword ptr [ECX + 0x4]\nLEA EAX,[ESI + -0x1]\nPUSH EBP\nXOR EBP,EBP\nTEST ESI,EAX\nMOV EAX,dword ptr [ECX]\nMOV EDX,0x6ac690c5 ; LCG multiplier 0x6AC690C5\nJZ <LOC>\nMUL EDX\nADD EAX,EDI\nADC EDX,EBP\nMOV dword ptr [ECX + 0x4],EDX\nMOV dword ptr [ECX],EAX\nXOR EDX,EDX\nDIV ESI\nPOP EBP\nPOP ESI\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET\nMUL EDX\nADD EAX,EDI\nADC EDX,EBP\nPOP EBP\nMOV dword ptr [ECX + 0x4],EDX\nLEA EDX,[ESI + -0x1]\nPOP ESI\nAND EDX,EAX\nMOV dword ptr [ECX],EAX\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd964d0"
+    ],
+    "disasm": "PUSH EBX\nMOV EBX,ECX\nCMP EAX,EBX\nJNZ <LOC>\nMOV EAX,EBX\nPOP EBX\nRET\nJGE <LOC>\nMOV ECX,EAX\nMOV EAX,EBX\nMOV EBX,ECX\nTEST EDX,EDX\nJNZ <LOC>\nPUSH 0x1505 ; int nLineNumber for CleanupAndAbort\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC: stack cleanup after CleanupAndAbort\nPUSH -0x1\nCALL _exit\nPUSH EDI\nMOV EDI,dword ptr [EDX]\nCMP EDI,0x4\nJZ <LOC>\nPUSH 0x1506 ; 0x1506: source line for unit type error\nJMP <LOC>\nMOV ECX,dword ptr [EDX + 0x14]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x1508 ; 0x1508: source line for item data error\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC: stack cleanup after CleanupAndAbort\nPUSH -0x1\nCALL _exit\nSUB EAX,EBX\nCMP word ptr [ECX + 0x30],0x1\nPUSH ESI\nJC <LOC>\nINC EAX\nCMP EDI,0x4\nMOV ESI,EAX\nJNZ <LOC>\nTEST ECX,ECX\nJZ <LOC>\nADD ECX,EDI\nJMP <LOC>\nXOR ECX,ECX\nTEST ESI,ESI\nJG <LOC>\nPOP ESI\nXOR EDX,EDX\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET\nMOV EDI,dword ptr [ECX + 0x4]\nLEA EAX,[ESI + -0x1]\nPUSH EBP\nXOR EBP,EBP\nTEST ESI,EAX\nMOV EAX,dword ptr [ECX]\nMOV EDX,0x6ac690c5 ; 0x6AC690C5: RNG LCG multiplier\nJZ <LOC>\nMUL EDX\nADD EAX,EDI\nADC EDX,EBP\nMOV dword ptr [ECX + 0x4],EDX\nMOV dword ptr [ECX],EAX\nXOR EDX,EDX\nDIV ESI\nPOP EBP\nPOP ESI\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET\nMUL EDX\nADD EAX,EDI\nADC EDX,EBP\nPOP EBP\nMOV dword ptr [ECX + 0x4],EDX\nLEA EDX,[ESI + -0x1]\nPOP ESI\nAND EDX,EAX\nMOV dword ptr [ECX],EAX\nPOP EDI\nLEA EAX,[EDX + EBX*0x1]\nPOP EBX\nRET"
+   }
+  ],
+  "MISSILE_GetRemainingFrames": [
+   {
+    "addresses": [
+     "6fd7fa20"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nJNZ <LOC>\nPUSH 0xe83 ; 0xE83 = exit code for abort\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; 6fdda728 = abort return addr\nCALL CleanupAndAbort\nADD ESP,0xc ; void * pContext for CleanupAndAbort\nPUSH -0x1 ; int nErrorCode for CleanupAndAbort\nCALL _exit\nMOV ECX,dword ptr [ESI]\nCMP ECX,0x2\nMOV EAX,dword ptr [ESI + 0x2c]\nPUSH EDI\nMOVZX EDI,word ptr [EAX + 0x10]\nJZ <LOC>\nCMP ECX,0x3 ; type lower bound (skip PLAYER=3)\nJLE <LOC>\nCMP ECX,0x5 ; type upper bound (types 4-5 use direct)\nJLE <LOC>\nTEST EAX,EAX\nJZ <LOC>\nMOVZX EDX,word ptr [EAX + 0x2]\nJMP <LOC>\nXOR EDX,EDX\nJMP <LOC>\nMOV EDX,dword ptr [EAX + 0xc]\nCMP EDI,EDX\nPOP EDI\nJNZ <LOC>\nCMP ECX,0x2\nMOVZX EDX,word ptr [EAX + 0x12]\nJZ <LOC>\nCMP ECX,0x3 ; type lower bound (skip PLAYER=3)\nJLE <LOC>\nCMP ECX,0x5 ; type upper bound (types 4-5 use direct)\nJLE <LOC>\nTEST EAX,EAX\nJZ <LOC>\nMOVZX ECX,word ptr [EAX + 0x6]\nJMP <LOC>\nXOR ECX,ECX\nJMP <LOC>\nMOV ECX,dword ptr [EAX + 0x10]\nCMP EDX,ECX\nJNZ <LOC>\nMOV AL,byte ptr [EAX + 0x65]\nPOP ESI\nRET 0x4\nMOV EAX,dword ptr [ESI + 0x2c]\nMOVZX ECX,word ptr [EAX + 0x12]\nMOVZX EAX,word ptr [EAX + 0x10]\nPUSH ECX\nPUSH EAX\nPUSH ESI\nCALL PATH_GetDirectionToCoords\nPOP ESI\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd843e0"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0xc]\nTEST ESI,ESI\nJL <LOC>\nMOV EAX,[6fde9e1c]\nMOV EAX,dword ptr [EAX + 0xc4]\nCMP ESI,EAX\nJGE <LOC>\nMOV ECX,dword ptr [ESP + 0x8]\nTEST ECX,ECX ; void * pContext for CleanupAndAbort\nJZ <LOC> ; int nErrorCode for CleanupAndAbort\nMOV ECX,dword ptr [ECX + 0x5c]\nTEST ECX,ECX\nJZ <LOC>\nMOV EDX,dword ptr [ECX + 0x10]\nTEST EDX,EDX\nJNS <LOC>\nMOV ECX,dword ptr [ECX + 0x58]\nADD EAX,0x1f ; Add 31 for rounding up to nearest dword boundary\nCDQ\nAND EDX,0x1f ; Mask with 0x1F to extract sign-extension bits\nADD EAX,EDX\nSAR EAX,0x5 ; Shift right 5 to get dword count (divide by 32)\nLEA ECX,[ECX + EAX*0x4]\nTEST ECX,ECX\nJZ <LOC>\nMOV EAX,[6fdd90b0]\nMOV EDX,ESI\nAND EDX,0x1f ; Mask 5 bits to get bit offset within dword\nMOV EAX,dword ptr [EAX + EDX*0x4]\nSAR ESI,0x5 ; Shift right 5 to get dword index into bitmap array\nAND EAX,dword ptr [ECX + ESI*0x4]\nPOP ESI\nRET 0x8\nXOR EAX,EAX\nPOP ESI\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fdba240"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nCMP dword ptr [EAX],0x3 ; 0x3 = missile type validation sentinel\nJNZ <LOC>\nMOV EAX,dword ptr [EAX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOVSX ECX,word ptr [EAX + 0x10]\nMOVSX EAX,word ptr [EAX + 0xe] ; void * pContext for CleanupAndAbort\nSUB EAX,ECX ; int nErrorCode for CleanupAndAbort\nRET 0x4\nXOR EAX,EAX\nRET 0x4"
+   }
+  ],
+  "MONSTER_IsRevivable": [
+   {
+    "addresses": [
+     "6fda0020"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nPUSH EDI\nJZ <LOC>\nMOV EDI,dword ptr [ESI]\nCMP EDI,0x1\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x10]\nCMP EAX,0xc\nJNZ <LOC>\nMOV EAX,[6fde9e1c]\nMOV ECX,dword ptr [EAX + 0x150]\nMOV EAX,ESI\nCALL DRLG_CheckBitFlagsOverlapWithMask\nTEST EAX,EAX\nJNZ <LOC>\nMOV ESI,dword ptr [ESI + 0x4]\nMOV EDX,0x7\nMOV EAX,ESI\nCALL MONSOUND_TestFlagByMonStats\nTEST EAX,EAX\nJZ <LOC>\nCMP EDI,EDI\nJNZ <LOC>\nMOV EDX,0xc\nMOV EAX,ESI\nCALL MONSOUND_TestFlagByMonStats\nTEST EAX,EAX\nJNZ <LOC>\nPOP EDI\nXOR EAX,EAX\nPOP ESI\nRET 0x4\nPOP EDI\nMOV EAX,0x1\nPOP ESI\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fda00e0"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nPUSH EDI\nJZ <LOC>\nMOV EDI,dword ptr [ESI]\nCMP EDI,0x1\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x10]\nCMP EAX,0xc ; anim mode == 0xC (DEATH)\nJNZ <LOC>\nMOV EAX,[6fde9e1c]\nMOV ECX,dword ptr [EAX + 0x150]\nMOV EAX,ESI\nCALL DRLG_CheckBitFlagsOverlapWithMask\nTEST EAX,EAX\nJNZ <LOC>\nMOV ESI,dword ptr [ESI + 0x4]\nMOV EDX,0x7 ; flag index 7\nMOV EAX,ESI\nCALL MONSOUND_TestFlagByMonStats\nTEST EAX,EAX\nJZ <LOC>\nCMP EDI,EDI\nJNZ <LOC>\nMOV EDX,0xc ; flag index 0xC (12)\nMOV EAX,ESI\nCALL MONSOUND_TestFlagByMonStats\nTEST EAX,EAX\nJNZ <LOC>\nPOP EDI\nXOR EAX,EAX\nPOP ESI\nRET 0x4\nPOP EDI\nMOV EAX,0x1\nPOP ESI\nRET 0x4"
+   }
+  ],
+  "OVERLAY_UpdateLinkedListFlagsReverse": [
+   {
+    "addresses": [
+     "6fd69810"
+    ],
+    "disasm": "MOV ECX,dword ptr [ECX + 0x4c] ; EAX on entry = dwTargetType; pNodeList at pOverlayCtx+0x4C\nTEST ECX,ECX\nJZ <LOC>\nMOV EDX,dword ptr [ECX + 0x10]\nCMP dword ptr [EDX],EAX\nJZ <LOC>\nMOV ECX,dword ptr [ECX + 0x4]\nTEST ECX,ECX\nJNZ <LOC>\nRET\nMOV EAX,dword ptr [ECX + 0xc]\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,0xfffffff7 ; Flag mask: clears VISIBILITY_ACTIVE (bit 3, 0x8) from dwFlags\nAND dword ptr [EAX + 0x14],EDX ; Clear VISIBILITY_ACTIVE (bit 3) on pOldFrameList entry\nMOV EAX,dword ptr [EAX + 0x20]\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,dword ptr [ECX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,0x8 ; Set VISIBILITY_ACTIVE flag (bit 3 = 0x8) on dwFlags\nOR dword ptr [EAX + 0x14],ECX ; Set VISIBILITY_ACTIVE (bit 3) on pNewFrame entry\nMOV EAX,dword ptr [EAX + 0x20]\nTEST EAX,EAX\nJNZ <LOC>\nRET"
+   },
+   {
+    "addresses": [
+     "6fd69860"
+    ],
+    "disasm": "MOV ECX,dword ptr [ECX + 0x4c]\nTEST ECX,ECX\nJZ <LOC>\nMOV EDX,dword ptr [ECX + 0x10]\nCMP dword ptr [EDX],EAX\nJZ <LOC>\nMOV ECX,dword ptr [ECX + 0x4]\nTEST ECX,ECX\nJNZ <LOC>\nRET\nMOV EAX,dword ptr [ECX + 0x14]\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,0xfffffff7 ; 0xFFFFFFF7 = ~0x8 (clear flag 3: make invisible)\nAND dword ptr [EAX + 0x14],EDX\nMOV EAX,dword ptr [EAX + 0x20]\nTEST EAX,EAX\nJNZ <LOC>\nMOV EAX,dword ptr [ECX + 0xc]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,0x8\nOR dword ptr [EAX + 0x14],ECX\nMOV EAX,dword ptr [EAX + 0x20]\nTEST EAX,EAX\nJNZ <LOC>\nRET"
+   }
+  ],
+  "PRESET_CheckCollisionD": [
+   {
+    "addresses": [
+     "6fd64750"
+    ],
+    "disasm": "PUSH ECX\nPUSH EBX\nPUSH EBP\nMOV EAX,EDX\nPUSH ESI\nPUSH EDI\nMOV EDI,EAX\nSHL EDI,0x4\nXOR EDX,EDX\nTEST EAX,EAX\nMOV dword ptr [ESP + 0x10],EAX\nJLE <LOC>\nLEA EBX,[ECX + 0xc]\nLEA ESP,[ESP]\nCMP EDX,dword ptr [EDI + 6fddcfb0] ; Skip entry if loop index matches room ID in skip array\nJZ <LOC>\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0x8] ; Load preset X bounds\nMOV EAX,dword ptr [EBX + -0x4]\nCMP ESI,EAX\nJGE <LOC>\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x10]\nSUB EAX,ESI\nMOV EBP,EAX ; X delta = entry_max - preset_min - preset_range (negative = overlap in X)\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x4]\nSUB ESI,EAX\nMOV EBP,ESI\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0xc] ; Load preset Y bounds\nMOV EAX,dword ptr [EBX]\nCMP ESI,EAX\nJGE <LOC>\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x14]\nSUB EAX,ESI ; Y delta = entry_max - preset_min - preset_range (negative = overlap in Y)\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x8]\nSUB ESI,EAX\nMOV EAX,ESI\nTEST EBP,EBP ; Collision check: both deltas < 0 means overlap on both X AND Y\nJGE <LOC>\nTEST EAX,EAX\nJL <LOC>\nMOV EAX,dword ptr [ESP + 0x10]\nINC EDX\nADD EBX,0x10\nCMP EDX,EAX\nJL <LOC>\nPOP EDI ; No collision found, return 1 (success)\nPOP ESI\nPOP EBP\nMOV EAX,0x1\nPOP EBX\nPOP ECX\nRET\nPOP EDI ; Collision detected: both axes overlap, return 0\nPOP ESI\nPOP EBP\nXOR EAX,EAX\nPOP EBX\nPOP ECX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd647e0"
+    ],
+    "disasm": "PUSH ECX ; EDI = dwEntryCount << 4 (bounds base for mask lookup)\nPUSH EBX\nPUSH EBP\nMOV EAX,EDX\nPUSH ESI\nPUSH EDI\nMOV EDI,EAX\nSHL EDI,0x4\nXOR EDX,EDX\nTEST EAX,EAX\nMOV dword ptr [ESP + 0x10],EAX ; Save loop limit (dwEntryCount) on stack\nJLE <LOC>\nLEA EBX,[ECX + 0xc]\nLEA ESP,[ESP]\nCMP EDX,dword ptr [EDI + 6fddcec0] ; Skip if dwLoopIndex == g_pPresetRoomBoundsMask[dwBaseOffset]\nJZ <LOC>\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0x8]\nMOV EAX,dword ptr [EBX + -0x4]\nCMP ESI,EAX\nJGE <LOC> ; X-axis overlap: delta = min(room1_max, room2_max) - max(room1_min, room2_min)\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x10]\nSUB EAX,ESI\nMOV EBP,EAX\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x4]\nSUB ESI,EAX\nMOV EBP,ESI\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0xc]\nMOV EAX,dword ptr [EBX]\nCMP ESI,EAX\nJGE <LOC> ; Y-axis overlap: delta = min(ymax) - max(ymin)\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x14]\nSUB EAX,ESI\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x8]\nSUB ESI,EAX\nMOV EAX,ESI\nTEST EBP,EBP ; Collision if both X and Y deltas are negative\nJGE <LOC>\nTEST EAX,EAX\nJL <LOC>\nMOV EAX,dword ptr [ESP + 0x10]\nINC EDX ; Advance pBoundsEntry by 16 bytes; loop until dwLoopIndex >= dwEntryCount\nADD EBX,0x10\nCMP EDX,EAX\nJL <LOC>\nPOP EDI\nPOP ESI\nPOP EBP\nMOV EAX,0x1\nPOP EBX\nPOP ECX\nRET\nPOP EDI ; No collision found across all entries \u2014 path clear, return 1\nPOP ESI\nPOP EBP\nXOR EAX,EAX\nPOP EBX\nPOP ECX\nRET"
+   },
+   {
+    "addresses": [
+     "6fd64870"
+    ],
+    "disasm": "PUSH ECX\nPUSH EBX\nPUSH EBP\nMOV EAX,EDX\nPUSH ESI\nPUSH EDI\nMOV EDI,EAX\nSHL EDI,0x4\nXOR EDX,EDX\nTEST EAX,EAX\nMOV dword ptr [ESP + 0x10],EAX\nJLE <LOC>\nLEA EBX,[ECX + 0xc]\nLEA ESP,[ESP]\nCMP EDX,dword ptr [EDI + 6fddcdd0]\nJZ <LOC>\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0x8]\nMOV EAX,dword ptr [EBX + -0x4]\nCMP ESI,EAX\nJGE <LOC>\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x10]\nSUB EAX,ESI\nMOV EBP,EAX\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x4]\nSUB ESI,EAX\nMOV EBP,ESI\nMOV ESI,dword ptr [EDI + ECX*0x1 + 0xc]\nMOV EAX,dword ptr [EBX]\nCMP ESI,EAX\nJGE <LOC>\nSUB EAX,dword ptr [EDI + ECX*0x1 + 0x14]\nSUB EAX,ESI\nJMP <LOC>\nSUB ESI,dword ptr [EBX + 0x8]\nSUB ESI,EAX\nMOV EAX,ESI\nTEST EBP,EBP\nJGE <LOC>\nTEST EAX,EAX\nJL <LOC>\nMOV EAX,dword ptr [ESP + 0x10]\nINC EDX\nADD EBX,0x10\nCMP EDX,EAX\nJL <LOC>\nPOP EDI\nPOP ESI\nPOP EBP\nMOV EAX,0x1\nPOP EBX\nPOP ECX\nRET\nPOP EDI\nPOP ESI\nPOP EBP\nXOR EAX,EAX\nPOP EBX\nPOP ECX\nRET"
+   }
+  ],
+  "ROOM_GetRoomAtCoords": [
+   {
+    "addresses": [
+     "6fd8b710"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nRET 0xc ; 0xC = stdcall stack cleanup\nMOV EAX,dword ptr [EAX + 0x10]\nTEST EAX,EAX\nPUSH ESI\nPUSH EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x14]\nMOV ESI,dword ptr [ESP + 0x10]\nMOV ECX,dword ptr [EAX + 0x4c]\nCMP ESI,ECX\nJL <LOC>\nMOV EDI,dword ptr [EAX + 0x54]\nADD EDI,ECX\nCMP ESI,EDI\nJGE <LOC>\nMOV ECX,dword ptr [EAX + 0x50]\nCMP EDX,ECX\nJL <LOC>\nMOV EDI,dword ptr [EAX + 0x58]\nADD EDI,ECX\nCMP EDX,EDI\nJL <LOC>\nMOV EAX,dword ptr [EAX + 0x7c]\nTEST EAX,EAX\nJNZ <LOC>\nXOR EAX,EAX\nPOP EDI\nPOP ESI\nRET 0xc ; 0xC = stdcall stack cleanup"
+   },
+   {
+    "addresses": [
+     "6fd8c1b0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nMOV EAX,dword ptr [EAX + 0x10]\nTEST EAX,EAX\nPUSH ESI\nPUSH EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x14]\nMOV ESI,dword ptr [ESP + 0x10]\nMOV ECX,dword ptr [EAX + 0x5c]\nCMP ESI,ECX\nJL <LOC>\nMOV EDI,dword ptr [EAX + 0x64]\nADD EDI,ECX\nCMP ESI,EDI\nJGE <LOC>\nMOV ECX,dword ptr [EAX + 0x60]\nCMP EDX,ECX\nJL <LOC>\nMOV EDI,dword ptr [EAX + 0x68]\nADD EDI,ECX\nCMP EDX,EDI\nJL <LOC>\nMOV EAX,dword ptr [EAX + 0x7c]\nTEST EAX,EAX\nJNZ <LOC>\nXOR EAX,EAX\nPOP EDI\nPOP ESI\nRET 0xc ; RET 0xC = stack cleanup for 3 params"
+   }
+  ],
+  "ROOM_LoadRoomTilesAndGetCacheHandle": [
+   {
+    "addresses": [
+     "6fd6a080"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,EAX\nTEST dword ptr [ESI + 0x28],0x1000000 ; 0x1000000 = DRPG_TILES_LOADED flag\nJNZ <LOC>\nCALL ROOM_LoadDefaultTileFiles\nTEST dword ptr [ESI + 0x28],0x2000000 ; 0x2000000 = DRPG_PRESET_ROOM flag\nJNZ <LOC>\nCMP dword ptr [ESI + 0x48],0x2\nJNZ <LOC>\nPUSH ESI\nCALL ROOM_LoadPresetAndGenerateRoomContent\nTEST dword ptr [ESI + 0x28],0x100000 ; 0x100000 = DRPG_UNITS_INITIALIZED flag\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x58]\nMOV ECX,dword ptr [EAX + 0x1b4]\nMOV ECX,dword ptr [ECX + 0x478] ; +0x478: pRoomUnits from tile layer buffer\nMOV EAX,ESI\nCALL ROOM_InitializeRoomWithTilesAndUnits\nMOV EAX,dword ptr [ESI + 0x30]\nPOP ESI\nRET"
+   },
+   {
+    "addresses": [
+     "6fdcc270"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,EAX\nTEST dword ptr [ESI + 0x28],0x1000000 ; TILE_FILES_LOADED flag check at pRoom+0x28\nJNZ <LOC>\nCALL ROOM_LoadDefaultTileFiles\nTEST dword ptr [ESI + 0x28],0x2000000 ; PRESET_CONTENT_GENERATED flag check at pRoom+0x28\nJNZ <LOC>\nCMP dword ptr [ESI + 0x48],0x2\nJNZ <LOC>\nPUSH ESI\nCALL ROOM_LoadPresetAndGenerateRoomContent\nTEST dword ptr [ESI + 0x28],0x100000 ; TILES_UNITS_INIT flag check at pRoom+0x28\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x58]\nMOV ECX,dword ptr [EAX + 0x1b4]\nMOV ECX,dword ptr [ECX + 0x478]\nMOV EAX,ESI\nCALL ROOM_InitializeRoomWithTilesAndUnits\nMOV EAX,dword ptr [ESI + 0x30]\nPOP ESI\nRET"
+   }
+  ],
+  "SKILLS_EncodeExpressionToBufferB": [
+   {
+    "addresses": [
+     "6fdb07d0"
+    ],
+    "disasm": "SUB ESP,0x400 ; 0x400 = temp buffer bytes\nPUSH ESI\nMOV ESI,EDX\nTEST ESI,ESI\nJZ <LOC>\nTEST ECX,ECX\nJZ <LOC>\nPUSH 6fdae520 ; token stack ptr\nPUSH 6fdadcc0 ; g_dwData_ff24\nPUSH 6fdadcd0 ; token stack end ptr\nPUSH 0x400 ; EXPR_BUFFER_SIZE=1024\nLEA EDX,[ESP + 0x14]\nPUSH EDX\nPUSH ECX\nCALL EncodeExpressionTokenStack\nTEST EAX,EAX\nJG <LOC>\nMOV EAX,dword ptr [ESP + 0x408]\nMOV dword ptr [ESI + EAX*0x1],0xffffffff\nPOP ESI\nADD ESP,0x400 ; EXPR_BUFFER_SIZE=1024\nRET 0x10\nPUSH EBX\nPUSH EAX\nLEA ECX,[ESP + 0xc]\nPUSH ECX\nMOV EAX,6fdeff2c ; g_dwExprEncStateC\nMOV EBX,6fdeff28 ; g_dwExprEncStateB\nMOV ECX,6fdeff24 ; g_dwExprEncStateA\nCALL DATATBLS_AppendToBuffer\nMOV EDX,dword ptr [ESP + 0x40c]\nMOV dword ptr [ESI + EDX*0x1],EAX\nPOP EBX\nPOP ESI\nADD ESP,0x400 ; EXPR_BUFFER_SIZE=1024\nRET 0x10"
+   },
+   {
+    "addresses": [
+     "6fdb0850"
+    ],
+    "disasm": "SUB ESP,0x400 ; Stack buffer: 0x400 bytes (1024)\nPUSH ESI\nMOV ESI,EDX\nTEST ESI,ESI\nJZ <LOC>\nTEST ECX,ECX\nJZ <LOC>\nPUSH 6fdae520 ; Expr token table ptr 1 (6fdae520)\nPUSH 6fdadcc0 ; Expr token table ptr 2 (6fdadcc0)\nPUSH 6fdadcd0 ; Expr token table ptr 3 (6fdadcd0)\nPUSH 0x400 ; Buffer size: 0x400 (1024)\nLEA EDX,[ESP + 0x14]\nPUSH EDX\nPUSH ECX\nCALL EncodeExpressionTokenStack\nTEST EAX,EAX\nJG <LOC>\nMOV EAX,dword ptr [ESP + 0x408]\nMOV dword ptr [ESI + EAX*0x1],0xffffffff\nPOP ESI\nADD ESP,0x400 ; Stack cleanup: 0x400 bytes\nRET 0x10\nPUSH EBX\nPUSH EAX\nLEA ECX,[ESP + 0xc]\nPUSH ECX\nMOV EAX,6fdeff20 ; Expr data table ptr 1 (6fdeff20)\nMOV EBX,6fdeff1c ; Expr data table ptr 2 (6fdeff1c)\nMOV ECX,6fdeff18 ; Expr data table ptr 3 (6fdeff18)\nCALL DATATBLS_AppendToBuffer\nMOV EDX,dword ptr [ESP + 0x40c]\nMOV dword ptr [ESI + EDX*0x1],EAX\nPOP EBX\nPOP ESI\nADD ESP,0x400 ; Stack cleanup: 0x400 bytes\nRET 0x10"
+   }
+  ],
+  "SKILLS_GetSkillDataRecord": [
+   {
+    "addresses": [
+     "6fd8d060"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI\nJNZ <LOC>\nPUSH 0xed ; 0xED = null pSkillData error\nJMP <LOC>\nMOV ECX,dword ptr [ESP + 0xc]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0xee ; 0xEE = null pOutputBuffer error\nJMP <LOC>\nXOR EAX,EAX\nMOV EDX,ECX\nMOV dword ptr [EDX],EAX\nMOV dword ptr [EDX + 0x4],EAX\nMOV dword ptr [EDX + 0x8],EAX\nMOV dword ptr [EDX + 0xc],EAX\nMOV dword ptr [EDX + 0x10],EAX\nMOV dword ptr [EDX + 0x14],EAX\nMOV dword ptr [EDX + 0x18],EAX\nMOV dword ptr [EDX + 0x1c],EAX\nMOV word ptr [EDX + 0x20],AX\nMOV EAX,dword ptr [ESI + 0x8]\nMOV DL,byte ptr [ESI + 0x4]\nXOR ESI,ESI\nTEST EAX,EAX\nMOV byte ptr [ECX],DL\nJZ <LOC>\nADD ECX,0x4\nNOP\nCMP ESI,0x8\nJGE <LOC>\nMOV DL,byte ptr [EAX + 0x4]\nMOV byte ptr [ECX + -0x2],DL\nMOV DX,word ptr [EAX]\nMOV word ptr [ECX],DX\nMOV EAX,dword ptr [EAX + 0x8]\nINC ESI\nADD ECX,0x4\nTEST EAX,EAX\nJNZ <LOC>\nPOP ESI\nRET 0x8\nPUSH 0xf8 ; 0xF8 = entry overflow error\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; stack cleanup: pop 3 args\nPUSH -0x1\nCALL _exit"
+   },
+   {
+    "addresses": [
+     "6fdbccc0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJLE <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc5c]\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xc58]\nIMUL EAX,EAX,0x220 ; 0x220: skill data record stride (byte size per skill entry in skill data table)\nADD EAX,EDX\nRET 0x4\nXOR EAX,EAX\nRET 0x4"
+   }
+  ],
+  "SKILLS_GetSkillDescField0x34": [
+   {
+    "addresses": [
+     "6fd7d970"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EAX,dword ptr [ECX + 0xc5c]\nJGE <LOC>\nMOV ECX,dword ptr [6fdf0b38]\nIMUL EAX,EAX,0x9c ; 0x9C = sizeof(SKILLS_SkillDescEntry) = skill description entry stride\nADD EAX,ECX\nMOV EAX,dword ptr [EAX + 0x34]\nRET 0x4\nXOR EAX,EAX\nMOV EAX,dword ptr [EAX + 0x34]\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd89b30"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nMOV ECX,dword ptr [EAX + 0x5c]\nTEST ECX,ECX\nJZ <LOC>\nMOV EAX,dword ptr [ECX + 0x10]\nTEST EAX,EAX\nJS <LOC>\nXOR EAX,EAX\nRET 0x8\nMOV EDX,dword ptr [ESP + 0x8]\nSHL EDX,0x10\nCALL STATS_CalcStatWithFormulas\nRET 0x8"
+   }
+  ],
+  "SKILLS_RemoveSkillFromUnit": [
+   {
+    "addresses": [
+     "6fda28b0"
+    ],
+    "disasm": "TEST EBX,EBX\nJZ <LOC>\nPUSH EDI\nMOV EDI,dword ptr [EBX + 0xa8]\nTEST EDI,EDI\nJZ <LOC>\nPUSH ESI\nMOV ESI,dword ptr [EDI + 0x4]\nTEST ESI,ESI\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0xc]\nPUSH EAX\nCALL ApplyUnitItemTypeStatList\nTEST EAX,EAX\nJZ <LOC>\nPUSH 0x0\nPUSH EAX\nPUSH EBX\nCALL STAT_UpdateUnitFlagState\nMOV EAX,dword ptr [EDI + 0x8]\nMOV EDX,dword ptr [ESP + 0xc]\nPUSH EBP\nOR EBP,0xffffffff\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX]\nMOVSX ECX,word ptr [ECX]\nCMP EDX,ECX\nJNZ <LOC>\nCMP dword ptr [EAX + 0x34],EBP\nJNZ <LOC>\nPUSH EBP\nPUSH 0x0\nPUSH EBX\nCALL DATATBLS_GetItemDataRecordKey\nMOV EDX,dword ptr [ESP + 0x10]\nMOV EAX,dword ptr [EDI + 0xc]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX]\nMOVSX ECX,word ptr [ECX]\nCMP EDX,ECX\nJNZ <LOC>\nCMP dword ptr [EAX + 0x34],EBP\nJNZ <LOC>\nPUSH EBP\nPUSH 0x0\nPUSH EBX\nCALL DRLG_LookupRoomExit\nMOV EDX,dword ptr [ESP + 0x10]\nMOV EAX,dword ptr [EDI + 0x10]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX]\nMOVSX ECX,word ptr [ECX]\nCMP EDX,ECX\nJNZ <LOC>\nCMP dword ptr [EAX + 0x34],EBP\nJNZ <LOC>\nMOV dword ptr [EDI + 0x10],0x0\nXOR EAX,EAX\nMOV ECX,dword ptr [ESI]\nMOVSX ECX,word ptr [ECX]\nCMP ECX,EDX\nJNZ <LOC>\nCMP dword ptr [ESI + 0x34],EBP\nJZ <LOC>\nMOV EAX,ESI\nMOV ESI,dword ptr [ESI + 0x4]\nTEST ESI,ESI\nJNZ <LOC>\nPOP EBP\nPOP ESI\nPOP EDI\nMOV dword ptr [ESP + 0x8],EDX\nMOV dword ptr [ESP + 0x4],EBX\nJMP SKILLS_SetPlayerOverlayFlag\nMOV ECX,dword ptr [ESP + 0x14]\nTEST ECX,ECX\nJZ <LOC>\nMOV EBP,dword ptr [ESI + 0x28]\nDEC EBP\nMOV ECX,EBP\nTEST ECX,ECX\nMOV dword ptr [ESI + 0x28],EBP\nJG <LOC>\nTEST EAX,EAX\nJZ <LOC>\nMOV EDX,dword ptr [ESI + 0x4]\nMOV dword ptr [EAX + 0x4],EDX\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nMOV dword ptr [EDI + 0x4],EAX\nMOV ECX,dword ptr [EBX + 0x8]\nPUSH 0x0\nPUSH 0x4ad ; 0x4AD = SKILL_RIGHT equip slot\nPUSH 6fde3118 ; 6fde3118 = data field reference\nMOV EDX,ESI\nCALL DeallocateResourceBuffer\nMOV EDX,dword ptr [ESP + 0x10]\nPOP EBP\nPOP ESI\nPOP EDI\nMOV dword ptr [ESP + 0x8],EDX\nMOV dword ptr [ESP + 0x4],EBX\nJMP SKILLS_SetPlayerOverlayFlag\nPOP ESI\nPOP EDI\nRET 0x8"
+   },
+   {
+    "addresses": [
+     "6fda2c80"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x8]\nPUSH EBX\nMOV EBX,dword ptr [ESP + 0x8]\nPUSH 0x1\nPUSH EAX\nCALL SKILLS_RemoveSkillFromUnit\nPOP EBX\nRET 0x10"
+   }
+  ],
+  "SKILLS_SetOrAssignSkillLevel": [
+   {
+    "addresses": [
+     "6fd6aa00"
+    ],
+    "disasm": "PUSH EBX\nPUSH EBP\nPUSH ESI\nMOV ESI,dword ptr [ESP + 0x10]\nTEST ESI,ESI\nPUSH EDI\nMOV EDI,dword ptr [6fde9e1c]\nJZ <LOC>\nCMP dword ptr [ESI],0x1\nJNZ <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nTEST EAX,EAX\nJL <LOC>\nCMP EAX,dword ptr [EDI + 0xa80]\nJGE <LOC>\nMOV EBX,dword ptr [EDI + 0xa78]\nMOV ECX,EAX\nIMUL ECX,ECX,0x1a8 ; 0x1A8 = stride (LevelTileFastEntry size)\nADD ECX,EBX\nJNZ <LOC>\nMOV EDX,EAX\nJMP <LOC>\nMOVSX EDX,word ptr [ECX + 0x2] ; short at +2: lookup classId\nTEST EDX,EDX\nJL <LOC>\nMOV ECX,dword ptr [EDI + 0xa80]\nCMP EDX,ECX\nJL <LOC>\nOR EDX,0xffffffff\nJMP <LOC>\nCMP EDX,0x14e ; skillIndex 0x14E = monster spawn\nJG <LOC>\nJZ <LOC>\nSUB EDX,0xce ; case 0xCE: item skill lookup\nCMP EDX,0x73 ; switch size 0x73 entries\nJA <LOC>\nMOVZX EAX,byte ptr [EDX + 6fd6b0fc]\nJMP dword ptr [EAX*0x4 + 6fd6b0e0]\nTEST ESI,ESI\nJNZ <LOC>\nOR EAX,0xffffffff\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nLEA ECX,[ESP + 0x14]\nPUSH ECX\nPUSH 0x0\nPUSH EAX\nCALL DATATBLS_GetItemRecordFields4A4B\nMOV EDX,dword ptr [6fde9e1c]\nMOV EBP,dword ptr [EDX + 0xa80]\nMOV EBX,dword ptr [ESP + 0x14]\nXOR ECX,ECX\nCMP EBP,0xf ; 0xF: entryCount clamp bound\nSETG CL\nDEC ECX\nAND ECX,0xfffffff0 ; mask 0xFFFFFFF0 clamp\nADD ECX,0xf ; base idx = 0xF\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV ECX,ESI\nMOV dword ptr [EDX],EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nADD EAX,0x3 ; maxLevel +3\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nMOV EBX,dword ptr [EDI + 0xa80] ; case 0xE4: light radius\nXOR EAX,EAX\nCMP EBX,0x60 ; entryCount clamp: 0x60\nSETG AL\nDEC EAX\nAND EAX,0xffffff9f ; clamp mask for entryCount\nADD EAX,0x60 ; base idx = 0x60\nPUSH EAX\nPUSH ESI\nCALL HaveLightResBonus\nPUSH EAX\nCALL SKILLS_ResolveItemCodeOverride\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV ECX,ESI\nMOV dword ptr [EDX],EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nADD EAX,0x2\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nMOV EBX,dword ptr [EDI + 0xa80] ; case 0x10B: positional skill\nMOV ECX,dword ptr [ESP + 0x18]\nXOR EAX,EAX\nCMP EBX,0x6 ; 0x6: entryCount clamp\nSETG AL\nPOP EDI\nDEC EAX\nAND EAX,0xfffffff9 ; clamp mask for 0x6\nADD EAX,0x6 ; base idx = 0x6\nMOV dword ptr [ECX],EAX\nMOV ESI,dword ptr [ESI + 0x2c]\nMOVZX EDX,word ptr [ESI + 0x10]\nMOV EAX,dword ptr [ESP + 0x18]\nMOV dword ptr [EAX],EDX\nMOVZX ECX,word ptr [ESI + 0x12]\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV EAX,dword ptr [ESP + 0x20]\nPOP ESI\nPOP EBP\nMOV dword ptr [EDX],ECX\nMOV dword ptr [EAX],0x8\nPOP EBX\nRET 0x1c ; stdcall cleanup\nTEST ESI,ESI\nJNZ <LOC>\nOR EAX,0xffffffff\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nLEA ECX,[ESP + 0x14] ; case 0x11C: item skill\nPUSH ECX\nPUSH 0x0\nPUSH EAX\nCALL DATATBLS_GetItemRecordFields4A4B\nMOV EDX,dword ptr [6fde9e1c]\nMOV EBP,dword ptr [EDX + 0xa80]\nMOV EBX,dword ptr [ESP + 0x14]\nXOR ECX,ECX\nCMP EBP,0x44 ; 0x44: entryCount clamp\nSETG CL\nDEC ECX\nAND ECX,0xffffffbb ; mask 0xFFFFFFBB clamp\nADD ECX,0x44 ; skillIndex = 0x44\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nADD EAX,0x8\nMOV ECX,ESI\nMOV dword ptr [EDX],EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x8\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nTEST ESI,ESI ; case 0x141: amazon/bow skill\nJZ <LOC>\nCMP dword ptr [ESI + 0x4],0x2c7 ; 0x2C7: amazon classId\nJNZ <LOC>\nMOV EBX,dword ptr [EDI + 0xa80]\nMOV ECX,dword ptr [ESP + 0x18]\nXOR EAX,EAX\nCMP EBX,0x2c8 ; 0x2C8: amazon skill idx\nSETG AL\nDEC EAX\nAND EAX,0xfffffd37 ; clamp mask for 0x2C8\nADD EAX,0x2c8 ; skillIndex = 0x2C8\nMOV dword ptr [ECX],EAX\nJMP <LOC>\nMOV EBX,dword ptr [EDI + 0xa80]\nMOV EDX,dword ptr [ESP + 0x18]\nXOR EAX,EAX\nCMP EBX,0x13 ; 0x13: entryCount clamp\nSETG AL\nDEC EAX\nAND EAX,0xffffffec ; clamp mask for 0x13\nADD EAX,0x13 ; skillIndex = 0x13\nMOV dword ptr [EDX],EAX ; base idx = 0x13\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV ECX,dword ptr [ESP + 0x1c]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetMonsterLevel\nMOV EDX,dword ptr [ESP + 0x20]\nPOP EDI\nPOP ESI\nMOV dword ptr [EDX],EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPOP EBP\nMOV dword ptr [EAX],0x1\nPOP EBX\nRET 0x1c ; ret 0x1C stdcall\nTEST ESI,ESI ; case 0x12A: inner fire skill\nJNZ <LOC>\nOR EAX,0xffffffff\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4]\nLEA ECX,[ESP + 0x14]\nPUSH ECX\nPUSH 0x0\nPUSH EAX\nCALL DATATBLS_GetItemRecordFields4A4B\nMOV EDX,dword ptr [6fde9e1c]\nMOV EBX,dword ptr [EDX + 0xa80]\nXOR ECX,ECX\nCMP EBX,0x12d ; 0x12D: entryCount clamp\nMOV EBX,dword ptr [ESP + 0x14]\nSETG CL\nDEC ECX\nAND ECX,0xfffffed2 ; clamp mask for 0x12D\nADD ECX,0x12d ; skillIndex = 0x12D\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ESI,dword ptr [ESI + 0x2c]\nMOVZX EDX,word ptr [ESI + 0x10]\nMOV EAX,dword ptr [ESP + 0x1c]\nMOV dword ptr [EAX],EDX\nMOVZX ECX,word ptr [ESI + 0x12]\nMOV EDX,dword ptr [ESP + 0x20]\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nPOP EBP\nMOV dword ptr [EDX],ECX\nMOV dword ptr [EAX],0x1\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nTEST EAX,EAX ; case 0x14E: monster spawn\nJL <LOC>\nCMP EAX,dword ptr [6fdf0958]\nJGE <LOC>\nMOV EDX,dword ptr [6fdf0950]\nIMUL EAX,EAX,0x1a8 ; 0x1A8: stride\nMOVZX EBX,byte ptr [EAX + EDX*0x1 + 0x4b]\nJMP <LOC>\nXOR EBX,EBX\nXOR EAX,EAX\nCMP ECX,0x72 ; 0x72: entryCount clamp\nSETG AL\nDEC EAX\nAND EAX,0xffffff8d ; clamp mask for 0x72\nADD EAX,0x72 ; skillIndex = 0x72\nMOV ECX,EAX\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV EAX,dword ptr [ESI]\nCMP EAX,0x2\nJZ <LOC>\nCMP EAX,0x3 ; type==3 check\nJLE <LOC>\nCMP EAX,0x5 ; type<=5 check\nJLE <LOC>\nMOV EAX,dword ptr [ESI + 0x2c]\nTEST EAX,EAX\nJZ <LOC>\nMOVZX EAX,word ptr [EAX + 0x2]\nJMP <LOC>\nXOR EAX,EAX\nJMP <LOC>\nMOV EDX,dword ptr [ESI + 0x2c]\nMOV EAX,dword ptr [EDX + 0xc]\nMOV ECX,dword ptr [ESP + 0x1c]\nADD EAX,-0x2 ; minLevel wPosY-2\nMOV dword ptr [ECX],EAX\nMOV EAX,dword ptr [ESI]\nCMP EAX,0x2\nJZ <LOC>\nCMP EAX,0x3 ; type==3 check max\nJLE <LOC>\nCMP EAX,0x5 ; type<=5 check max\nJLE <LOC>\nMOV ESI,dword ptr [ESI + 0x2c]\nTEST ESI,ESI\nJZ <LOC>\nMOVZX EAX,word ptr [ESI + 0x6]\nJMP <LOC>\nXOR EAX,EAX\nJMP <LOC>\nMOV EDX,dword ptr [ESI + 0x2c]\nMOV EAX,dword ptr [EDX + 0x10]\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nADD EAX,-0x2 ; maxLevel wPosX-2\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nPOP EBX\nRET 0x1c ; ret 0x1C stdcall\nADD EDX,0xfffffe1c ; switch 0x1E4+ monster skills\nCMP EDX,0x3c ; range 0x3C=60 cases\nJA <LOC>\nMOVZX EDX,byte ptr [EDX + 6fd6b184]\nJMP dword ptr [EDX*0x4 + 6fd6b170]\nTEST EAX,EAX ; case 0x1E4: monster base skill\nJL <LOC>\nCMP EAX,dword ptr [6fdf0958]\nJGE <LOC>\nMOV EDX,dword ptr [6fdf0950]\nIMUL EAX,EAX,0x1a8 ; stride 0x1A8\nMOVZX EBX,byte ptr [EAX + EDX*0x1 + 0x4b]\nJMP <LOC>\nXOR EBX,EBX\nXOR EAX,EAX\nCMP ECX,0x1c5 ; 0x1C5: entryCount clamp\nSETG AL\nDEC EAX\nAND EAX,0xfffffe3a ; clamp mask for 0x1C5\nADD EAX,0x1c5 ; skillIndex = 0x1C5\nMOV ECX,EAX\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV ECX,ESI\nMOV dword ptr [EDX],EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nADD EAX,0x3 ; maxLevel+3\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nPOP EBX\nRET 0x1c ; ret 0x1C\nMOV EAX,dword ptr [ESP + 0x2c] ; case 0x20E: callback skill\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,ESI\nCALL EAX\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV ECX,dword ptr [ESP + 0x1c]\nADD EAX,0x2\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetMonsterLevel\nMOV EDX,dword ptr [ESP + 0x20]\nPOP EDI\nADD EAX,0x2\nPOP ESI\nMOV dword ptr [EDX],EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPOP EBP\nMOV dword ptr [EAX],0x1\nPOP EBX\nRET 0x1c ; ret 0x1C\nMOV EDX,dword ptr [ESP + 0x18] ; case 0x210: callback fallback\nXOR EAX,EAX\nTEST ECX,ECX\nSETG AL\nPUSH 0x1fc ; int nLineNumber for CleanupAndAbort\nDEC EAX\nMOV dword ptr [EDX],EAX\nCALL GetReturnAddress\nPUSH EAX ; void * pContext for CleanupAndAbort\nPUSH 6fdda728 ; int nErrorCode for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; add ESP 0xC cleanup\nPUSH -0x1\nCALL _exit\nTEST EAX,EAX ; case 0x219: modifier skill\nJL <LOC>\nCMP EAX,dword ptr [6fdf0958]\nJGE <LOC>\nMOV EDX,dword ptr [6fdf0950]\nIMUL EAX,EAX,0x1a8 ; stride 0x1A8\nMOVZX EBX,byte ptr [EAX + EDX*0x1 + 0x4b]\nJMP <LOC>\nXOR EBX,EBX\nXOR EAX,EAX\nCMP ECX,0x21c ; 0x21C: entryCount clamp\nSETG AL\nDEC EAX\nAND EAX,0xfffffde3 ; clamp mask for 0x21C\nADD EAX,0x21c ; skillIndex = 0x21C\nMOV ECX,EAX\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV ECX,ESI\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nMOV ECX,ESI\nMOV dword ptr [EDX],EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nADD EAX,0x2\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nMOV EAX,[6fde9e1c]\nMOV ECX,dword ptr [EAX + 0xc4]\nMOV EBP,0x92 ; 0x92 skill count threshold\nCMP ECX,EBP\nJLE <LOC>\nMOV EBX,dword ptr [ESI + 0x5c]\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [EBX + 0x10]\nTEST EAX,EAX\nJNS <LOC>\nMOV ECX,dword ptr [6fdd90b0]\nMOV EAX,dword ptr [ECX + 0x48] ; bitmask array elem +0x48\nMOV EDX,dword ptr [EBX + 0x58] ; pStatList[1] chain offset\nMOV EDI,dword ptr [EDX + 0x10] ; flags array +0x10 offset\nMOV ECX,EAX\nAND ECX,EDI\nOR EAX,EDI\nTEST ECX,ECX\nMOV dword ptr [EDX + 0x10],EAX\nJNZ <LOC>\nMOV EDX,dword ptr [6fde9e1c]\nMOV EAX,dword ptr [EDX + 0xc4]\nMOV ECX,dword ptr [EBX + 0x58]\nADD EAX,0x1f ; +0x58: pStatList[1] chain offset\nCDQ\nAND EDX,0x1f ; AND 0x1F align32\nADD EAX,EDX\nMOV EDX,dword ptr [6fdd90b0]\nSAR EAX,0x5 ; SAR 5 = /32\nLEA EAX,[ECX + EAX*0x4 + 0x10] ; flags array index calc\nMOV ECX,dword ptr [EDX + 0x48] ; OR into flags word\nOR dword ptr [EAX],ECX\nMOV EAX,[6fde9e1c]\nCMP dword ptr [EAX + 0xc4],EBP\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbc]\nADD EAX,0x2238 ; 0x2238: stat list flags struct offset\nJZ <LOC>\nMOV DL,byte ptr [EAX + 0x12]\nMOV EAX,[6fdd90b0]\nTEST byte ptr [EAX],DL\nJZ <LOC>\nOR dword ptr [ESI + 0xc8],0x8\nPUSH ESI\nCALL AddUnitToClassQueue\nPOP EDI\nPOP ESI\nPOP EBP\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nMOV EDX,dword ptr [ESP + 0x18] ; case 0x220: random skill\nMOV EBX,dword ptr [EDX]\nXOR EAX,EAX\nCMP ECX,0x23a ; 0x23A: random skill idx\nSETG AL\nLEA EDI,[ESI + 0x20]\nDEC EAX\nAND EAX,0xfffffdc5 ; clamp mask for 0x23A\nADD EAX,0x23a ; skillIndex = 0x23A\nCMP EBX,EAX\nJZ <LOC>\nXOR EAX,EAX\nCMP ECX,0x232 ; 0x232: fallback skill idx\nSETG AL\nMOV ECX,EDI\nDEC EAX\nAND EAX,0xfffffdcd ; clamp mask for 0x232\nADD EAX,0x232 ; 0x232: fallback random skill idx\nMOV EBP,EAX\nMOV EAX,0x2\nCALL SEED_GetRandomNumber\nMOV EBX,EAX\nADD EBX,dword ptr [ESP + 0x28]\nMOV ECX,EBP\nCALL MONSTATS2_GetBaseTypeAtLevel\nMOV ECX,dword ptr [ESP + 0x18]\nMOV dword ptr [ECX],EAX\nMOV EAX,0x18 ; 0x18: RNG shift amount\nMOV ECX,EDI\nCALL SEED_GetRandomNumber\nMOV ECX,ESI\nMOV EBX,EAX\nCALL UNITS_GetUnitLevel\nLEA EDX,[EBX + EAX*0x1 + -0xc]\nMOV EAX,dword ptr [ESP + 0x1c]\nMOV dword ptr [EAX],EDX\nMOV EAX,0x18 ; 0x18: RNG shift amount\nMOV ECX,EDI\nCALL SEED_GetRandomNumber\nMOV ECX,ESI\nMOV EDI,EAX\nCALL UNITS_GetMonsterLevel\nMOV EDX,dword ptr [ESP + 0x20]\nLEA ECX,[EDI + EAX*0x1 + -0xc]\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP ESI\nPOP EBP\nMOV dword ptr [EDX],ECX\nMOV dword ptr [EAX],0x4\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nMOV EAX,0x18 ; 0x18: RNG shift amount\nMOV ECX,EDI\nCALL SEED_GetRandomNumber\nMOV ECX,ESI\nMOV EBX,EAX\nCALL UNITS_GetUnitLevel\nMOV EDX,dword ptr [ESP + 0x1c]\nLEA ECX,[EBX + EAX*0x1 + -0xc]\nMOV dword ptr [EDX],ECX\nMOV EAX,0x18 ; 0x18: RNG shift amount\nMOV ECX,EDI\nCALL SEED_GetRandomNumber\nMOV ECX,ESI\nMOV EDI,EAX\nCALL UNITS_GetMonsterLevel\nMOV ECX,dword ptr [ESP + 0x20]\nMOV EDX,dword ptr [ESP + 0x24]\nLEA EAX,[EDI + EAX*0x1 + -0xc]\nPOP EDI\nPOP ESI\nPOP EBP\nMOV dword ptr [ECX],EAX\nMOV dword ptr [EDX],0x1\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size\nMOV EDX,dword ptr [EDI + 0xa80]\nMOV ECX,dword ptr [ESP + 0x18]\nXOR EAX,EAX\nTEST EDX,EDX\nMOV EDX,dword ptr [ESP + 0x1c]\nSETG AL\nDEC EAX\nMOV dword ptr [ECX],EAX\nMOV EAX,dword ptr [ESP + 0x20]\nMOV ECX,dword ptr [ESP + 0x24]\nMOV dword ptr [EDX],0x0\nMOV dword ptr [EAX],0x0\nMOV dword ptr [ECX],0x1\nPOP EDI\nPOP ESI\nPOP EBP\nPOP EBX\nRET 0x1c ; 0x1C: stdcall arg size"
+   },
+   {
+    "addresses": [
+     "6fda2d50"
+    ],
+    "disasm": "PUSH ESI\nMOV ESI,dword ptr [ESP + 0x8]\nTEST ESI,ESI ; Early exit: pUnit is NULL\nJZ <LOC>\nMOV EAX,dword ptr [ESI + 0xa8]\nTEST EAX,EAX\nPUSH EDI\nMOV EDI,dword ptr [ESP + 0x10]\nJZ <LOC>\nMOV EAX,dword ptr [EAX + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nMOV ECX,dword ptr [EAX] ; Loop: search skill list for wSkillId with nFlags == -1\nMOVSX EDX,word ptr [ECX]\nCMP EDX,EDI\nJNZ <LOC>\nCMP dword ptr [EAX + 0x34],-0x1\nJZ <LOC>\nMOV EAX,dword ptr [EAX + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nXOR EAX,EAX ; Not found: set pSkillNode = NULL\nTEST EAX,EAX\nPUSH EBX\nPUSH EBP\nMOV EBP,dword ptr [ESP + 0x1c]\nMOV EBX,EAX\nJNZ <LOC>\nTEST EBP,EBP ; Skip if nSkillLevel < 1\nJLE <LOC>\nPUSH EDI\nPUSH ESI\nCALL SKILLS_SetItemInventoryDisplayTier\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nPUSH -0x1\nMOV EDX,EDI\nMOV ECX,ESI\nCALL SKILLS_GetGlobalPositionData\nTEST EAX,EAX\nJNZ <LOC>\nPUSH EDI\nPUSH ESI\nCALL SKILLS_SetItemInventoryDisplayTier\nPUSH -0x1\nMOV EDX,EDI\nMOV ECX,ESI\nCALL SKILLS_GetGlobalPositionData\nTEST EAX,EAX\nJZ <LOC>\nPUSH EDI\nPUSH ESI\nMOV dword ptr [EAX + 0x28],0x0\nCALL SKILLS_SetPlayerOverlayFlag\nCMP dword ptr [EBX + 0x34],-0x1\nJNZ <LOC>\nPUSH EDI\nPUSH ESI\nMOV dword ptr [EBX + 0x2c],EBP ; Set skill level at field_0x2c\nCALL SKILLS_SetPlayerOverlayFlag\nPOP EBP\nPOP EBX\nPOP EDI\nPOP ESI\nRET 0xc ; RET 0xC = stdcall cleanup (3 params)"
+   }
+  ],
+  "STATS_ApplyMaxDamageStats": [
+   {
+    "addresses": [
+     "6fd99af0"
+    ],
+    "disasm": "SUB ESP,0x8\nPUSH EBX\nPUSH ESI\nMOV ESI,dword ptr [ESP + 0x14]\nTEST ESI,ESI\nMOV EBX,ECX\nMOV dword ptr [ESP + 0x8],EDX\nMOV dword ptr [ESP + 0xc],EBX\nJNZ <LOC>\nPUSH 0x1505 ; Assert 5381: pUnit null\nJMP <LOC>\nMOV EAX,dword ptr [ESI]\nCMP EAX,0x4 ; Type 4 = Item\nJZ <LOC>\nPUSH 0x1506 ; Assert 5382: not Item\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x14] ; UnitAny+0x14: pItemData\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x1508 ; Assert 5384: no ItemData\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; s_Stats_cpp: __FILE__ string\nCALL CleanupAndAbort\nADD ESP,0xc ; Clean 3 args from stack\nPUSH -0x1\nCALL _exit\nCMP word ptr [EAX + 0x30],0x1 ; +0x30: wEnhDmgFlag (short)\nPUSH EBP\nPUSH EDI\nJC <LOC>\nMOV ECX,dword ptr [ESP + 0x20]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x364 ; Assert 868: pPropRec null\nJMP <LOC>\nMOV EAX,dword ptr [ECX + 0xc]\nMOV ECX,dword ptr [ECX + 0x8]\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nMOV EBP,dword ptr [ESP + 0x30]\nMOV ECX,dword ptr [ESP + 0x28]\nMOV EDX,dword ptr [ESP + 0x10]\nMOV EBX,EAX\nMOV EAX,dword ptr [ESP + 0x2c]\nPUSH EBP\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPUSH ECX\nPUSH EBX\nPUSH EDX\nPUSH EAX\nXOR EAX,EAX\nMOV EDI,0x28 ; Stat 40: maxdamage\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV ECX,dword ptr [ESP + 0x2c]\nMOV EDX,dword ptr [ESP + 0x28]\nMOV EAX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH ECX\nMOV ECX,dword ptr [ESP + 0x1c]\nPUSH EDX\nPUSH EBX\nPUSH EAX\nPUSH ECX\nXOR EAX,EAX\nMOV EDI,0x2a ; Stat 42: secondary_maxdmg\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EDX,dword ptr [ESP + 0x2c]\nMOV EAX,dword ptr [ESP + 0x28]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH EDX\nMOV EDX,dword ptr [ESP + 0x1c]\nPUSH EAX\nPUSH EBX\nPUSH ECX\nPUSH EDX\nXOR EAX,EAX\nMOV EDI,0x2c ; Stat 44: throw_maxdmg\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x28]\nMOV EDX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPUSH ECX\nPUSH EBX\nPUSH EDX\nPUSH EAX\nXOR EAX,EAX\nMOV EDI,0x2e ; Stat 46: maxdmg_pct\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP EBP\nPOP ESI\nPOP EBX\nADD ESP,0x8\nRET 0x1c ; RET: clean 7 stack params\nMOV EBP,dword ptr [ESP + 0x20]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1 ; nMode==1: binary search\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; Type 4 = Item\nJZ <LOC>\nPUSH 0x61c ; Assert 1564: not Item\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert 1567: null record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; ItemDataRec+0x80: sortKey\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c] ; sgptDataTables global\nCMP dword ptr [EAX + 0xbd4],0x28 ; +0xBD4: nISCCount\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: pISCTable\nADD EAX,0x32a0 ; ISC[40] offset 0x32A0\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x280000 ; stat40<<16: stat+layer key\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x28 ; Stat 0x28: maxdamage\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1 ; nMode==1: binary search\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; Type 4 = Item\nJZ <LOC>\nPUSH 0x61c ; Assert 1564: not Item\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert 1567: null record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; ItemDataRec+0x80: sortKey\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c] ; sgptDataTables global\nCMP dword ptr [EAX + 0xbd4],0x2a ; +0xBD4: nISCCount\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: pISCTable\nADD EAX,0x3528 ; ISC[42] offset 0x3528\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x2a0000 ; stat42<<16: stat+layer key\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x2a ; Stat 0x2A: secondary_maxdmg\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1 ; nMode==1: binary search\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; Type 4 = Item\nJZ <LOC>\nPUSH 0x61c ; Assert 1564: not Item\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert 1567: null record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; ItemDataRec+0x80: sortKey\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c] ; sgptDataTables global\nCMP dword ptr [EAX + 0xbd4],0x2c ; +0xBD4: nISCCount\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: pISCTable\nADD EAX,0x37b0 ; ISC[44] offset 0x37B0\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x2c0000 ; stat44<<16: stat+layer key\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x2c ; Stat 0x2C: throw_maxdmg\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1 ; nMode==1: binary search\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; Type 4 = Item\nJZ <LOC>\nPUSH 0x61c ; Assert 1564: not Item\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert 1567: null record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; ItemDataRec+0x80: sortKey\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJNZ <LOC>\nPUSH 0x29d ; Assert 669: null modSlot\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; s_Stats_cpp: __FILE__ string\nCALL CleanupAndAbort\nADD ESP,0xc ; Clean 3 args from stack\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c] ; sgptDataTables global\nCMP dword ptr [EAX + 0xbd4],0x2e ; +0xBD4: nISCCount\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: pISCTable\nADD EAX,0x3a38 ; ISC[46] offset 0x3A38\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x2e0000 ; stat46<<16: stat+layer key\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x2e ; Stat 0x2E: maxdmg_pct\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP EBP\nPOP ESI\nPOP EBX\nADD ESP,0x8\nRET 0x1c ; RET: clean 7 stack params"
+   },
+   {
+    "addresses": [
+     "6fd99f30"
+    ],
+    "disasm": "SUB ESP,0x8\nPUSH EBX\nPUSH ESI\nMOV ESI,dword ptr [ESP + 0x14]\nTEST ESI,ESI\nMOV EBX,ECX\nMOV dword ptr [ESP + 0x8],EDX\nMOV dword ptr [ESP + 0xc],EBX\nJNZ <LOC>\nPUSH 0x1505 ; Assert: null pUnit\nJMP <LOC>\nMOV EAX,dword ptr [ESI]\nCMP EAX,0x4 ; UNIT_TYPE_ITEM\nJZ <LOC>\nPUSH 0x1506 ; Assert: not item type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x14] ; UnitAny+0x14: pItemData\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x1508 ; Assert: no item data\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; s_assert_filename str ref\nCALL CleanupAndAbort\nADD ESP,0xc ; cleanup 3 pushed args\nPUSH -0x1\nCALL _exit\nCMP word ptr [EAX + 0x30],0x1 ; Enhanced dmg flag +0x30\nPUSH EBP\nPUSH EDI\nJC <LOC>\nMOV ECX,dword ptr [ESP + 0x20]\nTEST ECX,ECX\nJNZ <LOC>\nPUSH 0x349 ; Assert: null pProperty\nJMP <LOC>\nMOV EAX,dword ptr [ECX + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [ECX + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nMOV EBP,dword ptr [ESP + 0x30]\nMOV ECX,dword ptr [ESP + 0x28]\nMOV EDX,dword ptr [ESP + 0x10]\nMOV EBX,EAX\nMOV EAX,dword ptr [ESP + 0x2c]\nPUSH EBP\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPUSH ECX\nPUSH EBX\nPUSH EDX\nPUSH EAX\nXOR EAX,EAX\nMOV EDI,0x27 ; STAT_MAXDAMAGE (39)\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV ECX,dword ptr [ESP + 0x2c]\nMOV EDX,dword ptr [ESP + 0x28]\nMOV EAX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH ECX\nMOV ECX,dword ptr [ESP + 0x1c]\nPUSH EDX\nPUSH EBX\nPUSH EAX\nPUSH ECX\nXOR EAX,EAX\nMOV EDI,0x29 ; STAT_MAXFIREDAMAGE (41)\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EDX,dword ptr [ESP + 0x2c]\nMOV EAX,dword ptr [ESP + 0x28]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH EDX\nMOV EDX,dword ptr [ESP + 0x1c]\nPUSH EAX\nPUSH EBX\nPUSH ECX\nPUSH EDX\nXOR EAX,EAX\nMOV EDI,0x2b ; STAT_MAXCOLDDAMAGE (43)\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x28]\nMOV EDX,dword ptr [ESP + 0x10]\nPUSH EBP\nPUSH EAX\nMOV EAX,dword ptr [ESP + 0x1c]\nPUSH ECX\nPUSH EBX\nPUSH EDX\nPUSH EAX\nXOR EAX,EAX\nMOV EDI,0x2d ; STAT_MAXLIGHTDAMAGE (45)\nMOV ECX,ESI\nCALL STATS_ApplyStatWithEnhancedDamage\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP EBP\nPOP ESI\nPOP EBX\nADD ESP,0x8\nRET 0x1c ; cleanup 7 stack params (28)\nMOV EBP,dword ptr [ESP + 0x20]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; UNIT_TYPE_ITEM\nJZ <LOC>\nPUSH 0x61c ; Assert: not item type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert: no item record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; +0x80: record field\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c]\nCMP dword ptr [EAX + 0xbd4],0x27 ; count > maxdmg(39)?\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: ItemStatCost tbl ptr\nADD EAX,0x315c ; ItemStatCost[39] +0x315C\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x270000 ; statId=0x27 << 16\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x27 ; STAT_MAXDAMAGE\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; UNIT_TYPE_ITEM\nJZ <LOC>\nPUSH 0x61c ; Assert: not item type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert: no item record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; +0x80: record field\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c]\nCMP dword ptr [EAX + 0xbd4],0x29 ; count > maxfire(41)?\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: ItemStatCost tbl ptr\nADD EAX,0x33e4 ; ItemStatCost[41] +0x33E4\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x290000 ; statId=0x29 << 16\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x29 ; STAT_MAXFIREDAMAGE\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; UNIT_TYPE_ITEM\nJZ <LOC>\nPUSH 0x61c ; Assert: not item type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert: no item record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; +0x80: record field\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJZ <LOC>\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c]\nCMP dword ptr [EAX + 0xbd4],0x2b ; count > maxcold(43)?\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: ItemStatCost tbl ptr\nADD EAX,0x366c ; ItemStatCost[43] +0x366C\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x2b0000 ; statId=0x2B << 16\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x2b ; STAT_MAXCOLDDAMAGE\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EBX,dword ptr [ESP + 0x14]\nMOV EAX,dword ptr [EBP + 0xc] ; D2PropertyStrc+0x0C: nMax\nMOV ECX,dword ptr [EBP + 0x8] ; D2PropertyStrc+0x08: nMin\nMOV EDX,ESI\nCALL ITEMS_GetRandomInRangeFromUnitEx\nCMP EBX,0x1\nMOV EDI,EAX\nJNZ <LOC>\nCMP dword ptr [ESI],0x4 ; UNIT_TYPE_ITEM\nJZ <LOC>\nPUSH 0x61c ; Assert: not item type\nJMP <LOC>\nMOV EAX,dword ptr [ESI + 0x4] ; UnitAny+0x04: dwClassId\nPUSH EAX\nCALL GetItemDataRecord\nTEST EAX,EAX\nJNZ <LOC>\nPUSH 0x61f ; Assert: no item record\nJMP <LOC>\nMOV EAX,dword ptr [EAX + 0x80] ; +0x80: record field\nMOV ECX,dword ptr [6fdeff6c]\nPUSH 0x0\nPUSH EAX\nPUSH ECX\nCALL BinarySearchInSortedArray\nMOV dword ptr [ESP + 0x20],EAX\nTEST EDI,EDI\nJZ <LOC>\nMOV EDX,dword ptr [ESP + 0x30]\nMOV EAX,dword ptr [ESP + 0x2c]\nMOV ECX,dword ptr [ESP + 0x10]\nPUSH EDX\nPUSH EAX\nMOV EAX,ESI\nCALL STATS_GetOrCreateModifierSlot\nMOV EBX,EAX\nTEST EBX,EBX\nJNZ <LOC>\nPUSH 0x29d ; Assert: null mod slot\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; s_assert_filename str ref\nCALL CleanupAndAbort\nADD ESP,0xc ; cleanup 3 pushed args\nPUSH -0x1\nCALL _exit\nMOV EAX,dword ptr [ESP + 0x28]\nTEST EAX,EAX\nJZ <LOC>\nMOV EAX,[6fde9e1c]\nCMP dword ptr [EAX + 0xbd4],0x2d ; count > maxlight(45)?\nJLE <LOC>\nMOV EAX,dword ptr [EAX + 0xbcc] ; +0xBCC: ItemStatCost tbl ptr\nADD EAX,0x38f4 ; ItemStatCost[45] +0x38F4\nJNZ <LOC>\nXOR EAX,EAX\nJMP <LOC>\nPUSH EAX\nMOV EDI,0x2d0000 ; statId=0x2D << 16\nCALL STATS_GetStatListBaseStatValue\nNEG EAX\nMOV EDI,EAX\nPUSH 0x0\nPUSH EDI\nPUSH 0x2d ; STAT_MAXLIGHTDAMAGE\nPUSH EBX\nCALL STATLIST_AddStat\nMOV EAX,dword ptr [ESP + 0x24]\nPOP EDI\nPOP EBP\nPOP ESI\nPOP EBX\nADD ESP,0x8\nRET 0x1c ; cleanup 7 stack params (28)"
+   }
+  ],
+  "STATS_GetSlotElementPtr": [
+   {
+    "addresses": [
+     "6fd95920"
+    ],
+    "disasm": "CMP EAX,0xc ; 0xC = Maximum slot index (slots 0-11 valid, 12 total)\nJNC <LOC>\nSHL EAX,0x4\nLEA EAX,[EAX + ECX*0x1 + 0xc]\nRET\nPUSH 0x81 ; 0x81 = Exit code for abnormal termination\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728 ; 6fdda728 = Error context/handle for CleanupAndAbort\nCALL CleanupAndAbort\nADD ESP,0xc ; 0xC = Stack cleanup (3 args * 4 bytes)\nPUSH -0x1\nCALL _exit"
+   },
+   {
+    "addresses": [
+     "6fd95950"
+    ],
+    "disasm": "TEST ECX,ECX\nJNZ <LOC>\nPUSH 0x79\nJMP <LOC>\nCMP EAX,0x3\nJNC <LOC>\nSHL EAX,0x4\nLEA EAX,[EAX + ECX*0x1 + 0x24]\nRET\nPUSH 0x7a\nCALL GetReturnAddress\nPUSH EAX\nPUSH 6fdda728\nCALL CleanupAndAbort\nADD ESP,0xc\nPUSH -0x1\nCALL _exit"
+   }
+  ],
+  "STATS_GetUnitBaseStatValue": [
+   {
+    "addresses": [
+     "6fd88bd0"
+    ],
+    "disasm": "PUSH EBX\nMOV EBX,ECX\nTEST EBX,EBX ; nUnitStatId is passed in EAX per fastcall; ECX contains implicit this pointer\nPUSH EDI\nMOV EDI,EAX\nJZ <LOC>\nTEST EDI,EDI ; Validate nUnitStatId >= 0\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c] ; Load sgptDataTables pointer into ECX\nCMP EDI,dword ptr [ECX + 0xbd4] ; Bound check: nUnitStatId < nISCCount\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbcc] ; Compute pISCTable[nUnitStatId] entry address\nMOV EAX,EDI\nIMUL EAX,EAX,0x144 ; IMUL with 0x144 = stat entry stride (note: decompiler may show stale 0x51)\nADD EAX,EDX\nJNZ <LOC> ; Return 0 if entry pointer is NULL\nPOP EDI\nXOR EAX,EAX\nPOP EBX\nRET 0x4 ; Validation failed: return 0\nPUSH EAX\nMOVZX EAX,word ptr [ESP + 0x10]\nSHL EDI,0x10\nADD EDI,EAX\nCALL STATS_GetStatValueWithMinCheck\nPOP EDI ; Result returned from STATS_GetStatValue\nPOP EBX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd88c80"
+    ],
+    "disasm": "PUSH EBX\nMOV EBX,ECX\nTEST EBX,EBX\nPUSH EDI\nMOV EDI,EAX\nJZ <LOC>\nTEST EDI,EDI\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EDI,dword ptr [ECX + 0xbd4] ; Bounds check: statId < g_pDataTables->nMonStatsCount\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbcc]\nMOV EAX,EDI\nIMUL EAX,EAX,0x144 ; Calculate ISC entry: base + statId * 0x144 (entry size 324 bytes)\nADD EAX,EDX\nJNZ <LOC> ; Verify entry pointer is non-NULL\nPOP EDI\nXOR EAX,EAX\nPOP EBX ; Return 0 on validation failure\nRET 0x4\nPUSH EAX\nMOVZX EAX,word ptr [ESP + 0x10]\nSHL EDI,0x10\nADD EDI,EAX\nCALL STATS_GetStatListBaseStatValue ; Delegate to STATS_GetBaseStatValue with validated ItemStatCost entry\nPOP EDI\nPOP EBX\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd894e0"
+    ],
+    "disasm": "PUSH EBX\nMOV EBX,ECX\nTEST EBX,EBX\nPUSH EDI\nMOV EDI,EAX\nJZ <LOC>\nTEST EDI,EDI\nJL <LOC>\nMOV ECX,dword ptr [6fde9e1c]\nCMP EDI,dword ptr [ECX + 0xbd4] ; Bounds check: statId < g_pDataTables->nMonStatsCount\nJGE <LOC>\nMOV EDX,dword ptr [ECX + 0xbcc]\nMOV EAX,EDI\nIMUL EAX,EAX,0x144 ; Calculate ISC entry: base + statId * 0x144 (entry size 324 bytes)\nADD EAX,EDX\nJNZ <LOC> ; Verify entry pointer is non-NULL\nPOP EDI\nXOR EAX,EAX\nPOP EBX\nRET 0x4\nPUSH EAX\nMOVZX EAX,word ptr [ESP + 0x10]\nSHL EDI,0x10\nADD EDI,EAX\nCALL STATS_GetStatListBaseStatValue ; Delegate to STATS_GetBaseStatValue with validated ItemStatCost entry\nPOP EDI\nPOP EBX\nRET 0x4"
+   }
+  ],
+  "STAT_GetStatListOwnerId": [
+   {
+    "addresses": [
+     "6fd88000",
+     "6fd883a0"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJNZ <LOC>\nRET 0x4\nMOV EAX,dword ptr [EAX + 0x18]\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fda3050"
+    ],
+    "disasm": "MOV ECX,dword ptr [ESP + 0x4]\nPUSH EBX\nMOV EBX,dword ptr [ESP + 0x10]\nPUSH EBP\nMOV EBP,dword ptr [ESP + 0x10]\nINC EBP\nINC EBX\nNEG ECX\nPUSH ESI\nSBB ECX,ECX\nPUSH EDI\nMOV EDI,dword ptr [ESP + 0x20]\nAND ECX,0x64 ; 0x64=100 (stat list flag check)\nXOR EAX,EAX\nXOR ESI,ESI\nTEST EDI,EDI\nMOV dword ptr [ESP + 0x1c],EBX\nMOV EBX,dword ptr [6fdf0078]\nMOV dword ptr [ESP + 0x18],EBP\nJZ <LOC>\nMOV ESI,EDI\nSUB ESI,EBX\nMOV EAX,0xea0ea0eb ; 0xEA0EA0EB div-by-0x118 reciprocal\nIMUL ESI\nADD EDX,ESI\nMOV ESI,dword ptr [EDI + 0x1c]\nSAR EDX,0x8\nMOV EAX,EDX\nSHR EAX,0x1f ; 31 (sign-extract mask)\nLEA EAX,[EDX + EAX*0x1 + 0x1]\nMOV EBP,dword ptr [6fdf007c]\nCMP EAX,EBP\nMOV EDI,EAX\nJGE <LOC>\nIMUL EAX,EAX,0x118 ; 0x118=280 HirelingDataRecord stride\nLEA EDX,[EAX + EBX*0x1 + 0x10]\nMOV EBX,dword ptr [ESP + 0x18]\nCMP dword ptr [EDX + -0x4],EBX\nLEA EAX,[EDX + -0x10]\nJNZ <LOC>\nMOV EBX,dword ptr [ESP + 0x1c]\nCMP dword ptr [EDX],EBX\nJNZ <LOC>\nCMP word ptr [EAX],CX\nJNZ <LOC>\nTEST ESI,ESI\nJZ <LOC>\nCMP dword ptr [EDX + 0xc],ESI\nJZ <LOC>\nINC EDI\nADD EDX,0x118 ; 0x118=280 HirelingDataRecord stride\nCMP EDI,EBP\nJL <LOC>\nXOR EAX,EAX\nPOP EDI\nPOP ESI\nPOP EBP\nPOP EBX\nRET 0x10"
+   }
+  ],
+  "StubNoOp": [
+   {
+    "addresses": [
+     "6fd95610",
+     "6fd9dbd0",
+     "6fd9dbf0",
+     "6fd9dc00"
+    ],
+    "disasm": "RET 0xc"
+   },
+   {
+    "addresses": [
+     "6fd9dbc0",
+     "6fd9dbe0",
+     "6fdbc200",
+     "6fdc0f70"
+    ],
+    "disasm": "RET 0x4"
+   }
+  ],
+  "UNIT_GetUnitX": [
+   {
+    "addresses": [
+     "6fd87e20"
+    ],
+    "disasm": "MOV EAX,dword ptr [ESP + 0x4]\nTEST EAX,EAX\nJZ <LOC>\nPUSH ESI\nMOV ESI,dword ptr [EAX + 0x5c]\nTEST ESI,ESI\nJZ <LOC>\nMOV EAX,dword ptr [ESI + 0x10]\nTEST EAX,EAX\nJNS <LOC>\nMOV EDX,dword ptr [ESI + 0x50]\nTEST EDX,EDX\nJZ <LOC>\nMOV ECX,dword ptr [ESI]\nPUSH 0x0\nPUSH 0xa1e ; 0xa1e = resource type ID (DeallocateResourceBuffer)\nPUSH 6fde40c0 ; 6fde40c0 = resource buffer address\nCALL DeallocateResourceBuffer\nMOV dword ptr [ESI + 0x50],0x0\nMOV word ptr [ESI + 0x56],0x0\nMOV word ptr [ESI + 0x54],0x0\nPOP ESI\nRET 0x4"
+   },
+   {
+    "addresses": [
+     "6fd9ad10",
+     "6fd9e510"
+    ],
+    "disasm": "XOR EAX,EAX\nRET"
+   }
+  ]
+ },
+ "fetch_failed": {}
+}

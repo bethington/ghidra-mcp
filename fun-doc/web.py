@@ -32,6 +32,14 @@ _adaptive_refresh_lock = threading.Lock()
 
 HEARTBEAT_INTERVAL_SEC = float(os.environ.get("FUNDOC_HEARTBEAT_INTERVAL_SEC", "30"))
 STALL_KILL_THRESHOLD_SEC = float(os.environ.get("FUNDOC_STALL_KILL_THRESHOLD_SEC", "900"))
+# Provider sessions may legitimately run past the stall threshold while
+# actively working (idle-based session deadline, 2026-07-17): the worker
+# thread looks wedged to the heartbeat but the session subprocess is streaming
+# provider_turn/tool events. Grace = session idle limit (300s) + margin; the
+# hard cap = session hard cap (2700s) + margin so a wedged-but-chatty session
+# still can't pin a worker forever.
+STALL_ACTIVITY_GRACE_SEC = float(os.environ.get("FUNDOC_STALL_ACTIVITY_GRACE_SEC", "330"))
+STALL_KILL_HARD_CAP_SEC = float(os.environ.get("FUNDOC_STALL_KILL_HARD_CAP_SEC", "3000"))
 
 
 class WorkerManager:
@@ -49,6 +57,12 @@ class WorkerManager:
         self._in_progress_keys = set()
         self._load_queue = load_queue
         self._save_queue = save_queue
+        # Session-activity stamps for the stall watchdog: high-frequency
+        # provider-session events carry the owning worker's id; a fresh stamp
+        # means the "stalled" worker thread is really inside a long active
+        # provider call and must not be stall-killed yet.
+        for _evt in ("provider_turn", "tool_call", "tool_result"):
+            self._bus.on(_evt, self._note_session_activity)
         # Q11: per-binary lock for globals workers. Holds the binary path
         # of every binary currently being processed by a globals worker
         # so a second launch on the same binary is rejected with a clear
@@ -110,7 +124,22 @@ class WorkerManager:
                         last_dt = now
                     stale_sec = max(0.0, (now - last_dt).total_seconds())
                     phase = worker.get("phase", "unknown")
-                    if stale_sec > STALL_KILL_THRESHOLD_SEC and not worker.get("stall_kill_fired", False):
+                    # Activity-aware gate: a stale heartbeat with a fresh
+                    # session-activity stamp is a long ACTIVE provider call,
+                    # not a hang — skip the kill until the hard cap.
+                    act_age = None
+                    act_raw = worker.get("last_session_activity_at")
+                    if act_raw:
+                        try:
+                            act_age = (now - datetime.fromisoformat(act_raw)).total_seconds()
+                        except (TypeError, ValueError):
+                            act_age = None
+                    session_active = act_age is not None and act_age < STALL_ACTIVITY_GRACE_SEC
+                    if (
+                        stale_sec > STALL_KILL_THRESHOLD_SEC
+                        and not worker.get("stall_kill_fired", False)
+                        and (not session_active or stale_sec > STALL_KILL_HARD_CAP_SEC)
+                    ):
                         worker["stall_kill_fired"] = True
                         worker["stop_flag"].set()
                         worker["status"] = "stopping"
@@ -153,6 +182,34 @@ class WorkerManager:
 
             if heartbeats or kill_requests:
                 self._emit_status()
+
+    def _note_session_activity(self, data):
+        """Bus subscriber: stamp the owning worker on every provider-session
+        event so the stall watchdog can tell long-active from wedged."""
+        try:
+            wid = (data or {}).get("worker_id")
+            if wid and wid in self._workers:
+                self._workers[wid]["last_session_activity_at"] = datetime.now().isoformat()
+        except Exception:
+            pass
+
+    def _log_worker_stopped(self, worker_id, worker):
+        """Persist worker exit to events.jsonl so a clean finish is
+        distinguishable from a crash after the in-memory record is pruned."""
+        try:
+            from event_log import log_event
+            log_event(
+                "worker.stopped",
+                worker_id=worker_id,
+                provider=worker.get("provider"),
+                mode=worker.get("mode"),
+                status=worker.get("status"),
+                exit_reason=worker.get("exit_reason"),
+                error=worker.get("last_error"),
+                progress=dict(worker.get("progress") or {}),
+            )
+        except Exception:
+            pass
 
     def _serialize_worker(self, worker):
         return {
@@ -949,6 +1006,7 @@ class WorkerManager:
                 finalize_worker_session(session)
 
         except Exception as e:
+            worker["last_error"] = str(e)
             self._bus.emit(
                 "worker_stopped", {"worker_id": worker_id, "reason": f"error: {e}"}
             )
@@ -977,6 +1035,7 @@ class WorkerManager:
                     "progress": dict(worker["progress"]),
                 },
             )
+            self._log_worker_stopped(worker_id, worker)
 
     def _run_worker_globals(self, worker_id):
         """Globals worker loop. Per Q1-Q12 design: pulls every issue-global
@@ -1071,6 +1130,7 @@ class WorkerManager:
                 flush=True,
             )
         except Exception as e:
+            worker["last_error"] = str(e)
             self._bus.emit(
                 "worker_stopped",
                 {"worker_id": worker_id, "reason": f"error: {e}"},
@@ -1097,6 +1157,7 @@ class WorkerManager:
                     "summary": worker.get("globals_summary"),
                 },
             )
+            self._log_worker_stopped(worker_id, worker)
 
     def _run_worker_port(self, worker_id):
         """PORT (OpenD2 conformance) worker loop. Drafts + proves Stage 2/3
@@ -1217,6 +1278,7 @@ class WorkerManager:
                 "totals": summary.get("totals") or {},
             })
         except Exception as e:
+            worker["last_error"] = str(e)
             self._bus.emit(
                 "worker_stopped",
                 {"worker_id": worker_id, "reason": f"error: {e}"},
@@ -1242,44 +1304,10 @@ class WorkerManager:
                     "progress": dict(worker["progress"]),
                 },
             )
+            self._log_worker_stopped(worker_id, worker)
 
     def _emit_status(self):
         self._socketio.emit("worker_status", self.get_status())
-
-
-def compute_skip_reason(func: dict, key: str, pinned_keys: set) -> str | None:
-    """Return the selector skip reason for ``func``, or ``None`` if eligible.
-
-    Mirrors the gates in ``fun_doc.select_candidates`` exactly. Surfaced via
-    the dashboard's function-list APIs so the UI can show "why isn't this
-    function getting picked?" without users reading source. Keep in sync
-    with the selector; if a new gate lands there, add a branch here.
-
-    Every gate respects pinning — in ``select_candidates`` the pattern is
-    ``if func.get("X") and not is_pinned: continue``, so a pinned row with
-    a library_code / propagation / stagnation / etc. flag still gets
-    admitted at high priority. The dashboard column must reflect that
-    same reality or it'll lie to the user about what the worker will do.
-    """
-    is_pinned = key in pinned_keys
-    if func.get("library_code") and not is_pinned:
-        return "library_code"
-    if (
-        not is_pinned
-        and func.get("name_source") == "propagation"
-        and (
-            func.get("name_confidence") is None
-            or func.get("name_confidence", 0) < 0.5
-        )
-    ):
-        return "propagation"
-    if func.get("decompile_timeout") and not is_pinned:
-        return "decompile_timeout"
-    if func.get("stagnation_runs", 0) >= 3 and not is_pinned:
-        return "stagnation"
-    if func.get("recovery_pass_done") and not is_pinned:
-        return "recovery_done"
-    return None
 
 
 def create_app(state_file, event_bus=None, dashboard_port=5000):
@@ -1412,12 +1440,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         return _fd_load_state(binary_name=active) if active else _fd_load_state()
 
     # --- Stats snapshot cache -------------------------------------------
-    # A dashboard page load computes stats three times back-to-back (SSR
-    # route, the new socket's initial_state, the first /api/stats refresh),
-    # each paying a full state materialization. Cache the computed stats
-    # dict briefly; bus events that imply data changed invalidate it, and
-    # the TTL bounds staleness from writers outside this process (CLI runs)
-    # whose bus events never reach us.
+    # /api/stats pays a full state materialization per compute. Cache the
+    # computed stats dict briefly; bus events that imply data changed
+    # invalidate it, and the TTL bounds staleness from writers outside this
+    # process (CLI runs) whose bus events never reach us.
     _stats_cache = {"stats": None, "ts": 0.0, "version": 0}
     _stats_cache_lock = threading.Lock()  # cheap guard; never held during compute
     _stats_compute_lock = threading.Lock()  # serializes recomputes
@@ -1973,7 +1999,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "by_program": {},
                 "sessions": [],
                 "roi_queue": [],
-                "all_functions": [],
                 "deduction_breakdown": [],
                 "run_stats": compute_run_stats([]),
                 "project_folder": state.get("project_folder", "unknown"),
@@ -2043,54 +2068,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 by_program[prog]["done"] += 1
             else:
                 by_program[prog]["remaining"] += 1
-        pinned_keys = set(queue.get("pinned", []))
-        func_list = []
-        for key, func in funcs.items():
-            if func.get("is_thunk") or func.get("is_external"):
-                continue
-            # Rows written by disposition-only passes (STUB/THUNK triage) can
-            # lack a name; one such row must not 500 the stats path — the
-            # socket connect handler shares it, so a crash here kills every
-            # dashboard socket ("offline" dot, dead Start button).
-            if not func.get("name"):
-                continue
-            func_list.append(
-                {
-                    "key": key,
-                    "name": func["name"],
-                    "address": func["address"],
-                    "program": func.get("program_name", ""),
-                    "score": func.get("score") or 0,
-                    "fixable": round(func.get("fixable", 0), 1),
-                    "callers": func.get("caller_count", 0),
-                    "is_leaf": func.get("is_leaf", False),
-                    "last_result": func.get("last_result"),
-                    "pinned": key in pinned_keys,
-                    # True when state.json has never had analyze_function_completeness
-                    # run for this entry — score=0 here means "unknown", not "0% done"
-                    "unscored": not func.get("last_processed"),
-                    "tool_calls": func.get("tool_calls"),
-                    "tool_calls_known": func.get("tool_calls_known"),
-                    # Provenance (#204) — surface name_source, the source-binary
-                    # forensic pointer, the gate-confidence, and the selector
-                    # skip reason (None when eligible).
-                    "name_source": func.get("name_source") or "scan",
-                    "name_source_binary": func.get("name_source_binary"),
-                    "name_confidence": func.get("name_confidence"),
-                    "skip_reason": compute_skip_reason(func, key, pinned_keys),
-                }
-            )
-        func_list.sort(key=lambda x: x["score"])
-        all_func_total = len(func_list)
-        # Cap the inlined SSR list to keep initial dashboard HTML manageable.
-        # Without this, /-route emits ~70 MB of <tr> rows for a 60k-function
-        # state.json — initial page load takes 5+s. The full list is still
-        # available via paginated APIs (/api/queue/*, /api/cross_binary_progress)
-        # so the JS layer can render the rest on demand. Sorted ascending by
-        # score above, so the cap keeps the lowest-score (highest-value-to-fix)
-        # functions visible — the rows users actually want to see first.
-        SSR_FUNC_ROW_CAP = 500
-        func_list_capped = func_list[:SSR_FUNC_ROW_CAP]
         return {
             "total": total,
             "done": done,
@@ -2105,9 +2082,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "roi_queue": compute_roi_queue(funcs, queue, active_binary=active_binary)[
                 :50
             ],
-            "all_functions": func_list_capped,
-            "all_functions_total": all_func_total,
-            "all_functions_capped_to": SSR_FUNC_ROW_CAP,
             "deduction_breakdown": compute_deduction_breakdown(funcs),
             "run_stats": compute_run_stats(load_run_logs(), *count_run_totals()),
             "project_folder": state.get("project_folder", "unknown"),
@@ -2123,7 +2097,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @socketio.on("connect")
     def handle_connect():
-        sio_emit("initial_state", get_stats_snapshot())
+        # The pipeline UI pulls everything it needs over HTTP on load and
+        # asks for worker state explicitly (request_worker_status) — no
+        # initial_state push (that was the classic dashboard's protocol,
+        # and it cost a full stats compute per socket connect).
+        pass
 
     _scan_thread = None
 
@@ -2529,36 +2507,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
 
-    @socketio.on("request_fix_global")
-    def handle_fix_global(data):
-        """Targeted fix from the cleanup queue: run a globals worker on
-        exactly one address (or a small list). Bypasses the clean cache so
-        the fix always dispatches."""
-        try:
-            program = (data or {}).get("program") or None
-            addresses = (data or {}).get("addresses") or []
-            if isinstance(addresses, str):
-                addresses = [addresses]
-            if not program or not addresses:
-                sio_emit("worker_error", {"error": "program and addresses required"})
-                return
-            provider = (data or {}).get("provider", "minimax")
-            worker_id = worker_mgr.start_worker(
-                provider=provider,
-                count=len(addresses),
-                model=(data or {}).get("model") or None,
-                binary=program,
-                continuous=False,
-                mode="globals",
-                addresses=addresses,
-            )
-            sio_emit(
-                "worker_started_ack",
-                {"worker_id": worker_id, "mode": "globals", "targeted": len(addresses)},
-            )
-        except ValueError as e:
-            sio_emit("worker_error", {"error": str(e)})
-
     @socketio.on("request_stop_worker")
     def handle_stop_worker(data):
         try:
@@ -2577,11 +2525,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     # --- HTTP routes ---
 
+    # The confidence/pipeline dashboard is the only UI; /pipeline is kept
+    # as an alias so bookmarks, Playwright specs, and script instructions
+    # that predate the root swap keep working. (The classic dashboard.html
+    # and its SSR stats path were removed 2026-07-17.)
     @app.route("/")
-    def dashboard():
-        return render_template("dashboard.html", stats=get_stats_snapshot())
-
-    # New Ghidra-native confidence dashboard (kept alongside the classic one).
     @app.route("/pipeline")
     def pipeline_dashboard():
         return render_template("pipeline.html")
@@ -2595,12 +2543,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/stats")
     def api_stats():
-        # Shallow copy — the snapshot dict is shared with other consumers,
-        # so pop() on it directly would strip all_functions from the SSR
-        # render that shares the cache entry.
-        stats = dict(get_stats_snapshot())
-        stats.pop("all_functions", None)
-        return jsonify(stats)
+        return jsonify(get_stats_snapshot())
 
     @app.route("/api/_diag_bridge")
     def api_diag_bridge():
@@ -3266,171 +3209,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
 
-    # --- Globals quality-review feeds (renames + cleanup queue) ---
-
-    _globals_feed_cache = {"renames": None, "cleanup": None, "sig": None}
-
-    def _runs_file_sig():
-        lf = app.config["LOG_FILE"]
-        try:
-            st = lf.stat()
-            return (st.st_mtime, st.st_size)
-        except OSError:
-            return None
-
-    def _globals_feed_sync():
-        """Refresh the shared file signature; on change, drop BOTH cached
-        feeds (they must not survive independently — a stale one would
-        pass the sig check after the other refreshed it)."""
-        sig = _runs_file_sig()
-        if sig != _globals_feed_cache["sig"]:
-            _globals_feed_cache["renames"] = None
-            _globals_feed_cache["cleanup"] = None
-            _globals_feed_cache["sig"] = sig
-        return sig
-
-    @app.route("/api/globals/renames")
-    def api_globals_renames():
-        """Recent globals renames (name_before != name), newest first.
-        Reads a tail window of runs.jsonl — renames are sparse (~1 per
-        27 KB historically), so a 16 MB window yields several hundred.
-        Cached by file mtime+size."""
-        try:
-            limit = max(1, min(500, int(request.args.get("limit", 200))))
-        except ValueError:
-            limit = 200
-        _globals_feed_sync()
-        if _globals_feed_cache["renames"] is not None:
-            return jsonify({"renames": _globals_feed_cache["renames"][:limit]})
-        lf = app.config["LOG_FILE"]
-        renames = []
-        try:
-            with open(lf, "rb") as f:
-                size = f.seek(0, 2)
-                start = max(0, size - 16_000_000)
-                f.seek(start)
-                if start > 0:
-                    f.readline()
-                for raw in f:
-                    if b'"mode": "globals"' not in raw:
-                        continue
-                    try:
-                        r = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    nb, na = r.get("name_before"), r.get("name")
-                    if r.get("result") not in ("completed", "improved") or not nb or not na or nb == na:
-                        continue
-                    renames.append({
-                        "timestamp": r.get("timestamp"),
-                        "program": r.get("program"),
-                        "address": r.get("address"),
-                        "name_before": nb,
-                        "name": na,
-                        "duplicate_name": bool(r.get("duplicate_name")),
-                        "placeholder_name": bool(r.get("placeholder_name")),
-                        "issues_before": r.get("issues_before") or [],
-                    })
-        except OSError:
-            pass
-        renames.reverse()  # newest first
-        _globals_feed_cache["renames"] = renames
-        return jsonify({"renames": renames[:limit]})
-
-    @app.route("/api/globals/cleanup")
-    def api_globals_cleanup():
-        """Cleanup queue: duplicate names (same final name at 2+ addresses
-        in one binary) and placeholder/offset-derived names, derived from
-        the full runs.jsonl history (latest completed run per address wins).
-        Full-file scan (~118 MB, a few seconds) — cached by mtime+size and
-        only fetched when the panel is opened/refreshed."""
-        _globals_feed_sync()
-        if _globals_feed_cache["cleanup"] is not None:
-            return jsonify(_globals_feed_cache["cleanup"])
-        from fun_doc import _name_is_placeholder, _placeholder_cluster_base
-        lf = app.config["LOG_FILE"]
-        final = {}  # (program, address) -> latest completed name
-        try:
-            with open(lf, "rb") as f:
-                for raw in f:
-                    if b'"mode": "globals"' not in raw:
-                        continue
-                    try:
-                        r = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    if r.get("result") not in ("completed", "improved"):
-                        continue
-                    name = r.get("name")
-                    if name:
-                        # File is append-ordered — later lines overwrite.
-                        final[(r.get("program") or "", r.get("address") or "")] = name
-        except OSError:
-            pass
-        by_name = defaultdict(list)
-        for (program, address), name in final.items():
-            by_name[(program, name)].append(address)
-        duplicates = sorted(
-            (
-                {"program": prog, "name": name, "addresses": sorted(addrs)}
-                for (prog, name), addrs in by_name.items()
-                if len(addrs) > 1
-            ),
-            key=lambda d: len(d["addresses"]),
-            reverse=True,
-        )
-
-        # Cluster placeholder names that share an array-base. A run of
-        # per-element placeholders (g_dwKeybindingStateEntry0x16, ...0x17, …)
-        # is one array to reinterpret in Ghidra, NOT N worker fixes —
-        # dispatching the worker per-address would just re-invent the same
-        # offset-suffixed names. Clusters of >= ARRAY_MIN are pulled out as
-        # `array_candidates` (no per-address Fix); the rest stay as
-        # individually-fixable placeholders.
-        ARRAY_MIN = 4
-        ph_all = [
-            (prog, addr, name)
-            for (prog, addr), name in final.items()
-            if _name_is_placeholder(name)
-        ]
-        clusters = defaultdict(list)
-        for prog, addr, name in ph_all:
-            clusters[(prog, _placeholder_cluster_base(name))].append((addr, name))
-        array_candidates = []
-        clustered_keys = set()
-        for (prog, base), members in clusters.items():
-            if len(members) >= ARRAY_MIN:
-                addrs = sorted(a for a, _ in members)
-                array_candidates.append({
-                    "program": prog,
-                    "base": base,
-                    "count": len(members),
-                    "addr_first": addrs[0],
-                    "addr_last": addrs[-1],
-                    "sample_names": sorted({n for _, n in members})[:6],
-                })
-                for a, _ in members:
-                    clustered_keys.add((prog, a))
-        array_candidates.sort(key=lambda c: c["count"], reverse=True)
-        placeholders = sorted(
-            (
-                {"program": prog, "address": addr, "name": name}
-                for prog, addr, name in ph_all
-                if (prog, addr) not in clustered_keys
-            ),
-            key=lambda d: (d["program"], d["name"]),
-        )
-        payload = {
-            "duplicates": duplicates[:300],
-            "placeholders": placeholders[:300],
-            "array_candidates": array_candidates[:200],
-            "duplicate_total": len(duplicates),
-            "placeholder_total": len(placeholders),
-            "array_candidate_total": len(array_candidates),
-        }
-        _globals_feed_cache["cleanup"] = payload
-        return jsonify(payload)
-
     # --- Provider quota pauses (Q1-Q11) ---
     from provider_pause import get_default_manager as _get_pause_mgr
 
@@ -3482,249 +3260,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     if restored_workers:
         print(f"  Restored {len(restored_workers)} dashboard worker(s) after restart")
 
-    # /api/functions/search fires on every binary switch and costs a
-    # ~300 ms full-row materialization per call (it showed up in the
-    # slow-query log during routine dashboard navigation). Nav-time
-    # searches tolerate 30 s of staleness, so cache whole responses per
-    # parameter tuple. Bounded size; entries expire by TTL.
-    _search_cache = {}
-    _SEARCH_CACHE_TTL = 30.0
-    _SEARCH_CACHE_MAX = 32
-
-    @app.route("/api/functions/search", methods=["GET"])
-    def search_functions():
-        """Search across the full state.functions map without the 500-row dashboard cap."""
-        q = (request.args.get("q") or "").strip().lower()
-        program = request.args.get("program") or None
-        layer_filter = request.args.get("layer")  # "0", "1", ..., "cyclic", or None
-        try:
-            limit = max(1, min(10000, int(request.args.get("limit", 5000))))
-        except ValueError:
-            limit = 5000
-        sort = request.args.get("sort", "score")
-        cache_key = (q, program, layer_filter, limit, sort)
-        now = time.time()
-        hit = _search_cache.get(cache_key)
-        if hit is not None and (now - hit[0]) < _SEARCH_CACHE_TTL:
-            return hit[1]
-        # Push the program filter into SQL — this route fires on every
-        # dashboard repaint, and a full-state load costs ~3 s at 60K rows.
-        state = load_state(binary_name=program) if program else load_state()
-        all_funcs = state.get("functions", {})
-        queue = load_queue()
-        good_enough = queue.get("config", {}).get("good_enough_score", 80)
-        pinned = set(queue.get("pinned", []))
-
-        from fun_doc import func_in_binary
-        results = []
-        for key, func in all_funcs.items():
-            if func.get("is_thunk") or func.get("is_external"):
-                continue
-            if program and not func_in_binary(func, program):
-                continue
-            # Layer filter — computed dynamically using the same BFS as
-            # /api/call_graph_layers so results match the dashboard exactly.
-            # The pre-computed call_graph_layer in state.json can diverge
-            # because populate_call_graph includes thunks in the adjacency
-            # set while the dashboard excludes them.
-            if layer_filter is not None:
-                if not hasattr(search_functions, "_layer_cache"):
-                    search_functions._layer_cache = {}
-                cache_key = (program or state.get("active_binary"), layer_filter)
-                if cache_key not in search_functions._layer_cache:
-                    # Build layer map matching the dashboard's BFS
-                    active_bin = program or state.get("active_binary")
-                    bf = {
-                        k: v
-                        for k, v in all_funcs.items()
-                        if func_in_binary(v, active_bin)
-                        and not v.get("is_thunk")
-                        and not v.get("is_external")
-                    }
-                    sa = set()
-                    for v in bf.values():
-                        sa.add(v.get("address", ""))
-                    co = {}
-                    cr = defaultdict(set)
-                    for v in bf.values():
-                        a = v.get("address", "")
-                        ic = set(v.get("callees", [])) & sa
-                        co[a] = ic
-                        for c in ic:
-                            cr[c].add(a)
-                    dp = {}
-                    cur = {a for a in sa if not co.get(a)}
-                    for a in cur:
-                        dp[a] = 0
-                    ln = 0
-                    while cur:
-                        nx = set()
-                        for a in cur:
-                            for ca in cr.get(a, set()):
-                                if ca in dp:
-                                    continue
-                                if all(c in dp for c in co.get(ca, set())):
-                                    dp[ca] = ln + 1
-                                    nx.add(ca)
-                        cur = nx
-                        ln += 1
-                        if ln > 200:
-                            break
-                    lm = {}
-                    for a in sa:
-                        lm[a] = dp.get(a)  # None = cyclic
-                    search_functions._layer_cache[cache_key] = lm
-                lm = search_functions._layer_cache[cache_key]
-                func_layer = lm.get(func.get("address", ""))
-                if layer_filter == "cyclic":
-                    if func_layer is not None:
-                        continue
-                else:
-                    try:
-                        target_layer = int(layer_filter)
-                    except ValueError:
-                        target_layer = -1
-                    if func_layer != target_layer:
-                        continue
-            if q:
-                name = func.get("name", "").lower()
-                addr = str(func.get("address", "")).lower()
-                if q not in name and q not in addr:
-                    continue
-            # Compute deps remaining
-            callees = func.get("callees", [])
-            if not callees:
-                deps_remaining = 0
-            else:
-                prog = func.get("program")
-                deps_remaining = sum(
-                    1
-                    for ca in callees
-                    if (cf := all_funcs.get(f"{prog}::{ca}"))
-                    and cf.get("score", 0) < good_enough
-                )
-            results.append(
-                {
-                    "key": key,
-                    "name": func.get("name", ""),
-                    "address": func.get("address", ""),
-                    "program": func.get("program_name", ""),
-                    "score": func.get("score", 0),
-                    "fixable": round(func.get("fixable", 0), 1),
-                    "callers": func.get("caller_count", 0),
-                    "is_leaf": not callees,
-                    "call_graph_layer": func.get("call_graph_layer"),
-                    "deps_remaining": deps_remaining,
-                    "last_result": func.get("last_result"),
-                    "pinned": key in pinned,
-                    "unscored": not func.get("last_processed"),
-                    "tool_calls": func.get("tool_calls"),
-                    "tool_calls_known": func.get("tool_calls_known"),
-                    # Provenance (#204) — see compute_skip_reason() for the
-                    # selector-mirror logic. `name_source_binary` is the
-                    # forensic "where did this name come from?" pointer.
-                    "name_source": func.get("name_source") or "scan",
-                    "name_source_binary": func.get("name_source_binary"),
-                    "name_confidence": func.get("name_confidence"),
-                    "skip_reason": compute_skip_reason(func, key, pinned),
-                }
-            )
-        if sort == "name":
-            results.sort(key=lambda r: r["name"].lower())
-        elif sort == "name_desc":
-            results.sort(key=lambda r: r["name"].lower(), reverse=True)
-        elif sort == "address":
-            results.sort(key=lambda r: r.get("address", ""))
-        elif sort == "address_desc":
-            results.sort(key=lambda r: r.get("address", ""), reverse=True)
-        elif sort == "status":
-            # Sort by score bucket: unscored first, then NEW (<70), FIX (70-79), DONE (80+)
-            def _status_key(r):
-                if r.get("unscored"):
-                    return 0
-                s = r.get("score", 0)
-                if s >= 80:
-                    return 3
-                if s >= 70:
-                    return 2
-                return 1
-
-            results.sort(key=_status_key)
-        elif sort == "status_desc":
-
-            def _status_key_desc(r):
-                if r.get("unscored"):
-                    return 0
-                s = r.get("score", 0)
-                if s >= 80:
-                    return 3
-                if s >= 70:
-                    return 2
-                return 1
-
-            results.sort(key=_status_key_desc, reverse=True)
-        elif sort == "score_desc":
-            results.sort(key=lambda r: -r["score"])
-        elif sort == "fixable":
-            results.sort(key=lambda r: -r["fixable"])
-        elif sort == "fixable_desc":
-            results.sort(key=lambda r: r["fixable"])
-        elif sort == "deps_asc":
-            results.sort(key=lambda r: (r.get("deps_remaining", 0), r["score"]))
-        elif sort == "deps_desc":
-            results.sort(key=lambda r: (-r.get("deps_remaining", 0), r["score"]))
-        elif sort == "layer":
-            results.sort(
-                key=lambda r: (
-                    (
-                        r.get("call_graph_layer")
-                        if r.get("call_graph_layer") is not None
-                        else 999
-                    ),
-                    r["score"],
-                )
-            )
-        elif sort == "tools":
-            # Most tool calls first; unmeasured (-1 / None) sort to bottom.
-            def _tools_key(r):
-                tc = r.get("tool_calls")
-                if tc is None or tc < 0:
-                    return (1, 0)
-                return (0, -tc)
-
-            results.sort(key=_tools_key)
-        elif sort == "tools_desc":
-            def _tools_key_desc(r):
-                tc = r.get("tool_calls")
-                if tc is None or tc < 0:
-                    return (1, 0)
-                return (0, tc)
-
-            results.sort(key=_tools_key_desc)
-        elif sort == "layer_desc":
-            results.sort(
-                key=lambda r: (
-                    -(
-                        r.get("call_graph_layer")
-                        if r.get("call_graph_layer") is not None
-                        else -1
-                    ),
-                    -r["score"],
-                )
-            )
-        else:  # "score" (default — lowest first)
-            results.sort(key=lambda r: r["score"])
-        total_match = len(results)
-        response = jsonify(
-            {"total": total_match, "results": results[:limit], "limit": limit}
-        )
-        if len(_search_cache) >= _SEARCH_CACHE_MAX:
-            # Evict the oldest entry — tiny cache, no need for real LRU.
-            oldest = min(_search_cache, key=lambda k: _search_cache[k][0])
-            _search_cache.pop(oldest, None)
-        _search_cache[cache_key] = (now, response)
-        return response
-
     # --- Folder / binary selection ---
 
     # TTL cache for Ghidra HTTP fetchers. Both _fetch_project_binaries and
@@ -3774,18 +3309,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return result
         except Exception:
             return []
-
-    @app.route("/api/navigate", methods=["POST"])
-    def navigate_ghidra():
-        """Navigate Ghidra to a specific address."""
-        from fun_doc import ghidra_post
-
-        data = request.get_json() or {}
-        address = data.get("address", "")
-        if not address:
-            return jsonify({"error": "address required"}), 400
-        ghidra_post("/tool/goto_address", data={"address": f"0x{address}"})
-        return jsonify({"ok": True, "address": address})
 
     @app.route("/api/context", methods=["GET"])
     def get_context():
@@ -3969,200 +3492,6 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     @app.route("/api/context/folders", methods=["GET"])
     def get_available_folders():
         return jsonify({"folders": _fetch_project_folders()})
-
-    @app.route("/api/call_graph_layers", methods=["GET"])
-    def call_graph_layers():
-        """Compute call-graph layer assignment and per-layer completion stats.
-
-        Uses BFS from leaf functions (layer 0) upward through callers.
-        Functions in call cycles that can't be reached by BFS are grouped
-        into a final "cyclic" bucket and ordered internally by callee
-        readiness.
-        """
-        from fun_doc import _callee_readiness
-
-        # Filtered load — this route fires from every refreshStats() via
-        # populateLayerDropdown(), so a full-state materialization here
-        # doubles every dashboard repaint.
-        state = _load_dashboard_state()
-        active_binary = state.get("active_binary")
-        all_funcs = state.get("functions", {})
-        queue = load_queue()
-        good_enough = queue.get("config", {}).get("good_enough_score", 80)
-
-        # Filter to active binary, non-thunk only (path-aware -- disambiguates same names)
-        if active_binary:
-            from fun_doc import func_in_binary
-            funcs = {
-                k: v
-                for k, v in all_funcs.items()
-                if func_in_binary(v, active_binary)
-                and not v.get("is_thunk")
-                and not v.get("is_external")
-            }
-        else:
-            funcs = {
-                k: v
-                for k, v in all_funcs.items()
-                if not v.get("is_thunk") and not v.get("is_external")
-            }
-
-        # Build adjacency: address → [callee addresses]
-        addr_to_key = {}
-        callees_of = {}  # addr → set of callee addrs
-        callers_of = defaultdict(set)  # addr → set of caller addrs
-        all_addrs = set()
-
-        for key, func in funcs.items():
-            addr = func.get("address", "")
-            addr_to_key[addr] = key
-            all_addrs.add(addr)
-            callee_addrs = set(func.get("callees", []))
-            # Filter to only callees that are in this binary's function set
-            internal_callees = callee_addrs & all_addrs
-            callees_of[addr] = internal_callees
-            for c in internal_callees:
-                callers_of[c].add(addr)
-
-        # BFS layer assignment from leaves
-        depth = {}
-        current_layer = set()
-        for addr in all_addrs:
-            if not callees_of.get(addr):
-                depth[addr] = 0
-                current_layer.add(addr)
-
-        layer_num = 0
-        while current_layer:
-            next_layer = set()
-            for addr in current_layer:
-                for caller in callers_of.get(addr, set()):
-                    if caller in depth:
-                        continue
-                    # Assign when ALL callees have a depth
-                    if all(c in depth for c in callees_of.get(caller, set())):
-                        depth[caller] = layer_num + 1
-                        next_layer.add(caller)
-            current_layer = next_layer
-            layer_num += 1
-            if layer_num > 200:
-                break
-
-        # Build per-layer stats
-        max_depth = max(depth.values()) if depth else 0
-        layers = []
-        for d in range(max_depth + 1):
-            layer_addrs = [a for a, dep in depth.items() if dep == d]
-            total = len(layer_addrs)
-            done = sum(
-                1
-                for a in layer_addrs
-                if a in addr_to_key
-                and funcs[addr_to_key[a]].get("score", 0) >= good_enough
-            )
-            # "Ready" = callees all documented AND not yet done itself
-            ready = 0
-            for a in layer_addrs:
-                if a not in addr_to_key:
-                    continue
-                func = funcs[addr_to_key[a]]
-                if func.get("score", 0) >= good_enough:
-                    continue  # already done
-                readiness = _callee_readiness(func, all_funcs, good_enough)
-                if readiness >= 1.0:
-                    ready += 1
-            layers.append(
-                {
-                    "depth": d,
-                    "label": "Leaves" if d == 0 else f"Layer {d}",
-                    "total": total,
-                    "done": done,
-                    "pct": round(100 * done / total, 1) if total > 0 else 0,
-                    "ready": ready,
-                }
-            )
-
-        # Cyclic bucket: everything not assigned a depth
-        cyclic_addrs = [a for a in all_addrs if a not in depth]
-        if cyclic_addrs:
-            done = sum(
-                1
-                for a in cyclic_addrs
-                if a in addr_to_key
-                and funcs[addr_to_key[a]].get("score", 0) >= good_enough
-            )
-            ready = 0
-            for a in cyclic_addrs:
-                if a not in addr_to_key:
-                    continue
-                func = funcs[addr_to_key[a]]
-                if func.get("score", 0) >= good_enough:
-                    continue
-                readiness = _callee_readiness(func, all_funcs, good_enough)
-                if readiness >= 0.8:
-                    ready += 1
-            layers.append(
-                {
-                    "depth": max_depth + 1,
-                    "label": "Cyclic",
-                    "total": len(cyclic_addrs),
-                    "done": done,
-                    "pct": (
-                        round(100 * done / len(cyclic_addrs), 1) if cyclic_addrs else 0
-                    ),
-                    "ready": ready,
-                }
-            )
-
-        return jsonify(
-            {
-                "layers": layers,
-                "total_functions": len(funcs),
-                "assigned": len(depth),
-                "cyclic": len(all_addrs) - len(depth),
-                "max_depth": max_depth,
-            }
-        )
-
-    @app.route("/api/cross_binary_progress", methods=["GET"])
-    def cross_binary_progress():
-        """Cross-binary progress summary — all binaries in the current folder."""
-        state = load_state()
-        all_funcs = state.get("functions", {})
-        by_binary = defaultdict(
-            lambda: {
-                "total": 0,
-                "done": 0,
-                "fixable": 0,
-                "needs_work": 0,
-                "avg_score": 0,
-                "total_fixable_pts": 0,
-            }
-        )
-        for f in all_funcs.values():
-            prog = f.get("program_name", "unknown")
-            score = f.get("score", 0)
-            by_binary[prog]["total"] += 1
-            if score >= 90:
-                by_binary[prog]["done"] += 1
-            elif score >= 70:
-                by_binary[prog]["fixable"] += 1
-            else:
-                by_binary[prog]["needs_work"] += 1
-            by_binary[prog]["avg_score"] += score
-            by_binary[prog]["total_fixable_pts"] += f.get("fixable", 0)
-        result = []
-        for prog, info in sorted(by_binary.items()):
-            info["avg_score"] = (
-                round(info["avg_score"] / info["total"], 1) if info["total"] > 0 else 0
-            )
-            info["total_fixable_pts"] = round(info["total_fixable_pts"], 0)
-            info["pct_done"] = (
-                round(info["done"] / info["total"] * 100, 1) if info["total"] > 0 else 0
-            )
-            info["name"] = prog
-            result.append(info)
-        return jsonify({"binaries": result})
 
     # Pre-warm both caches at startup so the FIRST user request to / or
     # /api/stats lands on warm cache instead of paying the recursive Ghidra

@@ -132,6 +132,23 @@ def matrix(program: str = None) -> dict:
             "excluded_lib": s.get("excluded_lib")}
 
 
+BAND_TAGS = ["COMPLETE_80", "COMPLETE_90", "COMPLETE_95", "COMPLETE_100"]
+
+
+def bands(program: str = None) -> dict:
+    """Completeness band counts (COMPLETE_80/90/95/100 — exclusive, score-derived).
+    Library/stub functions are excluded so counts line up with in_scope.
+    `untagged` = in-scope functions below 80 or not yet swept."""
+    excl = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
+    sets = {t: _tag_addrs(t, program) - excl for t in BAND_TAGS}
+    counts = {t: len(a) for t, a in sets.items()}
+    tagged = len(set().union(*sets.values())) if sets else 0
+    s = summary(program)
+    in_scope = s.get("in_scope")
+    return {"bands": counts, "tagged": tagged, "in_scope": in_scope,
+            "untagged": max(0, (in_scope or 0) - tagged)}
+
+
 def intake(program: str = None) -> dict:
     """The intake lane: never-evaluated (in-scope, no tag) and the excluded library set."""
     s = summary(program)

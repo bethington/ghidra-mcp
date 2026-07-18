@@ -146,31 +146,43 @@ def main():
         print(f"\n[fix-strings] DRY RUN — nothing written. Re-run with --apply to apply.")
         return
 
-    print(f"\n[fix-strings] APPLYING string type to {len(fixes)} globals...")
-    ok, fail = 0, []
-    for i, f in enumerate(fixes, 1):
+    def apply_one(f):
+        """Apply `string`; return None on success or an error string."""
         try:
             res = gpost("/apply_data_type", address="0x" + f["addr"],
                         type_name="string", clear_existing=True)
-            # res is a parsed dict (JSON) or a str — detect failure in both.
-            err = None
             if isinstance(res, dict):
-                err = res.get("error") or (res.get("message") if res.get("status") == "rejected" else None)
-            else:
-                low = str(res).lower()
-                if "error" in low or "conflict" in low or "rejected" in low:
-                    err = str(res)[:140]
-            if err:
-                fail.append((f["addr"], str(err)[:140]))
-            else:
-                ok += 1
+                return res.get("error") or (res.get("message") if res.get("status") == "rejected" else None)
+            low = str(res).lower()
+            return str(res)[:140] if ("error" in low or "conflict" in low or "rejected" in low) else None
         except Exception as e:
-            fail.append((f["addr"], str(e)[:140]))
-        if i % 50 == 0:
-            print(f"    {i}/{len(fixes)} ...")
-    print(f"\n[fix-strings] APPLIED ok={ok} failed={len(fail)}")
-    for a, m in fail[:15]:
-        print(f"    FAIL {a}: {m}")
+            return str(e)[:140]
+
+    # Process ADDRESS-ASCENDING so an oversized parent (lower address) shrinks
+    # to its real length BEFORE the strings it was hiding (higher addresses) are
+    # reached — the fix cascades. Retry the leftovers (a parent may free a child
+    # only after the child's first attempt). Remaining conflicts are g_sz labels
+    # inside a real fixed-width table (g_ab*) — left alone by design.
+    fixes.sort(key=lambda f: int(f["addr"], 16))
+    print(f"\n[fix-strings] APPLYING `string` to {len(fixes)} globals "
+          f"(address-ascending, up to 3 passes)...")
+    ok = 0
+    pending = fixes
+    for _pass in range(1, 4):
+        still = []
+        for i, f in enumerate(pending, 1):
+            if apply_one(f) is None:
+                ok += 1
+            else:
+                still.append(f)
+        print(f"    pass {_pass}: ok so far {ok}, still-conflicting {len(still)}")
+        if len(still) == len(pending):   # no progress -> the rest are real conflicts
+            pending = still
+            break
+        pending = still
+    print(f"\n[fix-strings] APPLIED ok={ok}  left (real conflicts, e.g. table entries)={len(pending)}")
+    for f in pending[:12]:
+        print(f"    LEFT {f['addr']} {f['name'][:34]:34} (\"{f['text']}\")")
 
 
 if __name__ == "__main__":

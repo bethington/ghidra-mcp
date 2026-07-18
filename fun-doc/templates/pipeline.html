@@ -200,6 +200,20 @@
   .pin-btn:hover { border-color:var(--gold); color:var(--gold); }
   .pin-btn.pinned { opacity:1; border-color:var(--gold); color:var(--gold); }
 
+  /* ---- steering (rescan + queue admin, ported from the classic dashboard) ---- */
+  .steer-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .steer-row + .steer-row { margin-top:.5rem; padding-top:.5rem; border-top:1px solid var(--border-dark); }
+  .steer-lab { font-family:var(--font-mono); font-size:.6rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); width:52px; flex:0 0 52px; }
+  .steer-status { font-family:var(--font-mono); font-size:.62rem; color:var(--text-secondary); flex:1; min-width:120px; }
+  .steer-status.err { color:var(--red-light); }
+  .steer-status.ok { color:var(--set); }
+  .pin-chip { display:inline-flex; align-items:center; gap:4px; font-family:var(--font-mono); font-size:.6rem;
+    color:var(--gold); border:1px solid var(--border-light); border-radius:3px; padding:1px 3px 1px 6px; }
+  .pin-chip .px { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:.75rem; line-height:1; padding:0 2px; }
+  .pin-chip .px:hover { color:var(--red-light); }
+  .pin-chips { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex:1; min-width:0; }
+  .pin-chips .none { font-family:var(--font-mono); font-size:.6rem; color:var(--text-muted); }
+
   /* ---- badges ---- */
   .badge { font-family:var(--font-mono); font-size:.55rem; letter-spacing:.3px; padding:2px 5px; border-radius:3px; border:1px solid; white-space:nowrap; }
   .b-none { color:var(--text-muted); border-color:var(--border-light); }
@@ -393,7 +407,9 @@
           <div class="settings-bar">
             <div class="settings-group">
               <label class="settings-label" title="Functions at/above this score are excluded from the queue unless pinned">
-                <span>Good@</span><input type="number" class="worker-input" id="goodEnoughInput" min="0" max="100" onchange="saveQueueConfig()"></label>
+                <span>Target</span><select class="worker-input" id="goodEnoughInput" onchange="saveQueueConfig()" title="Target completeness band: doc workers keep working functions below this level; COMPLETE_<band> tags graduate through 80/90/95/100">
+                  <option value="80">80</option><option value="90">90</option><option value="95">95</option><option value="100">100</option>
+                </select></label>
               <label class="settings-label" title="Assess lane: functions whose completeness score is >= this get stamped DOC_DRAFT">
                 <span>Draft@</span><input type="number" class="worker-input" id="assessDraftInput" min="0" max="100" onchange="saveQueueConfig()"></label>
               <label class="settings-label" title="Surface unscored functions so they get scored on first contact">
@@ -449,6 +465,11 @@
           <div class="seg-legend" id="docLegend"></div>
         </div>
         <div>
+          <div class="bar-lab"><span class="t">Functions &middot; Completeness</span><span class="p" id="bandPct">-</span></div>
+          <div class="segbar" id="bandBar"></div>
+          <div class="seg-legend" id="bandLegend"></div>
+        </div>
+        <div>
           <div class="bar-lab"><span class="t">Functions &middot; Conformance</span><span class="p" id="confPct">-</span></div>
           <div class="segbar" id="confBar"></div>
           <div class="seg-legend" id="confLegend"></div>
@@ -475,6 +496,29 @@
       <button class="btn" onclick="triage(50)">Triage 50 &#9654;</button>
       <button class="btn primary" onclick="triage(0)">Triage all &#9654;</button>
     </div></div>
+
+    <!-- STEERING: rescan + priority-queue admin (ported from the classic dashboard).
+         Pins already live on the inventory rows; this panel shows what's pinned and
+         adds the scan + queue-maintenance actions that only the classic page had. -->
+    <div class="panel">
+      <div class="panel-header"><h2>Steering</h2>
+        <span class="hint" title="Scan refreshes the workflow store from Ghidra. Pins jump the line for Doc + Prove workers.">scan &amp; queue</span></div>
+      <div class="panel-content">
+        <div class="steer-row">
+          <span class="steer-lab">Scan</span>
+          <button class="btn" id="btnRescan" onclick="rescan(false,false)" title="Incremental rescan of the focused binary (new/renamed functions only)">Rescan focused</button>
+          <button class="btn" onclick="rescan(true,false)" title="Re-score every function of the focused binary">Full rescan</button>
+          <button class="btn" onclick="rescan(false,true)" title="Incremental rescan of every binary in the project folder">Rescan all</button>
+          <span class="steer-status" id="scanStatus"></span>
+        </div>
+        <div class="steer-row">
+          <span class="steer-lab">Queue</span>
+          <button class="btn" id="btnDrain" onclick="drainDone()" title="Score every pinned function and auto-dequeue any already at/above the Target band">Drain done</button>
+          <button class="btn" id="btnTop50" onclick="refreshTop()" title="Re-score the top 50 ROI candidates for the focused binary">Refresh top 50</button>
+          <span class="pin-chips" id="pinChips"><span class="none">no pins</span></span>
+        </div>
+      </div>
+    </div>
 
     <!-- INVENTORIES: functions (wider, has CONF) + globals (narrower, no CONF) side by side -->
     <div class="inv-row">
@@ -643,7 +687,19 @@
     document.getElementById("pickerBody").innerHTML=
       list.map(bcardHTML).join("")||'<div class="worker-empty">No binaries in this folder.</div>';
   }
-  function pickBinary(path){ PROGRAM=path; updFocusBtn(); closePicker(); refreshAll(); }
+  function pickBinary(path){ PROGRAM=path; updFocusBtn(); closePicker(); syncServerContext(); refreshAll(); }
+  // Keep the server-side context (state meta: project_folder + active_binary)
+  // in step with the pipeline's focus, so queue refresh defaults, the globals
+  // worker, and the classic page all follow the same binary. active_binary
+  // takes the FULL program path — it uniquely disambiguates same-named DLLs
+  // across folders (func_in_binary accepts path or bare name; path preferred).
+  async function syncServerContext(){
+    const b=(BINARIES||[]).find(x=>x.path===PROGRAM); if(!b) return;
+    try{
+      await fetch("/api/context/folder",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:b.folder})});
+      await fetch("/api/context/binary",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({binary:PROGRAM})});
+    }catch(e){}
+  }
   // click-away + Esc close the anchored popover
   document.addEventListener("click",e=>{ if(!e.target.closest("#focusWrap")) closePicker(); });
   document.addEventListener("keydown",e=>{ if(e.key==="Escape") closePicker(); });
@@ -676,6 +732,7 @@
       {label:"REVIEWED",n:dr,c:RUNG_COLOR.DOC_REVIEWED},
       {label:"VERIFIED",n:dv,c:RUNG_COLOR.DOC_VERIFIED},
     ],inscope);
+    renderBandBar();
     // ---- Functions - Conformance: none -> DRAFT -> VECTORS -> LIVE -> BATTLETESTED -> REGRESSION ----
     const cDr=row("CONF_DRAFT"), cVe=row("CONF_VECTORS"), cLi=row("CONF_LIVE"), cBa=row("CONF_BATTLETESTED"), cRe=row("CONF_REGRESSION");
     const proven=cDr+cVe+cLi+cBa+cRe;
@@ -689,6 +746,29 @@
       {label:"REGRESSION",n:cRe,c:RUNG_COLOR.CONF_REGRESSION},
     ],inscope);
   }
+  // ---- Functions - Completeness: untagged -> COMPLETE_80 -> 90 -> 95 -> 100 ----
+  // Exclusive score-band tags; the "done" line follows the Target picker
+  // (good_enough_score). Rendered from /api/conformance/bands.
+  async function renderBandBar(){
+    const b=await api("/bands"); if(!b||b.in_scope==null) return;
+    let target=90;
+    try{ const r=await fetch("/api/queue/config"); const j=await r.json();
+         target=parseInt((j.config||j||{}).good_enough_score)||90; }catch(e){}
+    const n=t=>((b.bands||{})[t]||0);
+    const c80=n("COMPLETE_80"), c90=n("COMPLETE_90"), c95=n("COMPLETE_95"), c100=n("COMPLETE_100");
+    const inscope=b.in_scope||1;
+    const atLevel={80:c80+c90+c95+c100, 90:c90+c95+c100, 95:c95+c100, 100:c100};
+    const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
+    document.getElementById("bandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
+    seg(document.getElementById("bandBar"),document.getElementById("bandLegend"),[
+      {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
+      {label:"80+",n:c80,c:"var(--crafted)"},
+      {label:"90+",n:c90,c:"var(--magic)"},
+      {label:"95+",n:c95,c:"var(--set)"},
+      {label:"100",n:c100,c:"var(--rare)"},
+    ],inscope);
+  }
+
   // Globals - Documentation: hatched typed-groundwork underlay is the untagged-first leftmost;
   // solid DOC rungs on top in progression order DRAFT -> REVIEWED -> VERIFIED.
   function segGlob(g){
@@ -716,12 +796,56 @@
   // jumps the line for the Document and Prove workers. Backend resolves
   // {program,address} -> canonical state key (handles the .0 suffix / 0x).
   let PINNED=new Set();
+  const NAME_BY_ADDR={};   // bare addr -> function name, filled as inventories load (labels the pin chips)
   function bareAddr(a){ return String(a).replace(/^0x/i,"").toLowerCase(); }
   function isPinned(a){ const s="::"+bareAddr(a); for(const k of PINNED){ if(k.endsWith(s)) return true; } return false; }
-  async function loadPins(){ try{ const q=await (await fetch("/api/queue")).json(); PINNED=new Set((q&&q.pinned)||[]); }catch(e){} }
+  async function loadPins(){ try{ const q=await (await fetch("/api/queue")).json(); PINNED=new Set((q&&q.pinned)||[]); }catch(e){} renderPins(); }
   async function qpost(path,body){ try{ return await (await fetch("/api/queue"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json(); }catch(e){ return null; } }
-  async function pin(kind,address,name){ const r=await qpost("/pin",{program:PROGRAM,address}); if(r&&r.key){ PINNED.add(r.key); flash(`pinned ${name||address} — workers will prioritize it`); } else { flash(`could not pin ${name||address}`); } loadInv(); }
-  async function unpin(kind,address){ await qpost("/unpin",{program:PROGRAM,address}); const s="::"+bareAddr(address); for(const k of [...PINNED]){ if(k.endsWith(s)) PINNED.delete(k); } loadInv(); }
+  async function pin(kind,address,name){ const r=await qpost("/pin",{program:PROGRAM,address});
+    if(r&&r.status==='already_done'){ flash(`${name||address} already at ${r.score}% (>= good@${r.good_enough}) — auto-dequeued`); }
+    else if(r&&r.key){ PINNED.add(r.key); flash(`pinned ${name||address} — workers will prioritize it`); }
+    else { flash(`could not pin ${name||address}`); }
+    renderPins(); loadInv(); }
+  async function unpin(kind,address){ await qpost("/unpin",{program:PROGRAM,address}); const s="::"+bareAddr(address); for(const k of [...PINNED]){ if(k.endsWith(s)) PINNED.delete(k); } renderPins(); loadInv(); }
+  // ---- steering: pin chips + queue maintenance + rescan (classic-dashboard port) ----
+  async function unpinKey(key){ await qpost("/unpin",{key}); PINNED.delete(key); renderPins(); loadInv(); }
+  function renderPins(){
+    const el=document.getElementById("pinChips"); if(!el) return;
+    if(!PINNED.size){ el.innerHTML='<span class="none">no pins</span>'; return; }
+    el.innerHTML=[...PINNED].map(k=>{
+      const [prog,addr]=k.includes("::")?k.split("::"):["",k];
+      const label=NAME_BY_ADDR[addr]||`${(prog||'').replace(/\.0$/,'').split('.dll')[0]}::${addr}`;
+      return `<span class="pin-chip" title="${esc(k)}">${esc(label)}<button class="px" title="unpin" onclick="unpinKey('${jsq(k)}')">&times;</button></span>`;
+    }).join("");
+  }
+  async function drainDone(){
+    const b=document.getElementById("btnDrain"); b.disabled=true;
+    const r=await qpost("/drain_done",{});
+    b.disabled=false;
+    flash(r&&!r.error?`drained: ${r.dequeued||0} dequeued, ${r.still_queued||0} still queued`:`drain failed${r&&r.error?': '+r.error:''}`);
+    loadPins();
+  }
+  async function refreshTop(){
+    const b=document.getElementById("btnTop50"); b.disabled=true;
+    await qpost("/refresh",{binary:PROGRAM,count:50});
+    setTimeout(()=>{ b.disabled=false; },3000);
+    flash("refreshing top 50 ROI scores");
+  }
+  // Rescan the workflow store from Ghidra. Scoped to the focused binary by NAME
+  // (the backend's binary_filter matches program names), or all=true for the
+  // whole project folder. Progress streams in via the scan_* socket events.
+  function rescan(refresh,all){
+    if(!socket){ flash("no socket"); return; }
+    const bin=(BINARIES||[]).find(x=>x.path===PROGRAM);
+    const program=all?null:(bin?bin.name:null);
+    if(!all&&!program){ flash("no binary focused"); return; }
+    socket.emit("request_rescan",{refresh,program});
+    setScanStatus(`${refresh?'full ':''}rescan requested (${program||'all binaries'})…`);
+  }
+  function setScanStatus(text,cls){
+    const el=document.getElementById("scanStatus"); if(!el) return;
+    el.textContent=text||""; el.className="steer-status"+(cls?" "+cls:"");
+  }
   let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
   const SAMPLE_GLOB={total:2120,shown:5,rows:[
     {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
@@ -747,6 +871,8 @@
     const q=document.getElementById("invSearch").value;
     const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000")||SAMPLE.inventory;
     document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
+    (inv.rows||[]).forEach(f=>{ NAME_BY_ADDR[bareAddr(f.address)]=f.name; });
+    renderPins();
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
       `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
       `<td class="act">${isPinned(f.address)?`<button class="pin-btn pinned" title="pinned — unpin" onclick="event.stopPropagation();unpin('fn','${f.address}')">&#9733;</button>`:`<button class="pin-btn" title="pin — Doc &amp; Prove workers prioritize this" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button>`}</td></tr>`).join("");
@@ -1091,6 +1217,21 @@
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
     socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
+    // --- scan lifecycle (steering panel) ---
+    socket.on("scan_acknowledged",d=>setScanStatus(`scan accepted${d.program?' for '+d.program:''}${d.refresh?' (full refresh)':''}…`));
+    socket.on("scan_started",d=>setScanStatus(`scan started (${d.mode||'incremental'}${d.folder?': '+d.folder:''})`));
+    socket.on("scan_progress",d=>{
+      const idx=(d.index||0)+1, total=d.total||0, scored=d.scored||0, progTotal=d.program_total||0;
+      const phase=d.phase||'scoring', failed=d.failed_batches||0;
+      const pct=progTotal>0?Math.round(scored/progTotal*100):0;
+      setScanStatus(`[${idx}/${total}] ${d.program||''} — ${phase==='scoring'&&progTotal>0?pct+'%':phase}${failed?' ('+failed+' failed batches)':''}`);
+    });
+    socket.on("scan_complete",d=>{
+      setScanStatus(`scan complete: ${d.total||0} functions, ${d.done||0} done`,"ok");
+      setTimeout(()=>setScanStatus(""),6000);
+      refreshAll();
+    });
+    socket.on("scan_error",d=>setScanStatus(`scan error: ${d.error||'unknown'}`,"err"));
     // canonical-types load progress
     socket.on("types_load_started", ()=>{ document.getElementById("typesBarMsg").textContent="Loading canonical types…"; });
     socket.on("types_load_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });

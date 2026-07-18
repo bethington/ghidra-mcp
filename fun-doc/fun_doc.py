@@ -1876,6 +1876,127 @@ def _assess_tag_addrs(tag, program):
         return set()
 
 
+# ---------------------------------------------------------------------------
+# Completeness band tags (COMPLETE_80/90/95/100)
+#
+# Exclusive, purely score-derived Ghidra tags that track the live completeness
+# score — including demotion when a re-score drops below the band. Deliberately
+# separate from the DOC_* provenance rungs (DOC_DRAFT/REVIEWED/VERIFIED), which
+# say how a doc was produced/reviewed, not how complete it currently scores.
+# ---------------------------------------------------------------------------
+
+COMPLETE_BAND_LEVELS = (100, 95, 90, 80)
+COMPLETE_BAND_TAGS = tuple(f"COMPLETE_{b}" for b in COMPLETE_BAND_LEVELS)
+
+
+def band_for_score(score):
+    """Band floor (80/90/95/100) for a score, or None when unscored / below 80."""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return None
+    for b in COMPLETE_BAND_LEVELS:
+        if s >= b:
+            return b
+    return None
+
+
+def sync_band_tag(program, address, new_score, old_score=None):
+    """Keep the exclusive COMPLETE_<band> tag in step with a score write.
+
+    Called from every path that persists a fresh score. When `old_score` is
+    given and the band didn't change this is a pure no-op (no Ghidra I/O), so
+    the hot worker paths only pay HTTP cost on actual band crossings. All
+    Ghidra I/O is best-effort: a tag-sync hiccup must never fail a run —
+    the --assess reconciliation sweep repairs any drift later.
+    """
+    new_band = band_for_score(new_score)
+    if old_score is not None and band_for_score(old_score) == new_band:
+        return
+    if not program or not address:
+        return
+    desired = f"COMPLETE_{new_band}" if new_band else None
+    addr = "0x" + str(address).lower().lstrip("0x")
+    try:
+        r = ghidra_get("/get_function_tags", params={"function": addr, "program": program})
+        if isinstance(r, str):
+            r = json.loads(r)
+        cur = set()
+        if isinstance(r, dict):
+            cur = {t.get("name") for t in (r.get("tags") or []) if isinstance(t, dict)}
+        stale = [t for t in COMPLETE_BAND_TAGS if t in cur and t != desired]
+        if stale:
+            ghidra_post("/remove_function_tag",
+                        {"function": addr, "tags": ",".join(stale), "program": program})
+        if desired and desired not in cur:
+            # add_function_tag auto-creates missing tag definitions
+            ghidra_post("/add_function_tag",
+                        {"function": addr, "tags": desired, "program": program})
+    except Exception:
+        pass
+
+
+def sync_band_tags_sweep(program, emit=print):
+    """Reconcile COMPLETE_* band tags for every function of `program` against
+    the scores in state. Repairs drift from missed live syncs (worker crashes,
+    Ghidra hiccups, functions scored before this feature existed). Called from
+    the --assess functions phase; state scores are used as-is (no re-scoring).
+    Returns (added, removed, skipped_unscored)."""
+    state = load_state()
+    norm = lambda a: "0x" + str(a).lower().lstrip("0x")
+    # addr -> score for this program, from state
+    scores = {}
+    for _k, f in (state.get("functions") or {}).items():
+        if func_in_binary(f, program) and not f.get("is_thunk") and not f.get("is_external"):
+            scores[norm(f.get("address", ""))] = f.get("score")
+    # current band membership, 4 tag queries total
+    current = {t: _assess_tag_addrs(t, program) for t in COMPLETE_BAND_TAGS}
+    to_add = []          # {function, tags} assignments
+    to_remove = []       # (addr, tag)
+    unscored = 0
+    for addr, score in scores.items():
+        band = band_for_score(score)
+        if band is None and score is None:
+            unscored += 1
+        desired = f"COMPLETE_{band}" if band else None
+        for tag, members in current.items():
+            if addr in members and tag != desired:
+                to_remove.append((addr, tag))
+        if desired and addr not in current[desired]:
+            to_add.append({"function": addr, "tags": desired})
+    emit(f"band sweep: {len(scores)} scored functions -> +{len(to_add)} tags, "
+         f"-{len(to_remove)} stale, {unscored} unscored")
+    CHUNK = 200
+    for i in range(0, len(to_add), CHUNK):
+        try:
+            ghidra_post("/batch_add_function_tags",
+                        {"assignments": to_add[i:i + CHUNK], "program": program},
+                        timeout=120)
+        except Exception as e:
+            emit(f"  [warn] batch band-tag add failed at {i}: {e}")
+    for addr, tag in to_remove:
+        try:
+            ghidra_post("/remove_function_tag",
+                        {"function": addr, "tags": tag, "program": program})
+        except Exception:
+            pass
+    return len(to_add), len(to_remove), unscored
+
+
+def _lib_tagged_addrs(program):
+    """Union of all LIB_* tagged function addresses in `program` ('0x<hex>').
+
+    This is the DURABLE library-code signal: Ghidra tags live on the address and
+    survive renaming, unlike the name-based runtime `detect_library_code`. The
+    refresh path re-syncs the resettable `library_code` state flag from this set
+    so a renamed CRT function that carries a LIB_* tag stays excluded from the
+    selector instead of being re-worked every cycle."""
+    lib = set()
+    for t in _ASSESS_LIB_TAGS:
+        lib |= _assess_tag_addrs(t, program)
+    return lib
+
+
 def run_assess_pass(program, count=None, draft_score=40):
     """Assess the CURRENT documentation state of in-scope functions and stamp DOC_DRAFT on
     any whose completeness score is >= draft_score (i.e. they already carry real docs). Only
@@ -1941,6 +2062,12 @@ def run_assess_pass(program, count=None, draft_score=40):
         else:
             emit(f"  [{i}/{total}] {nm} @ {a}  ->  untagged (score {sc if sc is not None else '?'})")
 
+    # Reconcile COMPLETE_80/90/95/100 band tags across ALL in-scope functions
+    # (state scores, no re-scoring) before the save below persists everything.
+    try:
+        sync_band_tags_sweep(program, emit=emit)
+    except Exception as e:
+        emit(f"  [warn] band-tag sweep failed: {e}")
     try:
         ghidra_post("/save_program", {"program": program})
     except Exception:
@@ -2702,8 +2829,8 @@ def fetch_function_data(program, address, mode="FIX"):
     }
 
     # Navigation removed — was calling /tool/goto_address on every function,
-    # stealing Ghidra focus from the user. Navigation is now controlled by the
-    # dashboard's Focus button (auto-follow checkbox) via /api/navigate.
+    # stealing Ghidra focus from the user. (The classic dashboard's
+    # auto-follow /api/navigate surface was retired with it, 2026-07-17.)
 
     # Decompile
     data["decompiled"] = ghidra_get(
@@ -3734,6 +3861,12 @@ def refresh_candidate_scores(
         except Exception as e:
             print(f"  Refresh failed for {prog}: {e}")
             continue
+        # Durable library-code signal for this program: refresh clears the
+        # resettable `library_code` flag below, but any function carrying a
+        # LIB_* Ghidra tag is CRT/library regardless of its (possibly renamed)
+        # name and must stay excluded. Fetch once per program (cheap) and
+        # re-derive the flag from tag membership instead of blindly False.
+        lib_addrs = _lib_tagged_addrs(prog)
         prog_refreshed = 0
         prog_stale = 0
         for c in items:
@@ -3744,6 +3877,7 @@ def refresh_candidate_scores(
             func = c["func"]
             old_score = func.get("score", 0)
             func["score"] = info["score"]
+            sync_band_tag(func.get("program"), addr, info["score"], old_score)
             func["fixable"] = info["fixable"]
             func["has_custom_name"] = info["has_custom_name"]
             func["has_plate_comment"] = info["has_plate_comment"]
@@ -3759,9 +3893,18 @@ def refresh_candidate_scores(
             func["recovery_pass_at"] = None
             func["decompile_timeout"] = False
             func["decompile_timeout_at"] = None
-            func["library_code"] = False
-            func["library_code_at"] = None
-            func["library_code_reasons"] = None
+            # Re-sync from the durable LIB_* tag rather than blindly clearing:
+            # a tagged (possibly renamed) CRT function stays library_code=True
+            # so the selector keeps skipping it. Untagged -> False, letting the
+            # name-based detector re-run as before.
+            _norm_addr = "0x" + str(addr).lower().lstrip("0x")
+            if _norm_addr in lib_addrs:
+                func["library_code"] = True
+                func["library_code_reasons"] = ["LIB_* Ghidra tag (durable)"]
+            else:
+                func["library_code"] = False
+                func["library_code_at"] = None
+                func["library_code_reasons"] = None
             func["stagnation_runs"] = 0
             prog_refreshed += 1
             if abs(info["score"] - old_score) >= 5:
@@ -3936,7 +4079,9 @@ def drain_done_pinned(state):
                 errors += 1
                 continue
             # Apply fresh score back into state
+            _old_score = func.get("score")
             func["score"] = info["score"]
+            sync_band_tag(func.get("program"), addr, info["score"], _old_score)
             func["fixable"] = info["fixable"]
             func["has_custom_name"] = info["has_custom_name"]
             func["has_plate_comment"] = info["has_plate_comment"]
@@ -5504,6 +5649,11 @@ def _invoke_provider_with_watchdog(
     events_queue = ctx.Queue(maxsize=10000)
     drain_stop = threading.Event()
     parent_worker_id = get_worker_id()
+    # Liveness signal for the idle-based deadline: every event the subprocess
+    # emits (tool calls, provider_turn request/waiting beats every ~15s during
+    # in-flight LLM requests) proves the session is still working. Updated by
+    # the drain thread; read by the wait loop below.
+    last_event = {"t": None}
 
     def _drain_events():
         # Stops when the stop flag is set AND the queue is fully drained.
@@ -5519,6 +5669,7 @@ def _invoke_provider_with_watchdog(
             except (ValueError, OSError):
                 # Queue was closed under us — nothing more to drain.
                 return
+            last_event["t"] = time.time()
             try:
                 event_type, data = event
                 get_bus().emit(event_type, data)
@@ -5563,22 +5714,56 @@ def _invoke_provider_with_watchdog(
     register_worker_subprocess(parent_worker_id, worker)
 
     result_msg = None
-    deadline = time.time() + timeout_secs
+    # Idle-based deadline (2026-07-17): the old wall-clock-only deadline killed
+    # sessions that were demonstrably still working (tool calls flowing at
+    # t=590s of a 600s budget) — MiniMax under concurrent load is slow, not
+    # hung. New rules, checked once per second:
+    #   - session emitted events, then went quiet >= idle_limit  -> kill (true
+    #     hang; fires FASTER than the old tier budget for real hangs)
+    #   - session never emitted anything -> old behavior, kill at timeout_secs
+    #     (protects non-event-emitting providers from immortal hangs)
+    #   - hard_cap elapsed -> kill regardless of activity (runaway backstop)
+    # Active sessions can therefore run past their tier budget to completion.
+    idle_limit = max(60.0, float(os.environ.get("FUNDOC_PROVIDER_IDLE_SECS", "300")))
+    hard_cap = max(
+        float(timeout_secs),
+        float(os.environ.get("FUNDOC_PROVIDER_HARD_CAP_SECS", "2700")),
+    )
+    started_at = time.time()
+    kill_reason = None
     try:
-        while time.time() < deadline:
+        while True:
             try:
                 result_msg = result_queue.get(timeout=1)
                 break
             except queue.Empty:
                 if not worker.is_alive():
                     break
+                now = time.time()
+                elapsed = now - started_at
+                seen = last_event["t"]
+                if elapsed >= hard_cap:
+                    kill_reason = f"hard cap {int(hard_cap)}s exceeded"
+                elif seen is None:
+                    if elapsed >= timeout_secs:
+                        kill_reason = (
+                            f"no session activity within the {int(timeout_secs)}s budget"
+                        )
+                elif now - seen >= idle_limit:
+                    kill_reason = (
+                        f"idle {int(now - seen)}s (limit {int(idle_limit)}s, "
+                        f"elapsed {int(elapsed)}s)"
+                    )
+                if kill_reason:
+                    break
 
         if result_msg is None and worker.is_alive():
             timeout_message = (
-                f"{effective_provider} session hard timeout after {timeout_secs}s"
+                f"{effective_provider} session hard timeout: "
+                f"{kill_reason or f'after {timeout_secs}s'}"
             )
             print(
-                f"  [{effective_provider}] hard timeout after {timeout_secs}s — terminating stalled session",
+                f"  [{effective_provider}] hard timeout ({kill_reason or f'{timeout_secs}s'}) — terminating session",
                 flush=True,
             )
             bus_emit(
@@ -5586,6 +5771,7 @@ def _invoke_provider_with_watchdog(
                 {
                     "provider": effective_provider,
                     "timeout_secs": timeout_secs,
+                    "kill_reason": kill_reason,
                     "message": timeout_message,
                     "session_killed": True,
                 },
@@ -7255,8 +7441,10 @@ def _sync_func_state(func, completeness, score=None, deductions=None):
     functions that were successfully scored but only went through a skip path.
     """
     if score is not None:
+        _old_score = func.get("score")
         func["score"] = score
         func["last_processed"] = datetime.now().isoformat()
+        sync_band_tag(func.get("program"), func.get("address"), score, _old_score)
     if deductions is not None:
         func["deductions"] = deductions
     if completeness and isinstance(completeness, dict) and "error" not in completeness:
@@ -8046,7 +8234,9 @@ def process_function(
         if archive_result == "archive_applied":
             func["last_result"] = "archive_applied"
             func["last_processed"] = datetime.now().isoformat()
+            _old_score = func.get("score")
             func["score"] = archive_score
+            sync_band_tag(func.get("program"), func.get("address"), archive_score, _old_score)
             update_function_state(func_key, func)
             auto_dequeue_if_done(
                 func_key, archive_score, source="archive_applied"
@@ -8890,6 +9080,28 @@ def process_function(
             func["last_result"] = result
         else:
             print(f"\n  Score after: {new_score}%{delta} | Result: {result}")
+
+        # Guard #2a: a "blocked" run that still reached the quality bar is DONE,
+        # not blocked. The model hit some minor blocker (BLOCKED: marker) but the
+        # function already meets good_enough_score, so re-queuing it just churns.
+        # Observed 2026-07-17: PATH_CalculateTargetAndTrace blocked 10+ times over
+        # ~3h while its score climbed to 95, wasting provider calls every pass
+        # (consecutive_fails resets each pass, re-admitting it). Accept it and
+        # clear the fail counter so it stops being re-selected.
+        if result == "blocked" and new_score is not None:
+            _good_enough = (load_priority_queue().get("config") or {}).get(
+                "good_enough_score", 80
+            )
+            if new_score >= _good_enough:
+                print(
+                    f"  blocked but score {new_score}% >= {_good_enough}% — "
+                    f"accepting as completed (adequate); block reason: {result_reason}"
+                )
+                result = "completed"
+                func["last_result"] = result
+                func["consecutive_fails"] = 0
+                if func_key in state.get("functions", {}):
+                    state["functions"][func_key]["consecutive_fails"] = 0
 
         # Guard #2b: score regression detection
         # If score dropped significantly and model claimed completion, downgrade

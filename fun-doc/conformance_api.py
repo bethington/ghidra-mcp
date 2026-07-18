@@ -96,6 +96,11 @@ def _intake():
     return jsonify(cd.intake(program=_prog()))
 
 
+@conf_bp.route("/api/conformance/bands")
+def _bands():
+    return jsonify(cd.bands(program=_prog()))
+
+
 @conf_bp.route("/api/conformance/inventory")
 def _inventory():
     try:

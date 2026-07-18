@@ -103,11 +103,45 @@ public class FrontEndProgramProvider implements ProgramProvider {
     }
 
     /**
+     * Persist a cached program's unsaved changes BEFORE its consumer reference is
+     * released. On-demand-opened programs are mutated in memory by the write
+     * endpoints (add_function_tag, apply_data_type, …) but those endpoints never
+     * save. If such a program is then LRU-evicted (or released on dispose) while
+     * the provider holds the only reference, Ghidra disposes the object and the
+     * unsaved writes are silently lost — even though the endpoint returned
+     * success. Saving here makes the cache write-through so eviction can never
+     * discard committed work.
+     *
+     * Best-effort: on a save failure we log loudly but still proceed to release,
+     * because holding the reference indefinitely risks the out-of-memory crash the
+     * cache cap exists to prevent. Read-only opens (canSave()==false) and clean
+     * programs (isChanged()==false) are skipped.
+     */
+    private void saveBeforeRelease(String key, Program p) {
+        if (p == null || p.isClosed()) {
+            return;
+        }
+        try {
+            if (p.isChanged() && p.canSave()) {
+                ghidra.framework.model.DomainFile df = p.getDomainFile();
+                if (df != null) {
+                    df.save(monitor);
+                    Msg.info(this, "Saved modified program before release: " + key);
+                }
+            }
+        } catch (Exception ex) {
+            Msg.error(this, "FAILED to save modified program before release; changes "
+                    + "may be lost: " + key + " — " + ex.getMessage(), ex);
+        }
+    }
+
+    /**
      * Release least-recently-accessed cached programs until the cache is at or below
      * {@link #MAX_CACHED_PROGRAMS}. Never evicts the just-opened program or the current
      * program. Releasing our consumer reference frees the program's memory when no
      * CodeBrowser holds it (the common dashboard case); if a CodeBrowser does, the release
-     * is a harmless ref-count decrement.
+     * is a harmless ref-count decrement. Unsaved changes are flushed first via
+     * {@link #saveBeforeRelease} so eviction can't discard committed writes.
      */
     private void evictExcessPrograms(Program justOpened) {
         java.util.Set<Program> protectedPrograms = new java.util.HashSet<>();
@@ -127,6 +161,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
                 continue;
             }
             try {
+                saveBeforeRelease(victimKey, victim);
                 victim.release(consumer);
                 Msg.info(this, "Evicted idle cached program (cap " + MAX_CACHED_PROGRAMS
                         + ", " + openPrograms.size() + " remain): " + victimKey);
@@ -387,6 +422,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
             Program previousProgram = openPrograms.get(cacheKey);
             if (previousProgram != null && previousProgram != program) {
                 try {
+                    saveBeforeRelease(cacheKey, previousProgram);
                     previousProgram.release(consumer);
                     Msg.info(this, "Released previous cached program for: " + cacheKey);
                 } catch (Exception ex) {
@@ -418,6 +454,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
                 Program previousProgram = openPrograms.get(cacheKey);
                 if (previousProgram != null && previousProgram != program) {
                     try {
+                        saveBeforeRelease(cacheKey, previousProgram);
                         previousProgram.release(consumer);
                     } catch (Exception ex) {
                         Msg.warn(this, "Error releasing previous program " + cacheKey + ": " + ex.getMessage());
@@ -515,6 +552,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
         for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
             try {
                 Program program = entry.getValue();
+                saveBeforeRelease(entry.getKey(), program);
                 program.release(consumer);
                 Msg.info(this, "Released program: " + entry.getKey());
             } catch (Exception e) {
@@ -563,6 +601,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
                 continue;
             }
             try {
+                saveBeforeRelease(key, program);
                 program.release(consumer);
                 released = true;
                 if (program == currentProgram) {
