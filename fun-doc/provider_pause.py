@@ -107,6 +107,12 @@ QUOTA_PAUSE_THRESHOLD_SECONDS = 300  # 5 minutes
 # Used when a wall is detected but no reset time can be parsed (Q3 fallback).
 DEFAULT_FALLBACK_PAUSE_SECONDS = 3600  # 1 hour
 
+# Fallback for a persistent 429 with no parsable reset time (2026-07-18
+# incident: MiniMax returned duration-less 429s for ~25 min; detectors
+# returned None so workers marched on stamping malformed_response/no_change).
+# Long enough to clear the threshold above, short enough to probe again soon.
+RATE_LIMIT_FALLBACK_PAUSE_SECONDS = 600  # 10 minutes
+
 # Random jitter window added to paused_until so workers waking together don't
 # all hit the API on the same wall-clock second (Q3 thundering-herd guard).
 JITTER_MIN_SECONDS = 30.0
@@ -254,10 +260,12 @@ def _detect_minimax(error_str: str, http_status: Optional[int] = None) -> Option
     if ("quota" in s and "exhausted" in s) or "insufficient_balance" in s:
         secs = _parse_duration(error_str) or DEFAULT_FALLBACK_PAUSE_SECONDS
         return ResetInfo(raw_seconds=secs, reason="minimax: " + _truncate_for_reason(error_str))
-    if http_status == 429:
-        secs = _parse_duration(error_str)
-        if secs is None:
-            return None
+    if http_status == 429 or "error code: 429" in s or "rate limit" in s or "rate_limit" in s:
+        # This detector only sees TERMINAL errors — _invoke_minimax surfaces
+        # provider_error after its own 4-attempt exponential backoff (~35s)
+        # is exhausted — so a duration-less 429 here is a persistent wall,
+        # not a blip. Pause rather than let workers stamp malformed/no_change.
+        secs = _parse_duration(error_str) or RATE_LIMIT_FALLBACK_PAUSE_SECONDS
         return ResetInfo(raw_seconds=secs, reason="minimax: " + _truncate_for_reason(error_str))
     return None
 

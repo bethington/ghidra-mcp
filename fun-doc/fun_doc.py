@@ -6626,6 +6626,14 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
     total_input_tokens = 0
     total_output_tokens = 0
     tool_call_count = 0
+    # Terminal API failure surfaced to the caller (2026-07-19, backlog #12):
+    # when the 4-attempt retry loop exhausts (e.g. a persistent 429 quota
+    # wall), the error must reach meta["provider_error"] so the post-call
+    # detect_quota_wall in _invoke_provider_direct can install a pause.
+    # Swallowing it returned a clean-looking empty result that the PORT lane
+    # stamped malformed_response and the GLOBALS lane stamped no_change.
+    provider_error = None
+    provider_http_status = None
 
     # Dynamic max_tokens: bump for complex/massive functions.
     # Floor raised 16384 -> 32768 (2026-07-14): M3 reasons at length before
@@ -6801,6 +6809,9 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                 break
         except Exception as e:
             print(f"  [minimax] API error: {e}", file=sys.stderr)
+            provider_error = str(e)
+            # openai.APIStatusError (incl. RateLimitError) carries status_code.
+            provider_http_status = getattr(e, "status_code", None)
             break
 
         if not response.choices:
@@ -7027,6 +7038,8 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
             # final draft iteration lives (last-block-wins parsing).
             "reasoning_text": ("\n".join(reasoning_parts))[-120000:] or None,
             "raw_final_message": raw_final_message,
+            "provider_error": provider_error,
+            "provider_http_status": provider_http_status,
         },
     )
 
