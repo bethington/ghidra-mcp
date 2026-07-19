@@ -1000,6 +1000,7 @@ def _looks_like_library_or_runtime(name):
 _PORT_TERMINAL_STATUSES = frozenset({
     "proven_pending_review",       # static harness succeeded, awaiting human promotion
     "proven_live_pending_review",  # LIVE oracle proof succeeded, awaiting human promotion
+    "proven_live",                 # review done (hand-proof or promote_pending_review.py)
     "stateful_skip",               # classified out of scope (deterministic)
     "harness_failed",              # exhausted the bounded fix-retry loop
     "live_prove_failed",           # live-path reimpl drafted but didn't prove
