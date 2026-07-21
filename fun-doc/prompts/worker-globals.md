@@ -194,6 +194,68 @@ One name (`g_dwActiveQuestState`), one type (`dword`), plate comment
 above. No `Ordinal_*` overlays or `XREF` decoration in the plate
 itself; those come from Ghidra's listing renderer.
 
+## Naming: unique, specific, evidence-based
+
+These rules exist because of measured production failures — each one is a
+pattern that actually degraded the database at scale.
+
+### Names must be unique within the program
+
+Never give a global a name that already exists at another address in this
+program. A production audit found 824 names applied at 2+ addresses in a
+single binary — the worst was `g_dwLastError` stamped onto **60 different
+addresses** in D2Client.dll, each of which was actually a distinct state
+field. Duplicate names make decompiler output ambiguous and poison any
+later write-back mapping.
+
+If the purpose you inferred yields a name that plausibly exists elsewhere
+(short, generic-sounding), make the descriptor more specific instead of
+reusing it: scope it by subsystem and role (`g_dwOverlayCacheLastError`,
+not `g_dwLastError`). If the harness tells you your chosen name collides,
+pick a *more specific* name — never resolve a collision by appending a
+counter or address suffix.
+
+**`g_dwLastError` is the canonical trap — never use the bare name.** A
+production audit found it applied to **47 different addresses** in one
+binary (plus dozens more across others). Windows binaries have many
+distinct error-holding slots — one per subsystem, not one global. When a
+global stores a `GetLastError()`-style value, disambiguate by the
+subsystem that owns it, taken from the writing function(s):
+`g_dwOverlayCacheLastError`, `g_dwArchiveLoadLastError`,
+`g_dwSocketLastError`. The same rule applies to any generic status word
+(`g_dwState`, `g_dwFlags`, `g_dwCount`, `g_dwResult`): a shared-looking
+name almost always means you haven't identified what *this* one is for.
+
+### Generic fallback names are forbidden
+
+Do not fall back to `g_dwLastError`, `g_dwFlags`, `g_dwState`, `g_dwData`,
+`g_pBuffer`, or similar catch-alls when the purpose isn't obvious. Those
+names claim knowledge you don't have and collide with each other. When you
+genuinely can't determine the role from xrefs, use the sanctioned neutral
+placeholder convention from `step-globals.md` (`g_dwField1D0`, `g_pUnk20`)
+— an honest placeholder beats a confident wrong name.
+
+### Resolve real field names before settling for a placeholder
+
+Before writing a placeholder like `g_dwField90` or an offset-style
+descriptor like `g_dwMissileAudioRec_0x94`: if the global lives inside (or
+points into) a struct that Ghidra already has a type for, call
+`get_struct_layout(program=..., struct_name=...)` and use the **real field
+name** at that offset for the descriptor. The D2 struct definitions loaded
+in this project are community-canonical; an offset-derived descriptor when
+the real name was one tool call away is a documentation bug.
+
+### Overwriting an existing meaningful name needs evidence
+
+If the current name is already a real descriptor (not auto-generated, not
+`DAT_*`/`g_dwData_*`/`s_*`/`Rsrc_*`, not a placeholder), treat it as
+probably correct. Replace it only when the xrefs you actually examined
+contradict it — and when you do replace it, state the evidence in the
+plate comment (e.g. `Renamed from g_pPlayerStatistics: all 4 writers are
+D2GFX light-map setup, see LIGHT_BuildFalloffTable`). A rename that flips
+the meaning of an established symbol without recorded evidence is worse
+than leaving it alone: downstream code and notes reference the old name.
+
 ## Hard constraints
 
 - **One global only.** Do not touch other addresses, even if you notice

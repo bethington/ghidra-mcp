@@ -20,13 +20,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **256 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **269 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **256 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **269 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -56,7 +56,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **256 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **269 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -101,7 +101,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
 - **Ghidra 12.1.2** (or compatible version)
-- **Python 3.10+** with pip
+- **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
 > Shared Ghidra Server users: Ghidra 12.1.2 clients require a Ghidra
 > Server at 12.1, 12.0.5, or a newer compatible version. Upgrade the
@@ -180,8 +180,25 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 2. **Install system prerequisites** (if not already installed):
    ```bash
-   sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip curl jq unzip
+   sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip python3-venv curl jq unzip
    ```
+
+   > **Debian/Kali/Ubuntu 23.04+ note (PEP 668):** these distros mark the system
+   > Python as *externally managed*, so a bare `pip install` fails with
+   > `error: externally-managed-environment`. Don't work around it with
+   > `--break-system-packages` — it can corrupt apt-managed tooling. Instead use
+   > [uv](https://docs.astral.sh/uv/) (recommended — it creates and manages a
+   > project-local `.venv` automatically, and is what this repo's commands use):
+   > ```bash
+   > curl -LsSf https://astral.sh/uv/install.sh | sh
+   > uv run bridge-mcp-ghidra    # resolves deps into .venv and starts the bridge
+   > ```
+   > or a classic virtual environment:
+   > ```bash
+   > python3 -m venv .venv && source .venv/bin/activate
+   > pip install -e .
+   > bridge-mcp-ghidra
+   > ```
 
 3. **Run environment preflight:**
    ```bash
@@ -307,6 +324,12 @@ MCP client config for the HTTP transport (add to your client's MCP config file):
   }
 }
 ```
+
+Browser-based clients (e.g. [MCP Inspector](https://github.com/modelcontextprotocol/inspector))
+work out of the box: the HTTP transports answer CORS preflight (`OPTIONS`) requests and expose
+the `mcp-session-id` / `mcp-protocol-version` headers to scripts. Allowed origins mirror the
+Host-header policy — loopback on any port is always permitted, plus the bind host and any
+hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
 
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 ```bash
@@ -496,6 +519,30 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
    ```
 4. Look for errors in Ghidra console: **Window > Console**
 
+### `pip install` fails with `error: externally-managed-environment`
+
+**Cause:** PEP 668. Debian-family distros (Debian 12+, Kali, Ubuntu 23.04+)
+mark the system Python as externally managed, so global `pip install` is
+blocked to protect apt-managed packages.
+
+**Solution:** Use a virtual environment — never `--break-system-packages`.
+The recommended path is [uv](https://docs.astral.sh/uv/), which manages a
+project-local `.venv` automatically:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+cd ghidra-mcp
+uv run bridge-mcp-ghidra
+```
+
+Or a classic venv:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+bridge-mcp-ghidra
+```
+
 ### `python -m debugger` fails with `ModuleNotFoundError` for `pybag` or `comtypes`
 
 **Cause:** The standalone debugger server uses optional Windows-only Python
@@ -561,7 +608,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 256 tools fully implemented
+- **MCP Tools**: 269 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -570,220 +617,357 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 🛠️ API Reference
 
-### Core Operations
-- `check_connection` - Verify MCP connectivity
-- `get_metadata` - Program metadata and info
-- `get_version` - Server version information
-- `get_function_count` - Return total function count for a program
-- `get_entry_points` - Binary entry points discovery
-- `get_current_address` - Get cursor address (GUI only)
-- `get_current_function` - Get function at cursor (GUI only)
-- `get_current_selection` - Get current selection context (address + function)
-- `read_memory` - Read raw bytes from memory
-- `save_program` - Save the current program
-- `exit_ghidra` - Save and exit Ghidra gracefully
+<!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-### Function Analysis
-- `list_functions` - List all functions (paginated)
-- `list_functions_enhanced` - List with isThunk/isExternal flags
-- `list_classes` - List namespace/class names (paginated)
-- `search_functions_enhanced` - Advanced function search with filters
-- `decompile_function` - Decompile function to C pseudocode
-- `force_decompile` - Force fresh decompilation (bypass cache)
-- `batch_decompile` - Batch decompile multiple functions
-- `get_function_callers` - Get function callers
-- `get_function_callees` - Get function callees
-- `get_function_call_graph` - Function relationship graph
-- `get_full_call_graph` - Complete call graph for program
-- `get_function_signature` - Get function prototype string
-- `get_function_hash` - SHA-256 hash of normalized function opcodes
-- `get_bulk_function_hashes` - Paginated bulk hashing with filter
-- `get_function_jump_targets` - Get jump target addresses from disassembly
-- `get_function_metrics` - Get complexity metrics for a function
-- `get_function_xrefs` - Get function cross-references
-- `analyze_function_full` - Comprehensive function analysis
-- `analyze_function_completeness` - Documentation completeness score
-- `batch_analyze_completeness` - Batch completeness analysis for multiple functions
-- `find_similar_functions_across_programs` - Cross-program similarity matching
-- `bulk_fuzzy_match_functions` - Bulk fuzzy match across all functions
-- `diff_functions` - Diff two functions side by side
-- `validate_function_prototype` - Validate a function prototype string
-- `can_rename_at_address` - Check if address can be renamed
-- `delete_function` - Delete function at address
+269 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
-### Memory & Data
-- `list_segments` - Memory segments and layout
-- `list_data_items` - List defined data labels and values (paginated)
-- `list_data_items_by_xrefs` - Data items sorted by xref count
-- `get_function_by_address` - Function at address
-- `disassemble_function` - Disassembly listing
-- `disassemble_bytes` - Raw byte disassembly
-- `get_xrefs_to` - Cross-references to address
-- `get_xrefs_from` - Cross-references from address
-- `get_bulk_xrefs` - Bulk cross-reference lookup
-- `analyze_data_region` - Analyze memory region structure
-- `inspect_memory_content` - View raw memory content
-- `detect_array_bounds` - Detect array boundaries
-- `search_byte_patterns` - Search for byte patterns
-- `create_memory_block` - Create a new memory block
+### Program & Session Management
 
-### Cross-Binary Documentation
-- `get_function_documentation` - Export complete function documentation
-- `apply_function_documentation` - Import documentation to target function
-- `compare_programs_documentation` - Compare documentation between programs
-- `build_function_hash_index` - Build persistent JSON index
-- `lookup_function_by_hash` - Find matching functions in index
-- `propagate_documentation` - Apply docs to all matching instances
-
-### Data Types & Structures
-- `list_data_types` - Available data types
-- `search_data_types` - Search for data types
-- `get_data_type_size` - Get byte size of a data type
-- `get_valid_data_types` - Get list of valid Ghidra builtin types
-- `get_struct_layout` - Get detailed field layout of a structure
-- `validate_data_type` - Validate data type syntax
-- `validate_data_type_exists` - Check if a data type exists
-- `create_struct` - Create custom structure
-- `add_struct_field` - Add field to structure
-- `modify_struct_field` - Modify existing field
-- `remove_struct_field` - Remove field from structure
-- `create_enum` - Create enumeration
-- `get_enum_values` - Get enumeration values
-- `create_array_type` - Create array data type
-- `create_typedef` - Create typedef alias
-- `create_union` - Create union data type
-- `create_pointer_type` - Create pointer data type
-- `clone_data_type` - Clone a data type with a new name
-- `apply_data_type` - Apply type to address
-- `delete_data_type` - Delete a data type
-- `consolidate_duplicate_types` - Merge duplicate types
-- `suggest_field_names` - AI-assisted field name suggestions for a structure
-- `create_data_type_category` - Create a category folder in the type manager
-- `move_data_type_to_category` - Move a type to a different category
-- `list_data_type_categories` - List all data type categories
-- `import_data_types` - Import types from a GDT/header file
-
-### Symbols & Labels
-- `list_imports` - Imported symbols and libraries
-- `list_exports` - Exported symbols and functions
-- `list_external_locations` - External location references
-- `get_external_location` - Specific external location detail
-- `list_strings` - Extracted strings with analysis
-- `search_memory_strings` - Search strings by regex/substring pattern
-- `list_namespaces` - Available namespaces
-- `list_globals` - Global variables
-- `create_label` - Create label at address
-- `batch_create_labels` - Bulk label creation
-- `delete_label` - Delete label at address
-- `batch_delete_labels` - Bulk label deletion
-- `rename_label` - Rename existing label
-- `rename_or_label` - Rename or create label
-
-### Renaming & Documentation
-- `rename_function` - Rename function by name
-- `rename_function_by_address` - Rename function by address
-- `rename_data` - Rename data item
-- `rename_variables` - Rename function variables
-- `rename_global_variable` - Rename global variable
-- `rename_external_location` - Rename external reference
-- `batch_rename_function_components` - Bulk renaming
-- `set_decompiler_comment` - Set decompiler comment
-- `set_disassembly_comment` - Set disassembly comment
-- `set_plate_comment` - Set function plate comment
-- `get_plate_comment` - Get function plate comment
-- `batch_set_comments` - Bulk comment setting
-- `clear_function_comments` - Clear all comments for a function
-- `list_bookmarks` - List all bookmarks
-- `set_bookmark` - Create or update a bookmark
-- `delete_bookmark` - Delete a bookmark
-
-### Type System
-- `set_function_prototype` - Set function signature
-- `set_local_variable_type` - Set variable type
-- `set_parameter_type` - Set parameter type
-- `batch_set_variable_types` - Bulk type setting
-- `set_variable_storage` - Control variable storage location
-- `set_function_no_return` - Mark function as non-returning
-- `clear_instruction_flow_override` - Clear flow override on instruction
-- `list_calling_conventions` - Available calling conventions
-- `get_function_variables` - Get all function variables
-- `get_function_labels` - Get labels in function
-
-### Ghidra Script Management
-- `list_scripts` - List available scripts
-- `list_ghidra_scripts` - List custom Ghidra scripts
-- `save_ghidra_script` - Save new script
-- `get_ghidra_script` - Get script contents
-- `run_ghidra_script` - Execute Ghidra script by name
-- `run_script_inline` - Execute inline script code
-- `update_ghidra_script` - Update existing script
-- `delete_ghidra_script` - Delete script
-
-### Multi-Program Support
-- `list_open_programs` - List all open programs
-- `get_current_program_info` - Current program details
-- `switch_program` - Switch active program
+- `analysis_status` - Get auto-analysis status for open programs
+- `close_program` - Close an open program by project path or name
+- `create_property_map` - Create a user property map to store typed values keyed by address
+- `delete_property_map` - Delete a user property map and all values it holds
+- `exit_ghidra` - Save and exit Ghidra
+- `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
+- `get_current_program_info` - Get current program info
+- `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
+- `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
+- `get_property` - Read the value stored at an address in a property map
+- `import_file` - Import a binary file from disk into the current Ghidra project and open it
+- `list_open_programs` - List open programs
+- `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
+- `list_properties` - List (address, value) entries stored in a property map, with pagination
+- `list_property_maps` - List user-defined property maps — typed per-address key→value stores
 - `open_program` - Open program from project
-
-### Project Lifecycle
-- `create_project` - Create a new Ghidra project
-- `open_project` - Open an existing project
-- `close_project` - Close the current project
-- `delete_project` - Delete a project
-- `list_projects` - List Ghidra projects in a directory
+- `reanalyze` - Trigger full auto-analysis on a program
+- `remove_program_option` - Remove an option from a program option group
+- `remove_property` - Remove the value stored at a single address in a property map
+- `save_all_programs` - Save all open programs
+- `save_program` - Save current program
+- `set_image_base` - Set the base address of the program (rebases all addresses)
+- `set_program_option` - Set a typed program option
+- `set_property` - Set a value at an address in a property map
+- `switch_program` - Switch current program
 
 ### Project Organization
-- `create_folder` - Create a folder in the project tree
-- `move_file` - Move a domain file to another folder
+
+- `create_folder` - Create a folder in the project
+- `delete_file` - Delete a file from the project
+- `delete_project` - Delete a Ghidra project
+- `list_projects` - List available Ghidra projects
+- `move_file` - Move a file to another project folder
 - `move_folder` - Move a folder to another location
-- `delete_file` - Delete a domain file from the project
+- `project_info` - Get detailed project info including running tools and open programs
 
-### Analysis Tools
-- `find_next_undefined_function` - Find undefined functions
-- `find_undocumented_by_string` - Find functions by string reference
-- `find_undocumented_functions_by_strings` - Find undocumented functions by string references
-- `get_assembly_context` - Get assembly context
-- `analyze_struct_field_usage` - Analyze structure field access
-- `get_field_access_context` - Get field access patterns
+### Headless Project & Program Lifecycle
+
+Available on the standalone headless server (`GhidraMCPHeadlessServer`).
+
+- `archive_project` - Archive the currently open project to a Ghidra-native .gar file
+- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version
+- `close_project` - Close the currently open project
+- `create_project` - Create a new Ghidra project
+- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf)
+- `get_project_info` - Get info about the currently open project
+- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/')
+- `load_program` - Load a binary file into the headless server for analysis
+- `load_program_from_project` - Load program from Ghidra project (headless)
+- `open_project` - Open an existing Ghidra project (.gpr file or directory)
+- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`
+- `server_status` - Check headless server connection status
+
+### Listing & Enumeration
+
+- `list_bookmarks` - List bookmarks
+- `list_calling_conventions` - List available calling conventions
+- `list_classes` - List namespace/class names
+- `list_data_items` - List defined data
+- `list_data_items_by_xrefs` - List data sorted by xref count
+- `list_exports` - List exported symbols
+- `list_external_locations` - List external locations
+- `list_functions` - List functions with addresses
+- `list_functions_enhanced` - List functions with metadata
+- `list_globals` - List global variables
+- `list_imports` - List imported symbols
+- `list_methods` - List all function names with pagination
+- `list_namespaces` - List all namespaces
+- `list_scripts` - List available Ghidra scripts
+- `list_segments` - List memory segments
+- `list_strings` - List defined strings
+
+### Context & Lookups
+
+- `get_current_address` - Get cursor address (GUI only)
+- `get_current_function` - Get function at cursor (GUI only)
+- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only)
+- `get_entry_points` - Get program entry points
+- `get_enum_values` - Get enumeration values
+- `get_external_location` - Get external location details
+- `get_full_call_graph` - Get full call graph
+- `get_function_by_address` - Get function at address
+- `get_function_call_graph` - Get call graph
+- `get_function_callees` - Get functions called
+- `get_function_callers` - Get calling functions
+- `get_function_count` - Return the number of functions in the loaded program
+- `get_function_jump_targets` - Get jump targets
+- `get_function_labels` - Get labels in function
+- `get_function_variables` - List all variables in a function
+- `get_struct_layout` - Get structure layout
+- `get_valid_data_types` - Get valid data type names
+
+### Search
+
+- `find_similar_functions` - Find similar functions
+- `search_byte_patterns` - Search for byte patterns
+- `search_data_types` - Search data types
+- `search_functions` - Search functions by name
+- `search_functions_enhanced` - Advanced function search
+- `search_strings` - Search defined strings by a regex/substring pattern
+
+### Decompilation & Disassembly
+
+- `decompile_function` - Decompile function
+- `disassemble_bytes` - Disassemble byte range
+- `disassemble_function` - Disassemble function
+- `force_decompile` - Force fresh decompilation
+
+### Function Tags, Variables & Attributes
+
+- `add_function_tag` - Attach one or more tags to a function
+- `batch_add_function_tags` - Attach tags to many functions in one transaction
+- `batch_remove_function_tags` - Detach tags from many functions in one transaction
+- `create_function_tag` - Create a program-wide function tag definition with an optional comment
+- `delete_function_tag` - Delete a program-wide function tag definition
+- `get_function_tags` - List all tags assigned to a specific function
+- `list_class_members` - List the member functions of a C++ class
+- `list_function_tags` - List all program-wide function tag definitions with their use counts
+- `remove_function_tag` - Detach one or more tags from a function
+- `search_functions_by_tag` - List all functions that have a specified tag attached
+- `set_decompiler_variable_type` - Set a decompiler (high-level) variable or parameter type by name
+- `set_function_no_return` - Set no-return attribute
+- `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
+- `set_function_this_type` - Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall)
+- `set_variables` - Set types and names for multiple variables atomically
+
+### Cross-References
+
+- `add_memory_reference` - Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables)
+- `get_bulk_xrefs` - Get xrefs for multiple addresses
+- `get_function_xrefs` - Get function cross-references
+- `get_xrefs_from` - Get references from address
+- `get_xrefs_to` - Get references to address
+- `remove_reference` - Remove memory cross-reference(s) from one address to another — the inverse of add_memory_reference
+
+### Data Types & Structures
+
+- `add_struct_field` - Add struct field
+- `apply_data_type` - Apply data type
+- `audit_global` - Audit a global variable's documentation state
+- `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
+- `batch_set_variable_types` - Set multiple variable types
+- `clone_data_type` - Clone data type
+- `create_array_type` - Create array type
+- `create_data_type_category` - Create data type category
+- `create_enum` - Create enumeration
+- `create_function_signature` - Create function signature type
+- `create_pointer_type` - Create pointer type
+- `create_struct` - Create structure
+- `create_typedef` - Create typedef
+- `create_union` - Create union
+- `delete_data_type` - Delete data type
+- `embed_struct_field` - Replace a structure field with an embedded struct type by value (e.g
+- `get_data_type_size` - Get data type size in bytes
+- `get_type_size` - Get data type size and info
+- `import_data_types` - Import data types from GDT
+- `list_data_type_categories` - List data type categories
+- `list_data_types` - List data types
+- `modify_struct_field` - Modify struct field
+- `modify_struct_field_type` - Set a structure field's type by name or offset (offset:N)
+- `move_data_type_to_category` - Move data type to category
+- `recreate_struct` - Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct)
+- `remove_struct_field` - Remove struct field
+- `resize_struct` - Grow or shrink an existing structure by total byte size
+- `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
+- `set_function_prototype` - Set function prototype (return type, param types, calling convention)
+- `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
+- `set_local_variable_type` - Set variable type
+- `set_parameter_type` - Set parameter type
+- `set_variable_storage` - Set variable storage
+- `validate_data_type` - Validate data type syntax
+- `validate_data_type_exists` - Check if data type exists
+- `validate_function_prototype` - Validate function prototype
+
+### Renaming & Labels
+
+- `batch_create_labels` - Create multiple labels
+- `batch_delete_labels` - Delete multiple labels
+- `batch_rename_function_components` - Batch rename function components
+- `create_label` - Create label
+- `delete_label` - Delete label at address
+- `rename_data` - Rename data symbol
+- `rename_external_location` - Rename external location
+- `rename_function` - Rename function by name
+- `rename_function_by_address` - Rename function by address
+- `rename_global_variable` - Rename global variable
+- `rename_label` - Rename label
+- `rename_or_label` - Rename or create label
+- `rename_variable` - Rename a variable in a function
+- `rename_variables` - Batch rename variables
+
+### Comments & Bookmarks
+
+- `batch_set_comments` - Set multiple comments
+- `clear_function_comments` - Clear all comments for a function
+- `delete_bookmark` - Delete bookmark
+- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function)
+- `get_plate_comment` - Get plate comment
+- `set_bookmark` - Set bookmark
+- `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
+- `set_decompiler_comment` - Set PRE_COMMENT
+- `set_disassembly_comment` - Set EOL_COMMENT
+- `set_plate_comment` - Set plate comment
+
+### Analysis
+
+- `analyze_api_call_chains` - Analyze API call chains
+- `analyze_call_graph` - Analyze function call graph patterns
+- `analyze_control_flow` - Analyze control flow
+- `analyze_data_region` - Analyze data region
+- `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
+- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
+- `analyze_function_complete` - Comprehensive single-call function analysis
+- `analyze_function_completeness` - Analyze documentation completeness
+- `analyze_struct_field_usage` - Analyze struct field usage
+- `apply_data_classification` - Apply data classification
+- `batch_analyze_completeness` - Batch analyze completeness for multiple functions
+- `batch_apply_documentation` - Apply all documentation to a function in one call
+- `batch_decompile` - Decompile multiple functions at once
+- `can_rename_at_address` - Check if address can be renamed
+- `clear_instruction_flow_override` - Clear flow override
+- `configure_analyzer` - Configure an analysis plugin
 - `create_function` - Create function at address
-- `analyze_control_flow` - Cyclomatic complexity and loop detection
-- `analyze_call_graph` - Build function call graph
-- `analyze_api_call_chains` - Detect API call threat patterns
-- `detect_malware_behaviors` - Detect malware behavior categories
+- `create_memory_block` - Create memory block
+- `delete_function` - Delete function at address
+- `detect_array_bounds` - Detect array bounds
+- `detect_crypto_constants` - Detect crypto constants
+- `detect_malware_behaviors` - Detect malware behaviors
+- `extract_iocs_with_context` - Extract IOCs with context
 - `find_anti_analysis_techniques` - Find anti-analysis techniques
-- `find_dead_code` - Detect unreachable code
-- `extract_iocs_with_context` - Extract IOCs from strings
-- `apply_data_classification` - Apply data classification to addresses
+- `find_code_gaps` - Find gaps of undefined bytes between functions in executable memory
+- `find_dead_code` - Find dead code
+- `find_next_undefined_function` - Find next undefined function
+- `get_assembly_context` - Get assembly context
+- `get_field_access_context` - Get field access context
+- `get_function_pcode` - Dump raw P-code for a function (issue #192)
+- `inspect_memory_content` - Inspect memory bytes
+- `list_analyzers` - List available analysis plugins
+- `read_memory` - Read raw memory
+- `run_analysis` - Run auto-analysis on the current program
+- `search_instructions` - Search for instructions by mnemonic and/or operand substring
+- `suggest_field_names` - Suggest field names
 
-### Analysis Control
-- `list_analyzers` - List all available Ghidra analyzers
-- `configure_analyzer` - Enable/disable or configure an analyzer
-- `run_analysis` - Trigger Ghidra auto-analysis programmatically
+### Cross-Binary Documentation & Archive
 
-### Server Connection (Ghidra Server)
-- `connect_server` - Connect to a Ghidra Server
-- `disconnect_server` - Disconnect from Ghidra Server
-- `server_status` - Check server connection status
-- `list_repositories` - List repositories on the server
-- `create_repository` - Create a new repository
-- `list_repository_files` - List files in a server repository folder
-- `get_repository_file` - Get metadata for a file in a server repository
+- `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres)
+- `archive_ingest_program` - Bulk-ingest every function in a program into the cross-version documentation archive
+- `batch_string_anchor_report` - Report of source file strings and their FUN_* functions
+- `bulk_fuzzy_match` - Bulk cross-binary function matching
+- `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
+- `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
 
-### Version Control
-- `checkout_file` - Check out a file from version control
-- `checkin_file` - Check in a file with a comment
-- `undo_checkout` - Undo a checkout without committing
-- `add_to_version_control` - Add a file to version control
+### Utility & Documentation Transfer
 
-### Version History
-- `get_version_history` - Get full version history for a file
-- `get_checkouts` - Get active checkout status
+- `apply_function_documentation` - Apply function documentation
+- `check_connection` - Health check endpoint
+- `compare_programs_documentation` - Compare documentation across programs
+- `convert_number` - Convert number between bases
+- `diff_functions` - Diff two functions
+- `find_undocumented_by_string` - Find undocumented functions referencing string
+- `get_bulk_function_hashes` - Get bulk function hashes
+- `get_function_documentation` - Export function documentation
+- `get_function_hash` - Get function hash
+- `get_function_signature` - Get function feature signature
+- `get_metadata` - Get program metadata
+- `get_version` - Get plugin version
+- `health` - Health check endpoint for headless server
+- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count
+- `mcp_schema` - Machine-readable API schema with endpoint metadata
+- `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address
+- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed
+- `tool_running_tools` - List all running Ghidra tool windows
 
-### Admin
-- `terminate_checkout` - Forcibly terminate a user's checkout
-- `list_server_users` - List all users on the Ghidra Server
-- `set_user_permissions` - Set a user's repository access level
+### Emulation
+
+- `emulate_function` - Emulate a single function with controlled register/memory inputs
+- `emulate_hash_batch` - Brute-force API hash resolution
+
+### Scripting
+
+- `run_ghidra_script` - Run script with output capture
+- `run_script_inline` - Run inline script code
+
+### Ghidra Server & Version Control
+
+- `server_admin_set_permissions` - Set user permissions on a repository
+- `server_admin_terminate_all_checkouts` - Terminate all checkouts in a folder recursively
+- `server_admin_terminate_checkout` - Terminate all checkouts on a single file
+- `server_admin_users` - List all users on the server
+- `server_authenticate` - Register server credentials for programmatic authentication
+- `server_checkouts` - List all checked-out files in a folder, including server-side checkouts
+- `server_connect` - Connect to a Ghidra server
+- `server_disconnect` - Disconnect from the Ghidra server
+- `server_repositories` - List repositories on the connected server
+- `server_repository_create` - Create a new repository on the server
+- `server_repository_file` - Get file info from a server repository
+- `server_repository_files` - List files in a server repository folder
+- `server_version_control_add` - Add a file to version control
+- `server_version_control_checkin` - Check in a version-controlled file
+- `server_version_control_checkout` - Check out a version-controlled file
+- `server_version_control_undo_checkout` - Undo a file checkout
+- `server_version_history` - Get version history for a file
+
+### Debugger (Ghidra TraceRmi — GUI only)
+
+On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix (e.g. `debugger_status_2`).
+
+- `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address
+- `debugger_interrupt` - Interrupt (break into) the running target
+- `debugger_launch` - Launch an executable through Ghidra's Trace RMI debugger launcher
+- `debugger_launch_offers` - List available debugger launch/attach options for the current program
+- `debugger_list_breakpoints` - List all breakpoints in the current trace
+- `debugger_modules` - List modules (DLLs/EXEs) loaded in the debugged process
+- `debugger_read_memory` - Read memory from the debugged process
+- `debugger_registers` - Read CPU registers from the current debug trace snapshot
+- `debugger_remove_breakpoint` - Remove a breakpoint at an address
+- `debugger_resume` - Resume execution of the debugged process
+- `debugger_set_breakpoint` - Set a software execution breakpoint at an address in the trace
+- `debugger_stack_trace` - Get the call stack backtrace for the current thread
+- `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace
+- `debugger_status` - Get debugger status: active trace, thread, execution state, module count
+- `debugger_step_into` - Single-step into the next instruction (follows calls)
+- `debugger_step_out` - Step out of the current function (run to return)
+- `debugger_step_over` - Step over the next instruction (does not follow calls)
+- `debugger_traces` - List all open debug traces
+
+### System
+
+- `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling
+
+### Bridge Static Tools
+
+Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge also proxies 22 `debugger_*` WinDbg tools when `GHIDRA_DEBUGGER_URL` points at the standalone debugger server.
+
+- `check_tools` - Report which tools are currently registered and callable
+- `connect_instance` - Connect the bridge to a specific Ghidra instance
+- `import_file` - Import a binary from disk into the current project and open it
+- `list_instances` - Discover running Ghidra MCP instances (UDS + TCP port scan)
+- `list_tool_groups` - List tool groups and their load state
+- `load_tool_group` - Register a tool group's dynamic tools with the MCP client
+- `search_tools` - Search the full tool catalog by keyword
+- `unload_tool_group` - Unregister a tool group's dynamic tools
+
+<!-- END GENERATED API REFERENCE -->
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
@@ -793,11 +977,11 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   AI/Automation │◄──►│   MCP Bridge    │◄──►│  Ghidra Plugin  │
 │     Tools       │    │ (bridge_mcp_    │    │ (GhidraMCP.jar) │
-│  (Claude, etc.) │    │  ghidra.py)     │    │                 │
+│  (Claude, etc.) │    │  ghidra/)       │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
         │                       │                       │
    MCP Protocol            HTTP REST              Ghidra API
-   (stdio/SSE)          (localhost:8089)      (Program, Listing)
+(stdio/streamable-http) (localhost:8089)      (Program, Listing)
 ```
 
 ### Components
@@ -998,7 +1182,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.15.0
+# Connection OK - GhidraMCP Headless Server v5.17.0
 ```
 
 ### Headless API Workflow
@@ -1064,7 +1248,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.15.0 |
+| **Version** | 5.17.0 |
 | **MCP Tools** | 249 fully implemented |
 | **GUI Endpoints** | 196 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |

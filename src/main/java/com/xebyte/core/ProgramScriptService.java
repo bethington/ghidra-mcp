@@ -1,13 +1,23 @@
 package com.xebyte.core;
 
 import ghidra.app.services.ProgramManager;
+import ghidra.framework.options.OptionType;
+import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.address.OverlayAddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.util.IntPropertyMap;
+import ghidra.program.model.util.LongPropertyMap;
+import ghidra.program.model.util.ObjectPropertyMap;
+import ghidra.program.model.util.PropertyMap;
+import ghidra.program.model.util.PropertyMapManager;
+import ghidra.program.model.util.StringPropertyMap;
+import ghidra.program.model.util.VoidPropertyMap;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
@@ -198,6 +208,635 @@ public class ProgramScriptService {
         metadata.append("Symbol Count: ").append(symbolCount).append("\n");
 
         return Response.text(metadata.toString());
+    }
+
+    // ========================================================================
+    // Program Options (typed key -> value settings grouped by category)
+    // ========================================================================
+
+    /** Standard address-parameter description shared by property-map tools. */
+    private static final String ADDRESS_PARAM_DESC =
+            "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+          + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+          + "embedded/microcontroller targets — are not address-space-agnostic; "
+          + "use get_address_spaces to discover spaces before assuming a plain hex "
+          + "address is unambiguous.";
+
+    /**
+     * List every program option group (e.g. "Program Information", "Analyzers",
+     * "Decompiler", "Disassembler"). Each group is a namespace of typed key→value
+     * settings; use {@code get_program_options} to read a group's entries.
+     */
+    @McpTool(path = "/list_option_groups",
+             description = "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries.",
+             category = "program")
+    public Response listOptionGroups(
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        try {
+            List<Map<String, Object>> groups = new ArrayList<>();
+            for (String groupName : program.getOptionsNames()) {
+                Options opts = program.getOptions(groupName);
+                groups.add(JsonHelper.mapOf(
+                    "name", groupName,
+                    "option_count", opts.getOptionNames().size()));
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "groups", groups,
+                "count", groups.size(),
+                "program", program.getName()));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    /**
+     * Read every option in a single group with its type, current value, default,
+     * and description. Values are rendered as strings via
+     * {@link Options#getValueAsString(String)} so every option type is legible.
+     */
+    @McpTool(path = "/get_program_options",
+             description = "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names.",
+             category = "program")
+    public Response getProgramOptions(
+            @Param(value = "group", description = "Option group name from list_option_groups (e.g. 'Program Information', 'Analyzers').") String group,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (group == null || group.isEmpty()) {
+            return Response.err("group is required (use list_option_groups to discover group names)");
+        }
+        if (!program.getOptionsNames().contains(group)) {
+            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+        }
+
+        try {
+            Options opts = program.getOptions(group);
+            List<Map<String, Object>> options = new ArrayList<>();
+            for (String name : opts.getOptionNames()) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", name);
+                OptionType type = opts.getType(name);
+                entry.put("type", type != null ? type.name() : "NO_TYPE");
+                entry.put("value", opts.getValueAsString(name));
+                entry.put("default_value", opts.getDefaultValueAsString(name));
+                entry.put("is_default", opts.isDefaultValue(name));
+                entry.put("registered", opts.isRegistered(name));
+                String desc = opts.getDescription(name);
+                if (desc != null && !desc.isEmpty()) {
+                    entry.put("description", desc);
+                }
+                options.add(entry);
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "group", group,
+                "options", options,
+                "count", options.size(),
+                "program", program.getName()));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    /**
+     * Set (or create) a typed option in a group. When the option already exists
+     * its current type is reused; otherwise the caller supplies {@code type}.
+     * Supported types: string, int, long, double, float, boolean. The value is
+     * parsed BEFORE the write transaction so parse errors surface cleanly.
+     * Persists to the database on the next {@code save_program}.
+     */
+    @McpTool(path = "/set_program_option", method = "POST",
+             description = "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist.",
+             category = "program")
+    public Response setProgramOption(
+            @Param(value = "group", source = ParamSource.BODY, description = "Option group name (e.g. 'Program Information'). Use list_option_groups to discover names.") String group,
+            @Param(value = "name", source = ParamSource.BODY, description = "Option name within the group.") String name,
+            @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
+            @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
+                   description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (group == null || group.isEmpty()) return Response.err("group is required");
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+        if (value == null) return Response.err("value is required");
+        if (!program.getOptionsNames().contains(group)) {
+            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+        }
+
+        Options opts = program.getOptions(group);
+
+        // Resolve the value type: explicit arg wins; otherwise infer from an
+        // existing option; otherwise default to string.
+        String resolved = (type == null) ? "" : type.trim().toLowerCase();
+        if (resolved.isEmpty()) {
+            if (opts.contains(name)) {
+                resolved = optionTypeKeyword(opts.getType(name));
+                if (resolved == null) {
+                    return Response.err("Option '" + name + "' has type "
+                        + opts.getType(name) + " which cannot be set via this tool. "
+                        + "Settable types: string, int, long, double, float, boolean.");
+                }
+            } else {
+                resolved = "string";
+            }
+        }
+
+        // Parse the value outside the transaction so a bad number is a clean error.
+        final Object parsed;
+        try {
+            switch (resolved) {
+                case "string":  parsed = value; break;
+                case "int":     parsed = Integer.parseInt(value.trim()); break;
+                case "long":    parsed = Long.parseLong(value.trim()); break;
+                case "double":  parsed = Double.parseDouble(value.trim()); break;
+                case "float":   parsed = Float.parseFloat(value.trim()); break;
+                case "boolean": parsed = Boolean.parseBoolean(value.trim()); break;
+                default:
+                    return Response.err("Unsupported type '" + resolved
+                        + "'. Use one of: string, int, long, double, float, boolean.");
+            }
+        } catch (NumberFormatException nfe) {
+            return Response.err("Value '" + value + "' is not a valid " + resolved + ": " + nfe.getMessage());
+        }
+
+        final String finalType = resolved;
+        try {
+            threadingStrategy.executeWrite(program, "Set Program Option", () -> {
+                switch (finalType) {
+                    case "string":  opts.setString(name, (String) parsed); break;
+                    case "int":     opts.setInt(name, (Integer) parsed); break;
+                    case "long":    opts.setLong(name, (Long) parsed); break;
+                    case "double":  opts.setDouble(name, (Double) parsed); break;
+                    case "float":   opts.setFloat(name, (Float) parsed); break;
+                    case "boolean": opts.setBoolean(name, (Boolean) parsed); break;
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to set option: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "group", group,
+            "name", name,
+            "type", finalType,
+            "value", opts.getValueAsString(name),
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    /**
+     * Remove an option from a group. Built-in registered options may be
+     * re-created with default values by Ghidra; this is mainly for clearing
+     * custom options previously written via {@code set_program_option}.
+     */
+    @McpTool(path = "/remove_program_option", method = "POST",
+             description = "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist.",
+             category = "program")
+    public Response removeProgramOption(
+            @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
+            @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (group == null || group.isEmpty()) return Response.err("group is required");
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+        if (!program.getOptionsNames().contains(group)) {
+            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+        }
+
+        Options opts = program.getOptions(group);
+        if (!opts.contains(name)) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", false,
+                "message", "No option named '" + name + "' in group '" + group + "'",
+                "program", program.getName()));
+        }
+
+        try {
+            threadingStrategy.executeWrite(program, "Remove Program Option", () -> {
+                opts.removeOption(name);
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to remove option: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "group", group,
+            "name", name,
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    // ========================================================================
+    // Property Maps (typed per-address key -> value stores)
+    // ========================================================================
+
+    /**
+     * List all user-defined property maps. Each map has a name, a value type
+     * (int / long / string / object / void), and the count of addresses that
+     * currently hold a value.
+     */
+    @McpTool(path = "/list_property_maps",
+             description = "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value.",
+             category = "program")
+    public Response listPropertyMaps(
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        try {
+            PropertyMapManager mgr = program.getUsrPropertyManager();
+            List<Map<String, Object>> maps = new ArrayList<>();
+            Iterator<String> it = mgr.propertyManagers();
+            while (it.hasNext()) {
+                String mapName = it.next();
+                PropertyMap<?> map = mgr.getPropertyMap(mapName);
+                maps.add(JsonHelper.mapOf(
+                    "name", mapName,
+                    "value_type", propertyMapValueType(map),
+                    "size", map != null ? map.getSize() : 0));
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "property_maps", maps,
+                "count", maps.size(),
+                "program", program.getName()));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    /**
+     * Create a new user property map. Types: int, long, string, void
+     * (address-presence tag). Store arbitrary structured per-address data by
+     * using a string map holding JSON.
+     */
+    @McpTool(path = "/create_property_map", method = "POST",
+             description = "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist.",
+             category = "program")
+    public Response createPropertyMap(
+            @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
+            @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
+                   description = "Value type: int, long, string, or void.") String type,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+        final String kind = (type == null || type.isEmpty()) ? "string" : type.trim().toLowerCase();
+        if (!Set.of("int", "long", "string", "void").contains(kind)) {
+            return Response.err("Unsupported map type '" + kind + "'. Use one of: int, long, string, void.");
+        }
+
+        PropertyMapManager mgr = program.getUsrPropertyManager();
+        if (mgr.getPropertyMap(name) != null) {
+            return Response.err("Property map '" + name + "' already exists.");
+        }
+
+        try {
+            threadingStrategy.executeWrite(program, "Create Property Map", () -> {
+                switch (kind) {
+                    case "int":    mgr.createIntPropertyMap(name); break;
+                    case "long":   mgr.createLongPropertyMap(name); break;
+                    case "string": mgr.createStringPropertyMap(name); break;
+                    case "void":   mgr.createVoidPropertyMap(name); break;
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to create property map: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "name", name,
+            "value_type", kind,
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    /**
+     * Delete an entire user property map and all its values.
+     */
+    @McpTool(path = "/delete_property_map", method = "POST",
+             description = "Delete a user property map and all values it holds. Call save_program to persist.",
+             category = "program")
+    public Response deletePropertyMap(
+            @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+        PropertyMapManager mgr = program.getUsrPropertyManager();
+        if (mgr.getPropertyMap(name) == null) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", false,
+                "message", "No property map named '" + name + "'",
+                "program", program.getName()));
+        }
+
+        final AtomicBoolean removed = new AtomicBoolean(false);
+        try {
+            threadingStrategy.executeWrite(program, "Delete Property Map", () -> {
+                removed.set(mgr.removePropertyMap(name));
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to delete property map: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", removed.get(),
+            "name", name,
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    /**
+     * Set a value at an address in a property map. The value is coerced to the
+     * map's declared type. {@code void} maps ignore the value and simply tag the
+     * address. Object maps cannot be written here (they require a registered
+     * {@link ghidra.util.Saveable} type). The map must already exist.
+     */
+    @McpTool(path = "/set_property", method = "POST",
+             description = "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist.",
+             category = "program")
+    public Response setProperty(
+            @Param(value = "map", source = ParamSource.BODY, description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
+                   description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+
+        PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
+        if (map == null) {
+            return Response.err("No property map named '" + mapName + "'. Create it with create_property_map.");
+        }
+        Address address = ServiceUtils.parseAddress(program, addressStr);
+        if (address == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
+        if (map instanceof ObjectPropertyMap) {
+            return Response.err("Object property maps cannot be written via MCP (they require a registered Saveable type).");
+        }
+
+        // Parse numeric values outside the transaction for clean error reporting.
+        final Object parsed;
+        try {
+            if (map instanceof IntPropertyMap) {
+                if (value == null || value.isEmpty()) return Response.err("value is required for an int property map");
+                parsed = Integer.parseInt(value.trim());
+            } else if (map instanceof LongPropertyMap) {
+                if (value == null || value.isEmpty()) return Response.err("value is required for a long property map");
+                parsed = Long.parseLong(value.trim());
+            } else if (map instanceof StringPropertyMap) {
+                if (value == null) return Response.err("value is required for a string property map");
+                parsed = value;
+            } else {
+                parsed = null; // void map — presence only
+            }
+        } catch (NumberFormatException nfe) {
+            return Response.err("Value '" + value + "' is not valid for map '" + mapName + "': " + nfe.getMessage());
+        }
+
+        try {
+            threadingStrategy.executeWrite(program, "Set Property", () -> {
+                if (map instanceof IntPropertyMap ip) {
+                    ip.add(address, (Integer) parsed);
+                } else if (map instanceof LongPropertyMap lp) {
+                    lp.add(address, (Long) parsed);
+                } else if (map instanceof StringPropertyMap sp) {
+                    sp.add(address, (String) parsed);
+                } else if (map instanceof VoidPropertyMap vp) {
+                    vp.add(address);
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to set property: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "map", mapName,
+            "address", address.toString(),
+            "value_type", propertyMapValueType(map),
+            "value", parsed,
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    /**
+     * Read the value stored at an address in a property map. Returns
+     * {@code has_value=false} with a null value when the address holds no
+     * property. Object-map values are rendered via {@code toString()}.
+     */
+    @McpTool(path = "/get_property",
+             description = "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property.",
+             category = "program")
+    public Response getProperty(
+            @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+
+        PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
+        if (map == null) {
+            return Response.err("No property map named '" + mapName + "'.");
+        }
+        Address address = ServiceUtils.parseAddress(program, addressStr);
+        if (address == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
+        try {
+            boolean hasValue = map.hasProperty(address);
+            Object value = hasValue ? renderPropertyValue(map.get(address)) : null;
+            return Response.ok(JsonHelper.mapOf(
+                "map", mapName,
+                "address", address.toString(),
+                "has_value", hasValue,
+                "value_type", propertyMapValueType(map),
+                "value", value,
+                "program", program.getName()));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    /**
+     * Remove the value stored at a single address in a property map.
+     */
+    @McpTool(path = "/remove_property", method = "POST",
+             description = "Remove the value stored at a single address in a property map. Call save_program to persist.",
+             category = "program")
+    public Response removeProperty(
+            @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+
+        PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
+        if (map == null) {
+            return Response.err("No property map named '" + mapName + "'.");
+        }
+        Address address = ServiceUtils.parseAddress(program, addressStr);
+        if (address == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
+        final AtomicBoolean removed = new AtomicBoolean(false);
+        try {
+            threadingStrategy.executeWrite(program, "Remove Property", () -> {
+                removed.set(map.remove(address));
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to remove property: " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", removed.get(),
+            "map", mapName,
+            "address", address.toString(),
+            "note", "Call save_program to persist this change to the database.",
+            "program", program.getName()));
+    }
+
+    /**
+     * List (address, value) entries stored in a property map with pagination.
+     * Optionally restrict to an inclusive address range via {@code start}/{@code end}.
+     */
+    @McpTool(path = "/list_properties",
+             description = "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end.",
+             category = "program")
+    public Response listProperties(
+            @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") String startStr,
+            @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
+            @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
+            @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
+        PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
+        if (map == null) {
+            return Response.err("No property map named '" + mapName + "'.");
+        }
+        if (offset < 0) offset = 0;
+        if (limit <= 0) limit = 100;
+
+        try {
+            AddressIterator it;
+            boolean hasStart = startStr != null && !startStr.isEmpty();
+            boolean hasEnd = endStr != null && !endStr.isEmpty();
+            if (hasStart != hasEnd) {
+                return Response.err("Provide both start and end to filter by range, or neither.");
+            }
+            if (hasStart) {
+                Address start = ServiceUtils.parseAddress(program, startStr);
+                if (start == null) return Response.err("start: " + ServiceUtils.getLastParseError());
+                Address end = ServiceUtils.parseAddress(program, endStr);
+                if (end == null) return Response.err("end: " + ServiceUtils.getLastParseError());
+                it = map.getPropertyIterator(start, end);
+            } else {
+                it = map.getPropertyIterator();
+            }
+
+            List<Map<String, Object>> entries = new ArrayList<>();
+            int skipped = 0;
+            while (it.hasNext()) {
+                Address addr = it.next();
+                if (skipped < offset) {
+                    skipped++;
+                    continue;
+                }
+                if (entries.size() >= limit) break;
+                entries.add(JsonHelper.mapOf(
+                    "address", addr.toString(),
+                    "value", renderPropertyValue(map.get(addr))));
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "map", mapName,
+                "value_type", propertyMapValueType(map),
+                "entries", entries,
+                "count", entries.size(),
+                "total", map.getSize(),
+                "offset", offset,
+                "limit", limit,
+                "program", program.getName()));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    /** Map an {@link OptionType} to the keyword accepted by set_program_option, or null if unsettable. */
+    private static String optionTypeKeyword(OptionType type) {
+        if (type == null) return null;
+        switch (type) {
+            case STRING_TYPE:  return "string";
+            case INT_TYPE:     return "int";
+            case LONG_TYPE:    return "long";
+            case DOUBLE_TYPE:  return "double";
+            case FLOAT_TYPE:   return "float";
+            case BOOLEAN_TYPE: return "boolean";
+            default:           return null;
+        }
+    }
+
+    /** Classify a property map by its concrete value type. */
+    private static String propertyMapValueType(PropertyMap<?> map) {
+        if (map instanceof IntPropertyMap)    return "int";
+        if (map instanceof LongPropertyMap)   return "long";
+        if (map instanceof StringPropertyMap) return "string";
+        if (map instanceof VoidPropertyMap)   return "void";
+        if (map instanceof ObjectPropertyMap) return "object";
+        return "unknown";
+    }
+
+    /** Render a stored property value for JSON: Saveable objects become their toString(). */
+    private static Object renderPropertyValue(Object raw) {
+        if (raw instanceof ghidra.util.Saveable) {
+            return raw.toString();
+        }
+        return raw;
     }
 
     // ========================================================================

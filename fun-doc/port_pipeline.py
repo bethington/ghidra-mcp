@@ -207,6 +207,36 @@ def _scalar_params_used_as_ptr(params_text, body):
             names.append(name)
     return names
 
+
+# A DECLARED pointer param (`void *pUnit`, `T *p`) name -- _POINTER_PARAM_RE
+# captures the base TYPE, not the name; this captures the name.
+_POINTER_PARAM_NAME_RE = re.compile(
+    r"(?:^|[,(])\s*(?:const\s+)?\w[\w ]*\*+\s*(\w+)\s*(?=[,)]|$)")
+
+
+def _ptr_params_cast_derefed(params_text, body):
+    """Names of DECLARED-pointer params the body dereferences ONLY via a cast
+    (`*(T *)pUnit`, `*(T *)(pUnit + off)`, `*(T *)((int)pUnit + off)`) with no
+    `->` / `[idx]` / double-deref. This is the canonical Ghidra idiom for a
+    read-only handle-getter on a `void *`/`int *` param -- struct_access stays
+    False (no `->` or index) and the bare-SCALAR detector skips it (the param is
+    a declared pointer, not an under-typed int), so WITHOUT this signal the
+    shadow_leaf gate misses it and the getter dead-ends in the static harness as
+    `harness_failed` (2026-07-12: UNIT_GetGfxInfo `*(void**)((int)pUnit+0x3c)`,
+    ITEMS_GetItemDataEarLvl `*(int*)pUnit` both wasted a static cycle). The
+    shadow_leaf gate's own no-global/no-delegate/no-write gates still apply."""
+    names = []
+    for m in _POINTER_PARAM_NAME_RE.finditer(params_text):
+        name = m.group(1)
+        esc = re.escape(name)
+        # *(T*)  [ ( [ (int) ] ]  name    -- allows `(pUnit` and `((int)pUnit`
+        cast_deref = re.search(
+            r"\*\s*\(\s*\w[\w ]*\*+\s*\)\s*\(?\s*(?:\(\s*int\s*\)\s*)?" + esc + r"\b",
+            body)
+        if cast_deref:
+            names.append(name)
+    return names
+
 # --- handle_leaf gate: a READ-ONLY live-object getter provable via the oracle
 # capture path (a real captured object passed to orig+reimpl). It takes exactly one
 # pointer, reads its fields, touches NO globals, calls NO real delegates, and
@@ -325,6 +355,20 @@ def classify_function(decompiled_text, variables=None):
     params_text = _extract_signature_params(header)
     has_ptr_param = bool(_POINTER_PARAM_RE.search(params_text))
 
+    # VESTIGIAL `this` (2026-07-13, capability loop): Ghidra types a register-arg
+    # getter as `__thiscall FN(void *this, int arg)` where `this` is UNUSED (the
+    # real arg arrives in EAX as `in_EAX`). The phantom pointer param made the
+    # whole SKILLS mana/damage getter family -- pure `g_pDataTables->pRows[idx]`
+    # global-table reads -- miss the global_leaf gate ("no pointer param") and
+    # dead-end in stateful_skip. A `this` param never referenced in the body is
+    # noise: drop it before the pointer-param gates so these route to the
+    # resolver-based global_leaf path. (26+ fns in the stateful_struct_arrow
+    # bucket are this shape.) Only when `this` is the exact param name AND absent
+    # from the body -- a real self/context pointer that IS used stays counted.
+    if re.search(r"\bthis\b", params_text) and not re.search(r"\bthis\b", body):
+        params_text = re.sub(r"(?:^|,)\s*\w[\w ]*\*+\s*this\s*(?=,|$)", ",", params_text).strip(", ")
+        has_ptr_param = bool(_POINTER_PARAM_RE.search(params_text))
+
     # handle_leaf FIRST -- a READ-ONLY live-object getter: EXACTLY ONE pointer arg,
     # reads its fields (struct access), touches NO globals, calls NO real delegate,
     # and writes NOTHING through the pointer. Provable via the oracle handle path (a
@@ -341,8 +385,14 @@ def classify_function(decompiled_text, variables=None):
     # dead-ending in the static harness.
     declared_ptr_params = _POINTER_PARAM_RE.findall(params_text)
     scalar_ptr_params = _scalar_params_used_as_ptr(params_text, body)
+    # A DECLARED pointer param dereferenced ONLY via cast (`*(T*)pUnit`) -- no
+    # `->`/index, so struct_access is False and it's not a bare-scalar either.
+    # Without this the read-only handle-getter falls through to `leaf` and dies
+    # in the static harness (see _ptr_params_cast_derefed).
+    cast_deref_ptr_params = _ptr_params_cast_derefed(params_text, body)
     total_ptr_params = len(declared_ptr_params) + len(scalar_ptr_params)
-    if (total_ptr_params == 1 and (struct_access or scalar_ptr_params)
+    if (total_ptr_params == 1
+            and (struct_access or scalar_ptr_params or cast_deref_ptr_params)
             and not _DAT_GLOBAL_RE.search(text) and not _NAMED_GLOBAL_RE.search(text)
             and not _has_delegate_call(body) and not _PTR_WRITE_RE.search(body)):
         return "shadow_leaf"
@@ -402,6 +452,59 @@ def classify_function(decompiled_text, variables=None):
     return "leaf"
 
 
+def stateful_reason(decompiled_text, variables=None):
+    """WHY did classify_function say 'stateful'? A short bucket code for the
+    capability loop (2026-07-13): the stateful class is the largest blocked
+    bucket (23/40 in the 07-12 sweep) but was logged as one opaque outcome, so
+    there was no data to decide WHICH prove capability to build next. Mirrors
+    classify_function's guard order; each code names the capability that would
+    unlock the function. Returns 'not_stateful' when classify wouldn't have
+    said stateful (caller bug), 'other' when no specific guard is identified.
+
+    Codes:
+      ptr_write            -- mutates through a pointer (needs write-capture; may never auto-prove)
+      delegate_call        -- calls a real subroutine (needs call-through lane to fire)
+      global_plus_ptr      -- named global AND pointer param (needs shadow-first / resolver+handle mix)
+      dat_global           -- unnamed DAT_/raw-address global (needs resolver entry or rename)
+      multi_ptr_params     -- >1 pointer param (needs multi-handle marshalling)
+      struct_arrow         -- `->` navigation w/ struct-typed locals/params (needs handle path widening)
+      deep_deref           -- pointer-to-pointer chains (needs deeper capture)
+      named_struct_ptr     -- param/local typed as a named struct ptr (typing-driven; often handle-leaf-able)
+      other                -- none of the above matched
+    """
+    text = decompiled_text or ""
+    header, _, body = text.partition("{")
+    params_text = _extract_signature_params(header)
+    declared = _POINTER_PARAM_RE.findall(params_text)
+    scalar_ptr = _scalar_params_used_as_ptr(params_text, body)
+    has_ptr = bool(declared or scalar_ptr)
+    if _PTR_WRITE_RE.search(body):
+        return "ptr_write"
+    if _has_delegate_call(body):
+        return "delegate_call"
+    if _NAMED_GLOBAL_RE.search(text) and has_ptr:
+        return "global_plus_ptr"
+    if _DAT_GLOBAL_RE.search(text):
+        return "dat_global"
+    if len(declared) + len(scalar_ptr) > 1:
+        return "multi_ptr_params"
+    if _STRUCT_ACCESS_RE.search(text):
+        return "struct_arrow"
+    if _DEEP_DEREF_RE.search(text):
+        return "deep_deref"
+    for m in _POINTER_PARAM_RE.finditer(params_text):
+        base = m.group(1).lower().replace("const", "").strip()
+        if base not in _SCALAR_POINTER_BASE_TYPES:
+            return "named_struct_ptr"
+    if isinstance(variables, dict):
+        for group in ("parameters", "locals"):
+            for v in variables.get(group, []) or []:
+                dtype = str(v.get("data_type") or v.get("type") or "")
+                if "*" in dtype and dtype.split("*")[0].strip().lower() not in _SCALAR_POINTER_BASE_TYPES:
+                    return "named_struct_ptr"
+    return "other"
+
+
 # ---------------------------------------------------------------------------
 # mint_vectors -- Stage 3 input, static-emulation oracle only (Mode 1)
 # ---------------------------------------------------------------------------
@@ -440,6 +543,17 @@ def mint_vectors(program, address, fn_name, param_layout, input_sets, *, max_ste
     """
     vectors = []
     errors = []
+    # A drafted layout can omit 'register' entirely (the model describes a
+    # STACK arg for a cdecl CRT leaf like shortsort). inp['register'] then
+    # KeyError'd and killed the whole candidate (2026-07-13). The static
+    # /emulate_function oracle is register-based -- no register mapping means
+    # this function can't be minted, which is an ERRORS outcome, not a crash.
+    missing = [p.get("name", "?") for p in
+               list(param_layout.get("inputs", [])) + list(param_layout.get("outputs", []))
+               if "register" not in p]
+    if missing:
+        return [], [f"layout has no register mapping for {missing} "
+                    f"(stack-arg layout -- not statically mintable)"]
     return_registers = ",".join(o["register"] for o in param_layout["outputs"])
 
     for case in input_sets:
@@ -454,8 +568,16 @@ def mint_vectors(program, address, fn_name, param_layout, input_sets, *, max_ste
             # int -- _hex_to_int (already used for the OUTPUT side below)
             # normalizes either form. Found by hand 2026-07-07: an int-only
             # `&` here raised an unhandled TypeError that killed the entire
-            # worker pass, not just this one candidate.
-            registers[inp["register"]] = f"0x{_hex_to_int(case[inp['name']]) & 0xFFFFFFFF:x}"
+            # worker pass, not just this one candidate. 2026-07-13: the model
+            # can also emit an EMPTY/garbage string ('' on
+            # ProcessFormatStringData) -- same policy, fail the CASE not the fn.
+            try:
+                registers[inp["register"]] = f"0x{_hex_to_int(case[inp['name']]) & 0xFFFFFFFF:x}"
+            except (ValueError, TypeError):
+                errors.append(f"case {case!r}: unparseable input "
+                              f"{inp['name']!r}={case[inp['name']]!r}")
+                registers = None
+                break
         if registers is None:
             continue
 
@@ -496,7 +618,18 @@ def mint_vectors(program, address, fn_name, param_layout, input_sets, *, max_ste
                 errors.append(f"case {case!r}: missing return register {outp['register']!r}")
                 ok = False
                 break
-            out[outp["name"]] = _hex_to_int(raw, signed_bits=32 if outp.get("signed") else None)
+            try:
+                out[outp["name"]] = _hex_to_int(raw, signed_bits=32 if outp.get("signed") else None)
+            except (ValueError, TypeError):
+                # The emulator reports a per-register failure as a STRING value
+                # (e.g. "error: Undefined register: MEM" when a drafted layout
+                # names a register the emulator doesn't have). int()-ing it was
+                # an UNCAUGHT ValueError that killed the whole candidate
+                # (2026-07-13, SEED_GetRandomInRange). Fail the CASE, keep the fn.
+                errors.append(f"case {case!r}: unreadable register "
+                              f"{outp['register']!r}: {str(raw)[:80]}")
+                ok = False
+                break
         if not ok:
             continue
 
@@ -545,6 +678,12 @@ _DRAFT_RUNNER_TEMPLATE = '''\
 
 #include <cstdio>
 #include <cstdint>
+#include <cinttypes>   // PRIXPTR / PRId64 / PRIu32 etc. -- models use these pointer/
+                       // width format macros in FAIL-diagnostic printfs; without
+                       // this the whole draft_runner fails to compile with
+                       // "'PRIXPTR': undeclared identifier" and the candidate is
+                       // scored harness_failed (found by the self-improving loop
+                       // 2026-07-15: SafeDereferencePointer, 3 wasted attempts).
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -869,12 +1008,28 @@ _PORT_TERMINAL_STATUSES = frozenset({
     "no_vectors",                  # /emulate_function couldn't mint any vectors
     "unknown_skip",                # decompile fetch failed
     "error",                       # unexpected pipeline exception (guarded per-candidate)
+    # WAIT-STATES owned by the shadow pipeline (2026-07-14): the routing that
+    # produces these is deterministic (decompile regexes + resolve-table
+    # lookups), so re-selecting them re-derives the identical verdict every
+    # pass -- observed burning 3 of 5 count slots in EVERY dashboard batch.
+    # They advance via a shadow-dispatcher build + battletest, not this
+    # worker; the shadow batch builder reads them from the state DB /
+    # shadow_leaf_backlog.jsonl, and include_terminal=True re-admits them.
+    "shadow_leaf_pending",         # deferred to shadow-first; awaiting a shadow batch build
+    "handle_abort_hazard_skip",    # type-gated fatal abort; unsafe until capture pinning exists
+    # CONFIRMED shadow-unreachable (2026-07-14 triage): 0 hits across a full
+    # instrumented playthrough AND 0 static callers in Ghidra — the game
+    # inlined every call site. A shadow dispatcher would idle forever; the
+    # planner's shadow_unreachable_risk PREDICTION is upgraded to fact.
+    # Terminal for the port worker; the offline CONF_REGRESSION lane owns
+    # these (conformance/CONF_REGRESSION_OFFLINE_SUITE.md).
+    "shadow_unreachable",
 })
 
 
 def select_port_candidates(funcs, conformance_protected, active_binary=None,
                             good_enough_score=80, limit=20,
-                            include_terminal=False):
+                            include_terminal=False, pinned=None):
     """Select functions eligible for Stage 2 (port) work.
 
     `funcs`: the same {key: func_dict} state fun_doc.select_candidates
@@ -894,23 +1049,42 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
     highest caller_count (more xrefs = more valuable to prove first).
     """
     out = []
+    pinned_set = set(pinned or [])
     for key, func in funcs.items():
+        # Pinned funcs (queue["pinned"]) are user-forced: they bypass the
+        # "not ready"/"already resolved"/"conformance-tracked" skips below and
+        # sort to the very front, so a pin actually steers the Prove worker.
+        is_pinned = key in pinned_set
         if func.get("is_thunk") or func.get("is_external"):
             continue
         if func.get("library_code") or _looks_like_library_or_runtime(func.get("name")):
             continue
-        if key in conformance_protected:
+        if key in conformance_protected and not is_pinned:
             continue
         binary_name = func.get("program_name", "") or ""
-        if active_binary and binary_name != active_binary:
+        # active_binary arrives as a bare name from CLI callers but as the
+        # full program path (/Mods/.../D2Common.dll) from the pipeline UI's
+        # Prove lane — accept both, else the UI's port worker always exits
+        # no_eligible_candidates.
+        if active_binary and active_binary not in (binary_name, func.get("program") or ""):
             continue
 
         score = func.get("effective_score", func.get("score", 0)) or 0
-        if score < good_enough_score:
+        if score < good_enough_score and not is_pinned:
             continue  # Stage 1 not finished yet -- not ready for Stage 2
 
-        if not include_terminal and func.get("port_status") in _PORT_TERMINAL_STATUSES:
+        if (not include_terminal and not is_pinned
+                and func.get("port_status") in _PORT_TERMINAL_STATUSES):
             continue  # already resolved -- don't re-select (loop must advance)
+
+        # oracle_unavailable (2026-07-15): a live-provable fn skipped ONLY because
+        # the oracle was down. NON-terminal -- never lost -- but excluded from
+        # selection WHILE the oracle is down (else it churns the same fns every
+        # pass). Re-admitted the moment FUNDOC_LIVE_PROVE=1 so it proves when the
+        # game is back. See fun_doc.process_port_candidate global_leaf branch.
+        if (not include_terminal and func.get("port_status") == "oracle_unavailable"
+                and os.environ.get("FUNDOC_LIVE_PROVE") != "1"):
+            continue
 
         # "program" must be the full project path (func["program"], e.g.
         # /Mods/PD2-S12/D2Common.dll), NOT the bare binary name: the PORT
@@ -924,12 +1098,15 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
             "key": key,
             "func": func,
             "program": program,
+            "pinned": is_pinned,
             "binary_priority": _BINARY_PORT_PRIORITY.get(binary_name, 99),
             "caller_count": func.get("caller_count", 0),
             "is_leaf": not func.get("callees"),
         })
 
-    out.sort(key=lambda c: (c["binary_priority"], not c["is_leaf"], -c["caller_count"]))
+    # Pinned first, then binary priority, leaves before callers, most xrefs first.
+    out.sort(key=lambda c: (not c["pinned"], c["binary_priority"],
+                            not c["is_leaf"], -c["caller_count"]))
     return out[:limit] if limit else out
 
 
@@ -985,7 +1162,11 @@ def build_port_prompt(func_name, address, program, decompiled_text, style_exampl
         "Tag them literally ```cpp / ```cpp / ```json (NOT ```c++, ```C, or untagged). Produce "
         "exactly two cpp blocks and exactly one json block -- no more, no fewer. If you must think, "
         "do it briefly BEFORE block 1; put nothing between or after the blocks. Getting this shape "
-        "wrong wastes the whole attempt.")
+        "wrong wastes the whole attempt.\n"
+        "CRITICAL: all three blocks must appear in your FINAL ANSWER message. Anything that exists "
+        "only inside your private reasoning/thinking is DISCARDED unread -- drafting the blocks "
+        "while thinking and then not restating them in the answer is the #1 wasted attempt. Keep "
+        "your reasoning SHORT (a few sentences); spend your output budget on the blocks themselves.")
     sections.append("")
     sections.append(
         "You are drafting an OpenD2 C++ port of a Ghidra-analyzed PD2-S12 function. This draft "
@@ -1152,35 +1333,93 @@ def _fenced_blocks(response_text):
     return [(lang.lower(), content) for lang, content in _CODE_BLOCK_RE.findall(response_text)]
 
 
+# The dispatch snippet is structurally unmistakable: it opens with the
+# run_case pattern `if (fn == "Name")`. Header code never references `fn`.
+# Classifying by CONTENT (instead of demanding an exact block count in an
+# exact order) tolerates the failure shapes observed live 2026-07-14:
+# extra/iterated blocks (M3 redrafts inside its reasoning), reordered
+# blocks, and salvage output where only the final iteration of each block
+# survives. Last-of-each-kind wins -- the model's final iteration is its
+# actual answer.
+_DISPATCH_MARKER_RE = re.compile(r"if\s*\(\s*fn\s*==")
+
+_SPEC_KEYS = ("fn", "param_layout", "input_sets")
+
+# Bare hex integer literals (0xCAFEBABE) rewritten to decimal before
+# json.loads: the model habitually puts hex in input_sets even though JSON
+# has no hex literals, which made a PERFECTLY-SHAPED 3-block draft score
+# malformed_response (2026-07-14: SetLinkedListFieldForAll, all 3 attempts;
+# same class the handle lane fixed 2026-07-08 for GetAnimSequenceRecord).
+# The lookbehind avoids touching hex inside quoted strings/identifiers.
+_HEX_LITERAL_RE = re.compile(r'(?<![\w"])0[xX][0-9a-fA-F]+')
+
+
+def json_loads_lenient(s):
+    """json.loads with bare-hex-literal tolerance. Raises JSONDecodeError
+    like json.loads on anything still malformed."""
+    return json.loads(_HEX_LITERAL_RE.sub(
+        lambda m: str(int(m.group(0), 16)), s or ""))
+
+
+def _is_json_dict(text):
+    try:
+        return isinstance(json_loads_lenient(text), dict)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+def _classify_cpp_blocks(cpp_blocks):
+    """Return (header, dispatch): last non-dispatch block, last dispatch block.
+    Blocks that parse as a JSON dict are excluded -- an UNTAGGED vector spec
+    lands in the cpp-family bucket (lang "" is in _CPP_LANGS) and must not
+    displace the real header as "last non-dispatch block"."""
+    code = [b for b in cpp_blocks if not _is_json_dict(b)]
+    headers = [b for b in code if not _DISPATCH_MARKER_RE.search(b)]
+    dispatches = [b for b in code if _DISPATCH_MARKER_RE.search(b)]
+    return (headers[-1] if headers else None,
+            dispatches[-1] if dispatches else None)
+
+
+def _extract_vector_spec(blocks):
+    """Last block (any tag -- models mis-tag json as ``` or ```jsonc) that
+    parses as JSON with the required spec keys, or None."""
+    for _lang, content in reversed(blocks):
+        try:
+            spec = json_loads_lenient(content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(spec, dict):
+            continue
+        if all(k in spec for k in _SPEC_KEYS) and \
+                all(k in spec["param_layout"] for k in ("inputs", "outputs")):
+            return spec
+    return None
+
+
 def parse_port_response(response_text):
     """Extract (header_content, dispatch_body) from a build_port_fix_prompt
-    response (2 blocks: header, dispatch -- no vector spec on a retry, since
-    vectors must not change once minted). Returns (None, None) if fewer than
-    two cpp-family blocks are found."""
+    response. Content-classified: header = last cpp-family block WITHOUT the
+    `if (fn ==` dispatch marker, dispatch = last block WITH it. Returns
+    (None, None) if either is missing."""
     cpp_blocks = [content for lang, content in _fenced_blocks(response_text) if lang in _CPP_LANGS]
-    if len(cpp_blocks) < 2:
+    header, dispatch = _classify_cpp_blocks(cpp_blocks)
+    if not header or not dispatch:
         return None, None
-    return cpp_blocks[0].strip() + "\n", cpp_blocks[1].strip()
+    return header.strip() + "\n", dispatch.strip()
 
 
 def parse_port_response_full(response_text):
     """Extract (header_content, dispatch_body, vector_spec) from a
-    build_port_prompt response (3 blocks: ```cpp header, ```cpp dispatch,
-    ```json vector spec with {fn, param_layout, input_sets}). Returns
-    (None, None, None) on any parse failure -- malformed JSON, missing
-    blocks, or a vector spec missing required keys -- so callers treat it
-    uniformly as "retry the draft", not a partial success."""
+    build_port_prompt response (```cpp header, ```cpp dispatch, ```json
+    vector spec with {fn, param_layout, input_sets}). Blocks are classified
+    by content (see _classify_cpp_blocks / _extract_vector_spec), so extra,
+    reordered, or mis-tagged blocks no longer sink an otherwise-good draft.
+    Returns (None, None, None) if any of the three pieces is missing, so
+    callers treat it uniformly as "retry the draft", not a partial success."""
     blocks = _fenced_blocks(response_text)
     cpp_blocks = [content for lang, content in blocks if lang in _CPP_LANGS]
-    json_blocks = [content for lang, content in blocks if lang in _JSON_LANGS]
-    if len(cpp_blocks) < 2 or not json_blocks:
+    header, dispatch = _classify_cpp_blocks(cpp_blocks)
+    spec = _extract_vector_spec(blocks)
+    if not header or not dispatch or spec is None:
         return None, None, None
-    try:
-        spec = json.loads(json_blocks[0])
-    except json.JSONDecodeError:
-        return None, None, None
-    if not all(k in spec for k in ("fn", "param_layout", "input_sets")):
-        return None, None, None
-    if not all(k in spec["param_layout"] for k in ("inputs", "outputs")):
-        return None, None, None
-    return cpp_blocks[0].strip() + "\n", cpp_blocks[1].strip(), spec
+    return header.strip() + "\n", dispatch.strip(), spec

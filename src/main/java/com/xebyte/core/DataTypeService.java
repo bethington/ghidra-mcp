@@ -2242,13 +2242,52 @@ public class DataTypeService {
     /**
      * Import data types (placeholder)
      */
-    @McpTool(path = "/import_data_types", method = "POST", description = "Import data types from C source", category = "datatype")
+    @McpTool(path = "/import_data_types", method = "POST", description = "Parse C source (structs/unions/enums/typedefs) into the program's data type manager via Ghidra's CParser. Returns how many types were added and any parser messages. Used to load a project's canonical type vocabulary from a generated header.", category = "datatype")
     public Response importDataTypes(
             @Param(value = "source", source = ParamSource.BODY) String source,
-            @Param(value = "format", source = ParamSource.BODY, defaultValue = "c") String format) {
-        // This is a placeholder for import functionality
-        // In a real implementation, you would parse the source based on format
-        return Response.text("Import functionality not yet implemented. Source: " + source + ", Format: " + format);
+            @Param(value = "format", source = ParamSource.BODY, defaultValue = "c") String format,
+            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (source == null || source.isEmpty()) return Response.err("source is required");
+
+        final DataTypeManager dtm = program.getDataTypeManager();
+        try {
+            return threadingStrategy.executeWrite(program, "Import data types", () -> {
+                int before = dtm.getDataTypeCount(true);
+                ghidra.app.util.cparser.C.CParser parser =
+                    new ghidra.app.util.cparser.C.CParser(dtm, true, new DataTypeManager[] { dtm });
+                String error = null;
+                boolean ok = false;
+                try {
+                    parser.parse(source);
+                    ok = parser.didParseSucceed();
+                } catch (ghidra.app.util.cparser.C.ParseException e) {
+                    error = e.getMessage();
+                } catch (Exception e) {
+                    error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                }
+                int after = dtm.getDataTypeCount(true);
+                String msgs = parser.getParseMessages();
+                if (msgs == null) msgs = "";
+                if (msgs.length() > 4000) msgs = msgs.substring(0, 4000) + " ...[truncated]";
+                return Response.ok(JsonHelper.mapOf(
+                    "status", (ok && error == null) ? "success" : "partial",
+                    "parse_succeeded", ok,
+                    "types_added", after - before,
+                    "types_after", after,
+                    "error", error == null ? "" : error,
+                    "messages", msgs));
+            });
+        } catch (Exception e) {
+            return Response.err("import failed: " + e.getMessage());
+        }
+    }
+
+    // Backward compatibility overload (pre-program-param callers)
+    public Response importDataTypes(String source, String format) {
+        return importDataTypes(source, format, null);
     }
 
     // -----------------------------------------------------------------------
@@ -3805,6 +3844,16 @@ public class DataTypeService {
         List<String> enforcementWarnings = new ArrayList<>();
         if (newName != null && !newName.isEmpty()) {
             String typeForCheck = (typeName != null && !typeName.isEmpty()) ? typeName : null;
+            // array_length arrives as a separate param, so `char` + array_length=35
+            // is really `char[35]` — a string that DOES satisfy an `sz`/array
+            // Hungarian prefix. Fold the array shape into the type used for the
+            // name-quality gate, else `g_sz*`/array globals get spuriously
+            // rejected as prefix_type_mismatch against the bare scalar base type,
+            // and the model oscillates set_global/audit_global trying to satisfy
+            // an unsatisfiable check (observed 2026-07-15, g_szPresetSrcPath).
+            if (typeForCheck != null && arrayLength > 0) {
+                typeForCheck = typeForCheck + "[" + arrayLength + "]";
+            }
             // If type isn't being set, fall back to whatever's already at the address.
             if (typeForCheck == null) {
                 Data existing = program.getListing().getDefinedDataAt(addr);

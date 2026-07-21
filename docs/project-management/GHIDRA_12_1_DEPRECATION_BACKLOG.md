@@ -1,6 +1,6 @@
 # Ghidra 12.1 Deprecation Backlog
 
-`./gradlew.bat compileJava -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC`
+`./gradlew.bat compileJava -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC`
 currently succeeds, but emits deprecation/removal warnings from Ghidra 12.1.
 These are not release blockers for v5.11.x, but they are compatibility work
 that should be paid down before the next Ghidra major/minor retarget.

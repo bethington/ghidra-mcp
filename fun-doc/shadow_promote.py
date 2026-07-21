@@ -204,18 +204,30 @@ def regenerate_dispatch_header() -> dict:
     return {"ok": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
 
-def maybe_promote(name: str, address, spec: dict, decompiled_text: str = "") -> dict:
+def maybe_promote(name: str, address, spec: dict, decompiled_text: str = "",
+                  *, abort_reviewed: bool = False) -> dict:
     """Given a function that just passed CONF_LIVE (one-shot oracle proof),
     decide whether it's safe+meaningful to promote to a live shadow dispatcher,
     and if so STAGE it (manifest + regenerated header; NOT built/deployed --
     see module docstring). Never raises; returns a status dict:
         {"promoted": bool, "reason": str, "class": str|None}
     Best-effort and non-fatal, matching port_live_prove.py's write-back contract
-    -- a promotion failure must never fail the underlying proof."""
+    -- a promotion failure must never fail the underlying proof.
+
+    abort_reviewed=True is the SANCTIONED review override for check_hazards'
+    abort/exit defer ONLY (design constraint 3 in the module docstring:
+    shadowing an abort-class getter is safe because the game only supplies
+    values its own code already validated -- the defer exists so a reviewer
+    confirms the abort is input-gated, not ambient). It never bypasses the
+    weak-proof, reachability, non-determinism, or shape gates."""
     try:
         check_weak_proof(name)               # degenerate-capture proofs must not auto-promote
         check_shadow_reachable(address)      # export-only/inlined -> freeze offline, don't shadow-stage
-        check_hazards(decompiled_text)
+        try:
+            check_hazards(decompiled_text)
+        except DeferPromotion as e:
+            if not (abort_reviewed and "abort/exit path" in e.reason):
+                raise
         cls = classify_dispatcher_shape(spec)
     except DeferPromotion as e:
         return {"promoted": False, "reason": e.reason, "class": None}
@@ -283,12 +295,26 @@ if __name__ == "__main__":
     except DeferPromotion:
         pass
 
+    # Class D (2b0e877): single-EAX-input u32-return register-explicit is SUPPORTED
+    # (this assertion was stale -- it predated the Class D generator support).
     regs_spec = {"callconv": "fastcall", "ret": "u32", "args": [{"id": "x", "kind": "i32"}],
                  "compare": ["ret"], "orig_regs": {"EAX": "x"}}
+    assert classify_dispatcher_shape(regs_spec) == "D"
+
+    multi_regs_spec = {"callconv": "fastcall", "ret": "u32",
+                       "args": [{"id": "x", "kind": "i32"}, {"id": "y", "kind": "i32"}],
+                       "compare": ["ret"], "orig_regs": {"EAX": "x", "ESI": "y"}}
     try:
-        classify_dispatcher_shape(regs_spec)
-        raise SystemExit("FAIL: expected DeferPromotion for orig_regs")
+        classify_dispatcher_shape(multi_regs_spec)
+        raise SystemExit("FAIL: expected DeferPromotion for multi-register orig_regs")
     except DeferPromotion:
         pass
+
+    # abort_reviewed override: bypasses ONLY the abort/exit hazard defer.
+    try:
+        check_hazards("int Foo(int a) { return GetTickCount() + a; }")
+        raise SystemExit("FAIL: expected DeferPromotion for non-deterministic")
+    except DeferPromotion as e:
+        assert "non-deterministic" in e.reason
 
     print("[ok] shadow_promote unit checks passed")

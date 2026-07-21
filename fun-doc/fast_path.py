@@ -196,8 +196,15 @@ _NAME_STOP = {"NULL", "if", "while", "for", "return", "switch", "sizeof", "CONCA
 def _name_of(dec) -> str:
     """The real function name from the decompile signature: the first identifier-before-'('
     that isn't a C keyword / decompiler pseudo-op / NULL guard (which the naive regex grabbed,
-    drafting a junk 'NULL.cpp' that poisoned the batch build until the sibling-heal removed it)."""
-    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]+)\s*\(", str(dec)):
+    drafting a junk 'NULL.cpp' that poisoned the batch build until the sibling-heal removed it).
+
+    STRIP COMMENTS FIRST: Ghidra prepends a plate comment, and for functions that call a
+    named helper the plate's prose mentions the CALLEE (e.g. "aborts via CleanupAndAbort")
+    before the real signature -- scanning the raw text grabbed the callee name and registered
+    the proof under the WRONG function (STAT_GetUnitCalculatedStat mis-named CleanupAndAbort)."""
+    text = re.sub(r"/\*.*?\*/", " ", str(dec), flags=re.S)   # drop plate/block comments
+    text = re.sub(r"//[^\n]*", " ", text)                    # drop line comments
+    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]+)\s*\(", text):
         nm = m.group(1)
         if nm not in _NAME_STOP and ("_" in nm or re.match(r"[A-Z][a-z]", nm)):
             return nm
@@ -284,6 +291,13 @@ def _selftest() -> int:
     r2 = classify_and_draft("ITEMS_GetItemQuality", "", gq)
     print(f"[selftest] GetItemQuality (2-level, nonzero default) -> cls={r2['cls']} prover={r2.get('prover')}")
     assert r2["cls"] == "two_level" and r2["prover"] == "synth2", r2
+    # _name_of must return the SIGNATURE name, not a callee mentioned in the plate
+    # comment (the bug that registered STAT_GetUnitCalculatedStat as "CleanupAndAbort").
+    dec = ("/* Reads a stat; on out-of-range it aborts via CleanupAndAbort(pGame).\n"
+           "   Helper GetReturnAddress() is used for the log. */\n"
+           "uint __stdcall STAT_GetUnitCalculatedStat(UnitAny *pUnit)\n{\n"
+           "  if (x) CleanupAndAbort(0);\n  return pUnit->stat;\n}\n")
+    assert _name_of(dec) == "STAT_GetUnitCalculatedStat", _name_of(dec)
     print("[ok] fast_path routing self-test passed")
     return 0
 

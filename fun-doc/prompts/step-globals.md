@@ -118,6 +118,24 @@ Conservative placeholders are explicitly allowed when the global's purpose is ge
 
 This is the same "underclaim with placeholder" convention used for variables — `dwUnknown1D0`, `pUnk20`. A correct neutral name beats a confident wrong one.
 
+**Placeholders are a last resort, not a shortcut.** If the global lives
+inside or points into a struct Ghidra already has a type for, resolve the
+real field name at that offset with `get_struct_layout` before settling
+for `g_dwFieldXX` — the loaded D2 struct definitions are
+community-canonical and usually have the answer.
+
+**Names must be unique within the program.** Never apply a name that
+already exists at another address (824 duplicate pile-ups measured in
+production, worst `g_dwLastError` × 60 in one binary). Never fall back to
+generic catch-alls (`g_dwLastError`, `g_dwFlags`, `g_dwData`, `g_pBuffer`)
+— scope the descriptor by subsystem + role, or use the placeholder
+convention above.
+
+**Overwriting an existing meaningful (non-auto-generated) name requires
+evidence** from xrefs you actually examined, and the evidence goes in the
+plate comment. Established names are load-bearing; an unjustified rename
+is worse than none.
+
 ## Plate-comment format (Win32-derived template)
 
 The community-standard structure (Microsoft Win32 function-header

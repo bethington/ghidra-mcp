@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -41,6 +42,86 @@ GLOBAL_INVENTORY_FILE_VERSION = 1
 DEFAULT_FAIL_STRIKES = 3
 IDLE_SLEEP_SECONDS = 5.0
 PROGRAMS_TTL_SECONDS = 300
+
+# Version of the "counts as documented" rules below. Stamped into every
+# inventory record; a record stamped under an older version is treated as
+# never-scanned (bypasses the rescan cooldown) so a rules change
+# automatically triggers a full re-walk instead of leaving every stored
+# tally stale until someone clicks 31 per-binary reset buttons.
+#   v2 (2026-07-09): severity-tiered bar — soft-only, OS-canonical, and
+#   code-label globals count as documented, matching the doc-worker.
+RULES_VERSION = 2
+
+
+_PHANTOM_PROGRAM_RE = re.compile(r"\.\d+$")
+
+
+def _is_phantom_program_name(name):
+    """True for Ghidra project artifacts like `D2Launch.dll.0` — a second,
+    trailing-.N versioned copy of a program that shouldn't be walked or
+    counted (it double-counts a binary and skews inventory totals). Matches
+    a trailing `.<digits>` after a real file extension. Real programs
+    (`D2Launch.dll`, `Game.exe`) never end in `.<digits>`."""
+    if not name:
+        return False
+    return bool(_PHANTOM_PROGRAM_RE.search(name))
+
+
+def classify_documented(audit, address=None):
+    """Classify one global's documentation state under the severity-tiered
+    bar, matching the doc-worker's own completion/skip rules
+    (fun_doc.process_global). Returns one of:
+
+      * "clean"        — zero issues
+      * "soft_only"    — only soft issues (plate_line_too_long etc.);
+                         non-blocking by design
+      * "code_label"   — the address is code / a function label, not data
+      * "os_canonical" — TIB/PEB/KUSER symbol; the Microsoft name IS the
+                         documentation
+      * "pending"      — has hard/medium issues; real work remains
+
+    Everything except "pending" counts as documented. Before this bar the
+    scorer counted raw `issues != []` and reported a binary as 71-pending
+    when the worker had legitimately drained it — which kept continuous
+    mode re-picking already-drained binaries forever."""
+    issues = audit.get("issues") or []
+    if not issues:
+        return "clean"
+    if audit.get("is_code_address") or audit.get("is_function_entry"):
+        return "code_label"
+    name = audit.get("name") or ""
+    addr = str(address or audit.get("address") or "")
+    try:
+        # Same predicates the worker's skip path uses. Lazy import: fun_doc
+        # imports this module (function-locally), so a module-level import
+        # here would be circular; at runtime fun_doc is already loaded.
+        from fun_doc import _is_os_canonical_global, _looks_like_function_label
+
+        if _looks_like_function_label(name):
+            return "code_label"
+        if _is_os_canonical_global(name, addr if addr.startswith("0x") else f"0x{addr.replace('ram:', '')}"):
+            return "os_canonical"
+    except Exception:  # noqa: BLE001 — standalone/test fallback below
+        for prefix in ("FID_conflict:", "FID_", "FUN_", "thunk_", "j_", "_imp_", "__imp_"):
+            if name.startswith(prefix):
+                return "code_label"
+        try:
+            addr_int = int(addr.replace("ram:", "").replace("0x", ""), 16)
+            if 0xFFDF0000 <= addr_int <= 0xFFDFFFFF:
+                return "os_canonical"
+            if 0x7FFE0000 <= addr_int <= 0x7FFEFFFF:
+                return "os_canonical"
+        except (ValueError, TypeError):
+            pass
+    sev = audit.get("severity_summary") or {}
+    if sev and ((sev.get("hard", 0) or 0) + (sev.get("medium", 0) or 0)) == 0:
+        return "soft_only"
+    return "pending"
+
+
+def counts_as_documented(audit, address=None):
+    """Boolean view of classify_documented — kept for existing callers."""
+    return classify_documented(audit, address) != "pending"
 
 
 # ---------- pure functions: ordering, status, persistence ----------
@@ -102,6 +183,10 @@ def _has_pending(rec: dict) -> int:
     fully = rec.get("fully_documented", 0) or 0
     if total == 0:
         return 1
+    if rec.get("rules_version") != RULES_VERSION:
+        # Stamped under an older counting bar — the stored tally can't be
+        # trusted, so the binary is re-pickable regardless of it.
+        return max(1, total - fully)
     return max(0, total - fully)
 
 
@@ -117,7 +202,12 @@ RESCAN_COOLDOWN_SECONDS = 3600
 def _scan_age_seconds(rec: dict) -> float:
     """Seconds since this binary was last scanned. Returns infinity when
     never scanned (or the timestamp is unparseable) so never-walked
-    binaries always sort ahead of any scanned candidate."""
+    binaries always sort ahead of any scanned candidate. A record stamped
+    under an older RULES_VERSION is also treated as never-scanned — its
+    stored tally is meaningless under the current bar, so it must bypass
+    the rescan cooldown."""
+    if rec.get("last_scan") and rec.get("rules_version") != RULES_VERSION:
+        return float("inf")
     last = rec.get("last_scan")
     if not last:
         return float("inf")
@@ -457,6 +547,7 @@ class GlobalScorer:
         if not folder:
             return []
         progs = self._fetch_programs(folder) or []
+        progs = [p for p in progs if not _is_phantom_program_name(p.get("name"))]
         self._cached_programs = progs
         self._cached_programs_at = now
         return progs
@@ -520,6 +611,7 @@ class GlobalScorer:
         total = 0
         fully = 0
         errors = 0
+        cats = {"clean": 0, "soft_only": 0, "os_canonical": 0, "code_label": 0, "pending": 0}
         last_stamp_at = 0
         print(
             f"  [global-scorer] {prog_name}: auditing {total_to_audit} globals",
@@ -528,13 +620,13 @@ class GlobalScorer:
 
         for idx, entry in enumerate(globals_list):
             if self._stop_event.is_set():
-                self._stamp_partial(prog_path, prog_name, total, fully)
+                self._stamp_partial(prog_path, prog_name, total, fully, cats)
                 return
             if self._wm.has_active_workers() and not self._force_on:
                 # Cooperative pause — partial progress is stamped before
                 # bailing so the next pass can pick up where we left off
                 # (or at least show real numbers in the dashboard).
-                self._stamp_partial(prog_path, prog_name, total, fully)
+                self._stamp_partial(prog_path, prog_name, total, fully, cats)
                 self._set_paused("doc workers active mid-scan")
                 return
             addr = entry.get("address") if isinstance(entry, dict) else entry
@@ -557,13 +649,14 @@ class GlobalScorer:
             if not audit:
                 continue
             total += 1
-            issues = audit.get("issues") or []
-            if not issues:
+            cat = classify_documented(audit, addr)
+            cats[cat] = cats.get(cat, 0) + 1
+            if cat != "pending":
                 fully += 1
             # Periodic stamp + console progress so the dashboard sees
             # work happening before the walk completes.
             if total - last_stamp_at >= self.AUDIT_STAMP_EVERY:
-                self._stamp_partial(prog_path, prog_name, total, fully)
+                self._stamp_partial(prog_path, prog_name, total, fully, cats)
                 last_stamp_at = total
                 print(
                     f"  [global-scorer] {prog_name}: {total}/{total_to_audit} "
@@ -572,7 +665,7 @@ class GlobalScorer:
                 )
 
         # Final stamp — full counts.
-        self._stamp_partial(prog_path, prog_name, total, fully)
+        self._stamp_partial(prog_path, prog_name, total, fully, cats)
 
         # If almost every audit failed, treat the binary as broken so it
         # eventually gets blacklisted instead of looping forever.
@@ -593,19 +686,27 @@ class GlobalScorer:
         )
         self._notify()
 
-    def _stamp_partial(self, prog_path: str, prog_name: str, total: int, fully: int) -> None:
+    def _stamp_partial(
+        self, prog_path: str, prog_name: str, total: int, fully: int, cats: Optional[dict] = None
+    ) -> None:
         """Write the current tally to global_inventory.json. Called both
         mid-walk (so partial progress survives interruptions) and at the
-        end of a successful walk."""
+        end of a successful walk. `cats` is the classify_documented
+        category breakdown; `rules_version` stamps which counting bar
+        produced the record so a bar change auto-invalidates it."""
         try:
             data = load_inventory(self._state_dir)
             bins = data.setdefault("binaries", {})
-            bins[prog_path] = {
+            rec = {
                 "name": prog_name,
                 "total_documentable": total,
                 "fully_documented": fully,
                 "last_scan": datetime.now().isoformat(),
+                "rules_version": RULES_VERSION,
             }
+            for key in ("clean", "soft_only", "os_canonical", "code_label", "pending"):
+                rec[key] = (cats or {}).get(key, 0)
+            bins[prog_path] = rec
             save_inventory(self._state_dir, data)
         except Exception as exc:  # noqa: BLE001 — never let a stamp failure kill the walk
             print(

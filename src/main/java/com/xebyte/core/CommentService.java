@@ -154,6 +154,83 @@ public class CommentService {
         return Response.ok(result);
     }
 
+    private static String firstNonEmpty(String... ss) {
+        for (String s : ss) {
+            if (s != null && !s.trim().isEmpty()) return s;
+        }
+        return null;
+    }
+
+    /**
+     * Get listing comments at ANY address (plate/pre/eol/post/repeatable), including data
+     * addresses. Unlike get_plate_comment, this does not require a function at the address --
+     * so it can read the plate/EOL comment attached to a global/data symbol.
+     */
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    public Response getComment(
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
+                               + "Works for data addresses, not just functions.") String addressStr,
+            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address parameter is required");
+        }
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
+        Listing listing = program.getListing();
+        String plate = listing.getComment(CodeUnit.PLATE_COMMENT, addr);
+        String pre = listing.getComment(CodeUnit.PRE_COMMENT, addr);
+        String eol = listing.getComment(CodeUnit.EOL_COMMENT, addr);
+        String post = listing.getComment(CodeUnit.POST_COMMENT, addr);
+        String repeatable = listing.getComment(CodeUnit.REPEATABLE_COMMENT, addr);
+
+        String best = firstNonEmpty(plate, pre, eol, post, repeatable);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.putAll(ServiceUtils.addressToJson(addr, program));
+        result.put("plate", plate);
+        result.put("pre", pre);
+        result.put("eol", eol);
+        result.put("post", post);
+        result.put("repeatable", repeatable);
+        result.put("comment", best);
+        result.put("has_comment", best != null && !best.trim().isEmpty());
+        return Response.ok(result);
+    }
+
+    /**
+     * Symmetric writer for get_comment: set a listing comment of a given kind at ANY address,
+     * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
+     * comment on a data global via Listing.setComment.
+     */
+    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; unlike set_plate_comment this can set a PLATE comment on a data global.", category = "comment")
+    public Response setComment(
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
+            @Param(value = "comment", source = ParamSource.BODY) String comment,
+            @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
+                   description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
+            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+        String t = (type == null || type.trim().isEmpty()) ? "plate" : type.trim().toLowerCase();
+        int ct;
+        switch (t) {
+            case "plate":                 ct = CodeUnit.PLATE_COMMENT;      break;
+            case "pre": case "decompiler": ct = CodeUnit.PRE_COMMENT;        break;
+            case "eol": case "disassembly": ct = CodeUnit.EOL_COMMENT;       break;
+            case "post":                  ct = CodeUnit.POST_COMMENT;       break;
+            case "repeatable":            ct = CodeUnit.REPEATABLE_COMMENT; break;
+            default:
+                return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
+        }
+        return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", programName);
+    }
+
     /**
      * Set function plate (header) comment.
      */

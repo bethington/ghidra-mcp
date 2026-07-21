@@ -81,6 +81,11 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "library_code",
     "library_code_at",
     "library_code_reasons",
+    # OpenD2 conformance port pipeline (Sec 14 of EMULATION_CONFORMANCE_PLAN.md)
+    "port_status",
+    "port_attempts",
+    "port_draft_path",
+    "port_last_result",
 }
 
 

@@ -2,9 +2,9 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 256 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 269 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.15.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
+- **Package**: `com.xebyte` | **Version**: 5.17.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
 
 ## Boil the ocean
 
@@ -21,7 +21,8 @@ This is a public repo with real external contributors. Their issues, PRs, and co
 - **To use a contributor's work, merge their PR through the normal flow** (which credits them) — never extract the commit around them or push it to `main` directly.
 - **Never post AI-generated text as if it were Ben's own analysis**, and never post a claim about someone else's work without verifying it against the code first.
 - When Ben asks for a reply to a contributor, produce a short draft *for him to send in his own words* — do not post it, and do not make it sound machine-generated.
-- A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands; treat that as a backstop, not the boundary. The boundary is this section.
+- **Exception: `dependabot[bot]` PRs.** These are the repo's own configured automation, not community contributions — no person's work is at stake. The agent may comment (e.g. `@dependabot rebase`/`recreate`) and merge these autonomously once CI is green, without per-action go-ahead. This exception is scoped to PRs whose author is literally `dependabot[bot]`; it does not extend to any human contributor, even one proposing a similar dependency bump.
+- A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands (checking PR authorship to carve out the dependabot exception above); treat that as a backstop, not the boundary. The boundary is this section.
 
 ## Architecture
 
@@ -45,7 +46,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (251 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (269 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 
@@ -107,8 +108,9 @@ state when modal dialogs may be present.
 ## Running the MCP Server
 
 ```bash
-uv run bridge-mcp-ghidra                       # stdio (recommended for AI tools)
-uv run bridge-mcp-ghidra --transport sse       # SSE (web/HTTP clients)
+uv run bridge-mcp-ghidra                                  # stdio (recommended for AI tools)
+uv run bridge-mcp-ghidra --transport streamable-http      # HTTP (web clients, MCP Inspector)
+uv run bridge-mcp-ghidra --transport sse                  # SSE (deprecated compat only)
 uv run python -m bridge_mcp_ghidra             # equivalent module form
 uv sync --group debugger                       # optional debugger deps
 uv run python -m debugger                      # standalone debugger server on :8099
@@ -182,6 +184,9 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | `fun-doc/inventory_scorer.py` | `tests/performance/test_inventory_scorer.py` |
 | `fun-doc/provider_pause.py` | `tests/performance/test_provider_pause.py` |
 | `fun-doc/event_bus.py` / `event_log.py` | `tests/performance/test_event_bus_drain.py` |
+| `fun-doc/port_pipeline.py` — OpenD2 conformance port pipeline (Sec 14 of `EMULATION_CONFORMANCE_PLAN.md`: classify/mint_vectors/write_draft/run_harness/select_port_candidates/prompt builders) | `tests/performance/test_port_pipeline.py` (offline — classify_function heuristic, selector, prompt round-trip, template rendering). `mint_vectors`/`run_harness` (live Ghidra `/emulate_function` + CMake build of the isolated `d2conform_draft` target) and `process_port_candidate`/`run_port_worker_pass` (live LLM calls) are manual-only — see the module docstring. After changing the `_DRAFT_RUNNER_TEMPLATE` or CMake wiring, manually rebuild `Tools/d2conform` with `-DD2CONFORM_ENABLE_DRAFTS=ON` in an isolated build dir (never `build_allegro`) and confirm a throwaway candidate still passes/fails correctly — do not trust the template renders correctly from reading it. |
+| `scripts/gen_conformance_protected.py` | Manual: `python -m scripts.gen_conformance_protected` (dry-run) against a live Ghidra instance with the PD2-S12 programs loaded; diff against the committed `conformance_protected.json` before `--apply`. Scoped to the `/Mods/PD2-S12/` path prefix, not `instance_info`'s `open` flag — that flag does not reliably indicate whether a program is queryable via `/search_functions_by_tag`. |
+| `fun-doc/web.py` — `/api/conformance/pipeline`, `/api/conformance/draft_content`, or the Conformance tab's "Port Pipeline" panel in `templates/dashboard.html` | `python fun-doc/workbench_selftest.py` (Flask test client — no live server needed; checks 4-6 exercise the pipeline/draft-content routes including the path-escape rejection, and self-skip with a note if no `proven_pending_review` candidate is currently staged). Fields read from `functions_workflow` must be listed in BOTH `fun_doc._STATE_DIRECT_FIELDS` (gates `_state_func_to_row`) AND `storage.repository._UPDATABLE_WORKFLOW_FIELDS` — missing either one silently drops the field on `update_function_state()` with no exception (confirmed live: this exact gap silently no-op'd `port_status` persistence). |
 | `fun-doc/audit/*` | `tests/performance/test_audit_rules.py tests/performance/test_audit_registry.py` |
 | `fun-doc/benchmark/scorer.py` or `truth/*.yaml` or `src/*.c` | `tests/performance/test_benchmark_scorer.py tests/performance/test_benchmark_extract_truth.py tests/performance/test_benchmark_haiku_judge.py tests/performance/test_benchmark_ghidra_bridge.py` + rerun the benchmark itself |
 | `debugger/*` | `tests/unit/test_address_map.py tests/unit/test_d2_conventions.py tests/unit/test_debugger_engine.py tests/unit/test_debugger_server.py tests/unit/test_windbg.py` |

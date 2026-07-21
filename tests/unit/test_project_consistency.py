@@ -120,6 +120,23 @@ class TestVersionConsistency(unittest.TestCase):
                     mismatches.append(f"{name}: {found} != {expected}")
         self.assertEqual(mismatches, [])
 
+    def test_readme_api_reference_matches_endpoint_catalog(self):
+        """README's API Reference section is generated from endpoints.json.
+
+        Any @McpTool addition that passes EndpointsJsonParityTest must also
+        refresh the README listing:
+            python -m tools.gen_readme_api_reference --write
+        """
+        from tools.gen_readme_api_reference import readme_section, render_api_reference
+
+        readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertEqual(
+            readme_section(readme_text),
+            render_api_reference(),
+            "README API Reference is stale — run "
+            "'python -m tools.gen_readme_api_reference --write'",
+        )
+
 
 class TestBridgeConfiguration(unittest.TestCase):
     """Verify bridge configuration and imports."""

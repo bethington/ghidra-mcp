@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fun-Doc Command Center</title>
+<style>
+  /* ============================ THEMES (4) ============================ */
+  /* Default = your D2 look. data-theme swaps the token set; light/dark + neutral variants. */
+  :root, :root[data-theme="d2-dark"] {
+    --bg-darkest:#0a0a0c; --bg-dark:#111114; --bg-medium:#1a1a1f; --bg-light:#222228; --bg-hover:#2a2a32;
+    --border-dark:#2d2d35; --border-light:#3d3d45;
+    --magic:#6969FF; --rare:#FFFF00; --set:#00FF00; --crafted:#FF6600;
+    --text-primary:#d4d4d4; --text-secondary:#8b8b8b; --text-muted:#5a5a5a;
+    --gold:#C7B377; --red:#8b2020; --red-light:#c93030;
+    --font-main:'Segoe UI',-apple-system,sans-serif; --font-mono:'Consolas','Monaco',monospace;
+  }
+  :root[data-theme="d2-light"] {
+    --bg-darkest:#e7e2d3; --bg-dark:#efe9db; --bg-medium:#f6f1e6; --bg-light:#fbf7ee; --bg-hover:#efe7d4;
+    --border-dark:#cfc6ad; --border-light:#bcae8b;
+    --magic:#3b3bd6; --rare:#9a8a00; --set:#1f8a1f; --crafted:#c25500;
+    --text-primary:#2b2519; --text-secondary:#6a6047; --text-muted:#94896c;
+    --gold:#8a7326; --red:#8b2020; --red-light:#b23030;
+    --font-main:'Segoe UI',-apple-system,sans-serif; --font-mono:'Consolas','Monaco',monospace;
+  }
+  :root[data-theme="neutral-dark"] {
+    --bg-darkest:#0d1318; --bg-dark:#141b22; --bg-medium:#1b242d; --bg-light:#222e38; --bg-hover:#28343f;
+    --border-dark:#29343d; --border-light:#354450;
+    --magic:#5cc8ff; --rare:#d6a327; --set:#3fb950; --crafted:#f0663f;
+    --text-primary:#dbe4ea; --text-secondary:#9aa8b3; --text-muted:#6b7883;
+    --gold:#39d3c3; --red:#7a2b26; --red-light:#f0663f;
+    --font-main:ui-sans-serif,system-ui,'Segoe UI',sans-serif; --font-mono:ui-monospace,'Cascadia Code',Consolas,monospace;
+  }
+  :root[data-theme="neutral-light"] {
+    --bg-darkest:#e9eef1; --bg-dark:#f2f5f7; --bg-medium:#ffffff; --bg-light:#f6f9fb; --bg-hover:#e8eef2;
+    --border-dark:#d3dbe0; --border-light:#c0cbd2;
+    --magic:#1a86c9; --rare:#9a7412; --set:#1f8a37; --crafted:#c73f1c;
+    --text-primary:#16222b; --text-secondary:#4a5a66; --text-muted:#7a8894;
+    --gold:#0e9e94; --red:#a83a2a; --red-light:#c73f1c;
+    --font-main:ui-sans-serif,system-ui,'Segoe UI',sans-serif; --font-mono:ui-monospace,'Cascadia Code',Consolas,monospace;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:var(--font-main); background:var(--bg-darkest); color:var(--text-primary); min-height:100vh; display:flex; flex-direction:column; }
+  .mono { font-family:var(--font-mono); }
+  .tnum { font-variant-numeric:tabular-nums; }
+
+  /* ---- header (kept from the example, adapted) ---- */
+  .header { background:linear-gradient(180deg,var(--bg-medium),var(--bg-dark)); border-bottom:1px solid var(--red); padding:0.5rem 1rem; display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; }
+  .header-logo { font-size:1rem; font-weight:600; color:var(--gold); letter-spacing:.3px; }
+  .live-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; background:var(--text-muted); }
+  .live-dot.connected { background:var(--set); animation:pulse 2s infinite; }
+  .live-dot.disconnected { background:var(--red-light); }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+  .header .spacer { flex:1; }
+  .header-info { color:var(--text-muted); font-size:.72rem; font-family:var(--font-mono); }
+
+  .main { flex:1; padding:1rem; overflow-y:auto; max-width:1400px; margin:0 auto; width:100%; }
+
+  /* ---- controls / buttons ---- */
+  select, .worker-input { padding:4px 8px; font-size:.7rem; border-radius:3px; border:1px solid var(--border-dark); background:var(--bg-darkest); color:var(--text-primary); font-family:var(--font-mono); }
+  .worker-input { width:52px; text-align:center; }
+  .btn { padding:4px 10px; font-size:.7rem; border-radius:3px; border:1px solid var(--border-dark); background:var(--bg-medium); color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono); transition:all .15s; }
+  .btn:hover { border-color:var(--gold); color:var(--gold); }
+  .btn.primary { border-color:var(--gold); color:var(--gold); }
+  .btn.go { background:var(--gold); color:var(--bg-darkest); border-color:var(--gold); font-weight:600; }
+  .btn.go:hover { filter:brightness(1.08); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .lane-pill { display:flex; align-items:center; gap:.4rem; }
+  .lane-pill label { font-size:.6rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
+
+  /* ---- panels ---- */
+  .panel { background:var(--bg-dark); border:1px solid var(--border-dark); border-radius:6px; margin-bottom:.75rem; }
+  .panel-header { padding:.5rem .8rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); border-radius:6px 6px 0 0; display:flex; align-items:center; justify-content:space-between; }
+  .panel-header h2 { font-size:.72rem; font-weight:600; color:var(--gold); text-transform:uppercase; letter-spacing:1px; }
+  .panel-header .hint { font-size:.62rem; font-family:var(--font-mono); color:var(--text-muted); }
+  .panel-content { padding:.7rem .8rem; }
+
+  /* ---- completion bars (replaces the stat cards) ---- */
+  .bars { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
+  @media (max-width:980px){ .bars{grid-template-columns:1fr;} }
+  /* globals bar: faint typed-groundwork underlay (hatched) with solid DOC rungs on top */
+  #globBar { position:relative; }
+  .glob-underlay { position:absolute; left:0; top:0; bottom:0; z-index:0; border-radius:3px 0 0 3px;
+    background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 6px); opacity:.55; }
+  #globBar .rung { position:relative; z-index:1; }
+  .glob-sw { background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 4px) !important; opacity:.9; }
+  .bar-lab { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .bar-lab .t { font-family:var(--font-mono); font-size:.62rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-secondary); }
+  .bar-lab .p { font-family:var(--font-mono); font-size:.75rem; color:var(--text-primary); }
+  .bar-lab .p b { color:var(--gold); }
+  .segbar { display:flex; height:22px; border-radius:4px; overflow:hidden; background:var(--bg-darkest); border:1px solid var(--border-dark); }
+  .segbar span { display:block; }
+  .seg-legend { display:flex; flex-wrap:wrap; gap:3px 12px; margin-top:7px; }
+  .seg-legend .lg { display:flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
+  .sw { width:9px; height:9px; border-radius:2px; }
+
+  /* ---- worker panes: classic-dashboard look (3-col grid, fn-blocks, streaming, auto-scroll) ---- */
+  .worker-cards { display:grid; grid-template-columns:1fr 1fr 1fr; gap:.4rem; }
+  @media (max-width:1100px){ .worker-cards{grid-template-columns:1fr 1fr;} }
+  @media (max-width:720px){ .worker-cards{grid-template-columns:1fr;} }
+  .worker-empty { grid-column:1/-1; font-family:var(--font-mono); font-size:.66rem; color:var(--text-muted); padding:.3rem; }
+  .worker-pane { background:var(--bg-dark); border:1px solid var(--border-dark); border-radius:6px; display:flex; flex-direction:column; min-height:120px; max-height:270px; }
+  .worker-pane.running { border-color:var(--set); }
+  .worker-pane.timeout { border-color:var(--red-light); box-shadow:0 0 8px rgba(201,48,48,.2); }
+  .worker-pane.focused { border-color:var(--gold); border-width:2px; box-shadow:0 0 8px rgba(199,179,119,.3); }
+  .worker-pane.stopping { border-color:var(--rare); }
+  .worker-pane.finished { border-color:var(--text-muted); opacity:.8; }
+  .worker-pane.quota_paused { border-color:var(--rare); }
+  .worker-pane-header { padding:.25rem .5rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); border-radius:6px 6px 0 0; display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; font-size:.65rem; }
+  .worker-pane-header .wp-title { font-family:var(--font-mono); color:var(--text-primary); font-weight:600; white-space:nowrap; }
+  .worker-pane-header .wp-title .wp-id { color:var(--text-muted); font-weight:400; }
+  .worker-pane-header .wp-status { font-family:var(--font-mono); color:var(--text-muted); font-size:.6rem; flex:1; min-width:0; }
+  .worker-pane-header .wp-status .wp-current { color:var(--gold); }
+  .worker-pane-header .wp-alert { font-family:var(--font-mono); font-size:.55rem; color:var(--red-light); border:1px solid rgba(201,48,48,.4); background:rgba(139,32,32,.18); border-radius:3px; padding:1px 4px; display:none; }
+  .worker-pane-header .wp-alert.active { display:inline-block; }
+  .worker-pane-header .wp-actions { margin-left:auto; display:flex; gap:3px; }
+  .icon-btn { width:22px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:0 0 22px; line-height:1; }
+  .icon-btn.is-active { border-color:var(--gold); color:var(--gold); }
+  .icon-stop { width:9px; height:9px; border-radius:1px; background:currentColor; display:block; }
+  .icon-focus { width:12px; height:12px; border:1px solid currentColor; border-radius:50%; position:relative; display:block; }
+  .icon-focus::before,.icon-focus::after { content:""; position:absolute; background:currentColor; left:50%; top:50%; transform:translate(-50%,-50%); }
+  .icon-focus::before { width:14px; height:1px; } .icon-focus::after { width:1px; height:14px; }
+  .btn.btn-danger { color:var(--red-light); border-color:var(--red); }
+  .btn.btn-danger:hover { border-color:var(--red-light); color:var(--red-light); }
+  .wp-config { display:none; padding:.15rem .5rem; font-family:var(--font-mono); font-size:.58rem; color:var(--text-secondary); border-bottom:1px solid var(--border-dark); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .worker-pane-output { flex:1; overflow-y:auto; padding:.2rem .3rem; font-family:var(--font-mono); font-size:.6rem; line-height:1.3; background:var(--bg-darkest); }
+  .worker-pane-output::-webkit-scrollbar { width:7px; } .worker-pane-output::-webkit-scrollbar-thumb { background:var(--border-light); border-radius:4px; }
+  .fn-block { border-top:1px solid var(--gold); border-left:1px solid var(--gold); border-bottom:1px solid var(--gold); border-right:none; margin:0 0 .5rem 0; padding:0; }
+  .fn-block .fn-name { color:var(--gold); font-weight:600; padding:1px 4px 1px 6px; }
+  .fn-block .fn-name.fn-header { border-bottom:1px dashed rgba(199,179,119,.18); }
+  .fn-block .fn-name.fn-footer { border-top:1px dashed rgba(199,179,119,.18); }
+  .fn-block .fn-body { padding-left:1rem; }
+  .fn-block .fn-body .activity-entry { padding-left:0; }
+  .activity-entry { white-space:pre-wrap; word-break:break-word; }
+  .activity-tool { color:var(--text-secondary); }
+  .activity-text { color:var(--text-primary); }
+  .activity-success { color:var(--set); }
+  .activity-error { color:var(--red-light); }
+  .activity-neutral { color:var(--text-muted); }
+
+  /* ---- intake lane ---- */
+  .intake { display:flex; align-items:center; gap:1.1rem; border-left:3px solid var(--crafted); }
+  .intake .k { font-family:var(--font-mono); font-size:.6rem; letter-spacing:1px; text-transform:uppercase; color:var(--crafted); }
+  .intake .n { font-family:var(--font-mono); font-size:1.8rem; color:var(--text-primary); line-height:1; }
+  .intake .n small { font-size:.72rem; color:var(--text-muted); }
+  .intake .desc { color:var(--text-secondary); font-size:.72rem; max-width:360px; }
+
+  /* ---- matrix ---- */
+  .grid-2 { display:grid; grid-template-columns:1fr 360px; gap:.75rem; align-items:start; }
+  @media (max-width:1000px){ .grid-2{grid-template-columns:1fr;} }
+  .matrix-wrap { overflow-x:auto; padding:.5rem; }
+  table.mtx { border-collapse:separate; border-spacing:5px; margin:0 auto; }
+  table.mtx th { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); padding:2px 4px; }
+  table.mtx th.rw { text-align:right; white-space:nowrap; padding-right:8px; }
+  .rk { display:inline-block; width:8px; height:8px; border-radius:2px; margin-left:6px; }
+  .cell { width:84px; height:48px; border-radius:6px; cursor:pointer; border:1px solid var(--border-dark); background:var(--bg-medium); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; transition:transform .08s, border-color .1s; }
+  .cell:hover { transform:translateY(-2px); border-color:var(--gold); }
+  .cell .cn { font-family:var(--font-mono); font-size:1.05rem; color:var(--text-primary); }
+  .cell .cd { font-family:var(--font-mono); font-size:.55rem; color:var(--text-muted); }
+  .cell.z .cn { color:var(--text-muted); opacity:.45; }
+  .cell.untri { background:repeating-linear-gradient(45deg,var(--bg-medium),var(--bg-medium) 6px,transparent 6px,transparent 12px); border-style:dashed; }
+  .cell.untri .cn { color:var(--crafted); }
+  .axis-hint { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:.58rem; color:var(--text-muted); margin:4px 4px 0; }
+
+  /* ---- queue / next ---- */
+  .reco { display:flex; align-items:center; gap:.7rem; }
+  .reco .tag { font-family:var(--font-mono); font-size:.55rem; letter-spacing:1px; text-transform:uppercase; color:var(--gold); border:1px solid var(--border-light); border-radius:4px; padding:2px 6px; }
+  .reco .txt { flex:1; font-size:.72rem; }
+  .qrow { display:flex; justify-content:space-between; align-items:center; padding:8px; border-radius:5px; cursor:pointer; border:1px solid transparent; }
+  .qrow:hover { background:var(--bg-medium); border-color:var(--border-dark); }
+  .qrow .nm { font-family:var(--font-mono); font-size:.7rem; color:var(--text-primary); }
+  .qrow .badges { display:flex; gap:4px; margin-top:3px; align-items:center; }
+  /* Recommended next beside Advancement queue (equal width; stack on narrow) */
+  .two-eq { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; align-items:start; }
+  @media (max-width:1000px){ .two-eq{grid-template-columns:1fr;} }
+  .two-eq .panel { margin-bottom:0; min-width:0; }
+  /* recommended-next / advancement: Functions | Globals as two light titled columns */
+  .subcols { display:grid; grid-template-columns:1fr 1fr; gap:0; }
+  .subcol { min-width:0; }
+  .subcol + .subcol { border-left:1px solid var(--border-dark); padding-left:.6rem; margin-left:.2rem; }
+  @media (max-width:720px){ .subcols{grid-template-columns:1fr;}
+    .subcol + .subcol{border-left:none; border-top:1px solid var(--border-dark); padding-left:0; margin-left:0; margin-top:6px;} }
+  .reco-sec { font-family:var(--font-mono); font-size:.56rem; text-transform:uppercase; letter-spacing:1px;
+    color:var(--text-muted); padding:2px 8px 3px; border-bottom:1px solid var(--border-dark); margin-bottom:2px; }
+  .qrow.auto { border-color:var(--gold); background:linear-gradient(90deg,rgba(199,179,119,.10),transparent); }
+  .reco-star { color:var(--gold); margin-right:5px; }
+  .reco-reason { font-size:.6rem; color:var(--text-secondary); margin-top:3px; font-family:var(--font-mono); }
+  .reco-action { font-family:var(--font-mono); font-size:.55rem; text-transform:uppercase; letter-spacing:.4px;
+    padding:2px 5px; border-radius:3px; border:1px solid var(--gold); color:var(--gold); }
+  .gtype-mini { font-family:var(--font-mono); font-size:.6rem; color:var(--text-secondary); }
+  .gtype-mini.untyped { color:var(--text-muted); font-style:italic; }
+  .pin-x { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:.9rem; line-height:1; padding:2px 4px; }
+  .pin-x:hover { color:var(--red-light); }
+  /* pin button in inventory rows */
+  td.act { width:26px; text-align:center; padding:0; }
+  .pin-btn { background:none; border:1px solid var(--border-light); border-radius:3px; color:var(--text-muted);
+    cursor:pointer; font-size:.7rem; line-height:1; padding:1px 5px; opacity:0; transition:opacity .1s; }
+  table.inv tr:hover .pin-btn { opacity:1; }
+  .pin-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .pin-btn.pinned { opacity:1; border-color:var(--gold); color:var(--gold); }
+
+  /* ---- steering (rescan + queue admin, ported from the classic dashboard) ---- */
+  .steer-row { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .steer-row + .steer-row { margin-top:.5rem; padding-top:.5rem; border-top:1px solid var(--border-dark); }
+  .steer-lab { font-family:var(--font-mono); font-size:.6rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); width:52px; flex:0 0 52px; }
+  .steer-status { font-family:var(--font-mono); font-size:.62rem; color:var(--text-secondary); flex:1; min-width:120px; }
+  .steer-status.err { color:var(--red-light); }
+  .steer-status.ok { color:var(--set); }
+  .pin-chip { display:inline-flex; align-items:center; gap:4px; font-family:var(--font-mono); font-size:.6rem;
+    color:var(--gold); border:1px solid var(--border-light); border-radius:3px; padding:1px 3px 1px 6px; }
+  .pin-chip .px { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:.75rem; line-height:1; padding:0 2px; }
+  .pin-chip .px:hover { color:var(--red-light); }
+  .pin-chips { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex:1; min-width:0; }
+  .pin-chips .none { font-family:var(--font-mono); font-size:.6rem; color:var(--text-muted); }
+
+  /* ---- badges ---- */
+  .badge { font-family:var(--font-mono); font-size:.55rem; letter-spacing:.3px; padding:2px 5px; border-radius:3px; border:1px solid; white-space:nowrap; }
+  .b-none { color:var(--text-muted); border-color:var(--border-light); }
+  .b-live { color:var(--magic); border-color:var(--magic); }
+  .b-battle { color:var(--set); border-color:var(--set); }
+  .b-regr { color:var(--rare); border-color:var(--rare); }
+  .b-vet { color:var(--gold); border-color:var(--gold); }
+  .b-docR { color:var(--magic); border-color:var(--magic); }
+  .b-docV { color:var(--set); border-color:var(--set); }
+
+  /* ---- inventory ---- */
+  /* functions (has extra CONF column) get more room than globals */
+  .inv-row { display:grid; grid-template-columns:3fr 2fr; gap:.75rem; align-items:start; }
+  @media (max-width:900px){ .inv-row{grid-template-columns:1fr;} }
+  .inv-row .panel { margin-bottom:0; min-width:0; }
+  .inv-head { display:flex; gap:.5rem; align-items:center; }
+  .inv-search { flex:1; max-width:280px; min-width:80px; }
+  table.inv { width:100%; border-collapse:collapse; margin-top:.5rem; table-layout:fixed; }
+  table.inv td.gtype { font-family:var(--font-mono); font-size:.64rem; color:var(--text-secondary);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.inv td.gtype.untyped { color:var(--text-muted); font-style:italic; }
+  table.inv td.gname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.inv th { font-family:var(--font-mono); font-size:.58rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); text-align:left; padding:4px 6px; border-bottom:1px solid var(--border-dark); }
+  table.inv:not(.gtbl) th:first-child { width:40%; }
+  table.inv td { padding:5px 6px; border-bottom:1px solid var(--border-dark); font-size:.7rem; }
+  table.inv tr { cursor:pointer; }
+  table.inv tr:hover td { background:var(--bg-medium); }
+  table.inv .fn { font-family:var(--font-mono); color:var(--text-primary); }
+  table.inv.gtbl tr { cursor:default; }
+
+  /* ---- drawer ---- */
+  .scrim { position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .18s; z-index:40; }
+  .scrim.open { opacity:1; pointer-events:auto; }
+  .drawer { position:fixed; top:0; right:0; height:100%; width:50vw; min-width:640px; max-width:94vw; background:var(--bg-dark); border-left:1px solid var(--border-light); transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1); z-index:50; display:flex; flex-direction:column; }
+  .drawer.open { transform:translateX(0); }
+  .dr-h { padding:14px 16px; border-bottom:1px solid var(--border-dark); }
+  .dr-h .top { display:flex; align-items:center; gap:10px; }
+  .dr-h .fn { font-family:var(--font-mono); font-size:.9rem; color:var(--gold); flex:1; }
+  .dr-h .addr { font-family:var(--font-mono); font-size:.66rem; color:var(--text-muted); }
+  .dr-close { background:none; border:none; color:var(--text-muted); font-size:18px; cursor:pointer; }
+  .dr-close:hover { color:var(--text-primary); }
+  .dr-body { overflow-y:auto; padding:4px 16px 24px; }
+  .sec { font-family:var(--font-mono); font-size:.58rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; }
+  .codegrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  @media (max-width:560px){ .codegrid{grid-template-columns:1fr;} }
+  pre { margin:0; background:var(--bg-darkest); border:1px solid var(--border-dark); border-radius:5px; padding:9px 10px; overflow-x:auto; font-family:var(--font-mono); font-size:.66rem; line-height:1.55; color:var(--text-secondary); white-space:pre-wrap; }
+  .proofgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .pstat { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:5px; padding:7px 8px; }
+  .pstat .pk { font-family:var(--font-mono); font-size:.55rem; text-transform:uppercase; color:var(--text-muted); }
+  .pstat .pv { font-family:var(--font-mono); font-size:.95rem; color:var(--text-primary); }
+  a { color:var(--gold); }
+  :focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+  @media (prefers-reduced-motion:reduce){ * { transition:none !important; } }
+  /* ---- focus button (opens the binary picker) ---- */
+  .focus-btn { display:flex; align-items:center; gap:.5rem; padding:4px 10px; }
+  .focus-btn .fb-name { color:var(--gold); font-weight:600; }
+  .focus-btn .fb-folder { font-size:.6rem; color:var(--text-muted); }
+  .focus-btn .fb-car { color:var(--text-secondary); font-size:.6rem; }
+
+  /* ---- binary picker: anchored dropdown under the focus button ---- */
+  .focus-wrap { position:relative; }
+  .picker { position:absolute; top:calc(100% + 6px); left:0; width:360px; z-index:60;
+    background:var(--bg-dark); border:1px solid var(--red); border-radius:8px; max-height:78vh;
+    display:none; flex-direction:column; box-shadow:0 14px 40px rgba(0,0,0,.55); }
+  .picker.open { display:flex; }
+  .picker-head { padding:.45rem .7rem; border-bottom:1px solid var(--border-dark);
+    font-size:.7rem; font-weight:600; color:var(--gold); text-transform:uppercase; letter-spacing:.5px; }
+  .picker-sub { text-transform:none; font-weight:400; color:var(--text-muted); letter-spacing:0; }
+  .picker-nav { display:flex; align-items:center; gap:3px; padding:.4rem .55rem; overflow-x:auto;
+    border-bottom:1px solid var(--border-dark); white-space:nowrap; }
+  .picker-nav::-webkit-scrollbar { height:6px; }
+  .pn-sel { padding:2px 6px; font-size:.62rem; border-radius:3px; border:1px solid var(--border-dark);
+    background:var(--bg-darkest); color:var(--text-primary); font-family:var(--font-mono); max-width:150px; }
+  .pn-sep { color:var(--text-muted); font-size:.7rem; padding:0 1px; }
+  .picker-body { overflow-y:auto; padding:.45rem; display:flex; flex-direction:column; gap:.4rem; }
+  .picker-foot { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:center; padding:.4rem .7rem;
+    border-top:1px solid var(--border-dark); font-size:.54rem; color:var(--text-secondary); }
+  .picker-foot .lg { display:flex; align-items:center; gap:4px; }
+  .picker-foot .picker-note { color:var(--text-muted); flex-basis:100%; line-height:1.3; }
+
+  /* ---- one binary card (compact; counts overlaid on the bars) ---- */
+  .bcard { background:var(--bg-medium); border:1px solid var(--border-dark); border-radius:5px;
+    padding:.45rem .55rem; cursor:pointer; transition:border-color .12s, background .12s; }
+  .bcard:hover { border-color:var(--gold); background:var(--bg-hover); }
+  .bcard.active { border-color:var(--set); }
+  .bcard-top { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; margin-bottom:.35rem; }
+  .bcard-name { font-family:var(--font-mono); font-size:.74rem; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bcard-name .fld { color:var(--text-muted); font-size:.56rem; margin-left:.35rem; }
+  .bcard-name .here { color:var(--set); font-size:.5rem; border:1px solid var(--set); border-radius:3px;
+    padding:0 3px; margin-left:.35rem; text-transform:uppercase; letter-spacing:.4px; }
+  .bcard-rem { font-family:var(--font-mono); font-size:.66rem; color:var(--text-secondary); white-space:nowrap; }
+  .bcard-rem b { color:var(--red-light); }
+  .brow { display:grid; grid-template-columns:50px 1fr; align-items:center; gap:.45rem; margin:2px 0; }
+  .brow .lbl { font-family:var(--font-mono); font-size:.54rem; text-transform:uppercase; letter-spacing:.4px; color:var(--text-secondary); }
+  .brow .seg { position:relative; display:flex; height:15px; border-radius:3px; overflow:hidden;
+    background:var(--bg-darkest); border:1px solid var(--border-dark); }
+  .brow .seg span.sg { display:block; height:100%; }
+  .brow .seg .cnt { position:absolute; right:5px; top:0; line-height:15px; font-family:var(--font-mono);
+    font-size:.54rem; color:var(--text-primary); pointer-events:none; white-space:nowrap;
+    text-shadow:0 0 3px var(--bg-darkest), 0 0 2px var(--bg-darkest), 0 0 2px var(--bg-darkest); }
+
+  /* ---- settings slide-out panel ---- */
+  .types-bar { max-height:0; overflow:hidden; display:flex; align-items:center; gap:.6rem;
+    background:linear-gradient(90deg,rgba(199,120,60,.16),rgba(199,120,60,.04)); border-bottom:1px solid transparent;
+    padding:0 1rem; transition:max-height .2s ease, border-color .2s ease; }
+  .types-bar.active { max-height:52px; padding:.5rem 1rem; border-bottom-color:var(--gold,#c7b377); }
+  .types-bar.busy { background:linear-gradient(90deg,rgba(120,150,199,.16),rgba(120,150,199,.04)); }
+  .types-bar.ok { background:linear-gradient(90deg,rgba(120,199,140,.16),rgba(120,199,140,.04)); }
+  .types-bar .tb-icon { font-size:1rem; }
+  .types-bar .tb-msg { flex:1; font-size:.72rem; color:var(--text-secondary); }
+  .types-bar .tb-btn { padding:.28rem .7rem; font-size:.66rem; }
+  .types-bar .tb-dismiss { background:none; border:none; color:var(--text-muted); font-size:1rem; cursor:pointer; padding:0 .3rem; }
+  .settings-popout { max-height:0; overflow:hidden; background:linear-gradient(180deg,var(--bg-medium),var(--bg-dark));
+    border-bottom:1px solid transparent; transition:max-height .18s ease, border-color .18s ease; }
+  .settings-popout.active { max-height:460px; border-bottom-color:var(--red); overflow:auto; }
+  .settings-popout-inner { max-width:1400px; margin:0 auto; width:100%; padding:0 1rem; }
+  .settings-popout .panel { margin:0 0 .75rem; border-top:none; border-radius:0 0 6px 6px; }
+  .settings-bar { display:flex; flex-wrap:wrap; gap:.6rem .9rem; align-items:center; }
+  .settings-group { display:flex; flex-wrap:wrap; gap:.4rem .6rem; align-items:center; }
+  .settings-label { font-size:.65rem; color:var(--text-secondary); display:flex; align-items:center; gap:4px; }
+  .settings-divider { width:1px; align-self:stretch; background:var(--border-dark); }
+  .header-select { padding:3px 6px; font-size:.7rem; border-radius:3px; border:1px solid var(--border-dark); background:var(--bg-darkest); color:var(--text-primary); font-family:var(--font-mono); cursor:pointer; }
+  .header-select:focus { outline:none; border-color:var(--gold); }
+  .models-grid { display:grid; grid-template-columns:64px repeat(3, minmax(110px,1fr)) minmax(70px,90px); gap:4px 6px; align-items:center; width:100%; }
+  .models-grid-header { color:var(--text-muted); font-size:.6rem; text-transform:uppercase; letter-spacing:.6px; }
+  .models-provider { font-family:var(--font-mono); font-size:.7rem; color:var(--gold); }
+  .settings-popout .worker-input { text-align:left; }
+</style>
+</head>
+<body>
+  <header class="header">
+    <span class="header-logo">Fun-Doc Command Center</span>
+    <span><span class="live-dot" id="liveDot"></span><span class="mono" id="liveTxt" style="font-size:.62rem;color:var(--text-muted)">offline</span></span>
+    <!-- FOCUS: which binary this dashboard is showing. Everything (tags/maps/rollup) is per-binary.
+         Click the button: the picker drops down right below it (each binary's remaining work). -->
+    <div class="focus-wrap" id="focusWrap">
+      <button class="btn focus-btn" id="focusBtn" onclick="togglePicker(event)" title="Choose which binary to focus">
+        <span class="fb-name" id="fbName">binary</span>
+        <span class="fb-folder mono" id="fbFolder"></span>
+        <span class="fb-car">&#9662;</span>
+      </button>
+      <!-- BINARY PICKER: anchored dropdown, most-remaining-first, counts overlaid on the bars. -->
+      <div class="picker" id="picker">
+        <div class="picker-head">
+          <span>Focus a binary <span class="picker-sub mono">&mdash; most work first</span></span>
+        </div>
+        <div class="picker-nav" id="pickerNav"></div>
+        <div class="picker-body" id="pickerBody"></div>
+        <div class="picker-foot mono">
+          <span class="lg"><span class="sw" style="background:var(--set)"></span>verified/battletested</span>
+          <span class="lg"><span class="sw" style="background:var(--magic)"></span>reviewed/live</span>
+          <span class="lg"><span class="sw" style="background:var(--rare)"></span>regression</span>
+          <span class="lg"><span class="sw" style="background:var(--crafted)"></span>draft/vectors</span>
+          <span class="lg"><span class="sw" style="background:var(--bg-darkest);border:1px solid var(--border-dark)"></span>remaining</span>
+          <span class="picker-note">Glob Doc rungs are empty until the globals-doc pass runs; the % is typing groundwork.</span>
+        </div>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <div class="lane-pill">
+      <label>Lane</label>
+      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess" title="Score current docs of functions AND globals; stamp DOC_DRAFT on the documented ones">Assess</option><option value="triage" title="Intake-classify functions AND globals: exclude library/stub/thunk, enqueue the rest">Triage</option></select>
+    </div>
+    <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
+    <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
+    <label class="mono" style="font-size:.62rem;color:var(--text-secondary)" title="Process every function (ignores count)"><input type="checkbox" id="allFns" onchange="syncAllFns()"> All</label>
+    <button class="btn go" onclick="startLane()">Start &#9654;</button>
+    <button class="btn" id="btnToggleSettings" onclick="toggleSettings()" title="Settings">&#9881; Settings</button>
+    <span style="width:8px"></span>
+    <select id="themeSel" onchange="setTheme(this.value)" title="Theme">
+      <option value="d2-dark">D2 - Dark</option><option value="d2-light">D2 - Light</option>
+      <option value="neutral-dark">Neutral - Dark</option><option value="neutral-light">Neutral - Light</option>
+    </select>
+    <button class="btn" onclick="refreshAll()" title="Refresh">&#8635;</button>
+  </header>
+
+  <!-- CANONICAL TYPES slide-out warning bar (missing/stale D2MOO type vocabulary) -->
+  <div class="types-bar" id="typesBar">
+    <span class="tb-icon">&#9888;</span>
+    <span class="tb-msg" id="typesBarMsg">Loading type status&hellip;</span>
+    <button class="btn go tb-btn" id="typesBarBtn" onclick="loadTypes()">Load types</button>
+    <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('typesBar').classList.remove('active')">&times;</button>
+  </div>
+
+  <!-- SETTINGS slide-out (queue config: good@, cold, debug, handoff, audit, provider models) -->
+  <div class="settings-popout" id="settingsPopout">
+    <div class="settings-popout-inner">
+      <div class="panel">
+        <div class="panel-header"><h2>Settings</h2></div>
+        <div class="panel-content">
+          <div class="settings-bar">
+            <div class="settings-group">
+              <label class="settings-label" title="Functions at/above this score are excluded from the queue unless pinned">
+                <span>Target</span><select class="worker-input" id="goodEnoughInput" onchange="saveQueueConfig()" title="Target completeness band: doc workers keep working functions below this level; COMPLETE_<band> tags graduate through 80/90/95/100">
+                  <option value="80">80</option><option value="90">90</option><option value="95">95</option><option value="100">100</option>
+                </select></label>
+              <label class="settings-label" title="Assess lane: functions whose completeness score is >= this get stamped DOC_DRAFT">
+                <span>Draft@</span><input type="number" class="worker-input" id="assessDraftInput" min="0" max="100" onchange="saveQueueConfig()"></label>
+              <label class="settings-label" title="Surface unscored functions so they get scored on first contact">
+                <input type="checkbox" id="requireScoredInput" onchange="saveQueueConfig()" style="margin:0"><span>Score Cold</span></label>
+              <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/">
+                <input type="checkbox" id="debugModeInput" onchange="saveQueueConfig()" style="margin:0"><span>Debug Logs</span></label>
+              <label class="settings-label" title="Refresh the harness-owned plate scaffold (empirical block + slots) before the model runs, so it only fills descriptions. Re-attach is 100% lossless.">
+                <input type="checkbox" id="plateScaffoldInput" onchange="saveQueueConfig()" style="margin:0"><span>Plate Scaffold</span></label>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" title="Hand off complex functions to this provider instead of skipping">
+                <span>Handoff&rarr;</span>
+                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
+                  <option value="off">Off</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="minimax">MiniMax</option><option value="gemini">Gemini</option>
+                </select></label>
+              <label class="settings-label" title="Max handoffs per worker session. 0 = unlimited">
+                <span>Max</span><input type="number" class="worker-input" id="handoffMaxInput" min="0" max="999" onchange="saveQueueConfig()" style="width:48px"></label>
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-group">
+              <label class="settings-label" title="A second provider reviews and fixes gaps after the worker finishes. Off = no audit">
+                <span>Audit&rarr;</span>
+                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
+                  <option value="off">Off</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="minimax">MiniMax</option><option value="gemini">Gemini</option>
+                </select></label>
+              <label class="settings-label" title="Skip audit if the worker's score gain >= this value">
+                <span>Min&Delta;</span><input type="number" class="worker-input" id="auditMinDeltaInput" min="0" max="100" onchange="saveQueueConfig()" style="width:48px"></label>
+            </div>
+          </div>
+          <div style="margin-top:.75rem">
+            <div style="font-size:.65rem; color:var(--text-secondary); margin-bottom:.35rem" title="Dashboard-owned model config; Max Turns is the per-provider tool-call cap">Provider Models</div>
+            <div class="models-grid" id="modelsGrid">
+              <div></div>
+              <div class="models-grid-header">Full</div>
+              <div class="models-grid-header">Fix</div>
+              <div class="models-grid-header">Verify</div>
+              <div class="models-grid-header" title="Max tool-call turns per provider">Max Turns</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- COMPLETION BARS (replaces stat cards) -->
+    <div class="panel"><div class="panel-content">
+      <div class="bars">
+        <div>
+          <div class="bar-lab"><span class="t">Functions &middot; Documentation</span><span class="p" id="docPct">-</span></div>
+          <div class="segbar" id="docBar"></div>
+          <div class="seg-legend" id="docLegend"></div>
+        </div>
+        <div>
+          <div class="bar-lab"><span class="t">Functions &middot; Completeness</span><span class="p" id="bandPct">-</span></div>
+          <div class="segbar" id="bandBar"></div>
+          <div class="seg-legend" id="bandLegend"></div>
+        </div>
+        <div>
+          <div class="bar-lab"><span class="t">Functions &middot; Conformance</span><span class="p" id="confPct">-</span></div>
+          <div class="segbar" id="confBar"></div>
+          <div class="seg-legend" id="confLegend"></div>
+        </div>
+        <div>
+          <div class="bar-lab"><span class="t">Globals &middot; Documentation</span><span class="p" id="globPct">-</span></div>
+          <div class="segbar" id="globBar"></div>
+          <div class="seg-legend" id="globLegend"></div>
+        </div>
+      </div>
+    </div></div>
+
+    <!-- WORKERS (kept) -->
+    <div class="panel">
+      <div class="panel-header"><h2>Active Workers</h2><span class="hint" id="workerHint">-</span></div>
+      <div class="panel-content"><div class="worker-cards" id="workerCards"><div class="worker-empty">No workers running. Pick a lane and Start.</div></div></div>
+    </div>
+
+    <!-- INTAKE -->
+    <div class="panel"><div class="panel-content intake">
+      <div><div class="k">Intake - never evaluated</div><div class="n tnum" id="intakeN">-</div></div>
+      <div class="desc">In-scope functions with no DOC/CONF/scope tag. Triage scope-classifies them (drains library) and enqueues the rest for the doc + prove lanes.</div>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn" onclick="triage(50)">Triage 50 &#9654;</button>
+      <button class="btn primary" onclick="triage(0)">Triage all &#9654;</button>
+    </div></div>
+
+    <!-- STEERING: rescan + priority-queue admin (ported from the classic dashboard).
+         Pins already live on the inventory rows; this panel shows what's pinned and
+         adds the scan + queue-maintenance actions that only the classic page had. -->
+    <div class="panel">
+      <div class="panel-header"><h2>Steering</h2>
+        <span class="hint" title="Scan refreshes the workflow store from Ghidra. Pins jump the line for Doc + Prove workers.">scan &amp; queue</span></div>
+      <div class="panel-content">
+        <div class="steer-row">
+          <span class="steer-lab">Scan</span>
+          <button class="btn" id="btnRescan" onclick="rescan(false,false)" title="Incremental rescan of the focused binary (new/renamed functions only)">Rescan focused</button>
+          <button class="btn" onclick="rescan(true,false)" title="Re-score every function of the focused binary">Full rescan</button>
+          <button class="btn" onclick="rescan(false,true)" title="Incremental rescan of every binary in the project folder">Rescan all</button>
+          <span class="steer-status" id="scanStatus"></span>
+        </div>
+        <div class="steer-row">
+          <span class="steer-lab">Queue</span>
+          <button class="btn" id="btnDrain" onclick="drainDone()" title="Score every pinned function and auto-dequeue any already at/above the Target band">Drain done</button>
+          <button class="btn" id="btnTop50" onclick="refreshTop()" title="Re-score the top 50 ROI candidates for the focused binary">Refresh top 50</button>
+          <span class="pin-chips" id="pinChips"><span class="none">no pins</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- INVENTORIES: functions (wider, has CONF) + globals (narrower, no CONF) side by side -->
+    <div class="inv-row">
+      <div class="panel">
+        <div class="panel-header inv-head"><h2 style="margin:0">Function Inventory</h2>
+          <input class="worker-input inv-search" id="invSearch" placeholder="search by name..." oninput="debouncedInv()" style="width:auto">
+          <span class="hint" id="invHint"></span>
+        </div>
+        <div class="panel-content" style="max-height:340px;overflow-y:auto">
+          <table class="inv"><thead><tr><th>Function</th><th>Address</th><th>DOC</th><th>CONF</th><th></th></tr></thead>
+          <tbody id="invBody"></tbody></table>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header inv-head"><h2 style="margin:0">Globals Inventory</h2>
+          <input class="worker-input inv-search" id="globSearch" placeholder="search by name..." oninput="debouncedGlob()" style="width:auto">
+          <span class="hint" id="globHint"></span>
+        </div>
+        <div class="panel-content" style="max-height:340px;overflow-y:auto">
+          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th></tr></thead>
+          <tbody id="globBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+  <aside class="drawer" id="drawer">
+    <div class="dr-h"><div class="top"><span class="fn" id="drName">-</span><span class="addr" id="drAddr"></span><button class="dr-close" onclick="closeDrawer()">&#10005;</button></div>
+      <div class="badges" id="drBadges" style="display:flex;gap:5px;margin-top:10px"></div></div>
+    <div class="dr-body" id="drBody"></div>
+  </aside>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  // ---------- theme ----------
+  function setTheme(t){ document.documentElement.setAttribute("data-theme",t); localStorage.setItem("fd_theme",t); document.getElementById("themeSel").value=t; }
+  setTheme(localStorage.getItem("fd_theme")||"d2-dark");
+
+  // ---------- data plumbing (live API, sample fallback for preview) ----------
+  const SAMPLE = {
+    summary:{proven:119,CONF_LIVE:80,CONF_BATTLETESTED:35,CONF_REGRESSION:4,vetted:7,in_scope:2547,excluded_lib:22,total_all:2712,local_defined:2569,last_sync:"2026-07-10"},
+    intake:{untriaged:2423,in_scope:2547,excluded_lib:22,total_all:2712},
+    matrix:{rows:["CONF_REGRESSION","CONF_BATTLETESTED","CONF_LIVE","CONF_VECTORS","none"],cols:["none","DOC_DRAFT","DOC_REVIEWED","DOC_VERIFIED"],in_scope:2547,evaluated:124,
+      cell:{CONF_REGRESSION:{none:4,DOC_DRAFT:0,DOC_REVIEWED:0,DOC_VERIFIED:0},CONF_BATTLETESTED:{none:29,DOC_DRAFT:0,DOC_REVIEWED:6,DOC_VERIFIED:0},CONF_LIVE:{none:60,DOC_DRAFT:0,DOC_REVIEWED:14,DOC_VERIFIED:6},CONF_VECTORS:{none:0,DOC_DRAFT:0,DOC_REVIEWED:0,DOC_VERIFIED:0},none:{none:2423,DOC_DRAFT:0,DOC_REVIEWED:5,DOC_VERIFIED:0}}},
+    inventory:{rows:[{name:"UNITS_GetField08",address:"0x6fd681f0",doc:"none",conf:"CONF_LIVE"},{name:"DATATBLS_GetSkillsTxtRecord",address:"0x6fd5c8e0",doc:"DOC_REVIEWED",conf:"CONF_BATTLETESTED"},{name:"PATH_GetOriginX",address:"0x6fd68250",doc:"none",conf:"CONF_REGRESSION"}],total:3,shown:3}
+  };
+  // focus: the selected binary (full program path). Every API call is scoped to it.
+  let PROGRAM=null, BINARIES=[];
+  async function api(path){ try{
+    const sep=path.includes("?")?"&":"?";
+    const url="/api/conformance"+path+(PROGRAM?sep+"program="+encodeURIComponent(PROGRAM):"");
+    const r=await fetch(url); if(!r.ok) throw 0; return await r.json();
+  }catch(e){ return null; } }
+
+  function updFocusBtn(){
+    const b=BINARIES.find(x=>x.path===PROGRAM);
+    document.getElementById("fbName").textContent=b?b.name:"(no binary)";
+    document.getElementById("fbFolder").textContent=b?b.folder:"";
+  }
+  // Offline preview fallback -- progress-shaped so the picker renders in the artifact.
+  const SAMPLE_PROG={active:"/Mods/PD2-S12/D2Common.dll",binaries:[
+    {path:"/Mods/PD2-S12/D2Client.dll",name:"D2Client.dll",folder:"/Mods/PD2-S12",fn_scope:4658,remaining_total:12142,
+      fn_doc:{scope:4658,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:4658,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:2826,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:648,typed_pct:22.9}},
+    {path:"/Mods/PD2-S12/D2Game.dll",name:"D2Game.dll",folder:"/Mods/PD2-S12",fn_scope:4734,remaining_total:9924,
+      fn_doc:{scope:4734,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:4734,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:456,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:175,typed_pct:38.4}},
+    {path:"/Mods/PD2-S12/D2Common.dll",name:"D2Common.dll",folder:"/Mods/PD2-S12",fn_scope:2547,remaining_total:7064,
+      fn_doc:{scope:2547,done:31,rungs:{DOC_VERIFIED:6,DOC_REVIEWED:25,DOC_DRAFT:0}},
+      fn_conf:{scope:2547,done:119,rungs:{CONF_REGRESSION:4,CONF_BATTLETESTED:35,CONF_LIVE:80,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:2120,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:697,typed_pct:32.9}},
+    {path:"/Mods/PD2-S12/D2Win.dll",name:"D2Win.dll",folder:"/Mods/PD2-S12",fn_scope:647,remaining_total:1843,
+      fn_doc:{scope:647,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:647,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:549,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:182,typed_pct:33.2}},
+    {path:"/Mods/OtherMod/D2Common.dll",name:"D2Common.dll",folder:"/Mods/OtherMod",fn_scope:2500,remaining_total:5000,
+      fn_doc:{scope:2500,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:2500,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:1200,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:300,typed_pct:25}},
+    {path:"/testing/D2Common.dll",name:"D2Common.dll",folder:"/testing",fn_scope:2220,remaining_total:4441,
+      fn_doc:{scope:2220,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:2220,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:1,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}},
+    {path:"/benchmark/bench_core.dll",name:"bench_core.dll",folder:"/benchmark",fn_scope:460,remaining_total:920,
+      fn_doc:{scope:460,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
+      fn_conf:{scope:460,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
+      glob_doc:{scope:0,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}}]};
+  async function loadBinaries(){
+    const r=await api("/binaries/progress")||SAMPLE_PROG;
+    BINARIES=r.binaries||[]; PROGRAM=r.active||(BINARIES[0]&&BINARIES[0].path)||null;
+    updFocusBtn();
+  }
+  // ---- binary picker (anchored dropdown under the focus button) ----
+  const kf=n=>n==null?'?':(n>=1000?(n/1000).toFixed(n>=10000?0:1).replace(/\.0$/,'')+'k':''+n);
+  function togglePicker(ev){ if(ev) ev.stopPropagation();
+    const p=document.getElementById("picker");
+    const open=!p.classList.contains("open");
+    p.classList.toggle("open",open);
+    if(open){ PNAV=segsOf(folderOfPath(PROGRAM)); renderPicker(); }   // default to the focused folder
+  }
+  function closePicker(){ document.getElementById("picker").classList.remove("open"); }
+  function segHTML(bar,order){
+    const scope=bar.scope||0; let html="";
+    order.forEach(k=>{ const n=(bar.rungs||{})[k]||0;
+      if(n>0&&scope>0) html+=`<span class="sg" title="${pretty(k)}: ${n}" style="width:${(n/scope*100).toFixed(2)}%;background:${RUNG_COLOR[k]||'var(--text-muted)'}"></span>`; });
+    return html;   // whatever's left is the empty .seg background = remaining
+  }
+  const DOC_ORDER=["DOC_DRAFT","DOC_REVIEWED","DOC_VERIFIED"];                                   // low -> high
+  const CONF_ORDER=["CONF_DRAFT","CONF_VECTORS","CONF_LIVE","CONF_BATTLETESTED","CONF_REGRESSION"]; // low -> high
+  function brow(lbl,bar,order,extra){        // count overlaid on the bar -- no side column
+    const cnt=`${kf(bar.done||0)}/${kf(bar.scope)}${extra||''}`;
+    return `<div class="brow"><span class="lbl">${lbl}</span>`+
+      `<span class="seg" title="${lbl}: ${(bar.done||0).toLocaleString()} of ${bar.scope==null?'?':bar.scope.toLocaleString()}">`+
+      `${segHTML(bar,order)}<span class="cnt">${cnt}</span></span></div>`;
+  }
+  function bcardHTML(c){
+    const active=c.path===PROGRAM;
+    return `<div class="bcard ${active?'active':''}" onclick="pickBinary('${c.path.replace(/'/g,"\\'")}')">
+      <div class="bcard-top">
+        <span class="bcard-name">${c.name}<span class="fld">${c.folder}</span>${active?'<span class="here">focused</span>':''}</span>
+        <span class="bcard-rem">&#9650; <b>${(c.remaining_total||0).toLocaleString()}</b> left</span>
+      </div>
+      ${brow("Fn Doc",c.fn_doc,DOC_ORDER)}
+      ${brow("Fn Conf",c.fn_conf,CONF_ORDER)}
+      ${brow("Glob Doc",c.glob_doc,DOC_ORDER,` &middot;${Math.round(c.glob_doc.typed_pct)}%`)}
+    </div>`;
+  }
+  // ---- folder breadcrumb (recursive; each dropdown has an "All"; leading "All folders") ----
+  let PNAV=null;   // chosen folder segments; [] = all folders; null = init from focus
+  const segsOf=f=>String(f||"").split("/").filter(Boolean);
+  function folderOfPath(p){ const b=(BINARIES||[]).find(x=>x.path===p); return b?b.folder:""; }
+  function childrenAt(prefix){        // next-level folder names among binaries whose path starts with prefix
+    const kids=new Set();
+    (BINARIES||[]).forEach(b=>{ const s=segsOf(b.folder);
+      if(s.length>prefix.length && prefix.every((p,i)=>s[i]===p)) kids.add(s[prefix.length]); });
+    return [...kids].sort();
+  }
+  function binInNav(b){ const s=segsOf(b.folder); return PNAV.every((p,i)=>s[i]===p); }
+  function renderBreadcrumb(){
+    let html="", lvl=0;
+    while(true){
+      const opts=childrenAt(PNAV.slice(0,lvl));
+      if(opts.length===0) break;
+      const val=PNAV[lvl]||"";
+      html += (lvl>0?'<span class="pn-sep">/</span>':'')
+        + `<select class="pn-sel" onchange="onNav(${lvl},this.value)">`
+        + `<option value=""${val===""?" selected":""}>${lvl===0?"All folders":"All"}</option>`
+        + opts.map(o=>`<option value="${o}"${o===val?" selected":""}>${o}</option>`).join("")
+        + `</select>`;
+      if(!val) break;              // "All" chosen here -> recursive, no deeper dropdown
+      lvl++;
+    }
+    document.getElementById("pickerNav").innerHTML=html;
+  }
+  function onNav(lvl,value){
+    PNAV = value ? PNAV.slice(0,lvl).concat([value]) : PNAV.slice(0,lvl);  // concrete adds; All drops deeper
+    renderPicker();
+  }
+  function renderPicker(){
+    if(PNAV===null) PNAV=segsOf(folderOfPath(PROGRAM));
+    renderBreadcrumb();
+    const list=(BINARIES||[]).filter(binInNav);
+    document.getElementById("pickerBody").innerHTML=
+      list.map(bcardHTML).join("")||'<div class="worker-empty">No binaries in this folder.</div>';
+  }
+  function pickBinary(path){ PROGRAM=path; updFocusBtn(); closePicker(); syncServerContext(); refreshAll(); }
+  // Keep the server-side context (state meta: project_folder + active_binary)
+  // in step with the pipeline's focus, so queue refresh defaults, the globals
+  // worker, and the classic page all follow the same binary. active_binary
+  // takes the FULL program path — it uniquely disambiguates same-named DLLs
+  // across folders (func_in_binary accepts path or bare name; path preferred).
+  async function syncServerContext(){
+    const b=(BINARIES||[]).find(x=>x.path===PROGRAM); if(!b) return;
+    try{
+      await fetch("/api/context/folder",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:b.folder})});
+      await fetch("/api/context/binary",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({binary:PROGRAM})});
+    }catch(e){}
+  }
+  // click-away + Esc close the anchored popover
+  document.addEventListener("click",e=>{ if(!e.target.closest("#focusWrap")) closePicker(); });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") closePicker(); });
+
+  const RUNG_CLASS={CONF_REGRESSION:"b-regr",CONF_BATTLETESTED:"b-battle",CONF_LIVE:"b-live",DOC_REVIEWED:"b-docR",DOC_VERIFIED:"b-docV"};
+  const RUNG_COLOR={CONF_REGRESSION:"var(--rare)",CONF_BATTLETESTED:"var(--set)",CONF_LIVE:"var(--magic)",CONF_VECTORS:"var(--crafted)",CONF_DRAFT:"var(--crafted)",none:"var(--text-muted)",
+    DOC_VERIFIED:"var(--set)",DOC_REVIEWED:"var(--magic)",DOC_DRAFT:"var(--crafted)",untagged:"var(--text-muted)"};
+  const badge=(v)=>`<span class="badge ${RUNG_CLASS[v]||'b-none'}">${v==='none'?'&middot;none':v.replace('CONF_','').replace('DOC_','')}</span>`;
+  const pretty=(v)=>v.replace('CONF_','').replace('DOC_','');
+
+  // A bar lists ALL rungs in progression order (low->high); untagged/none is the FIRST
+  // (leftmost) segment. Legend always lists every rung, even at 0. Bar span drawn only when >0.
+  function seg(bar,legend,parts,total){
+    bar.innerHTML=""; legend.innerHTML="";
+    parts.forEach(p=>{
+      if(p.n>0){ const s=document.createElement("span"); s.style.background=p.c; s.style.width=(100*p.n/Math.max(1,total))+"%"; s.title=`${p.label} ${p.n}`; bar.appendChild(s); }
+      legend.insertAdjacentHTML("beforeend",`<span class="lg"><span class="sw" style="background:${p.c}"></span>${p.label} ${p.n}</span>`);
+    });
+  }
+  function renderBars(s,m){
+    const inscope=s.in_scope||1;
+    const col=c=>(m.rows||[]).reduce((a,rk)=>a+(((m.cell||{})[rk]||{})[c]||0),0);   // DOC column summed over all conf rows
+    const row=rk=>(m.cols||[]).reduce((a,ck)=>a+(((m.cell||{})[rk]||{})[ck]||0),0);  // conf row summed over all doc cols
+    // ---- Functions - Documentation: untagged -> DRAFT -> REVIEWED -> VERIFIED ----
+    const dd=col("DOC_DRAFT"), dr=col("DOC_REVIEWED"), dv=col("DOC_VERIFIED"), docTagged=dd+dr+dv;
+    document.getElementById("docPct").innerHTML=`<b>${(100*dv/inscope).toFixed(1)}%</b> at VERIFIED &middot; ${(100*docTagged/inscope).toFixed(1)}% any`;
+    seg(document.getElementById("docBar"),document.getElementById("docLegend"),[
+      {label:"untagged",n:Math.max(0,inscope-docTagged),c:"var(--text-muted)"},
+      {label:"DRAFT",n:dd,c:RUNG_COLOR.DOC_DRAFT},
+      {label:"REVIEWED",n:dr,c:RUNG_COLOR.DOC_REVIEWED},
+      {label:"VERIFIED",n:dv,c:RUNG_COLOR.DOC_VERIFIED},
+    ],inscope);
+    renderBandBar();
+    // ---- Functions - Conformance: none -> DRAFT -> VECTORS -> LIVE -> BATTLETESTED -> REGRESSION ----
+    const cDr=row("CONF_DRAFT"), cVe=row("CONF_VECTORS"), cLi=row("CONF_LIVE"), cBa=row("CONF_BATTLETESTED"), cRe=row("CONF_REGRESSION");
+    const proven=cDr+cVe+cLi+cBa+cRe;
+    document.getElementById("confPct").innerHTML=`<b>${(100*proven/inscope).toFixed(1)}%</b> of in-scope proven`;
+    seg(document.getElementById("confBar"),document.getElementById("confLegend"),[
+      {label:"none",n:Math.max(0,inscope-proven),c:"var(--text-muted)"},
+      {label:"DRAFT",n:cDr,c:RUNG_COLOR.CONF_DRAFT},
+      {label:"VECTORS",n:cVe,c:RUNG_COLOR.CONF_VECTORS},
+      {label:"LIVE",n:cLi,c:RUNG_COLOR.CONF_LIVE},
+      {label:"BATTLETESTED",n:cBa,c:RUNG_COLOR.CONF_BATTLETESTED},
+      {label:"REGRESSION",n:cRe,c:RUNG_COLOR.CONF_REGRESSION},
+    ],inscope);
+  }
+  // ---- Functions - Completeness: untagged -> COMPLETE_80 -> 90 -> 95 -> 100 ----
+  // Exclusive score-band tags; the "done" line follows the Target picker
+  // (good_enough_score). Rendered from /api/conformance/bands.
+  async function renderBandBar(){
+    const b=await api("/bands"); if(!b||b.in_scope==null) return;
+    let target=90;
+    try{ const r=await fetch("/api/queue/config"); const j=await r.json();
+         target=parseInt((j.config||j||{}).good_enough_score)||90; }catch(e){}
+    const n=t=>((b.bands||{})[t]||0);
+    const c80=n("COMPLETE_80"), c90=n("COMPLETE_90"), c95=n("COMPLETE_95"), c100=n("COMPLETE_100");
+    const inscope=b.in_scope||1;
+    const atLevel={80:c80+c90+c95+c100, 90:c90+c95+c100, 95:c95+c100, 100:c100};
+    const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
+    document.getElementById("bandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
+    seg(document.getElementById("bandBar"),document.getElementById("bandLegend"),[
+      {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
+      {label:"80+",n:c80,c:"var(--crafted)"},
+      {label:"90+",n:c90,c:"var(--magic)"},
+      {label:"95+",n:c95,c:"var(--set)"},
+      {label:"100",n:c100,c:"var(--rare)"},
+    ],inscope);
+  }
+
+  // Globals - Documentation: hatched typed-groundwork underlay is the untagged-first leftmost;
+  // solid DOC rungs on top in progression order DRAFT -> REVIEWED -> VERIFIED.
+  function segGlob(g){
+    const bar=document.getElementById("globBar"), legend=document.getElementById("globLegend");
+    bar.innerHTML=""; legend.innerHTML="";
+    const scope=g.scope||1, r=g.rungs||{};
+    document.getElementById("globPct").innerHTML=`<b>${(100*(g.done||0)/scope).toFixed(1)}%</b> documented &middot; ${g.typed_pct||0}% typed`;
+    if(g.typed>0){ const u=document.createElement("span"); u.className="glob-underlay";
+      u.style.width=(100*g.typed/scope)+"%"; u.title=`typed groundwork ${g.typed}`; bar.appendChild(u); }
+    [["DOC_DRAFT","var(--crafted)"],["DOC_REVIEWED","var(--magic)"],["DOC_VERIFIED","var(--set)"]].forEach(([k,c])=>{
+      const n=r[k]||0; if(!n) return;
+      const s=document.createElement("span"); s.className="rung"; s.style.background=c;
+      s.style.width=(100*n/scope)+"%"; s.title=`${pretty(k)} ${n}`; bar.appendChild(s); });
+    legend.innerHTML=`<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`+
+      `<span class="lg"><span class="sw" style="background:var(--crafted)"></span>DRAFT ${r.DOC_DRAFT||0}</span>`+
+      `<span class="lg"><span class="sw" style="background:var(--magic)"></span>REVIEWED ${r.DOC_REVIEWED||0}</span>`+
+      `<span class="lg"><span class="sw" style="background:var(--set)"></span>VERIFIED ${r.DOC_VERIFIED||0}</span>`;
+  }
+  const jsq=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const addrCell=a=>`<span class="mono" style="color:var(--text-muted);font-size:.6rem">${a}</span>`;
+  async function postJSON(path,body){ try{ await fetch("/api/conformance"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){} }
+  // Pinning STEERS the workers: a pin lands in the shared priority queue
+  // (queue["pinned"]) that BOTH the Doc selector (select_candidates) and the
+  // Prove/Port selector (select_port_candidates) honour, so a pinned function
+  // jumps the line for the Document and Prove workers. Backend resolves
+  // {program,address} -> canonical state key (handles the .0 suffix / 0x).
+  let PINNED=new Set();
+  const NAME_BY_ADDR={};   // bare addr -> function name, filled as inventories load (labels the pin chips)
+  function bareAddr(a){ return String(a).replace(/^0x/i,"").toLowerCase(); }
+  function isPinned(a){ const s="::"+bareAddr(a); for(const k of PINNED){ if(k.endsWith(s)) return true; } return false; }
+  async function loadPins(){ try{ const q=await (await fetch("/api/queue")).json(); PINNED=new Set((q&&q.pinned)||[]); }catch(e){} renderPins(); }
+  async function qpost(path,body){ try{ return await (await fetch("/api/queue"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json(); }catch(e){ return null; } }
+  async function pin(kind,address,name){ const r=await qpost("/pin",{program:PROGRAM,address});
+    if(r&&r.status==='already_done'){ flash(`${name||address} already at ${r.score}% (>= good@${r.good_enough}) — auto-dequeued`); }
+    else if(r&&r.key){ PINNED.add(r.key); flash(`pinned ${name||address} — workers will prioritize it`); }
+    else { flash(`could not pin ${name||address}`); }
+    renderPins(); loadInv(); }
+  async function unpin(kind,address){ await qpost("/unpin",{program:PROGRAM,address}); const s="::"+bareAddr(address); for(const k of [...PINNED]){ if(k.endsWith(s)) PINNED.delete(k); } renderPins(); loadInv(); }
+  // ---- steering: pin chips + queue maintenance + rescan (classic-dashboard port) ----
+  async function unpinKey(key){ await qpost("/unpin",{key}); PINNED.delete(key); renderPins(); loadInv(); }
+  function renderPins(){
+    const el=document.getElementById("pinChips"); if(!el) return;
+    if(!PINNED.size){ el.innerHTML='<span class="none">no pins</span>'; return; }
+    el.innerHTML=[...PINNED].map(k=>{
+      const [prog,addr]=k.includes("::")?k.split("::"):["",k];
+      const label=NAME_BY_ADDR[addr]||`${(prog||'').replace(/\.0$/,'').split('.dll')[0]}::${addr}`;
+      return `<span class="pin-chip" title="${esc(k)}">${esc(label)}<button class="px" title="unpin" onclick="unpinKey('${jsq(k)}')">&times;</button></span>`;
+    }).join("");
+  }
+  async function drainDone(){
+    const b=document.getElementById("btnDrain"); b.disabled=true;
+    const r=await qpost("/drain_done",{});
+    b.disabled=false;
+    flash(r&&!r.error?`drained: ${r.dequeued||0} dequeued, ${r.still_queued||0} still queued`:`drain failed${r&&r.error?': '+r.error:''}`);
+    loadPins();
+  }
+  async function refreshTop(){
+    const b=document.getElementById("btnTop50"); b.disabled=true;
+    await qpost("/refresh",{binary:PROGRAM,count:50});
+    setTimeout(()=>{ b.disabled=false; },3000);
+    flash("refreshing top 50 ROI scores");
+  }
+  // Rescan the workflow store from Ghidra. Scoped to the focused binary by NAME
+  // (the backend's binary_filter matches program names), or all=true for the
+  // whole project folder. Progress streams in via the scan_* socket events.
+  function rescan(refresh,all){
+    if(!socket){ flash("no socket"); return; }
+    const bin=(BINARIES||[]).find(x=>x.path===PROGRAM);
+    const program=all?null:(bin?bin.name:null);
+    if(!all&&!program){ flash("no binary focused"); return; }
+    socket.emit("request_rescan",{refresh,program});
+    setScanStatus(`${refresh?'full ':''}rescan requested (${program||'all binaries'})…`);
+  }
+  function setScanStatus(text,cls){
+    const el=document.getElementById("scanStatus"); if(!el) return;
+    el.textContent=text||""; el.className="steer-status"+(cls?" "+cls:"");
+  }
+  let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
+  const SAMPLE_GLOB={total:2120,shown:5,rows:[
+    {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
+    {name:"g_awSuperUniquesHcIdxLookup",address:"0x6fd9b220",type:"word",typed:false,doc:"none"},
+    {name:"g_pSkillsTxt",address:"0x6fde9f10",type:"SkillsTxt *",typed:true,doc:"DOC_REVIEWED"},
+    {name:"g_pDataTables",address:"0x6fde9e1c",type:"DataTablesContext *",typed:true,doc:"none"},
+    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:false,doc:"none"}],
+    summary:{scope:2120,typed:697,typed_pct:32.9,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},done:0,remaining:2120}};
+  let globTimer; function debouncedGlob(){ clearTimeout(globTimer); globTimer=setTimeout(loadGlobals,220); }
+  async function loadGlobals(){
+    const q=document.getElementById("globSearch").value;
+    const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200")||SAMPLE_GLOB;
+    document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
+    if(g.summary) segGlob(g.summary);
+    document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
+      `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
+      `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+
+      `<td>${badge(r.doc)}</td>`+
+      `</tr>`).join("")
+      ||'<div class="worker-empty">none</div>';
+  }
+  async function loadInv(){
+    const q=document.getElementById("invSearch").value;
+    const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000")||SAMPLE.inventory;
+    document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
+    (inv.rows||[]).forEach(f=>{ NAME_BY_ADDR[bareAddr(f.address)]=f.name; });
+    renderPins();
+    document.getElementById("invBody").innerHTML=inv.rows.map(f=>
+      `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
+      `<td class="act">${isPinned(f.address)?`<button class="pin-btn pinned" title="pinned — unpin" onclick="event.stopPropagation();unpin('fn','${f.address}')">&#9733;</button>`:`<button class="pin-btn" title="pin — Doc &amp; Prove workers prioritize this" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button>`}</td></tr>`).join("");
+  }
+  async function openFn(addr){
+    const f=await api("/function/"+addr)||{address:addr,doc:"none",conf:"CONF_LIVE",name:addr,proof:SAMPLE.inventory.rows[0]};
+    document.getElementById("drName").textContent=f.name||addr;
+    document.getElementById("drAddr").textContent=f.address;
+    document.getElementById("drBadges").innerHTML=badge(f.doc)+badge(f.conf)+(f.proof&&f.proof.vetted?`<span class="badge b-vet">vetted</span>`:'');
+    const p=f.proof||{};
+    const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // original = live Ghidra decompilation; fall back to signature, then a clear notice
+    const orig = f.decompile ? esc(f.decompile)
+               : f.signature ? esc(f.signature)+'\n\n// (full decompilation unavailable)'
+               : '// no decompilation available from Ghidra for this function';
+    // equivalent = proven D2MOO reimpl code read from the file the proof points at
+    const equiv = f.reimpl_code ? esc(f.reimpl_code)
+                : f.reimpl_path ? '// equivalent expected at '+esc(f.reimpl_path)+'\n// (file not found on disk)'
+                : '// no proven equivalent yet';
+    const equivHdr = f.reimpl_path ? 'D2MOO equivalent — '+esc(f.reimpl_path) : 'D2MOO equivalent';
+    document.getElementById("drBody").innerHTML=`
+      <div class="sec">Proven 1:1 code</div>
+      <div class="codegrid">
+        <div><div class="mono" style="font-size:.58rem;color:var(--text-muted);margin-bottom:4px">original - Ghidra</div><pre>${orig}</pre></div>
+        <div><div class="mono" style="font-size:.58rem;color:var(--set);margin-bottom:4px">${equivHdr}</div><pre>${equiv}</pre></div>
+      </div>
+      <div class="sec">Proof</div>
+      <div class="proofgrid">
+        <div class="pstat"><div class="pk">method</div><div class="pv">${p.method||'-'}</div></div>
+        <div class="pstat"><div class="pk">vectors</div><div class="pv">${p.vectors||'-'}</div></div>
+        <div class="pstat"><div class="pk">shadow</div><div class="pv">${p.shadow_hits!=null?p.shadow_hits:'-'}</div></div>
+        <div class="pstat"><div class="pk">divergence</div><div class="pv" style="color:var(--set)">${p.shadow_div!=null?p.shadow_div:'0'}</div></div>
+      </div>
+      <div class="sec">Detail</div>
+      <pre>${JSON.stringify(p,null,2)}</pre>`;
+    document.getElementById("scrim").classList.add("open"); document.getElementById("drawer").classList.add("open");
+  }
+  function closeDrawer(){ document.getElementById("scrim").classList.remove("open"); document.getElementById("drawer").classList.remove("open"); }
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
+  function cellClick(rk,ck){ document.getElementById("invSearch").focus(); }
+
+  // ---------- actions (emit to backend; graceful if socket absent) ----------
+  let socket=null;
+  // Lanes map to real backend worker modes:
+  //   Document -> request_start_worker mode=functions
+  //   Prove    -> request_start_worker mode=port (conformance)
+  //   Globals  -> request_start_globals_worker
+  //   Triage   -> request_start_triage (non-LLM classify script)
+  // "All" checkbox: when on, the worker runs over every function, so the count field is moot.
+  function syncAllFns(){
+    const all=document.getElementById("allFns").checked;
+    const c=document.getElementById("count");
+    c.disabled=all; c.style.opacity=all?.4:1; c.title=all?"count ignored — All is on":"count";
+  }
+  function startLane(force){
+    const lane=force||document.getElementById("lane").value;
+    const provider=document.getElementById("provider").value;
+    const count=+document.getElementById("count").value;
+    const continuous=document.getElementById("allFns").checked;   // "All" -> run every function, ignore count
+    const binary=PROGRAM;
+    if(!socket){ flash("no socket"); return; }
+    if(lane==="globals"){
+      socket.emit("request_start_globals_worker",{binary,provider,count,continuous});
+    } else if(lane==="triage"){
+      socket.emit("request_start_triage",{binary});
+    } else if(lane==="assess"){
+      // "All" -> count 0 so the backend omits --assess-count and scores every candidate
+      socket.emit("request_start_assess",{binary, count: continuous?0:count, continuous});
+    } else {
+      const mode=(lane==="prove"||lane==="port")?"port":"functions";
+      socket.emit("request_start_worker",{binary,provider,count,continuous,mode});
+    }
+    flash(`start ${lane} on ${binary||'?'}`);
+  }
+  function triage(n){ if(socket) socket.emit("request_start_triage",{binary:PROGRAM, count:n||0}); flash("triage "+(n?n:"all")); }
+  function flash(m){ const h=document.getElementById("workerHint"); const o=h.textContent; h.textContent=m+"..."; setTimeout(()=>h.textContent=o,1200); }
+
+  // ---------- settings slide-out (queue config via /api/queue/config) ----------
+  const SETTINGS_PROVIDERS = ['minimax','gemini','claude','codex'];
+  let _settingsLoaded = false;
+  function toggleSettings(){
+    const pop = document.getElementById("settingsPopout");
+    const btn = document.getElementById("btnToggleSettings");
+    const open = !pop.classList.contains("active");
+    pop.classList.toggle("active", open);
+    if(btn) btn.classList.toggle("primary", open);
+    if(open) loadQueueConfig();
+  }
+  async function loadQueueConfig(){
+    let cfg = {};
+    try { const r = await fetch("/api/queue/config"); const j = await r.json(); cfg = j.config || j || {}; }
+    catch(e){ flash("settings load failed"); return; }
+    const g = id => document.getElementById(id);
+    if(g("goodEnoughInput"))  g("goodEnoughInput").value  = cfg.good_enough_score!=null ? cfg.good_enough_score : 80;
+    if(g("assessDraftInput")) g("assessDraftInput").value = cfg.assess_draft_score!=null ? cfg.assess_draft_score : 80;
+    if(g("requireScoredInput")) g("requireScoredInput").checked = !!cfg.require_scored;
+    if(g("debugModeInput"))   g("debugModeInput").checked = !!cfg.debug_mode;
+    if(g("plateScaffoldInput")) g("plateScaffoldInput").checked = !!cfg.plate_scaffold;
+    if(g("handoffProviderInput")) g("handoffProviderInput").value = cfg.complexity_handoff_provider || "off";
+    if(g("handoffMaxInput"))  g("handoffMaxInput").value  = cfg.complexity_handoff_max!=null ? cfg.complexity_handoff_max : 0;
+    if(g("auditProviderInput")) g("auditProviderInput").value = cfg.audit_provider || "off";
+    if(g("auditMinDeltaInput")) g("auditMinDeltaInput").value = cfg.audit_min_delta!=null ? cfg.audit_min_delta : 5;
+    // provider models grid: keep the 5 header cells, rebuild the provider rows
+    const grid = g("modelsGrid");
+    while(grid.children.length > 5) grid.removeChild(grid.lastChild);
+    const pm = cfg.provider_models || {}, pt = cfg.provider_max_turns || {};
+    SETTINGS_PROVIDERS.forEach(prov=>{
+      const mm = pm[prov] || {};
+      const lab = document.createElement("div"); lab.className = "models-provider"; lab.textContent = prov; grid.appendChild(lab);
+      ["FULL","FIX","VERIFY"].forEach(mode=>{
+        const inp = document.createElement("input");
+        inp.type="text"; inp.className="worker-input"; inp.id=`model-${prov}-${mode}`;
+        inp.value = mm[mode] || ""; inp.placeholder = mode.toLowerCase(); inp.style.width="100%";
+        inp.addEventListener("change", saveQueueConfig); grid.appendChild(inp);
+      });
+      const turns = document.createElement("input");
+      turns.type="number"; turns.className="worker-input"; turns.id=`turns-${prov}`;
+      turns.value = pt[prov]!=null ? pt[prov] : 25; turns.min="1"; turns.max="999"; turns.style.width="100%";
+      turns.addEventListener("change", saveQueueConfig); grid.appendChild(turns);
+    });
+    _settingsLoaded = true;
+  }
+  function collectProviderModels(){
+    const pm = {};
+    SETTINGS_PROVIDERS.forEach(p=>{ pm[p]={}; ["FULL","FIX","VERIFY"].forEach(m=>{ const el=document.getElementById(`model-${p}-${m}`); if(el && el.value.trim()) pm[p][m]=el.value.trim(); }); });
+    return pm;
+  }
+  function collectProviderMaxTurns(){
+    const pt = {};
+    SETTINGS_PROVIDERS.forEach(p=>{ const el=document.getElementById(`turns-${p}`); if(el){ const v=parseInt(el.value); if(!isNaN(v)) pt[p]=v; } });
+    return pt;
+  }
+  async function saveQueueConfig(){
+    if(!_settingsLoaded) return;   // don't POST an empty form before load populates it
+    const g = id => document.getElementById(id);
+    const v = (id,d) => { const e=g(id); return e ? e.value : d; };
+    const cfg = {
+      good_enough_score: parseInt(v("goodEnoughInput",80)) || 80,
+      assess_draft_score: parseInt(v("assessDraftInput",80)) || 80,
+      require_scored: g("requireScoredInput") ? g("requireScoredInput").checked : false,
+      debug_mode: g("debugModeInput") ? g("debugModeInput").checked : false,
+      plate_scaffold: g("plateScaffoldInput") ? g("plateScaffoldInput").checked : false,
+      complexity_handoff_provider: v("handoffProviderInput","off")==="off" ? null : v("handoffProviderInput","off"),
+      complexity_handoff_max: parseInt(v("handoffMaxInput",0)) || 0,
+      audit_provider: v("auditProviderInput","off")==="off" ? null : v("auditProviderInput","off"),
+      audit_min_delta: parseInt(v("auditMinDeltaInput",5)) || 5,
+      provider_models: collectProviderModels(),
+      provider_max_turns: collectProviderMaxTurns(),
+    };
+    try { await fetch("/api/queue/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(cfg)}); flash("settings saved"); }
+    catch(e){ flash("settings save failed"); }
+  }
+
+  async function refreshAll(){
+    const s=await api("/summary")||SAMPLE.summary;
+    const m=await api("/matrix")||SAMPLE.matrix;
+    const ik=await api("/intake")||SAMPLE.intake;
+    renderBars(s,m);
+    document.getElementById("intakeN").innerHTML=`${(ik.untriaged||0).toLocaleString()} <small>/ ${(ik.in_scope||0).toLocaleString()} in scope &middot; ${ik.excluded_lib||0} excluded</small>`;
+    document.getElementById("workerHint").textContent=`last sync ${s.last_sync||'-'}`;
+    loadPins(); loadInv(); loadGlobals();
+    checkTypes();
+  }
+
+  // ---------- canonical D2MOO types: session-cached check + slide-out bar ----------
+  const _typesChecked = new Set();   // programs checked this session (once-per-session cadence)
+  let _typesBusy = false;
+  function _shortBin(p){ return (p||'').split(/[\\/]/).pop() || p || 'this binary'; }
+  // ORDERED checks: (1) missing/stale canonical types FIRST (prerequisite -- can't normalize to
+  // uint32_t until it exists); (2) only once loaded, warn about existing NATIVE-typed variables.
+  async function checkTypes(force){
+    const prog = PROGRAM; if(!prog) return;
+    if(!force && _typesChecked.has(prog)) return;      // once per binary per session
+    _typesChecked.add(prog);
+    const bar=document.getElementById("typesBar"), msg=document.getElementById("typesBarMsg"),
+          btn=document.getElementById("typesBarBtn");
+    const st = await api("/types_status"+(force?"?force=1":""));
+    if(!st){ return; }
+    // (1) MISSING / STALE canonical types -> load first, stop here
+    if(!st.loaded || st.stale){
+      bar.classList.remove("busy","ok"); bar.dataset.mode="load";
+      btn.style.display="";                          // show the Load button
+      const n = st.count ? st.count.toLocaleString() : '~1000';
+      msg.innerHTML = st.stale
+        ? `<b>${_shortBin(prog)}</b>&rsquo;s canonical types are out of date (${n}) &mdash; reload to match the current D2MOO headers.`
+        : `<b>${_shortBin(prog)}</b> is missing D2MOO&rsquo;s canonical data types (${n}) &mdash; variables can&rsquo;t be validly typed.`;
+      btn.disabled=false; btn.textContent = st.stale ? "Reload types" : "Load types";
+      bar.classList.add("active"); return;
+    }
+    // (2) LOADED -> INFORMATIONAL warning if existing variables use native / untyped (undefined*)
+    // types. No fix button: Ghidra collapses stdint typedefs to their width builtin, so bulk
+    // scalar normalization is cosmetic -- real typing is the doc pipeline's job (struct identity).
+    const nt = await api("/native_types_status"+(force?"?force=1":""));
+    if(nt && nt.native > 0){
+      bar.classList.remove("busy","ok"); bar.dataset.mode="detect";
+      btn.style.display="none";                      // detection only -- no action
+      const parts=[];
+      if(nt.unrefined) parts.push(`${nt.unrefined.toLocaleString()} on native width types`);
+      if(nt.invalid)   parts.push(`${nt.invalid.toLocaleString()} still untyped (undefined*)`);
+      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals &mdash; these need real D2MOO types (via the Document/Prove lanes).`;
+      bar.classList.add("active"); return;
+    }
+    bar.classList.remove("active","busy","ok");     // all clean
+  }
+  function loadTypes(){
+    if(_typesBusy || !PROGRAM || !socket){ return; }
+    _typesBusy = true;
+    document.getElementById("typesBar").classList.add("active","busy");
+    document.getElementById("typesBarBtn").disabled = true;
+    document.getElementById("typesBarMsg").textContent = "Starting type load…";
+    socket.emit("request_load_types", {binary: PROGRAM});
+  }
+
+  // ---------- worker panes: classic-dashboard look -- per-worker streaming pane, fn-blocks, auto-scroll ----------
+  const workerPanes = {};              // id -> {element, output, currentFnBlock, currentFuncName, currentFuncAddr}
+  const syntheticPanes = new Set();    // panes not backed by a WorkerManager worker (e.g. triage) -- exempt from prune
+  let _focusedWorkerId = null;
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const shortAddr = a => a ? ('0x' + String(a).replace(/^0x/,'')) : '';
+  function getOrCreatePane(id, provider, binary){
+    if(!id) return null;
+    if(workerPanes[id]) return workerPanes[id];
+    const grid = document.getElementById("workerCards");
+    const empty = grid.querySelector(".worker-empty"); if(empty) empty.remove();
+    const pane = document.createElement("div");
+    pane.className = "worker-pane running"; pane.id = `wp-${id}`;
+    pane.innerHTML =
+      `<div class="worker-pane-header">`+
+        `<span class="wp-title" id="wp-title-${id}">${esc(provider||'worker')} <span class="wp-id">#${esc(id)}</span></span>`+
+        `<span class="wp-status" id="wp-status-${id}">${esc((binary||'').split('/').pop()||'')}</span>`+
+        `<span class="wp-alert" id="wp-alert-${id}"></span>`+
+        `<div class="wp-actions">`+
+          `<button class="btn icon-btn" onclick="focusWorker('${id}')" id="wp-focus-${id}" title="Focus worker"><span class="icon-focus"></span></button>`+
+          `<button class="btn btn-danger icon-btn" onclick="stopWorker('${id}')" id="wp-stop-${id}" title="Stop worker"><span class="icon-stop"></span></button>`+
+        `</div>`+
+      `</div>`+
+      `<div class="wp-config" id="wp-config-${id}"></div>`+
+      `<div class="worker-pane-output" id="wp-out-${id}"></div>`;
+    grid.appendChild(pane);
+    workerPanes[id] = { element:pane, output:pane.querySelector(".worker-pane-output"), currentFnBlock:null, currentFuncName:null, currentFuncAddr:null };
+    return workerPanes[id];
+  }
+  function appendToPane(id, text, type){
+    if(!id || !text || !String(text).trim()) return;
+    const p = getOrCreatePane(id, null, ''); if(!p) return;
+    const atBottom = p.output.scrollHeight - p.output.scrollTop - p.output.clientHeight < 40;
+    const el = document.createElement("div");
+    el.className = "activity-entry activity-" + (type||'neutral');
+    el.textContent = text;
+    (p.currentFnBlock && p.currentFnBlock.body ? p.currentFnBlock.body : p.output).appendChild(el);
+    if(p.output.children.length > 220) p.output.removeChild(p.output.firstChild);
+    if(atBottom) p.output.scrollTop = p.output.scrollHeight;
+  }
+  function _openFnBlock(p, name, address){
+    if(p.currentFnBlock) _closeFnBlock(p, null, null, true);
+    const block = document.createElement("div"); block.className = "fn-block";
+    const header = document.createElement("div"); header.className = "fn-name fn-header"; header.textContent = `${name||''} @ ${shortAddr(address)}`;
+    block.appendChild(header);
+    const body = document.createElement("div"); body.className = "fn-body"; block.appendChild(body);
+    p.output.appendChild(block); p.currentFnBlock = { block, body };
+    p.output.scrollTop = p.output.scrollHeight;
+  }
+  function _closeFnBlock(p, name, address, interrupted){
+    if(!p || !p.currentFnBlock) return;
+    const footer = document.createElement("div"); footer.className = "fn-name fn-footer";
+    const nm = name || p.currentFuncName || '?'; const ad = address || p.currentFuncAddr || '?';
+    footer.textContent = interrupted ? `${nm} @ ${shortAddr(ad)} (interrupted)` : `${nm} @ ${shortAddr(ad)}`;
+    p.currentFnBlock.block.appendChild(footer); p.currentFnBlock = null;
+    p.output.scrollTop = p.output.scrollHeight;
+  }
+  function setPaneAlert(id, alert){
+    const p = workerPanes[id], badge = document.getElementById(`wp-alert-${id}`);
+    if(!p || !badge) return;
+    if(alert && alert.type==='provider_timeout'){
+      badge.textContent = `TIMEOUT${alert.timeout_secs?' '+alert.timeout_secs+'s':''}`;
+      badge.title = alert.message || 'Provider timeout'; badge.classList.add('active'); p.element.classList.add('timeout');
+    } else { badge.textContent=''; badge.classList.remove('active'); p.element.classList.remove('timeout'); }
+  }
+  function renderWorkerConfig(id, snap){
+    const el = document.getElementById(`wp-config-${id}`); if(!el) return;
+    if(!snap || typeof snap!=='object'){ el.style.display='none'; el.textContent=''; return; }
+    const provs = snap.providers||{}, pe = provs[snap.primary_provider]||{}, tk = [];
+    const fullModel = (pe.models||{}).FULL; if(fullModel) tk.push(fullModel);
+    if(pe.max_turns!==undefined) tk.push(`t:${pe.max_turns}`);
+    tk.push(snap.audit_provider ? `audit:${snap.audit_provider} Δ${snap.audit_min_delta}` : 'audit:off');
+    tk.push(snap.complexity_handoff_provider ? `esc:${snap.complexity_handoff_provider}` : 'esc:off');
+    if(snap.good_enough_score!==undefined) tk.push(`good@${snap.good_enough_score}`);
+    el.textContent = tk.join(' · '); el.style.display = '';
+  }
+  function markPaneFinished(id, reason){
+    const p = workerPanes[id]; if(!p) return;
+    if(p.currentFnBlock) _closeFnBlock(p, null, null, true);
+    p.element.className = 'worker-pane finished';
+    const st = document.getElementById(`wp-status-${id}`); if(st) st.textContent = reason||'finished';
+    const stop = document.getElementById(`wp-stop-${id}`); if(stop) stop.style.display = 'none';
+  }
+  function stopWorker(id){ if(socket) socket.emit('request_stop_worker',{worker_id:id}); flash('stopping '+id); }
+  function focusWorker(id){
+    const setBtn=(wid,on)=>{ const b=document.getElementById(`wp-focus-${wid}`); if(b) b.classList.toggle('is-active',on); const pp=workerPanes[wid]; if(pp) pp.element.classList.toggle('focused',on); };
+    if(_focusedWorkerId===id){ setBtn(id,false); _focusedWorkerId=null; return; }
+    if(_focusedWorkerId) setBtn(_focusedWorkerId,false);
+    _focusedWorkerId=id; setBtn(id,true);
+  }
+  // worker_status is a BARE LIST of worker rows; update panes IN PLACE (never wipe the logs).
+  function renderWorkers(st){
+    const w = Array.isArray(st) ? st : ((st && st.workers) || []);
+    const grid = document.getElementById("workerCards"); const hint = document.getElementById("workerHint");
+    const ids = new Set(w.map(x=>String(x.id)));
+    Object.keys(workerPanes).forEach(id=>{ if(!ids.has(String(id)) && !syntheticPanes.has(String(id))){ workerPanes[id].element.remove(); delete workerPanes[id]; if(_focusedWorkerId===id)_focusedWorkerId=null; } });
+    if(!w.length){ if(!grid.querySelector(".worker-empty")) grid.innerHTML='<div class="worker-empty">No workers running. Pick a lane and Start.</div>'; if(hint) hint.textContent='0 workers'; return; }
+    const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
+    if(hint) hint.textContent = `${running} running / ${w.length} total`;
+    w.forEach(x=>{
+      const p = getOrCreatePane(x.id, x.provider, x.binary);
+      const titleEl = document.getElementById(`wp-title-${x.id}`); if(titleEl && x.provider) titleEl.innerHTML = `${esc(x.provider)} <span class="wp-id">#${esc(x.id)}</span>`;
+      if(['finished','stopped'].includes(x.status)){ markPaneFinished(x.id, x.status); return; }
+      const cls = x.status==='stopping' ? 'stopping' : x.status==='quota_paused' ? 'quota_paused' : 'running';
+      p.element.className = 'worker-pane ' + cls + (_focusedWorkerId===String(x.id)||_focusedWorkerId===x.id?' focused':'') + (p.element.classList.contains('timeout')?' timeout':'');
+      setPaneAlert(x.id, x.last_alert);
+      renderWorkerConfig(x.id, x.config_snapshot);
+      const stt = document.getElementById(`wp-status-${x.id}`);
+      if(stt){
+        const pr = x.progress || {};
+        const done = (pr.completed||0)+(pr.skipped||0)+(pr.failed||0);
+        const cnt = x.continuous ? 'auto' : `${done}/${x.count||'?'}`;
+        const skip = pr.skipped>0 ? ` ${pr.skipped}skip` : '';
+        const to = x.timeout_count>0 ? ` | ${x.timeout_count} timeout${x.timeout_count>1?'s':''}` : '';
+        let cur=''; if(pr.current) cur = typeof pr.current==='string' ? pr.current : (pr.current.name || pr.current.address || '');
+        stt.innerHTML = esc(`${cnt} | ${pr.completed||0}ok ${pr.failed||0}fail${skip}${to}`) + (cur ? ` | <span class="wp-current">${esc(cur)}</span>` : '');
+      }
+    });
+  }
+
+  // ---------- socket (live-dot + streaming worker output + push refresh) ----------
+  try {
+    socket=io();
+    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; socket.emit("request_worker_status"); });
+    socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
+    let confTimer;   // debounce: workers emit conf_changed per documented/proven item
+    socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
+    let wsTimer;
+    socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
+    socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
+    socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
+    // --- scan lifecycle (steering panel) ---
+    socket.on("scan_acknowledged",d=>setScanStatus(`scan accepted${d.program?' for '+d.program:''}${d.refresh?' (full refresh)':''}…`));
+    socket.on("scan_started",d=>setScanStatus(`scan started (${d.mode||'incremental'}${d.folder?': '+d.folder:''})`));
+    socket.on("scan_progress",d=>{
+      const idx=(d.index||0)+1, total=d.total||0, scored=d.scored||0, progTotal=d.program_total||0;
+      const phase=d.phase||'scoring', failed=d.failed_batches||0;
+      const pct=progTotal>0?Math.round(scored/progTotal*100):0;
+      setScanStatus(`[${idx}/${total}] ${d.program||''} — ${phase==='scoring'&&progTotal>0?pct+'%':phase}${failed?' ('+failed+' failed batches)':''}`);
+    });
+    socket.on("scan_complete",d=>{
+      setScanStatus(`scan complete: ${d.total||0} functions, ${d.done||0} done`,"ok");
+      setTimeout(()=>setScanStatus(""),6000);
+      refreshAll();
+    });
+    socket.on("scan_error",d=>setScanStatus(`scan error: ${d.error||'unknown'}`,"err"));
+    // canonical-types load progress
+    socket.on("types_load_started", ()=>{ document.getElementById("typesBarMsg").textContent="Loading canonical types…"; });
+    socket.on("types_load_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });
+    socket.on("types_load_done", d=>{
+      _typesBusy=false; const bar=document.getElementById("typesBar");
+      const btn=document.getElementById("typesBarBtn"); btn.disabled=false;
+      if(d && d.ok){
+        bar.classList.remove("busy"); bar.classList.add("ok");
+        document.getElementById("typesBarMsg").innerHTML=`&#10003; Loaded ${Number(d.added||0).toLocaleString()} canonical types.`;
+        _typesChecked.delete(d.program||PROGRAM);
+        // after loading, re-check -> the bar transitions to the Normalize warning if needed
+        setTimeout(()=>{ bar.classList.remove("active","ok"); checkTypes(true); }, 2600);
+        flash("canonical types loaded");
+      } else {
+        bar.classList.remove("busy");
+        document.getElementById("typesBarMsg").textContent = "Load failed: " + ((d&&d.error)||"unknown");
+        flash("type load failed");
+      }
+    });
+    // --- streaming model/tool output per worker, grouped into function blocks (auto-scrolling) ---
+    function _startBlock(d){ const p=getOrCreatePane(d.worker_id,null,''); if(p){ _openFnBlock(p, d.name||d.address, d.address); p.currentFuncName=d.name||d.address; p.currentFuncAddr=d.address; } }
+    function _endBlock(d, line, cls){ const p=workerPanes[d.worker_id]; appendToPane(d.worker_id, line, cls); if(p && p.currentFnBlock) _closeFnBlock(p, d.name, d.address, false); }
+    socket.on("function_started", _startBlock);
+    socket.on("global_started",   _startBlock);
+    socket.on("function_mode",  d=>appendToPane(d.worker_id, `${d.mode||''} | ${d.model||''} | score: ${d.score}%`, 'neutral'));
+    socket.on("tool_result",    d=>{ const meta=[d.bytes!=null?d.bytes+'b':'', d.duration_ms!=null?d.duration_ms+'ms':''].filter(Boolean).join(', ');
+      appendToPane(d.worker_id, `[mcp] ${d.tool} → ${d.status}${d.error?' - '+d.error:''}${meta?' ('+meta+')':''}`, (d.status==='failed'||d.status==='error')?'error':'tool'); });
+    socket.on("model_text",     d=>{ if(d.text) appendToPane(d.worker_id, String(d.text).substring(0,300), 'text'); });
+    socket.on("score_update",   d=>{ const del=(d.score_after||0)-(d.score_before||0); appendToPane(d.worker_id, `Score: ${d.score_before}% -> ${d.score_after}% (${del>=0?'+':''}${del}%) | ${d.result||''}`, del>0?'success':'neutral'); });
+    socket.on("function_complete", d=>_endBlock(d, d.result==='skipped'?`SKIP${d.skip_type?' ('+d.skip_type+')':''}: ${d.reason||''}`:`Complete: ${d.result}`, d.result==='completed'?'success':(d.result==='skipped'?'neutral':'error')));
+    socket.on("global_complete",   d=>_endBlock(d, (d.result==='skipped'||d.result==='already_clean')?`SKIP: ${d.reason||d.result}`:`Complete: ${d.result||'done'}${d.fixed!=null?' (fixed '+d.fixed+')':''}`, (d.result==='completed'||d.result==='improved')?'success':'neutral'));
+    socket.on("provider_timeout",  d=>{ if(d.worker_id){ getOrCreatePane(d.worker_id,d.provider,null); appendToPane(d.worker_id, `[watchdog] ${d.message||'provider timeout'} — killed stalled session`, 'error'); setPaneAlert(d.worker_id, d); } });
+    // --- Prove (port) lane: per-step progress inside the current function block ---
+    socket.on("port_drafted",        d=>appendToPane(d.worker_id, `drafting${d.status?' ('+d.status+')':''}…`, 'neutral'));
+    socket.on("port_vectors_minted", d=>appendToPane(d.worker_id, `vectors: ${d.count} minted${d.errors?` (${d.errors} mint errors)`:''}`, d.count?'tool':'error'));
+    socket.on("port_harness_result", d=>appendToPane(d.worker_id, `harness: ${d.passed??'?'}/${d.total??'?'} ${d.ok?'OK':'FAILED'} (${d.attempts||1} attempt${(d.attempts||1)==1?'':'s'})`, d.ok?'success':'error'));
+    socket.on("port_live_prove_result", d=>appendToPane(d.worker_id, `live prove: ${d.passed??'?'}/${d.total??'?'} ${d.ok?'OK':'FAILED'}`, d.ok?'success':'error'));
+    socket.on("shadow_promote_result",  d=>appendToPane(d.worker_id, d.promoted?'shadow: staged for battletest':`shadow: deferred${d.reason?' ('+d.reason+')':''}`, d.promoted?'success':'neutral'));
+    socket.on("port_proven_pending_review", d=>appendToPane(d.worker_id, `PROVEN — pending review${d.header_path?': '+d.header_path:''}`, 'success'));
+    socket.on("port_pass_done", d=>{
+      const totals=Object.entries(d.totals||{}).map(([k,v])=>`${v} ${k}`).join(', ');
+      appendToPane(d.worker_id, `prove pass done: ${d.processed||0}/${d.count||'?'} processed — ${d.stopped_reason||'done'}${totals?' | '+totals:''}`, (d.processed||0)>0?'success':'error');
+      flash(`prove pass done (${d.stopped_reason||'done'})`);
+    });
+    // Retries (e.g. malformed model responses) land as runs.jsonl rows with a
+    // *_retry result — surface them live so a multi-minute retry loop is
+    // visibly "still working", not silently hung.
+    socket.on("run_logged", d=>{
+      if(d && d.worker_id && typeof d.result==='string' && /_retry$/.test(d.result) && /^port/.test(d.mode||''))
+        appendToPane(d.worker_id, `retry: ${d.result}${d.mode?' ['+d.mode+']':''}`, 'error');
+    });
+    // --- triage/assess: not WorkerManager workers; stream their subprocess output into a synthetic pane ---
+    socket.on("triage_started", d=>{
+      const id=d.id||'triage', label=d.label||id; syntheticPanes.add(String(id));
+      const p=getOrCreatePane(id, label, d.program||'');
+      p.output.innerHTML=''; p.currentFnBlock=null;                 // reset if re-run
+      p.element.className='worker-pane running';
+      const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent='running';
+      const stopBtn=document.getElementById(`wp-stop-${id}`); if(stopBtn) stopBtn.style.display='none';   // can't stop a quick subprocess
+      const head = id==='assess' ? '▶ assess: score in-scope functions → stamp DOC_DRAFT on documented ones'
+                                 : '▶ triage: scope-classify (drain LIB_) + enqueue backlog';
+      appendToPane(id, head, 'fn-header');
+    });
+    socket.on("triage_line", d=>{
+      const t=d.text||''; let cls='neutral';
+      if(d.error||/\berror\b|traceback|\bfail/i.test(t)) cls='error';
+      else if(/->\s*DOC_DRAFT/i.test(t)) cls='success';                    // assess stamped a rung
+      else if(/^\s*\[\d+\/\d+\]/.test(t)) cls='tool';                       // other per-item -> dim
+      else if(/\btagged LIB_/i.test(t)) cls='tool';
+      else if(/enqueued|excluded \d|backlog|complete|drain|never-evaluated|assessed \d|stamped|scored \d/i.test(t)) cls='success';
+      appendToPane(d.id||'triage', t, cls);
+    });
+    socket.on("triage_done", d=>{
+      const id=d.id||'triage';
+      appendToPane(id, d.code===0?`✔ ${id} complete (${d.lines||0} lines)`:`${id} exited ${d.code}`, d.code===0?'success':'error');
+      const p=workerPanes[id]; if(p){ p.element.className='worker-pane finished'; }
+      const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent = d.code===0?'done':'error';
+      flash(d.code===0?'triage complete':'triage failed');
+      refreshAll();
+    });
+  } catch(e){}
+
+  // load the binary list first (sets the focus), then render everything for it
+  loadBinaries().then(refreshAll);
+</script>
+</body>
+</html>

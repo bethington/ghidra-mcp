@@ -2,9 +2,12 @@
 
 import argparse
 import os
+import re
 import socket
 
+import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.middleware.cors import CORSMiddleware
 
 from . import state
 from .config import logger
@@ -48,6 +51,52 @@ def _wildcard_allowed_hosts() -> list[str]:
         if ":" in h and not h.startswith("["):
             out.append(f"[{h}]:*")
     return out
+
+
+def _cors_origin_regex(bind_host: str) -> str:
+    """Build the allowed-Origin regex for the HTTP transports.
+
+    CORS only gates browsers — native MCP clients never send a preflight —
+    so this mirrors the Host-header policy: loopback origins on any port
+    are always allowed (browser tools like MCP Inspector serve their UI
+    from ``http://localhost:<port>``), a non-loopback bind additionally
+    allows the bind host itself, a wildcard bind allows the machine's own
+    hostnames/IPs, and ``GHIDRA_MCP_ALLOWED_HOSTS`` extends the list.
+    """
+    hosts: set[str] = {"localhost", "127.0.0.1", "[::1]"}
+    if bind_host in {"0.0.0.0", "::"}:
+        # _wildcard_allowed_hosts entries are "host:*"; strip the suffix.
+        hosts.update(entry[:-2] for entry in _wildcard_allowed_hosts())
+    elif bind_host not in {"localhost", "127.0.0.1", "::1"}:
+        hosts.add(bind_host)
+        if ":" in bind_host and not bind_host.startswith("["):
+            hosts.add(f"[{bind_host}]")
+    extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
+    hosts.update(h.strip() for h in extra.split(",") if h.strip())
+    alternatives = "|".join(sorted(re.escape(h) for h in hosts))
+    return rf"^https?://({alternatives})(:\d+)?$"
+
+
+def _build_http_app(transport: str, bind_host: str):
+    """Return the transport's Starlette app wrapped in CORS middleware.
+
+    Browser-based clients (MCP Inspector) send an OPTIONS preflight before
+    every POST and can only read the ``mcp-session-id`` response header if
+    it is explicitly exposed. The SDK's stock ``mcp.run()`` apps carry no
+    CORS middleware at all, so the preflight got a 405 and the session
+    header was invisible to scripts — this wrapper is why the bridge runs
+    uvicorn itself instead of delegating to ``mcp.run()``.
+    """
+    app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=_cors_origin_regex(bind_host),
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["*"],
+        expose_headers=["mcp-session-id", "mcp-protocol-version"],
+        max_age=3600,
+    )
+    return app
 
 
 def main():
@@ -163,4 +212,7 @@ def main():
         port = args.mcp_port if args.mcp_port else mcp.settings.port
         path = "/sse" if args.transport == "sse" else "/mcp"
         logger.info(f"MCP endpoint: http://{host}:{port}{path}")
-    mcp.run(transport=args.transport)
+        app = _build_http_app(args.transport, host)
+        uvicorn.run(app, host=host, port=port, log_level=mcp.settings.log_level.lower())
+    else:
+        mcp.run(transport=args.transport)

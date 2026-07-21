@@ -518,11 +518,30 @@ def test_process_global_pre_audit_failure(isolated_run_log, monkeypatch):
 # ---------- run_globals_worker_pass ----------
 
 
-def test_run_globals_worker_pass_respects_count_cap(isolated_run_log, monkeypatch):
+def _entries(addresses):
+    """Shape addresses the way `_list_global_entries` returns them."""
+    return [{"address": a, "name": None} for a in addresses]
+
+
+@pytest.fixture
+def globals_pass_env(monkeypatch):
+    """Isolate `run_globals_worker_pass` side channels. The pass reads and
+    writes the repo's real globals_clean_cache.json via SCRIPT_DIR and
+    fires best-effort HTTP calls (save_program, Doc-rung set_property) —
+    none of which belong in the offline tier."""
+    monkeypatch.setattr(fun_doc, "_load_globals_clean_cache", lambda base_dir=None: {})
+    monkeypatch.setattr(fun_doc, "_save_globals_clean_cache", lambda cache, base_dir=None: None)
+    monkeypatch.setattr(fun_doc, "_save_globals_worker_program", lambda p: None)
+    monkeypatch.setattr(fun_doc, "_stamp_global_doc_rung", lambda *a, **k: None)
+    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+
+
+def test_run_globals_worker_pass_respects_count_cap(
+    isolated_run_log, globals_pass_env, monkeypatch
+):
     """count=2 caps non-skipped processed work, even if more issues remain."""
     addresses = [f"0x{i:04x}" for i in range(10)]
-    monkeypatch.setattr(fun_doc, "_list_global_addresses", lambda p: addresses)
-    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda p: _entries(addresses))
     # Every global has issues; provider always succeeds.
     audits_per_call = {"i": 0}
     def _audit(prog, addr):
@@ -551,12 +570,13 @@ def test_run_globals_worker_pass_respects_count_cap(isolated_run_log, monkeypatc
     assert summary["binaries_visited"] == ["/proj/A.dll"]
 
 
-def test_run_globals_worker_pass_skipped_globals_dont_count(isolated_run_log, monkeypatch):
+def test_run_globals_worker_pass_skipped_globals_dont_count(
+    isolated_run_log, globals_pass_env, monkeypatch
+):
     """Pre-audit clean globals don't burn the count budget — worker keeps
     going past them until it hits N actual fixes (or runs out of globals)."""
     addresses = [f"0x{i:04x}" for i in range(10)]
-    monkeypatch.setattr(fun_doc, "_list_global_addresses", lambda p: addresses)
-    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda p: _entries(addresses))
     # First 5 globals are clean (skip), next ones have issues + get fixed.
     state = {"audit_idx": 0, "post_pending": False}
     def _audit(prog, addr):
@@ -589,10 +609,11 @@ def test_run_globals_worker_pass_skipped_globals_dont_count(isolated_run_log, mo
     assert summary["totals"]["skipped"] == 5
 
 
-def test_run_globals_worker_pass_stop_flag_interrupts(isolated_run_log, monkeypatch):
+def test_run_globals_worker_pass_stop_flag_interrupts(
+    isolated_run_log, globals_pass_env, monkeypatch
+):
     addresses = [f"0x{i:04x}" for i in range(20)]
-    monkeypatch.setattr(fun_doc, "_list_global_addresses", lambda p: addresses)
-    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda p: _entries(addresses))
     stop_flag = threading.Event()
     state = {"i": 0}
     def _audit(prog, addr):
@@ -619,7 +640,7 @@ def test_run_globals_worker_pass_stop_flag_interrupts(isolated_run_log, monkeypa
 
 
 def test_run_globals_worker_pass_continuous_ignores_count_cap(
-    isolated_run_log, monkeypatch
+    isolated_run_log, globals_pass_env, monkeypatch
 ):
     """Auto/continuous mode keeps processing past `count` until the binary
     is drained — mirrors the function-worker semantic at web.py:619-621
@@ -630,8 +651,7 @@ def test_run_globals_worker_pass_continuous_ignores_count_cap(
     running unbounded until the binary was complete.
     """
     addresses = [f"0x{i:04x}" for i in range(25)]
-    monkeypatch.setattr(fun_doc, "_list_global_addresses", lambda p: addresses)
-    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda p: _entries(addresses))
     # No follow-on binary — return None so continuous mode exits naturally
     # after the single binary is exhausted (lets the assertion reach the
     # "exhausted" reason rather than hopping to a second binary).
@@ -675,7 +695,7 @@ def test_run_globals_worker_pass_continuous_ignores_count_cap(
 
 
 def test_run_globals_worker_pass_continuous_advances_to_next_binary(
-    isolated_run_log, monkeypatch
+    isolated_run_log, globals_pass_env, monkeypatch
 ):
     """Auto mode should also rotate to the next most-needy binary once the
     current one is drained (continuous-mode rotation, separate from the
@@ -685,10 +705,9 @@ def test_run_globals_worker_pass_continuous_advances_to_next_binary(
         "/proj/B.dll": ["0x1001", "0x1002", "0x1003"],
     }
     monkeypatch.setattr(
-        fun_doc, "_list_global_addresses",
-        lambda p: addresses_by_binary.get(p, []),
+        fun_doc, "_list_global_entries",
+        lambda p: _entries(addresses_by_binary.get(p, [])),
     )
-    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
 
     # First call after A.dll drains → B.dll. Second call → None (stop).
     rotation = iter(["/proj/B.dll", None])

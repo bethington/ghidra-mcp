@@ -1,0 +1,236 @@
+[
+  {
+    "addr": "0x6fd5a090",
+    "name": "DATATBLS_GetDataTableRowValue",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd72690",
+    "name": "ITEMS_IsItemNormalDroppable",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "CMP not a [EAX+off],imm type-gate -- computed branch"
+  },
+  {
+    "addr": "0x6fd88de0",
+    "name": "STAT_GetGoldBankMax",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes EBX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd8b1a0",
+    "name": "SKILLS_GetSkillDescriptionString",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "arithmetic ADD on data reg -- computed getter"
+  },
+  {
+    "addr": "0x6fd80530",
+    "name": "UNIT_IsUnitDualWieldClass",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd7fd50",
+    "name": "PATH_GetPathTargetField60",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fdb9f50",
+    "name": "MISSILE_GetMissileDataCoords",
+    "cls": "two_level",
+    "prover": "synth2",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": true,
+    "result": "PROVEN",
+    "doc": "documented -> MISSILE_GetMissileDataCoords"
+  },
+  {
+    "addr": "0x6fd6e670",
+    "name": "INV_GetItemAtBodyLoc",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes EBX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd7e900",
+    "name": "UNITS_GetGraphicsModeField8",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "calls non-abort subroutine 0x6fd7e840"
+  },
+  {
+    "addr": "0x6fd880e0",
+    "name": "STATLIST_GetStateIndex",
+    "cls": "flat",
+    "prover": "synth",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": true,
+    "result": "PROVEN",
+    "doc": "documented -> STATLIST_GetStateIndex"
+  },
+  {
+    "addr": "0x6fd874e0",
+    "name": "STATS_GetInventoryItemFromStatList",
+    "cls": "two_level",
+    "prover": "synth2",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": true,
+    "result": "PROVEN",
+    "doc": "documented -> STATS_GetInventoryItemFromStatList"
+  },
+  {
+    "addr": "0x6fd6a520",
+    "name": "MONSTER_IsNeutralMode",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd7eda0",
+    "name": "OBJECT_GetFlagBit1At13A",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd6a990",
+    "name": "DATATBLS_CheckField0x88",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes EDX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd72760",
+    "name": "ITEMS_GetItemRecordFlags",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "CMP not a [EAX+off],imm type-gate -- computed branch"
+  },
+  {
+    "addr": "0x6fd890a0",
+    "name": "STAT_GetMaxManaStatCost",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes EBX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd8d060",
+    "name": "SKILLS_GetSkillDataRecord",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ESI, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd80ac0",
+    "name": "UNIT_GetActiveStateLink",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "non-arg-0 stack read [ESP+8]"
+  },
+  {
+    "addr": "0x6fd7fdb0",
+    "name": "PATH_GetPathTargetField5C",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fdb9f90",
+    "name": "MISSILE_GetDataField28",
+    "cls": "two_level",
+    "prover": "synth2",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": true,
+    "result": "PROVEN",
+    "doc": "documented -> MISSILE_GetMissileDataStatus"
+  },
+  {
+    "addr": "0x6fd6ef90",
+    "name": "INV_GetGridSlotUnit",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes EBX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd7e940",
+    "name": "UNITS_GetGraphicsModeField0",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "calls non-abort subroutine 0x6fd7e840"
+  },
+  {
+    "addr": "0x6fd88f60",
+    "name": "STATS_GetISCStatValueByIndex",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "non-arg-0 stack read [ESP+8]"
+  },
+  {
+    "addr": "0x6fd738b0",
+    "name": "MONSTER_GetMaxComponentVisualTier",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "AND EAX,dword ptr [ESP + 0x8] -- non-immediate transform"
+  },
+  {
+    "addr": "0x6fd6dc40",
+    "name": "DATATBLS_GetSafeUint",
+    "cls": "flat",
+    "prover": "synth",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": true,
+    "result": "PROVEN",
+    "doc": "documented -> DATATBLS_GetSafeUint"
+  },
+  {
+    "addr": "0x6fd72970",
+    "name": "ITEMS_GetItemDexBonus",
+    "cls": "delegate",
+    "prover": "delegate",
+    "ok": true,
+    "allMatch": null,
+    "discriminating": false,
+    "result": "PROVEN",
+    "doc": "documented -> ITEMS_GetItemDexBonus"
+  },
+  {
+    "addr": "0x6fd89cc0",
+    "name": "STAT_GetStatBonusValueWrapper",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "non-arg-0 stack read [ESP+12]"
+  },
+  {
+    "addr": "0x6fd8d160",
+    "name": "SKILLS_GetSkillListEntryByTypeIndex2",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "XOR writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd80ee0",
+    "name": "UNIT_GetBlockingSize",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  },
+  {
+    "addr": "0x6fd84910",
+    "name": "PATH_GetWorldCoords",
+    "cls": "-",
+    "result": "unsupported",
+    "reason": "writes ECX, not the EAX chain"
+  }
+]

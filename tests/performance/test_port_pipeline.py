@@ -252,10 +252,27 @@ if (fn == "TestFn") { return (int)D2Lib::TestFn((unsigned int)in->n("x")) == (in
         assert (header, dispatch, spec) == (None, None, None)
 
     def test_parse_port_response_two_block_retry(self):
-        response = "```cpp\nheader content\n```\n```cpp\ndispatch content\n```"
+        # Blocks are content-classified, not positional: the dispatch block
+        # is recognized by its `if (fn ==` marker, the header is the last
+        # cpp-family block without it.
+        response = (
+            "```cpp\nheader content\n```\n"
+            '```cpp\nif (fn == "target_fn") { return run(); }\n```'
+        )
         header, dispatch = pp.parse_port_response(response)
         assert header.strip() == "header content"
-        assert dispatch.strip() == "dispatch content"
+        assert dispatch.strip() == 'if (fn == "target_fn") { return run(); }'
+
+    def test_parse_port_response_reordered_blocks(self):
+        """Dispatch-first ordering must still classify correctly — the whole
+        point of content classification over positional parsing."""
+        response = (
+            '```cpp\nif (fn == "target_fn") { return run(); }\n```\n'
+            "```cpp\nheader content\n```"
+        )
+        header, dispatch = pp.parse_port_response(response)
+        assert header.strip() == "header content"
+        assert dispatch.strip() == 'if (fn == "target_fn") { return run(); }'
 
     def test_parse_port_response_needs_two_blocks(self):
         header, dispatch = pp.parse_port_response("```cpp\njust one\n```")

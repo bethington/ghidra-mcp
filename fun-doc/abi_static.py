@@ -53,11 +53,31 @@ for _p, _subs in (("EAX", ("AX", "AL", "AH")), ("EBX", ("BX", "BL", "BH")),
 _REG_TOKEN_RE = re.compile(r"\b(E?[ABCD]X|E?[SD]I|E?BP|[ABCD][LH])\b", re.IGNORECASE)
 _ESP_READ_RE = re.compile(r"\[\s*ESP\s*(?:\+\s*(0x[0-9a-fA-F]+|\d+))?\s*\]", re.IGNORECASE)
 _ABS_MEM_RE = re.compile(r"\[\s*(0x[0-9a-fA-F]+)\s*\]")
+# A global used as the DISPLACEMENT of a base+index memory operand --
+# `MOV AL, byte ptr [EAX + 0x6fdef0a8]` -- where 0x6fdef0a8 is an array-base GLOBAL,
+# not a struct field offset. Struct offsets are small (< a few KB); loaded D2Common
+# globals live in the image range (0x6fdxxxxx), so an image-range threshold cleanly
+# separates the two. (Before this, array-base getters were mis-tagged provable_now.)
+_DISP_GLOBAL_RE = re.compile(r"\+\s*(0x[0-9a-fA-F]+)\s*\]")
+_IMAGE_MIN = 0x6f000000
 _IMM_RE = re.compile(r"^(?:0x[0-9a-fA-F]+|-?\d+)$")
 
 _ABORT_DECOMPILE_RE = re.compile(
     r"Subroutine does not return|_exit\s*\(|CleanupAndAbort|ExitProcess|\babort\s*\(",
     re.IGNORECASE)
+
+# Decompiler NULL-FOLD artifact: `iRam00000034` / `uRam00000010` etc. -- Ghidra
+# proved a register is 0 along some branch and folded `[reg+0x34]` into a load
+# from ABSOLUTE address 0x34. At runtime that branch is a wild low-address read
+# -> SEH fault. Catchable (unlike a real abort dialog), but any prove vector that
+# reaches it still fails the whole prove as marshal_fault, so vectors must stay
+# in the valid envelope exactly like the _exit class. (2026-07-12,
+# SKILLS_GetSkillDescField0x34: the out-of-range return is `iRam00000034` -- the
+# planner filed it provable-now, the adversarial vet fed it 0x7FFFFFFF, the
+# original faulted.) Only LOW absolute addresses qualify (Ram0000xxxx < 0x10000):
+# image-range Ram names (uRam00097858) are relocation artifacts on globals the
+# running code reads fine.
+_NULL_FOLD_RAM_RE = re.compile(r"\b[a-zA-Z]{1,3}Ram0000[0-9a-fA-F]{4}\b")
 
 # The D2Common 1.13c abort-idiom helpers (GetReturnAddress / CleanupAndAbort /
 # _exit). Every fatal out-of-range branch this session called exactly these three,
@@ -90,8 +110,13 @@ def detect_abort_path(decompiled_text: str) -> bool:
     stay strictly in the valid envelope and V1 adversarial sweeps must skip it.
     (GetAnimSequenceRecord killed the :8790 bridge 3x before this was automated;
     contrast GetItemDataRecord whose out-of-range path RETURNS NULL -> full-range
-    vectors are safe. The decompile states which one you have.)"""
-    return bool(_ABORT_DECOMPILE_RE.search(decompiled_text or ""))
+    vectors are safe. The decompile states which one you have.)
+
+    Also true for the NULL-FOLD wild-read class (_NULL_FOLD_RAM_RE): not a
+    process-killing abort, but an out-of-envelope vector faults the original
+    all the same, so it gets the identical clamp treatment."""
+    text = decompiled_text or ""
+    return bool(_ABORT_DECOMPILE_RE.search(text) or _NULL_FOLD_RAM_RE.search(text))
 
 
 # A dwType (or ->dwType) comparison anywhere in the body. Combined with
@@ -148,6 +173,14 @@ def derive_abi(disasm_text: str) -> dict:
         for m in _ABS_MEM_RE.finditer(ops):
             v = int(m.group(1), 16)
             if v not in data_globals:
+                data_globals.append(v)
+
+        # --- global as a base+index displacement: `[reg + 0x<image-range global>]`
+        # (array-base getters, e.g. `MOV AL,[EAX + 0x6fdef0a8]`). The image-range
+        # threshold keeps small struct-field offsets from being mistaken for globals.
+        for m in _DISP_GLOBAL_RE.finditer(ops):
+            v = int(m.group(1), 16)
+            if v >= _IMAGE_MIN and v not in data_globals:
                 data_globals.append(v)
 
         # --- stack arg reads: [ESP] / [ESP+off], adjusted by tracked push depth ---
@@ -449,6 +482,13 @@ def translate_getter_to_c(name: str, disasm_text: str, *, callconv: str = "stdca
                 if base != "EAX":
                     return {"ok": False, "reason": f"deref base {base}, not the EAX chain"}
                 off = int(mm.group(2), 0) if mm.group(2) else 0
+                if off >= _IMAGE_MIN:
+                    # `[EAX + 0x<image-range>]` is `global_base[index]`, NOT a struct
+                    # field read -- the arg is an INDEX, not a pointer. Defer to the
+                    # global-table translator; treating it as flat makes synth pass a
+                    # fake pointer for the index arg -> marshal_fault.
+                    return {"ok": False, "reason": f"offset 0x{off:x} is an image-range "
+                            "global base -- global-table indexed, not a flat getter"}
                 sl = src.lower()
                 width = ("d" if "dword" in sl else "w" if "word" in sl
                          else "b" if "byte" in sl else None)
@@ -608,6 +648,15 @@ def resolvable_globals(disasm_text: str, resolve_rev: dict = None) -> list:
         for m in _ABS_MEM_RE.finditer(ops):
             a = int(m.group(1), 16)
             if a in rev and a not in seen:
+                out.append((a, rev[a]))
+                seen.add(a)
+        # array-base globals addressed as a base+index displacement `[reg + 0x<global>]`
+        # (e.g. `MOV AL,[EAX + 0x6fdef0a8]`) -- same image-range rule as derive_abi.
+        # Without this the model is never told the wired name and invents one -> the
+        # provider's D2MOO_Resolve(<invented>) returns null and the prove mismatches.
+        for m in _DISP_GLOBAL_RE.finditer(ops):
+            a = int(m.group(1), 16)
+            if a >= _IMAGE_MIN and a in rev and a not in seen:
                 out.append((a, rev[a]))
                 seen.add(a)
     return out
@@ -1004,6 +1053,31 @@ def apply_static_abi(layout: dict, input_sets: list, abi: dict) -> tuple:
     if not isinstance(inputs, list):
         return layout, input_sets, notes
 
+    # REGISTER-EXPLICIT ABI (2026-07-13, capability loop): the disasm reads the
+    # arg(s) from GP register(s) with NO stack slots (Ghidra's vestigial-thiscall
+    # getters -- index in EAX, RET 0). The model almost always mis-guesses these
+    # as stack/stdcall, so the oracle pushed the arg on the stack while the
+    # ORIGINAL reads EAX -> marshal_fault (SKILLS_GetBaseManaCost pilot). Force
+    # each input's register to the disasm's reg_args so translate_layout_to_spec
+    # emits orig_regs and the oracle marshals into the right register. Only when
+    # there are genuinely no stack slots (a mixed reg+stack ABI is out of scope
+    # for the v1 marshaller and stays as the model drafted it).
+    reg_args = abi.get("reg_args") or []
+    if reg_args and abi.get("slots") == 0 and str(abi.get("callconv", "")).lower() != "stdcall":
+        for idx, i in enumerate(inputs[:len(reg_args)]):
+            cur = str(i.get("register", "")).upper()
+            if cur != reg_args[idx]:
+                notes.append(f"forced input '{i.get('name')}' register {cur or '(none)'} "
+                             f"-> {reg_args[idx]} (disasm: register-explicit, RET 0, no stack)")
+                i["register"] = reg_args[idx]
+        # drop any stack-typed extras the model invented (there are no stack args)
+        keep = [i for i in inputs if str(i.get("register", "")).upper() in reg_args]
+        if keep and len(keep) != len(inputs):
+            layout["inputs"] = keep
+            notes.append(f"trimmed {len(inputs) - len(keep)} non-register input(s) "
+                         f"(disasm shows only register args {reg_args})")
+        return layout, input_sets, notes
+
     if abi["callconv"] == "stdcall":
         for i in inputs:
             reg = str(i.get("register", "")).upper()
@@ -1026,11 +1100,61 @@ def apply_static_abi(layout: dict, input_sets: list, abi: dict) -> tuple:
     return layout, input_sets, notes
 
 
-def clamp_abort_vectors(input_sets: list, max_index: int = 32) -> tuple:
-    """For an ABORT-CLASS function: keep only vectors whose every value lies in
-    [0, max_index); if none survive, synthesize a dense in-range sweep. The valid
-    upper bound is a LIVE global we can't read statically, so this is deliberately
-    conservative -- small indices into any populated game table are in-range."""
+_SWITCH_CASE_RE = re.compile(r"\bcase\s+(0x[0-9a-fA-F]+|\d+)\s*:")
+
+
+def abort_safe_case_values(decompiled_text: str) -> list:
+    """Valid switch-case index values for a SPARSE-SWITCH abort-class getter.
+    Such a function -- `if (i < 0x10) switch(i){case 1:..case 4:..case 8:..case 9:..
+    default: break;} CleanupAndAbort();` -- aborts on ANY value NOT in the case set,
+    which INCLUDES 0 and the interior gaps (5,6,7). A synthesized contiguous
+    [0,N) sweep therefore drives it straight into the Halt (2026-07-12,
+    DATATBLS_GetOverlayRecordByte50: valid set {1,2,3,4,8,9}, and vector
+    nOverlayId=0 fired the game's unrecoverable-error dialog and killed the
+    bridge). Returns the sorted case values so the prover can use EXACTLY the
+    valid inputs; [] when the decompile shows no switch (a plain range-check
+    abort, where the old contiguous clamp is appropriate)."""
+    vals = set()
+    for m in _SWITCH_CASE_RE.finditer(decompiled_text or ""):
+        try:
+            vals.add(int(m.group(1), 0))
+        except ValueError:
+            pass
+    return sorted(vals)
+
+
+def clamp_abort_vectors(input_sets: list, max_index: int = 32,
+                        decompiled_text: str = None) -> tuple:
+    """For an ABORT-CLASS function: restrict vectors to inputs that CANNOT reach
+    the fatal branch.
+
+    SPARSE SWITCH (decompile has `case N:` labels): the ONLY safe inputs are the
+    case values themselves -- every other value (0, interior gaps, out-of-range)
+    hits `default`/the range guard and aborts. Restrict to the case set and, if
+    the single varying param can be identified, synthesize vectors from it. NEVER
+    fall back to a contiguous [0,N) sweep here -- that is exactly what crashed the
+    game (see abort_safe_case_values).
+
+    PLAIN RANGE CHECK (no switch): keep vectors in [0, max_index); if none survive,
+    synthesize a small in-range sweep. The valid upper bound is a live global we
+    can't read statically, so this stays deliberately conservative -- small indices
+    into any populated game table are in-range."""
+    cases = abort_safe_case_values(decompiled_text)
+    if cases:
+        case_set = set(cases)
+        safe = [s for s in (input_sets or [])
+                if all(isinstance(v, int) and v in case_set for v in s.values())]
+        dropped = len(input_sets or []) - len(safe)
+        if not safe:
+            # rebuild from the valid case values on the single scalar index param
+            names = sorted({k for s in (input_sets or []) for k in s}) or ["value"]
+            if len(names) == 1:
+                safe = [{names[0]: v} for v in cases]
+            else:
+                # multi-arg sparse switch we can't safely enumerate -> prove nothing
+                # rather than guess a crashing combination.
+                safe = []
+        return safe, dropped
     safe = [s for s in (input_sets or [])
             if all(isinstance(v, int) and 0 <= v < max_index for v in s.values())]
     dropped = len(input_sets or []) - len(safe)
@@ -1172,6 +1296,20 @@ def _selftest() -> int:
     assert a["callconv"] == "stdcall", a
     assert 0x6fdf0b94 in a["data_globals"] and 0x6fdf0b98 in a["data_globals"], a
 
+    # array-base global as a base+index displacement: `MOV AL,[EAX + 0x6fdef0a8]`.
+    # This is the batch-B planner gap -- DATATBLS_GetBodyLocPropertyByte reads a global
+    # but was mis-tagged provable_now because the bare-`[0x..]` regex never saw it.
+    a = derive_abi("6fd6a2a0: MOVZX EAX,byte ptr [ESP + 0x4]\n"
+                   "6fd6a2a5: MOV AL,byte ptr [EAX + 0x6fdef0a8]\n"
+                   "6fd6a2ab: RET 0x4\n")
+    assert 0x6fdef0a8 in a["data_globals"], a
+    assert a["ret_imm"] == 4 and a["slots"] == 1, a
+    # ...but small struct-field offsets in the same operand form must NOT be caught:
+    b = derive_abi("6fd87ded: MOV EAX,dword ptr [EAX + 0x5c]\n"
+                   "6fd87df4: MOV EAX,dword ptr [EAX + 0x10]\n"
+                   "6fd87df7: RET 0x4\n")
+    assert b["data_globals"] == [], b
+
     a = derive_abi(_CORPUS["ITEMS_LookupItemRecordByCode"])
     assert a["ret_imm"] == 8 and a["slots"] == 2, a
     assert a["used_slots"] == [0, 1], a          # slot 1 read post-call (depth reset)
@@ -1275,6 +1413,16 @@ uint STAT_GetUnitCalculatedStat(UnitAny *pUnit)
 6f00000d: RET 0x4
 """)
     assert not t["ok"] and "computed address" in t["reason"], t
+
+    # ARRAY-INDEX GLOBAL getter must NOT match as flat: `[EAX + 0x<image-range>]` is
+    # global_base[index] (arg is an INDEX), not a struct field read. Mis-matching it
+    # as flat makes synth pass a fake pointer for the index -> marshal_fault.
+    t = translate_getter_to_c("DATATBLS_GetBodyLocPropertyByte", """
+6fd6a2a0: MOVZX EAX,byte ptr [ESP + 0x4]
+6fd6a2a5: MOV AL,byte ptr [EAX + 0x6fdef0a8]
+6fd6a2ab: RET 0x4
+""")
+    assert not t["ok"] and "image-range global base" in t["reason"], t
 
     # BRANCHY / COMPUTED getters must DEFER to the model (ok=False):
     t = translate_getter_to_c("HaveLightResBonus", """

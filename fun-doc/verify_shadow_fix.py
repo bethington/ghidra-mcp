@@ -86,8 +86,20 @@ def run(name: str, *, target_hits: int = 1000, reload: bool = True,
     print(f"[baseline] {name} idx={idx} hits={base['hits']} divergences={base['divergences']}")
 
     if reload:
+        # drain armed shadow dispatchers -> original first: reload's drain-to-zero
+        # deadlocks the oracle while shadow reimpls are in-flight (backlog item 13)
+        shadow = [int(x["index"]) for x in _get("/dispatchers").get("dispatchers", [])
+                  if x.get("modeName") == "shadow" or x.get("mode") == 2]
+        if shadow:
+            print(f"[reload] draining {len(shadow)} armed shadow dispatcher(s) -> original first")
+            for i in shadow:
+                _post(f"/dispatcher/{i}/mode", {"mode": "original"})
+            time.sleep(1.0)
         rl = _post("/reimpl/reload")
-        print(f"[reload] {rl.get('provider', rl.get('error'))}")
+        for i in shadow:
+            _post(f"/dispatcher/{i}/mode", {"mode": "shadow"})
+        print(f"[reload] {rl.get('provider', rl.get('error'))}"
+              + (f" (restored {len(shadow)} to shadow)" if shadow else ""))
 
     sm = _post(f"/dispatcher/{idx}/mode", {"mode": "shadow"})
     if not sm.get("ok"):

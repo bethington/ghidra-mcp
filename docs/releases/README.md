@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.15.0 (Latest) — headless GZF/GAR round-trip + debugger write primitives
+### v5.17.0 (Latest) — headless GZF/GAR round-trip + debugger write primitives
 
 Minor release. Headless program (`.gzf`) and project (`.gar`) archive
 round-trip endpoints — `/export_program`, `/import_program`,

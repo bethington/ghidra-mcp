@@ -619,6 +619,14 @@ public class EndpointRegistry {
             params(qStr("address", "Function address"), pProg()),
             (q, b) -> commentService.getPlateComment(str(q, "address"), str(q, "program")));
 
+        get("/get_comment", "Get listing comments (plate/pre/eol/post) at any address, including data",
+            params(qStr("address", "Address (data or code)"), pProg()),
+            (q, b) -> commentService.getComment(str(q, "address"), str(q, "program")));
+
+        post("/set_comment", "Set a listing comment (plate/pre/eol/post/repeatable) at any address, including data",
+            params(bStr("address"), bStr("comment"), bStrOpt("type"), pProg()),
+            (q, b) -> commentService.setComment(bodyStr(b, "address"), bodyStr(b, "comment"), bodyStr(b, "type"), str(q, "program")));
+
         post("/set_plate_comment", "Set function header/plate comment",
             params(bStr("address"), bStr("comment"), pProg()),
             (q, b) -> commentService.setPlateComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
@@ -899,9 +907,9 @@ public class EndpointRegistry {
             params(bStr("struct_name"), bStr("field_name"), pProg()),
             (q, b) -> dataTypeService.removeStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"), str(q, "program")));
 
-        post("/import_data_types", "Import data types from C source",
-            params(bStr("source"), bStr("format")),
-            (q, b) -> dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c")));
+        post("/import_data_types", "Parse C source into the program's data type manager (CParser)",
+            params(bStr("source"), bStr("format"), pProg()),
+            (q, b) -> dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c"), str(q, "program")));
 
         post("/create_data_type_category", "Create a new data type category",
             params(bStr("category_path"), pProg()),

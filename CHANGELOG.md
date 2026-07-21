@@ -8,6 +8,32 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Added
 
+- **Program-option and property-map storage tools (11 new endpoints).** Closes
+  the two gaps in Ghidra's per-program / per-address storage surface that had no
+  MCP coverage.
+  - *Program options / metadata* (was partial — only `list_analyzers` read
+    boolean analysis flags): `list_option_groups`, `get_program_options`,
+    `set_program_option`, `remove_program_option`. Read and write any typed
+    option in any group (Program Information, Analyzers, Decompiler, …). Setters
+    support string/int/long/double/float/boolean, infer the type from an
+    existing option, and create custom options on demand.
+  - *Property maps* (was unsupported): `list_property_maps`,
+    `create_property_map`, `delete_property_map`, `set_property`, `get_property`,
+    `remove_property`, `list_properties`. Typed per-address key→value stores
+    (int/long/string/void) — the clean home for arbitrary structured per-function
+    data (store JSON in a string map). Object maps are read-only (they require a
+    registered `Saveable` type).
+  - All wired through `ProgramScriptService` (category `program`), transaction-
+    wrapped via `ThreadingStrategy`, and covered by
+    `tests/integration/test_program_storage_endpoints.py`. Endpoint catalog and
+    tool count updated (256 → 267).
+- **Any-address comment tools: `/get_comment` + `/set_comment` (2 new
+  endpoints).** Read and write any of Ghidra's five comment types (plate, pre,
+  post, EOL, repeatable) at any address — data, instructions, or undefined
+  bytes — where the existing comment tools were function-scoped. Assess-globals
+  requires a comment on every documented global; these are the tools that make
+  that enforceable. Tool count 267 → 269.
+
 - **Autohand Code MCP setup documentation.** The stdio quick start now includes
   the `autohand mcp add` command for launching the bridge from a cloned checkout.
 - **Coverage gates and baselines across all test tiers.**
@@ -24,6 +50,32 @@ Complete version history for the Ghidra MCP Server project.
     execute on each PR; wired into `build-status`.
 
 ### Fixed
+
+- **Browser MCP clients (MCP Inspector) couldn't connect over the HTTP
+  transports — CORS preflight got 405.** The stock SDK apps behind
+  `mcp.run()` carry no CORS middleware, so the `OPTIONS` preflight every
+  browser sends before a cross-origin POST was rejected with
+  405 Method Not Allowed, and even successful responses never exposed
+  `mcp-session-id` to scripts. The bridge now builds the Starlette app
+  itself for `streamable-http`/`sse` and wraps it in `CORSMiddleware`:
+  preflights are answered, `mcp-session-id`/`mcp-protocol-version` are
+  exposed, and allowed origins mirror the Host-header policy (loopback on
+  any port always; plus the bind host, the machine's own hostnames on
+  wildcard binds, and `GHIDRA_MCP_ALLOWED_HOSTS` entries). Foreign origins
+  still get no CORS approval, and the SDK's DNS-rebinding protection is
+  unchanged. Regression coverage in `tests/unit/test_bridge_cli.py`
+  (origin-regex matrix + a real preflight driven through the wrapped app).
+
+- **`ensure-prereqs` now self-heals stale cached Ghidra jars.**
+  `install_ghidra_dependencies` skipped an m2 dependency whenever a jar with the
+  matching version string was already cached — but Ghidra re-releases (and dev
+  builds) rebuild jars while keeping the same version, so a stale jar stayed
+  cached forever. A stale test-scoped `DB.jar` cached this way broke the entire
+  offline Java suite (`DomainObjectAdapterDB` → `db.util.ErrorHandler` "cannot be
+  resolved" at test setUp) with no obvious cause. The installer now compares the
+  cached jar's SHA-256 against the install's jar and refreshes on drift, so
+  `python -m tools.setup ensure-prereqs` makes the offline suite runnable from a
+  clean checkout. Covered by `tests/unit/test_setup_ghidra.py`.
 
 - **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
   shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the

@@ -74,10 +74,20 @@ def test_pick_next_binary_respects_blacklist():
 
 def test_pick_next_binary_returns_none_when_all_complete_or_blacklisted():
     inv = {
-        "/done": {"name": "done", "total_documentable": 5, "fully_documented": 5, "last_scan": "x"},
+        "/done": {"name": "done", "total_documentable": 5, "fully_documented": 5, "last_scan": "x", "rules_version": gs.RULES_VERSION},
     }
     assert gs.pick_next_binary(inv, ["/done"], blacklist=set()) is None
     assert gs.pick_next_binary({}, [], blacklist=set()) is None
+
+
+def test_pick_next_binary_re_picks_complete_binary_stamped_under_old_rules():
+    """A tally stamped under an older RULES_VERSION can't be trusted — the
+    counting bar changed, so even a '5/5 complete' record is re-pickable
+    (and bypasses the rescan cooldown via the inf scan age)."""
+    inv = {
+        "/done_old_bar": {"name": "done", "total_documentable": 5, "fully_documented": 5, "last_scan": datetime.now().isoformat()},
+    }
+    assert gs.pick_next_binary(inv, ["/done_old_bar"], blacklist=set()) == "/done_old_bar"
 
 
 def test_pick_next_binary_skips_recently_scanned_in_favor_of_unscanned():
@@ -92,6 +102,7 @@ def test_pick_next_binary_skips_recently_scanned_in_favor_of_unscanned():
             "total_documentable": 328,
             "fully_documented": 0,
             "last_scan": just_now,
+            "rules_version": gs.RULES_VERSION,
         },
         "/never_walked": {
             "name": "never",
@@ -112,8 +123,8 @@ def test_pick_next_binary_returns_none_when_all_recently_scanned():
     cooldown expires on the next scan."""
     just_now = datetime.now().isoformat()
     inv = {
-        "/a": {"name": "a", "total_documentable": 100, "fully_documented": 50, "last_scan": just_now},
-        "/b": {"name": "b", "total_documentable": 200, "fully_documented": 0, "last_scan": just_now},
+        "/a": {"name": "a", "total_documentable": 100, "fully_documented": 50, "last_scan": just_now, "rules_version": gs.RULES_VERSION},
+        "/b": {"name": "b", "total_documentable": 200, "fully_documented": 0, "last_scan": just_now, "rules_version": gs.RULES_VERSION},
     }
     picked = gs.pick_next_binary(inv, ["/a", "/b"], blacklist=set())
     assert picked is None
@@ -178,7 +189,7 @@ def test_pick_next_binary_falls_back_when_current_binary_complete():
     """A current binary with zero pending should not block the queue —
     fall through to standard ordering."""
     inv = {
-        "/done": {"name": "done", "total_documentable": 100, "fully_documented": 100, "last_scan": "x"},
+        "/done": {"name": "done", "total_documentable": 100, "fully_documented": 100, "last_scan": "x", "rules_version": gs.RULES_VERSION},
         "/wip": {"name": "wip", "total_documentable": 100, "fully_documented": 50, "last_scan": "x"},
     }
     picked = gs.pick_next_binary(

@@ -74,6 +74,16 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
     register ABIs the v1 marshaller can't express."""
     inputs = param_layout.get("inputs", [])
     outputs = param_layout.get("outputs", [])
+    # The model sometimes emits a malformed layout where an input/output entry
+    # is a LIST (e.g. ["nIndex","ECX"]) instead of a {name,register} dict --
+    # `i.get(...)` then AttributeError'd and crashed the candidate
+    # (2026-07-13, DATATBLS_GetLvlPrestDataField28). A malformed layout is an
+    # UNSUPPORTED ABI (handled: the caller drops the candidate cleanly), not a
+    # crash.
+    if not all(isinstance(i, dict) for i in list(inputs) + list(outputs)):
+        raise UnsupportedLiveABI(
+            f"{name}: malformed layout -- input/output entries must be objects "
+            f"with name/register, got a non-object entry")
     regs = [str(i.get("register", "")).upper() for i in inputs]
 
     # Classify the calling convention from the input register pattern.
@@ -111,14 +121,33 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
             f"{name}: output registers {out_regs} beyond EAX not comparable live yet")
     signed = any(o.get("signed") for o in outputs if str(o.get("register", "")).upper() == "EAX")
 
-    args = [{"id": i["name"], "kind": "i32"} for i in inputs]
+    # Class B (2026-07-13, capability loop): an input may be a pure OUT-buffer
+    # param -- `kind: "outbuf"` (+ optional `bytes`, default 4) in the drafted
+    # layout. The oracle has ALWAYS supported buf args + buf compare channels
+    # (see D2Debugger.LiveDispatch POST /oracle: {"kind":"buf","bytes":N},
+    # compare ["ret","x"]); only THIS translator was i32/EAX-only, which is why
+    # every void out-param writer (GetBeltTxtEntry, MONSTER_GetInvGridSize, the
+    # ROOM coordinate pairs) dead-ended as unprovable. Out-buffers join the
+    # compare set, so a void-return writer becomes a MEANINGFUL proof (and a
+    # meaningful shadow dispatcher) via its written bytes. input_sets carry
+    # ONLY the scalar params -- the oracle allocates fresh scratch buffers per
+    # call for buf args.
+    outbufs = [i for i in inputs if str(i.get("kind", "")).lower() == "outbuf"]
+    args = []
+    for i in inputs:
+        if str(i.get("kind", "")).lower() == "outbuf":
+            args.append({"id": i["name"], "kind": "buf",
+                         "bytes": int(i.get("bytes") or 4)})
+        else:
+            args.append({"id": i["name"], "kind": "i32"})
+    compare = (["ret"] if outputs else []) + [b["name"] for b in outbufs]
     spec = {
         "name": name,
         "addr": _int(address),
         "callconv": callconv,
         "ret": ("i32" if signed else "u32") if outputs else "void",
         "args": args,
-        "compare": ["ret"] if outputs else [],
+        "compare": compare,
     }
     if orig_regs:
         spec["orig_regs"] = orig_regs
@@ -272,7 +301,10 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
         "OUTPUT CONTRACT (a machine parses your reply; a human never sees it): reply with "
         "EXACTLY TWO fenced blocks and nothing that matters outside them -- BLOCK 1 ```cpp (the "
         "reimpl), BLOCK 2 ```json (the register layout + input_sets). Tag them literally ```cpp "
-        "and ```json. No third block, no split code blocks, no trailing prose.")
+        "and ```json. No third block, no split code blocks, no trailing prose. "
+        "CRITICAL: both blocks must appear in your FINAL ANSWER message -- anything that exists "
+        "only inside your private reasoning/thinking is DISCARDED unread. Keep reasoning SHORT; "
+        "spend the output budget on the blocks.")
     parts.append("")
     parts.append("## Task: reimplement a Diablo II function for LIVE conformance proving")
     parts.append(
@@ -345,6 +377,18 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
     parts.append(example)
     parts.append("```")
     parts.append("")
+    parts.append("## OUT-PARAM (pointer the function only WRITES through)")
+    parts.append(
+        "If a parameter is a pointer the function ONLY WRITES results into (an out-buffer -- e.g. "
+        "`uint *pnWidth`, a record struct the fn fills), declare it in param_layout.inputs with "
+        "`\"kind\": \"outbuf\"` and `\"bytes\": <written size>` (the full byte size the function writes; "
+        "a plain `*p = x` dword is 4). The prover allocates a fresh buffer per call, passes its address "
+        "in that arg slot to BOTH original and reimpl, and COMPARES THE WRITTEN BYTES -- so a void-return "
+        "writer is still a real proof. In your reimpl, declare that param as the pointer it is and write "
+        "through it exactly like the decompile. input_sets must contain ONLY the scalar params (never the "
+        "outbuf ones). If the function READS meaningful data through a pointer param (not just writes), "
+        "it is NOT an outbuf -- reply with the single word UNSUPPORTED instead of guessing.")
+    parts.append("")
     parts.append("## Output")
     parts.append("BLOCK 1 -- ```cpp: the complete reimpl (include + marker + function, all in one block).")
     parts.append(
@@ -378,7 +422,10 @@ def build_handle_draft_prompt(func_name: str, address, decompiled_text: str) -> 
     p = []
     p.append("OUTPUT CONTRACT (a machine parses your reply): reply with EXACTLY TWO fenced blocks -- "
              "BLOCK 1 ```cpp (the reimpl), BLOCK 2 ```json (param_layout + input_sets). Tag them "
-             "literally ```cpp and ```json. Nothing else that matters outside them.")
+             "literally ```cpp and ```json. Nothing else that matters outside them. "
+             "CRITICAL: both blocks must appear in your FINAL ANSWER message -- anything that exists "
+             "only inside your private reasoning/thinking is DISCARDED unread. Keep reasoning SHORT; "
+             "spend the output budget on the blocks.")
     p.append("")
     p.append("## Task: reimplement a Diablo II LIVE-POINTER getter for handle conformance proving")
     p.append(
@@ -480,9 +527,23 @@ def _is_provider_reimpl(cpp: str) -> bool:
     extern-C symbol: written as a provider candidate it makes the .def export a symbol
     the DLL never defines -> LNK2001 -> the WHOLE provider build fails for every
     function (found 2026-07-08: SKILLS_GetSkillNodeRecord poisoned the build). Treating
-    such a draft as malformed here keeps it out of the provider dir entirely."""
+    such a draft as malformed here keeps it out of the provider dir entirely.
+
+    Also rejects a TRUNCATED draft (2026-07-13, capability loop): the model
+    sometimes emits an incomplete reimpl (cut off mid-body), which the parser
+    accepted, wrote to candidates/, and the compiler then failed with C1075
+    ('{' no matching token) / C1004 (unexpected EOF) -- and because the provider
+    is ONE shared DLL, that truncated file fails the build for EVERY function
+    (the provider-compile-cascade). A balanced brace/paren count is a cheap,
+    reliable truncation signal; rejecting here forces a re-draft and keeps the
+    broken file out of the shared build entirely."""
     c = cpp or ""
-    return 'extern "C"' in c and "namespace D2Lib" not in c
+    if 'extern "C"' not in c or "namespace D2Lib" in c:
+        return False
+    code = re.sub(r"//[^\n]*", "", c)   # ignore braces inside line comments
+    if code.count("{") != code.count("}") or code.count("(") != code.count(")"):
+        return False
+    return True
 
 
 def _json_loads_lenient(s: str):
@@ -503,21 +564,28 @@ def parse_handle_response(text: str):
     blocks = pp._fenced_blocks(text or "")
     cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
     js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
-    if not cpp or not js:
-        return None, None, None
-    try:
-        spec = _json_loads_lenient(js[0])
-    except json.JSONDecodeError:
-        return None, None, None
-    layout = spec.get("param_layout")
-    input_sets = spec.get("input_sets")
-    if not isinstance(layout, dict) or not layout.get("handle_arg"):
+    # LAST-valid-block-wins (2026-07-14): when the deliverable is salvaged from
+    # the reasoning channel the text contains MANY draft iterations; the final
+    # one is the model's actual answer. Scanning for validity (instead of
+    # blindly taking [0]) also survives stray early snippets in normal replies.
+    layout = input_sets = None
+    for c in reversed(js):
+        try:
+            s = _json_loads_lenient(c)
+        except json.JSONDecodeError:
+            continue
+        lay = s.get("param_layout") if isinstance(s, dict) else None
+        if isinstance(lay, dict) and lay.get("handle_arg"):
+            layout, input_sets = lay, s.get("input_sets")
+            break
+    if layout is None:
         return None, None, None
     if not isinstance(input_sets, list) or not input_sets:
         input_sets = [{}]
-    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
+    body = next((c for c in reversed(cpp) if _is_provider_reimpl(c)), None)
+    if body is None:   # reject OpenD2/non-extern-C drafts (build poison)
         return None, None, None
-    reimpl = cpp[0].strip() + "\n"
+    reimpl = body.strip() + "\n"
     if 'provider_runtime.h' not in reimpl:
         reimpl = '#include "../provider_runtime.h"\n' + reimpl
     return reimpl, layout, input_sets
@@ -908,21 +976,25 @@ def parse_live_response(text: str):
     blocks = pp._fenced_blocks(text or "")
     cpp = [c for lang, c in blocks if lang in pp._CPP_LANGS]
     js = [c for lang, c in blocks if lang in pp._JSON_LANGS]
-    if not cpp or not js:
+    # LAST-valid-block-wins — see parse_handle_response for rationale.
+    layout = input_sets = None
+    for c in reversed(js):
+        try:
+            s = _json_loads_lenient(c)
+        except json.JSONDecodeError:
+            continue
+        lay = s.get("param_layout") if isinstance(s, dict) else None
+        ins = s.get("input_sets") if isinstance(s, dict) else None
+        if (isinstance(lay, dict) and "inputs" in lay and "outputs" in lay
+                and isinstance(ins, list) and ins):
+            layout, input_sets = lay, ins
+            break
+    if layout is None:
         return None, None, None
-    try:
-        spec = _json_loads_lenient(js[0])
-    except json.JSONDecodeError:
+    body = next((c for c in reversed(cpp) if _is_provider_reimpl(c)), None)
+    if body is None:   # reject OpenD2/non-extern-C drafts (build poison)
         return None, None, None
-    layout = spec.get("param_layout")
-    input_sets = spec.get("input_sets")
-    if not isinstance(layout, dict) or not isinstance(input_sets, list) or not input_sets:
-        return None, None, None
-    if "inputs" not in layout or "outputs" not in layout:
-        return None, None, None
-    if not _is_provider_reimpl(cpp[0]):   # reject OpenD2/non-extern-C drafts (build poison)
-        return None, None, None
-    reimpl = cpp[0].strip() + "\n"
+    reimpl = body.strip() + "\n"
     if 'provider_runtime.h' not in reimpl:  # ensure the resolver header is present
         reimpl = '#include "../provider_runtime.h"\n' + reimpl
     return reimpl, layout, input_sets
@@ -958,6 +1030,14 @@ def write_candidate(reimpl_cpp: str, name: str) -> Path:
             f"write build poison into the provider candidates dir")
     CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
     body = reimpl_cpp
+    # Output-normalization (phase b): rewrite width spellings to D2MOO's canonical stdint
+    # (unsigned int -> uint32_t, uint -> uint32_t, ...). Typedef-identical via <cstdint>, so it
+    # can't change compiled behavior -- and the prove that follows this write validates it.
+    try:
+        import d2moo_types
+        body, _n = d2moo_types.normalize_c_types(body)
+    except Exception:
+        pass
     if "D2MOO_REIMPL_EXPORT:" not in body:
         body = f"// D2MOO_REIMPL_EXPORT: {name}\n{body}"
     path = CANDIDATES_DIR / f"{name}.cpp"
@@ -1080,20 +1160,73 @@ def set_doc_level(address, doc_level: str, *, program: str = "D2Common.dll") -> 
     return _set_rung(address, doc_level, DOC_TAGS, program)
 
 
+_PROP_ENDPOINTS_AVAILABLE: bool | None = None
+
+
+def _property_endpoints_available() -> bool:
+    """The Conf property-map endpoints live on the ghidra-mcp branch
+    feat/program-options-property-map-tools, which is NOT in the deployed plugin
+    (found 2026-07-15: /set_property 404'd silently since the 5.16.2 jar deploy,
+    losing every prove-time proof-detail write). Probe once per process; when the
+    endpoints are missing, the proof record goes into the function's CONFORMANCE
+    bookmark instead -- same record, same address, readable by the dashboard and
+    sync_conformance_to_ghidra.py --export. A transient unreachable Ghidra is NOT
+    cached, so a later proof re-probes."""
+    global _PROP_ENDPOINTS_AVAILABLE
+    if _PROP_ENDPOINTS_AVAILABLE is None:
+        u = urllib.parse.urlparse(GHIDRA_HTTP)
+        conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=10)
+        try:
+            conn.request("GET", "/list_properties?map=Conf")
+            _PROP_ENDPOINTS_AVAILABLE = conn.getresponse().status != 404
+        except OSError:
+            return False               # unreachable: don't cache, just fall through
+        finally:
+            conn.close()
+    return _PROP_ENDPOINTS_AVAILABLE
+
+
+def _conf_record_json(row: dict) -> str:
+    """The compact proof record stored in the `Conf` property map (Ghidra = single source
+    of truth for the semantic proof facts; a typed per-address map, queryable via
+    list_properties -- not a bookmark comment). Kept in sync with
+    conformance/tools/sync_conformance_to_ghidra.py::_conf_record so a prove-time write
+    and a later reconcile agree byte-for-byte. Only durable proof facts -- never
+    queue/token/telemetry state."""
+    rec: dict = {"conf": row.get("conf")}
+    if row.get("proof_kind"):
+        rec["method"] = row["proof_kind"]
+    for k in ("vectors", "passed", "total", "ret", "callconv", "orig_regs", "date"):
+        v = row.get(k)
+        if v not in (None, "", 0):
+            rec[k] = v
+    rec["reimpl"] = f"candidates/{row.get('name')}.cpp"
+    for flag in ("abort_class", "weak_proof", "needs_review"):
+        if row.get(flag):
+            rec[flag] = row[flag]
+    return json.dumps(rec, separators=(",", ":"))
+
+
 def record_proof(name: str, address, spec: dict, result: dict, *,
                  program: str = "D2Common.dll", conf_level: str = "CONF_LIVE",
                  abort_class: bool = False, weak_proof: str = None) -> dict:
     """WRITE-BACK (see the writeback-source-of-truth principle). On a successful
-    live proof: (1) set the CONF_ rung in Ghidra -- the RE source of truth,
-    queryable via search_functions_by_tag -- REMOVING the other (mutually
-    exclusive) CONF_ rungs first, and (2) append a machine-readable row to
-    conformance/proven_functions.jsonl. Additive to the DOC_ axis and decompiler
-    comments (never clobbered). Best-effort; never raises.
+    live proof, make GHIDRA the source of truth for the proof, three ways:
+      (1) set the CONF_ rung tag (mutually exclusive -- removes the other CONF_ rungs),
+      (2) write the compact proof record (method, vectors, ABI, date, reimpl path) into
+          the `Conf` PROPERTY MAP -- Ghidra's typed per-address store, queryable via
+          list_properties -- so the DETAIL is authoritative at prove time, not just after
+          a sync_conformance_to_ghidra.py reconcile, and
+      (3) append a machine-readable row to conformance/proven_functions.jsonl -- now a
+          git-tracked MIRROR of (1)+(2).
+    Additive to the DOC_ axis and decompiler comments (never clobbered). Each write is
+    independent best-effort; never raises. Ends with a per-proof save_program (chosen
+    cadence: zero-loss over speed -- every rung/property is persisted immediately).
 
     conf_level defaults to CONF_LIVE (the live-oracle proof). A future battle-test
     promoter passes CONF_BATTLETESTED (earned by zero shadow divergences in real
     gameplay)."""
-    status = {"ghidra_tag": None, "registry": None}
+    status = {"ghidra_tag": None, "property": None, "registry": None}
     a = spec.get("addr", address)
     addr = f"0x{a:x}" if isinstance(a, int) else str(a)
 
@@ -1101,35 +1234,69 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
     r = _set_rung(addr, conf_level, CONF_TAGS, program)
     status["ghidra_tag"] = f"{conf_level}={r['status']}"
 
+    row = {
+        "name": name, "address": addr, "program": program,
+        "conf": conf_level,
+        "callconv": spec.get("callconv"), "ret": spec.get("ret"),
+        "orig_regs": spec.get("orig_regs"),
+        "vectors": len(spec.get("vectors", [])),
+        "passed": result.get("passed"), "total": result.get("total"),
+        "date": datetime.date.today().isoformat(),
+    }
+    if abort_class or spec.get("abort_class"):
+        # out-of-range input is FATAL: V1 adversarial (and any fuzzing tool
+        # reading this registry) must stay in-envelope or skip entirely.
+        row["abort_class"] = True
+    if weak_proof:
+        # DEGENERATE capture -> this CONF_LIVE proof matched by luck; must not
+        # silently promote/freeze. shadow_promote + freeze tooling should honor this.
+        row["weak_proof"] = weak_proof
+    # proof provenance (synth / synth2 / delegate_call_through) + delegate metadata,
+    # so the record is self-describing (a delegate row names its callee).
+    for _k in ("proof_kind", "callee", "note"):
+        if result.get(_k) is not None:
+            row[_k] = result[_k]
+
+    # (2) `Conf` property map -- Ghidra's purpose-built per-address store is authoritative
+    # for the proof detail (typed, queryable via list_properties, no bookmark/plate
+    # pollution). Ensure the map exists, then set this function's record.
     try:
-        row = {
-            "name": name, "address": addr, "program": program,
-            "conf": conf_level,
-            "callconv": spec.get("callconv"), "ret": spec.get("ret"),
-            "orig_regs": spec.get("orig_regs"),
-            "vectors": len(spec.get("vectors", [])),
-            "passed": result.get("passed"), "total": result.get("total"),
-            "date": datetime.date.today().isoformat(),
-        }
-        if abort_class or spec.get("abort_class"):
-            # out-of-range input is FATAL: V1 adversarial (and any fuzzing tool
-            # reading this registry) must stay in-envelope or skip entirely.
-            row["abort_class"] = True
-        if weak_proof:
-            # DEGENERATE capture -> this CONF_LIVE proof matched by luck; must not
-            # silently promote/freeze. shadow_promote + freeze tooling should honor this.
-            row["weak_proof"] = weak_proof
-        # proof provenance (synth / synth2 / delegate_call_through) + delegate metadata,
-        # so the registry row is self-describing (a delegate row names its callee).
-        for _k in ("proof_kind", "callee", "note"):
-            if result.get(_k) is not None:
-                row[_k] = result[_k]
+        rec = _conf_record_json(row)
+        if _property_endpoints_available():
+            p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+            if not p.get("success") and "No property map" in str(p):
+                _ghidra_post("/create_property_map", {"name": "Conf", "type": "string", "program": program})
+                p = _ghidra_post("/set_property", {"map": "Conf", "address": addr, "value": rec, "program": program})
+        else:
+            # property endpoints missing in the deployed plugin -> CONFORMANCE bookmark
+            # is the store (program is a QUERY param on the bookmark endpoints)
+            p = _ghidra_post("/set_bookmark?" + urllib.parse.urlencode({"program": program}),
+                             {"address": addr, "category": "CONFORMANCE", "comment": rec})
+        status["property"] = "ok" if p.get("success") else p.get("error", p)
+    except OSError as e:
+        status["property"] = f"error: {e}"
+    if status["property"] != "ok":
+        # a swallowed contract violation hid 5 days of lost writes -- be loud, stay non-fatal
+        print(f"  [write-back WARN] Ghidra proof-detail write FAILED for {name} @ {addr}: "
+              f"{str(status['property'])[:160]}")
+
+    # (3) git-tracked registry mirror.
+    try:
         PROVEN_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
         with open(PROVEN_REGISTRY, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         status["registry"] = str(PROVEN_REGISTRY)
     except OSError as e:
         status["registry"] = f"error: {e}"
+
+    # (4) per-proof save -- persist the tag + property to the .rep immediately. Chosen
+    # cadence: zero-loss over speed. save_program is a full program save, so batches run
+    # slower, but no Ghidra write is ever lost to an unexpected close/crash.
+    try:
+        _ghidra_post("/save_program", {"program": program})
+        status["saved"] = "ok"
+    except OSError as e:
+        status["saved"] = f"error: {e}"
     return status
 
 
