@@ -6374,6 +6374,25 @@ _MINIMAX_DOC_TOOL_ALLOWLIST = {
 }
 
 
+def _apply_program_scope(arguments, valid_params, context_program):
+    """Program-scope injection (2026-07-21): a tool call without an explicit
+    `program` hits Ghidra's ACTIVE program, which flips as multi-binary
+    workers rotate — observed as false "function does not exist" blocks
+    and risks WRITES landing in the wrong binary. The session's target
+    program rides in the debug context (restored cross-process in
+    `_restore_debug_context_for_worker`), so default to it whenever the
+    tool accepts a `program` param and the model omitted it. Returns a
+    copy when it injects; the caller's dict is never mutated."""
+    if (
+        context_program
+        and "program" in valid_params
+        and not arguments.get("program")
+    ):
+        arguments = dict(arguments)
+        arguments["program"] = context_program
+    return arguments
+
+
 def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                     use_tools=True):
     """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
@@ -6528,6 +6547,10 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                 _remapped.append(f"{_alias}->{_canon}")
         if _remapped:
             print(f"  [mcp] {name}: normalized args {', '.join(_remapped)}", flush=True)
+
+        arguments = _apply_program_scope(
+            arguments, _valid_params, (_debug_ctx.get() or {}).get("program")
+        )
 
         # Split arguments into query params and body params based on schema
         query_params = {}
@@ -7911,6 +7934,13 @@ def _inject_tool_block(prompt):
         "create_function",
         "get_function_callers",
         "decompile_function",
+        # Globals tools (2026-07-20): completeness scoring deducts for
+        # undocumented referenced globals, so FIX prompts target them — on a
+        # fresh binary (D2Client) nearly every function hits this, and without
+        # these tools every such run is structurally forced to BLOCKED.
+        "audit_global",
+        "audit_globals_in_function",
+        "set_global",
     }
     registered = [t for t in available_tools if t in RELEVANT_TOOLS]
     missing = RELEVANT_TOOLS - set(available_tools)

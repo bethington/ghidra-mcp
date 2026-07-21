@@ -2748,6 +2748,64 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         threading.Thread(target=run_refresh, daemon=True).start()
         return jsonify({"ok": True, "scheduled": True, "count": count})
 
+    @app.route("/api/worker/start", methods=["POST"])
+    def http_start_worker():
+        """HTTP twin of the socket.io `request_start_worker` /
+        `request_start_globals_worker` handlers (backlog #12): autonomous
+        launchers shouldn't depend on socket.io namespace stability. Body:
+        {mode, provider, count, model, binary, continuous}. mode "globals"
+        routes through the same WorkerManager path as the globals button."""
+        data = request.get_json(silent=True) or {}
+        try:
+            provider = data.get("provider", "minimax")
+            continuous = bool(data.get("continuous", False))
+            count = max(1, min(500, int(data.get("count", 5))))
+            model = data.get("model") or None
+            binary = data.get("binary") or None
+            mode = data.get("mode") or "functions"
+            if mode in ("document", "doc", "functions"):
+                mode = "functions"
+            worker_id = worker_mgr.start_worker(
+                provider=provider,
+                count=count,
+                model=model,
+                binary=binary,
+                continuous=continuous,
+                mode=mode,
+            )
+            return jsonify({"ok": True, "worker_id": worker_id, "mode": mode})
+        except ValueError as e:
+            # Controlled launch-rejection messages (per-binary lock, unknown
+            # provider) — safe and useful to surface to the caller.
+            return jsonify({"ok": False, "error": str(e)}), 409
+        except Exception:  # noqa: BLE001
+            app.logger.exception("HTTP worker start failed")
+            return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500
+
+    @app.route("/api/worker/stop", methods=["POST"])
+    def http_stop_worker():
+        """HTTP twin of `request_stop_worker`. Body: {worker_id}."""
+        data = request.get_json(silent=True) or {}
+        wid = data.get("worker_id")
+        if not wid:
+            return jsonify({"ok": False, "error": "worker_id is required"}), 400
+        try:
+            worker_mgr.stop_worker(wid)
+            return jsonify({"ok": True, "worker_id": wid})
+        except Exception:  # noqa: BLE001
+            app.logger.exception("HTTP worker stop failed for %r", wid)
+            return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500
+
+    @app.route("/api/worker/status", methods=["GET"])
+    def http_worker_status():
+        """Worker roster snapshot (same payload as the `worker_status` socket
+        event) so headless operators can poll instead of holding a socket."""
+        try:
+            return jsonify({"ok": True, "workers": worker_mgr.get_status()})
+        except Exception:  # noqa: BLE001
+            app.logger.exception("HTTP worker status failed")
+            return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500
+
     @app.route("/api/queue/config", methods=["GET", "POST"])
     def queue_config():
         from fun_doc import DEFAULT_QUEUE_CONFIG
