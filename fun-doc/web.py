@@ -514,6 +514,13 @@ class WorkerManager:
 
         set_worker_id(worker_id)  # Tag all events from this thread
 
+        # DOC-rung write-back parity with the globals lane (which stamps
+        # unconditionally): without this the pipeline page's Fn Doc bar never
+        # moves — it counts DOC_* tags in Ghidra, and fun_doc's stamp after a
+        # completed run is gated on FUNDOC_DOC_TAGS=1 (found 2026-07-21: workers
+        # completed 485 D2Client runs while the bar sat at zero).
+        os.environ.setdefault("FUNDOC_DOC_TAGS", "1")
+
         worker = self._workers[worker_id]
         current_key = None
         try:
