@@ -3726,6 +3726,189 @@ public class DataTypeService {
         return Response.ok(auditGlobalAt(program, addr));
     }
 
+    // ------------------------------------------------------------------
+    // Global completeness scoring — the data-address analog of
+    // /analyze_function_completeness. Builds a budgeted 0-100 raw score plus
+    // an effective_score that forgives "advanced" axes (enum/equate, struct)
+    // and soft issues, exactly like the function rubric forgives structural
+    // deductions. Six axes: name, comment, type, bytes (core, drive effective
+    // + DOC_DRAFT) + enum/equate and struct membership (advanced, raw-only).
+    // ------------------------------------------------------------------
+    private static final double GAX_NAME = 25, GAX_COMMENT = 25, GAX_TYPE = 20,
+                                GAX_BYTES = 15, GAX_ENUM = 8, GAX_STRUCT = 7;
+
+    private static String globalBandForScore(double eff) {
+        if (eff >= 100.0) return "COMPLETE_100";
+        if (eff >= 95.0) return "COMPLETE_95";
+        if (eff >= 90.0) return "COMPLETE_90";
+        if (eff >= 80.0) return "COMPLETE_80";
+        return null;
+    }
+
+    /** Reusable global completeness scorer (mirrors {@link #auditGlobalAt}).
+     *  Returns raw + effective + per-axis breakdown; effective forgives the
+     *  enum/struct axes and all soft-severity issues, so effective==100
+     *  exactly when the global is fully documented. */
+    public static Map<String, Object> scoreGlobalCompletenessAt(Program program, Address addr) {
+        Map<String, Object> audit = auditGlobalAt(program, addr);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("address", addr.toString());
+        out.put("name", audit.get("name"));
+        out.put("type", audit.get("type"));
+        out.put("xref_count", audit.get("xref_count"));
+
+        // Code addresses are not data globals — not scorable.
+        if (Boolean.TRUE.equals(audit.get("is_code_address"))) {
+            out.put("applicable", false);
+            out.put("reason", "code_address");
+            out.put("score", null);
+            out.put("effective_score", null);
+            out.put("band", null);
+            return out;
+        }
+        out.put("applicable", true);
+
+        // OS-canonical globals (TIB/PEB/KUSER) are complete by definition.
+        if (Boolean.TRUE.equals(audit.get("os_canonical"))) {
+            out.put("score", 100.0);
+            out.put("effective_score", 100.0);
+            out.put("band", "COMPLETE_100");
+            out.put("fully_documented", true);
+            out.put("os_canonical", true);
+            out.put("missing", new ArrayList<String>());
+            out.put("deductions", new ArrayList<Map<String, Object>>());
+            return out;
+        }
+
+        @SuppressWarnings("unchecked")
+        List<String> issues = (List<String>) audit.getOrDefault("issues", new ArrayList<String>());
+
+        // Per-axis accumulators: [rawDeduction, effectiveDeduction].
+        Map<String, double[]> ded = new LinkedHashMap<>();
+        Map<String, Double> budget = new LinkedHashMap<>();
+        budget.put("name", GAX_NAME);   budget.put("comment", GAX_COMMENT);
+        budget.put("type", GAX_TYPE);   budget.put("bytes", GAX_BYTES);
+        budget.put("enum", GAX_ENUM);   budget.put("struct", GAX_STRUCT);
+        for (String ax : budget.keySet()) ded.put(ax, new double[]{0.0, 0.0});
+        List<Map<String, Object>> breakdown = new ArrayList<>();
+
+        for (String code : issues) {
+            String axis; double pts; String sev;
+            if (code.equals("generic_name") || code.equals("ida_reserved_prefix")) {
+                axis = "name"; pts = GAX_NAME; sev = "hard";
+            } else if (code.equals("generic_descriptor")) {
+                axis = "name"; pts = 5; sev = "soft";
+            } else if (code.startsWith("name_")) {
+                axis = "name"; pts = 20; sev = "hard";
+            } else if (code.equals("untyped")) {
+                axis = "type"; pts = GAX_TYPE; sev = "hard";
+            } else if (code.equals("unformatted_bytes_length_mismatch")
+                    || code.equals("unformatted_bytes_should_be_string")) {
+                axis = "bytes"; pts = 8; sev = "medium";
+            } else if (code.equals("bytes_size_unknown")) {
+                axis = "bytes"; pts = 3; sev = "soft";
+            } else if (code.equals("missing_plate_comment")) {
+                axis = "comment"; pts = GAX_COMMENT; sev = "hard";
+            } else if (code.equals("bitfield_undocumented")) {
+                // value/flag semantics documentation — the enum/equate axis.
+                axis = "enum"; pts = GAX_ENUM; sev = "medium";
+            } else if (code.equals("plate_line_too_long")) {
+                axis = "comment"; pts = 3; sev = "soft";
+            } else {
+                // xref_summary_missing, callback_signature_missing, and any
+                // checkGlobalPlateComment quality code — all comment-axis medium.
+                axis = "comment"; pts = 8; sev = "medium";
+            }
+            boolean forgiven = sev.equals("soft") || axis.equals("enum") || axis.equals("struct");
+            double[] a = ded.get(axis);
+            a[0] += pts;
+            if (!forgiven) a[1] += pts;
+            breakdown.add(JsonHelper.mapOf("axis", axis, "code", code,
+                    "points", pts, "severity", sev, "forgiven", forgiven));
+        }
+
+        // Struct-membership axis (advanced, forgiven): an undefined blob with
+        // multiple xrefs is data that should be a named struct but isn't. A
+        // plain scalar / already-composite type is N/A (full credit).
+        Data data = program.getListing().getDefinedDataAt(addr);
+        if (data != null) {
+            DataType dt = data.getDataType();
+            if (dt instanceof Array) {
+                Array arr = (Array) dt;
+                DataType elem = arr.getDataType();
+                Number xr = (Number) audit.getOrDefault("xref_count", 0);
+                if (elem != null && elem.getName().startsWith("undefined")
+                        && arr.getLength() >= 8 && xr.intValue() > 1) {
+                    ded.get("struct")[0] += GAX_STRUCT;  // raw only (forgiven)
+                    breakdown.add(JsonHelper.mapOf("axis", "struct",
+                            "code", "undefined_blob_should_be_struct",
+                            "points", GAX_STRUCT, "severity", "soft", "forgiven", true));
+                }
+            }
+        }
+
+        // Cap per axis at its budget, then sum.
+        double raw = 100.0, eff = 100.0;
+        Map<String, Object> axesOut = new LinkedHashMap<>();
+        List<String> missing = new ArrayList<>();
+        for (String ax : budget.keySet()) {
+            double b = budget.get(ax);
+            double[] a = ded.get(ax);
+            double rawDed = Math.min(b, a[0]);
+            double effDed = (ax.equals("enum") || ax.equals("struct")) ? 0.0 : Math.min(b, a[1]);
+            raw -= rawDed;
+            eff -= effDed;
+            boolean forgivenAxis = ax.equals("enum") || ax.equals("struct");
+            axesOut.put(ax, JsonHelper.mapOf(
+                    "budget", b, "deduction", rawDed,
+                    "satisfied", rawDed == 0.0, "forgiven", forgivenAxis));
+            if (effDed > 0.0) missing.add(ax);
+        }
+        raw = Math.max(0.0, Math.min(100.0, raw));
+        eff = Math.max(0.0, Math.min(100.0, eff));
+
+        out.put("score", raw);
+        out.put("effective_score", eff);
+        out.put("band", globalBandForScore(eff));
+        out.put("fully_documented", eff >= 100.0);
+        out.put("axes", axesOut);
+        out.put("missing", missing);
+        out.put("deductions", breakdown);
+        out.put("issues", issues);
+        out.put("severity_summary", audit.get("severity_summary"));
+        return out;
+    }
+
+    @McpTool(path = "/analyze_global_completeness", method = "GET",
+            description = "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
+            category = "datatype")
+    public Response analyzeGlobalCompleteness(
+            @Param(value = "address", paramType = "address",
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+            @Param(value = "compact", defaultValue = "false", description = "Compact output (score/effective/band/missing only)") boolean compact,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address is required");
+        }
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Map<String, Object> full = scoreGlobalCompletenessAt(program, addr);
+        if (compact) {
+            Map<String, Object> slim = new LinkedHashMap<>();
+            for (String k : new String[]{"address", "name", "applicable", "score",
+                    "effective_score", "band", "fully_documented", "missing"}) {
+                if (full.containsKey(k)) slim.put(k, full.get(k));
+            }
+            return Response.ok(slim);
+        }
+        return Response.ok(full);
+    }
+
     @McpTool(path = "/audit_globals_in_function", method = "GET",
             description = "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
             category = "datatype")

@@ -490,6 +490,42 @@ def _doc_map_rungs(program: str) -> dict:
     return out
 
 
+GLOB_COMPLETE_MAP = "Complete"
+
+
+def _complete_map_bands(program: str) -> dict:
+    """{address -> COMPLETE_<band>} from the `Complete` property map (globals'
+    completeness bands, written by the globals assess pass -- the data-address
+    analog of a function's COMPLETE_* tag). Empty until assess runs."""
+    out = {}
+    try:
+        r = _get("/list_properties", map=GLOB_COMPLETE_MAP, program=program, limit=100000)
+        for p in (r.get("entries") or r.get("properties") or []):
+            a = p.get("address")
+            v = p.get("value")
+            if a and v in BAND_TAGS:
+                out["0x" + str(a).lower().lstrip("0x").rjust(8, "0")] = v
+    except (OSError, AttributeError):
+        pass
+    return out
+
+
+def glob_bands(program: str = None) -> dict:
+    """Global-variable completeness band counts (COMPLETE_80/90/95/100) from the
+    `Complete` property map, with the in-scope globals denominator. The data-address
+    analog of bands(). `untagged` = in-scope globals below 80 or not yet scored."""
+    program = program or PROGRAM
+    m = _complete_map_bands(program)
+    counts = {t: 0 for t in BAND_TAGS}
+    for v in m.values():
+        if v in counts:
+            counts[v] += 1
+    scope = len(_global_rows(program))
+    tagged = len(m)
+    return {"bands": counts, "tagged": tagged, "in_scope": scope,
+            "untagged": max(0, scope - tagged)}
+
+
 def _in_scope_fn(program: str, s: dict) -> int | None:
     """In-scope function count: from the summary option if present, else defined-minus-LIB_."""
     if s.get("in_scope") is not None:

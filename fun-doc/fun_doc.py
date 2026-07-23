@@ -1876,6 +1876,59 @@ def _assess_tag_addrs(tag, program):
         return set()
 
 
+# DOC provenance rung ladder as a set, for fast membership tests in the live
+# DOC_DRAFT auto-stamp (sync_band_tag). DOC_DRAFT is the lowest rung; the stamp
+# is add-only, so a function already carrying any of these rungs is left alone.
+_DOC_RUNG_SET = frozenset(_ASSESS_DOC_TAGS)
+
+# good_enough_score (the completeness Target), memoized on the priority-queue
+# file's mtime so the DOC_DRAFT crossing check in sync_band_tag never re-parses
+# priority_queue.json on every score write. A dashboard edit changes the file
+# mtime and is picked up on the next call; a stat() per score write is
+# negligible next to the Ghidra I/O the crossing itself triggers.
+_GOOD_ENOUGH_DRAFT_CACHE = {"mtime": None, "value": None}
+
+
+def _good_enough_for_draft():
+    """Live good_enough_score (the completeness Target), mtime-memoized. This is
+    the threshold at which a documented function is 'fully drafted' and earns the
+    DOC_DRAFT rung -- one knob (the dashboard 'Target') now drives both 'done'
+    and 'drafted'."""
+    try:
+        mtime = PRIORITY_QUEUE_FILE.stat().st_mtime if PRIORITY_QUEUE_FILE.exists() else None
+    except OSError:
+        mtime = None
+    cache = _GOOD_ENOUGH_DRAFT_CACHE
+    if cache["value"] is not None and cache["mtime"] == mtime:
+        return cache["value"]
+    try:
+        cfg = load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG
+        val = int(cfg.get("good_enough_score", 80))
+    except Exception:
+        val = int(DEFAULT_QUEUE_CONFIG.get("good_enough_score", 80))
+    cache["mtime"], cache["value"] = mtime, val
+    return val
+
+
+def _crossed_good_enough(old_score, new_score, good_enough):
+    """True on the UPWARD crossing of `good_enough`: the new score meets the
+    target and the old score did not (or the function was never scored). This
+    gates the sticky, add-only DOC_DRAFT stamp -- a re-score that stays at/above
+    target won't re-fire, and one that later drops below target never fires
+    (and never removes the rung: DOC_* is provenance, not the live score)."""
+    try:
+        if float(new_score) < good_enough:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if old_score is None:
+        return True
+    try:
+        return float(old_score) < good_enough
+    except (TypeError, ValueError):
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Completeness band tags (COMPLETE_80/90/95/100)
 #
@@ -1901,22 +1954,37 @@ def band_for_score(score):
     return None
 
 
-def sync_band_tag(program, address, new_score, old_score=None):
-    """Keep the exclusive COMPLETE_<band> tag in step with a score write.
+def sync_band_tag(program, address, new_score, old_score=None, good_enough=None):
+    """Keep the exclusive COMPLETE_<band> tag in step with a score write, and
+    stamp the DOC_DRAFT provenance rung the first time a function reaches the
+    completeness Target (good_enough_score).
 
     Called from every path that persists a fresh score. When `old_score` is
-    given and the band didn't change this is a pure no-op (no Ghidra I/O), so
-    the hot worker paths only pay HTTP cost on actual band crossings. All
-    Ghidra I/O is best-effort: a tag-sync hiccup must never fail a run —
-    the --assess reconciliation sweep repairs any drift later.
+    given and NEITHER the band changed NOR the Target was crossed this is a pure
+    no-op (no Ghidra I/O), so the hot worker paths only pay HTTP cost on an
+    actual crossing. The DOC_DRAFT stamp is add-only + sticky: it fires only on
+    the upward Target crossing, never overwrites a higher rung (DOC_REVIEWED /
+    DOC_VERIFIED), and is never removed if a later re-score drops below Target --
+    the COMPLETE_* band tags carry the live score, the DOC_* rungs carry
+    provenance. `good_enough` defaults to the live Target when not supplied. All
+    Ghidra I/O is best-effort: a tag-sync hiccup must never fail a run — the
+    --assess reconciliation sweep repairs any drift later.
     """
     new_band = band_for_score(new_score)
-    if old_score is not None and band_for_score(old_score) == new_band:
+    band_changed = old_score is None or band_for_score(old_score) != new_band
+    if good_enough is None:
+        good_enough = _good_enough_for_draft()
+    crossed_target = _crossed_good_enough(old_score, new_score, good_enough)
+    if not band_changed and not crossed_target:
         return
     if not program or not address:
         return
     desired = f"COMPLETE_{new_band}" if new_band else None
     addr = "0x" + str(address).lower().lstrip("0x")
+    # `program` MUST ride in the query string on the tag-write POSTs: their
+    # program param is QUERY-sourced, so a body-only program silently targets
+    # the *active* program (a real hazard with many same-named versions open).
+    qp = {"program": program}
     try:
         r = ghidra_get("/get_function_tags", params={"function": addr, "program": program})
         if isinstance(r, str):
@@ -1924,14 +1992,21 @@ def sync_band_tag(program, address, new_score, old_score=None):
         cur = set()
         if isinstance(r, dict):
             cur = {t.get("name") for t in (r.get("tags") or []) if isinstance(t, dict)}
-        stale = [t for t in COMPLETE_BAND_TAGS if t in cur and t != desired]
-        if stale:
-            ghidra_post("/remove_function_tag",
-                        {"function": addr, "tags": ",".join(stale), "program": program})
-        if desired and desired not in cur:
-            # add_function_tag auto-creates missing tag definitions
+        if band_changed:
+            stale = [t for t in COMPLETE_BAND_TAGS if t in cur and t != desired]
+            if stale:
+                ghidra_post("/remove_function_tag",
+                            {"function": addr, "tags": ",".join(stale), "program": program}, params=qp)
+            if desired and desired not in cur:
+                # add_function_tag auto-creates missing tag definitions
+                ghidra_post("/add_function_tag",
+                            {"function": addr, "tags": desired, "program": program}, params=qp)
+        # DOC_DRAFT: add-only + sticky. Stamp the Target crossing only when the
+        # function carries no DOC rung yet, so an existing DOC_REVIEWED /
+        # DOC_VERIFIED is never clobbered and a re-cross never re-adds.
+        if crossed_target and not (cur & _DOC_RUNG_SET):
             ghidra_post("/add_function_tag",
-                        {"function": addr, "tags": desired, "program": program})
+                        {"function": addr, "tags": "DOC_DRAFT", "program": program}, params=qp)
     except Exception:
         pass
 
@@ -1967,17 +2042,18 @@ def sync_band_tags_sweep(program, emit=print):
     emit(f"band sweep: {len(scores)} scored functions -> +{len(to_add)} tags, "
          f"-{len(to_remove)} stale, {unscored} unscored")
     CHUNK = 200
+    qp = {"program": program}   # program in QUERY -> target this program, not the active one
     for i in range(0, len(to_add), CHUNK):
         try:
             ghidra_post("/batch_add_function_tags",
                         {"assignments": to_add[i:i + CHUNK], "program": program},
-                        timeout=120)
+                        params=qp, timeout=120)
         except Exception as e:
             emit(f"  [warn] batch band-tag add failed at {i}: {e}")
     for addr, tag in to_remove:
         try:
             ghidra_post("/remove_function_tag",
-                        {"function": addr, "tags": tag, "program": program})
+                        {"function": addr, "tags": tag, "program": program}, params=qp)
         except Exception:
             pass
     return len(to_add), len(to_remove), unscored
@@ -1997,12 +2073,17 @@ def _lib_tagged_addrs(program):
     return lib
 
 
-def run_assess_pass(program, count=None, draft_score=40):
+def run_assess_pass(program, count=None, draft_score=None):
     """Assess the CURRENT documentation state of in-scope functions and stamp DOC_DRAFT on
-    any whose completeness score is >= draft_score (i.e. they already carry real docs). Only
-    functions that don't yet have a DOC rung are scored, so each pass shrinks the pool and
-    repeats get cheaper. Streams per-function progress via print() for the dashboard pane.
-    Returns 0 on success."""
+    any whose completeness score is >= draft_score (i.e. they have reached the Target and are
+    fully drafted). `draft_score` defaults to the live good_enough_score, so the batch sweep
+    and the live per-function auto-stamp (sync_band_tag) mean exactly one thing: DOC_DRAFT ==
+    'met the Target'. Only functions that don't yet have a DOC rung are scored, so each pass
+    shrinks the pool and repeats get cheaper. Streams per-function progress via print() for the
+    dashboard pane. Returns 0 on success."""
+    if draft_score is None:
+        draft_score = _good_enough_for_draft()
+
     def emit(s):
         print(s, flush=True)
 
@@ -2041,9 +2122,11 @@ def run_assess_pass(program, count=None, draft_score=40):
 
     score_map = _batch_score(addrs, prog_path=program, progress_callback=_on_batch) or {}
 
-    # best-effort: make sure the tag exists before tagging
+    # best-effort: make sure the tag exists before tagging.
+    # program in QUERY on every write -> target this program, not the active one.
+    qp = {"program": program}
     try:
-        ghidra_post("/create_function_tag", {"name": "DOC_DRAFT", "program": program})
+        ghidra_post("/create_function_tag", {"name": "DOC_DRAFT", "program": program}, params=qp)
     except Exception:
         pass
 
@@ -2054,7 +2137,7 @@ def run_assess_pass(program, count=None, draft_score=40):
         if sc is not None and sc >= draft_score:
             try:
                 ghidra_post("/add_function_tag",
-                            {"function": a, "tags": "DOC_DRAFT", "program": program})
+                            {"function": a, "tags": "DOC_DRAFT", "program": program}, params=qp)
                 stamped += 1
                 emit(f"  [{i}/{total}] {nm} @ {a}  ->  DOC_DRAFT (score {sc})")
             except Exception as e:
@@ -2069,7 +2152,7 @@ def run_assess_pass(program, count=None, draft_score=40):
     except Exception as e:
         emit(f"  [warn] band-tag sweep failed: {e}")
     try:
-        ghidra_post("/save_program", {"program": program})
+        ghidra_post("/save_program", {"program": program}, params=qp)
     except Exception:
         emit("  [warn] save_program failed -- DOC_DRAFT tags are in memory; save Ghidra manually")
     emit(f"\nassessed {total}: stamped DOC_DRAFT on {stamped}, left {total - stamped} untagged "
@@ -2148,14 +2231,18 @@ def _global_comment_state(program, addr):
         return (False, False)
 
 
-def run_assess_globals_pass(program, count=None, draft_score=80):
-    """Assess the CURRENT documentation state of in-scope globals -- the data-address analog of
-    run_assess_pass. A global reaches DOC_DRAFT only when it has a meaningful NAME, a real
-    (non-placeholder) TYPE, *and* an explanatory COMMENT (the plate/pre comment set_global writes);
-    the comment is a hard requirement -- name+type alone is 'ready, needs comment', not documented.
-    Only globals without a DOC rung are scored. For each, reports which piece is missing so the
-    Document lane can target it. The comment is read only when name+type already pass (cheap).
-    Streams per-global progress. Returns 0 on success."""
+def run_assess_globals_pass(program, count=None, draft_score=None):
+    """Assess documentation completeness of in-scope globals -- the data-address analog of
+    run_assess_pass, backed by the /analyze_global_completeness budgeted 0-100 scorer (six
+    axes: meaningful name, explanatory comment, real type, formatted bytes -- core -- plus
+    enum/equate and struct membership, forgiven in effective_score). A global earns DOC_DRAFT
+    when its EFFECTIVE score >= the Target (good_enough_score), and its COMPLETE_<band> is
+    written to the `Complete` property map so the dashboard can render a completeness
+    distribution. Only globals without a DOC rung are scored (sticky, pool-shrinking).
+    `draft_score` defaults to the live Target. Streams per-global progress. Returns 0."""
+    if draft_score is None:
+        draft_score = _good_enough_for_draft()
+
     def emit(s):
         print(s, flush=True)
 
@@ -2180,7 +2267,7 @@ def run_assess_globals_pass(program, count=None, draft_score=80):
     already = _global_doc_rungs(program)
     candidates = [g for g in rows if g["addr"] not in already]
     emit(f"[globals] {len(rows)} in-image globals - {len(already)} already DOC-tagged "
-         f"-> {len(candidates)} to assess")
+         f"-> {len(candidates)} to assess (Target={draft_score})")
     if count:
         candidates = candidates[:count]
         emit(f"  (this pass: first {len(candidates)})")
@@ -2188,45 +2275,60 @@ def run_assess_globals_pass(program, count=None, draft_score=80):
         emit("[globals] nothing to assess -- every in-scope global already carries a DOC rung")
         return 0
 
-    # DOC_DRAFT now requires an explanatory comment -- probe /get_comment once (it's a new
-    # endpoint; absent until the Ghidra extension is reloaded).
-    _probe = next((g for g in candidates if _global_meaningful_name(g["name"]) and g["typed"]), None)
-    comments_live = _global_comment_state(program, _probe["addr"])[1] if _probe else True
-    if not comments_live:
-        emit("[globals] NOTE: /get_comment not live yet (Ghidra extension reload pending) -- "
-             "reporting readiness but stamping nothing, since DOC_DRAFT requires a confirmable comment")
-
-    stamped = ready_no_comment = 0
-    miss = {"name": 0, "type": 0, "comment": 0}
+    stamped = 0
+    bands = {}          # band string / "none" -> count
+    scorer_live = True
     total = len(candidates)
+
+    def _tally(band):
+        key = band or "none"
+        bands[key] = bands.get(key, 0) + 1
+
     for i, g in enumerate(candidates, 1):
-        named, typed = _global_meaningful_name(g["name"]), g["typed"]
-        explanatory = False
-        if named and typed and comments_live:
-            explanatory = _global_comment_state(program, g["addr"])[0]
-        if named and typed and explanatory:
+        # Cheap short-circuit: a global with neither a meaningful name nor a real
+        # type cannot reach any band -- skip the HTTP score, just clear its band.
+        if not _global_meaningful_name(g["name"]) and not g["typed"]:
+            _sync_global_band(program, g["addr"], None)
+            _tally(None)
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  needs name, type (score ~0)")
+            continue
+        res = ghidra_get("/analyze_global_completeness",
+                         params={"address": g["addr"], "program": program})
+        if not isinstance(res, dict) or "effective_score" not in res:
+            scorer_live = False
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  scorer unavailable "
+                 f"(/analyze_global_completeness not deployed?)")
+            continue
+        if res.get("applicable") is False:
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  skip ({res.get('reason')})")
+            continue
+        eff = res.get("effective_score")
+        band = res.get("band")
+        _sync_global_band(program, g["addr"], band)
+        _tally(band)
+        if eff is not None and eff >= draft_score:
             _stamp_global_doc_rung(program, g["addr"], "DOC_DRAFT")
             stamped += 1
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT (name+type+comment)")
-        elif named and typed:
-            ready_no_comment += 1
-            miss["comment"] += 1
-            note = "needs comment" + ("" if comments_live else " (comment check pending reload)")
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  ready: {note}")
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT "
+                 f"(effective {eff:.0f}, {band})")
         else:
-            gaps = [k for k, ok in (("name", named), ("type", typed)) if not ok]
-            for k in gaps:
-                miss[k] += 1
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  needs {', '.join(gaps)}")
+            miss = ", ".join(res.get("missing") or []) or "polish"
+            eff_s = f"{eff:.0f}" if eff is not None else "?"
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  effective {eff_s} "
+                 f"({band or 'no band'}); needs {miss}")
     try:
-        ghidra_post("/save_program", {"program": program})
+        ghidra_post("/save_program", {"program": program}, params={"program": program})
     except Exception:
-        emit("  [warn] save_program failed -- Doc rungs are in memory; save Ghidra manually")
-    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped} (name+type+comment); "
-         f"{ready_no_comment} ready-but-need-a-comment; "
-         f"missing name={miss['name']} type={miss['type']}")
-    emit("next: the Document/Globals lane writes the missing comments (and names/types); "
-         "re-run assess to promote them to DOC_DRAFT")
+        emit("  [warn] save_program failed -- rungs/bands are in memory; save Ghidra manually")
+    if not scorer_live:
+        emit("[globals] WARNING: /analyze_global_completeness did not respond for some globals -- "
+             "build + deploy the current plugin JAR so globals get scored.")
+    band_summary = " ".join(f"{b}={bands[b]}" for b in
+                            ("COMPLETE_100", "COMPLETE_95", "COMPLETE_90", "COMPLETE_80")
+                            if bands.get(b))
+    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped} (effective >= {draft_score}); "
+         f"bands: {band_summary or 'none'}; below-band={bands.get('none', 0)}")
+    emit("next: the Globals lane raises names/types/comments/bytes; re-run assess to promote to DOC_DRAFT")
     return 0
 
 
@@ -3251,9 +3353,6 @@ DEFAULT_PROVIDER_MODELS = {
 DEFAULT_QUEUE_CONFIG = {
     "good_enough_score": 80,
     "require_scored": False,
-    # Assess lane: a function whose completeness score is >= this gets stamped DOC_DRAFT
-    # ("already documented"). Dashboard-tunable via Settings.
-    "assess_draft_score": 80,
     # Plate scaffold: when on, the worker refreshes the harness-owned plate scaffold (empirical
     # block + re-attached prose + <TODO> slots) before the model runs, so the model only fills
     # descriptions. Off by default -- opt-in; the re-attach is verified 100% lossless by plate_diff.
@@ -9712,8 +9811,9 @@ def main():
     parser.add_argument("--assess-globals-only", action="store_true", help="--assess: skip the functions phase")
     parser.add_argument("--assess-count", type=int, default=None,
                         help="Limit items assessed this pass (default: all untagged in-scope)")
-    parser.add_argument("--draft-score", type=int, default=80,
-                        help="Completeness score >= this stamps DOC_DRAFT during --assess (default: 80)")
+    parser.add_argument("--draft-score", type=int, default=None,
+                        help="Completeness score >= this stamps DOC_DRAFT during --assess "
+                             "(default: the live good_enough_score / Target)")
     parser.add_argument("--web", action="store_true", help="Start web dashboard")
     parser.add_argument(
         "--web-port", type=int, default=5000, help="Web dashboard port (default: 5000)"
@@ -10005,8 +10105,11 @@ def main():
             print("--assess requires a binary: pass --binary <program path>")
             return
         if not args.assess_globals_only:
+            # draft_score None -> run_assess_pass resolves the live Target (good_enough_score)
             run_assess_pass(prog, count=args.assess_count, draft_score=args.draft_score)
         if not args.assess_functions_only:
+            # Globals now use the same budgeted completeness scorer as functions;
+            # draft_score None -> run_assess_globals_pass resolves the live Target.
             run_assess_globals_pass(prog, count=args.assess_count, draft_score=args.draft_score)
         return
 
@@ -11337,13 +11440,55 @@ def _stamp_global_doc_rung(program, address, rung="DOC_DRAFT"):
     if not program or not address:
         return
     try:
+        # `program` MUST ride in the query string: /set_property's program param is
+        # QUERY-sourced, so a body-only program silently targets the *active*
+        # program instead (a real hazard with many same-named versions open).
+        qp = {"program": program}
         p = ghidra_post("/set_property",
-                        {"map": "Doc", "address": address, "value": rung, "program": program})
+                        {"map": "Doc", "address": address, "value": rung, "program": program},
+                        params=qp)
         if isinstance(p, dict) and not p.get("success") and "No property map" in str(p):
             ghidra_post("/create_property_map",
-                        {"name": "Doc", "type": "string", "program": program})
+                        {"name": "Doc", "type": "string", "program": program}, params=qp)
             ghidra_post("/set_property",
-                        {"map": "Doc", "address": address, "value": rung, "program": program})
+                        {"map": "Doc", "address": address, "value": rung, "program": program},
+                        params=qp)
+    except Exception:
+        pass
+
+
+# The globals analog of a function's COMPLETE_<band> tag. Data addresses can't
+# carry function tags, so a global's completeness band lives in the `Complete`
+# property map (sibling to the `Doc` rung map). Unlike the sticky DOC rung, the
+# band tracks LIVE effective completeness -- it updates and clears on re-assess,
+# exactly like function COMPLETE_* tags demote when a re-score drops the band.
+GLOB_COMPLETE_MAP = "Complete"
+
+
+def _sync_global_band(program, address, band):
+    """Write (or clear when `band` is None/below-80) a global's COMPLETE_<band>
+    in the `Complete` property map. Best-effort -- a property hiccup never fails
+    the assess pass."""
+    if not program or not address:
+        return
+    try:
+        # `program` in the QUERY string -- these endpoints resolve program from
+        # the query, so a body-only program silently hits the active program.
+        qp = {"program": program}
+        if not band:
+            ghidra_post("/remove_property",
+                        {"map": GLOB_COMPLETE_MAP, "address": address, "program": program},
+                        params=qp)
+            return
+        p = ghidra_post("/set_property",
+                        {"map": GLOB_COMPLETE_MAP, "address": address, "value": band, "program": program},
+                        params=qp)
+        if isinstance(p, dict) and not p.get("success") and "No property map" in str(p):
+            ghidra_post("/create_property_map",
+                        {"name": GLOB_COMPLETE_MAP, "type": "string", "program": program}, params=qp)
+            ghidra_post("/set_property",
+                        {"map": GLOB_COMPLETE_MAP, "address": address, "value": band, "program": program},
+                        params=qp)
     except Exception:
         pass
 
