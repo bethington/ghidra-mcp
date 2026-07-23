@@ -78,7 +78,21 @@ def _binaries():
 def _binaries_progress():
     """All open binaries with per-binary progress (Fn Doc / Fn Conf / Glob Doc segmented
     bars + remaining), most-remaining-first. Feeds the focus picker. Not program-scoped."""
-    return jsonify(cd.binaries_progress())
+    data = cd.binaries_progress()
+    # cd's `active` is the process-start default (FUNDOC_GHIDRA_PROGRAM or
+    # D2Common.dll). The pipeline page seeds its focus from this value on every
+    # load, so serve the PERSISTED focus (state meta active_binary — the value
+    # pickBinary() writes back) or a reload silently reverts the picker to the
+    # default binary while workers run against the one the user actually chose.
+    try:
+        from fun_doc import get_state_meta
+
+        persisted = get_state_meta().get("active_binary")
+        if persisted:
+            data["active"] = persisted
+    except Exception:
+        pass
+    return jsonify(data)
 
 
 @conf_bp.route("/api/conformance/summary")
