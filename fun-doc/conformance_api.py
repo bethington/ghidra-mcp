@@ -115,6 +115,11 @@ def _bands():
     return jsonify(cd.bands(program=_prog()))
 
 
+@conf_bp.route("/api/conformance/glob_bands")
+def _glob_bands():
+    return jsonify(cd.glob_bands(program=_prog()))
+
+
 @conf_bp.route("/api/conformance/inventory")
 def _inventory():
     try:

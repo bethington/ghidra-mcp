@@ -410,8 +410,6 @@
                 <span>Target</span><select class="worker-input" id="goodEnoughInput" onchange="saveQueueConfig()" title="Target completeness band: doc workers keep working functions below this level; COMPLETE_<band> tags graduate through 80/90/95/100">
                   <option value="80">80</option><option value="90">90</option><option value="95">95</option><option value="100">100</option>
                 </select></label>
-              <label class="settings-label" title="Assess lane: functions whose completeness score is >= this get stamped DOC_DRAFT">
-                <span>Draft@</span><input type="number" class="worker-input" id="assessDraftInput" min="0" max="100" onchange="saveQueueConfig()"></label>
               <label class="settings-label" title="Surface unscored functions so they get scored on first contact">
                 <input type="checkbox" id="requireScoredInput" onchange="saveQueueConfig()" style="margin:0"><span>Score Cold</span></label>
               <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/">
@@ -478,6 +476,11 @@
           <div class="bar-lab"><span class="t">Globals &middot; Documentation</span><span class="p" id="globPct">-</span></div>
           <div class="segbar" id="globBar"></div>
           <div class="seg-legend" id="globLegend"></div>
+        </div>
+        <div>
+          <div class="bar-lab"><span class="t">Globals &middot; Completeness</span><span class="p" id="globBandPct">-</span></div>
+          <div class="segbar" id="globBandBar"></div>
+          <div class="seg-legend" id="globBandLegend"></div>
         </div>
       </div>
     </div></div>
@@ -733,6 +736,7 @@
       {label:"VERIFIED",n:dv,c:RUNG_COLOR.DOC_VERIFIED},
     ],inscope);
     renderBandBar();
+    renderGlobBandBar();
     // ---- Functions - Conformance: none -> DRAFT -> VECTORS -> LIVE -> BATTLETESTED -> REGRESSION ----
     const cDr=row("CONF_DRAFT"), cVe=row("CONF_VECTORS"), cLi=row("CONF_LIVE"), cBa=row("CONF_BATTLETESTED"), cRe=row("CONF_REGRESSION");
     const proven=cDr+cVe+cLi+cBa+cRe;
@@ -761,6 +765,29 @@
     const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
     document.getElementById("bandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
     seg(document.getElementById("bandBar"),document.getElementById("bandLegend"),[
+      {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
+      {label:"80+",n:c80,c:"var(--crafted)"},
+      {label:"90+",n:c90,c:"var(--magic)"},
+      {label:"95+",n:c95,c:"var(--set)"},
+      {label:"100",n:c100,c:"var(--rare)"},
+    ],inscope);
+  }
+
+  // ---- Globals - Completeness: untagged -> COMPLETE_80 -> 90 -> 95 -> 100 ----
+  // The data-address analog of the function completeness bar; exclusive score-band
+  // values live in the `Complete` property map. Rendered from /api/conformance/glob_bands.
+  async function renderGlobBandBar(){
+    const b=await api("/glob_bands"); if(!b||b.in_scope==null) return;
+    let target=90;
+    try{ const r=await fetch("/api/queue/config"); const j=await r.json();
+         target=parseInt((j.config||j||{}).good_enough_score)||90; }catch(e){}
+    const n=t=>((b.bands||{})[t]||0);
+    const c80=n("COMPLETE_80"), c90=n("COMPLETE_90"), c95=n("COMPLETE_95"), c100=n("COMPLETE_100");
+    const inscope=b.in_scope||1;
+    const atLevel={80:c80+c90+c95+c100, 90:c90+c95+c100, 95:c95+c100, 100:c100};
+    const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
+    document.getElementById("globBandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
+    seg(document.getElementById("globBandBar"),document.getElementById("globBandLegend"),[
       {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
       {label:"80+",n:c80,c:"var(--crafted)"},
       {label:"90+",n:c90,c:"var(--magic)"},
@@ -967,7 +994,6 @@
     catch(e){ flash("settings load failed"); return; }
     const g = id => document.getElementById(id);
     if(g("goodEnoughInput"))  g("goodEnoughInput").value  = cfg.good_enough_score!=null ? cfg.good_enough_score : 80;
-    if(g("assessDraftInput")) g("assessDraftInput").value = cfg.assess_draft_score!=null ? cfg.assess_draft_score : 80;
     if(g("requireScoredInput")) g("requireScoredInput").checked = !!cfg.require_scored;
     if(g("debugModeInput"))   g("debugModeInput").checked = !!cfg.debug_mode;
     if(g("plateScaffoldInput")) g("plateScaffoldInput").checked = !!cfg.plate_scaffold;
@@ -1011,7 +1037,6 @@
     const v = (id,d) => { const e=g(id); return e ? e.value : d; };
     const cfg = {
       good_enough_score: parseInt(v("goodEnoughInput",80)) || 80,
-      assess_draft_score: parseInt(v("assessDraftInput",80)) || 80,
       require_scored: g("requireScoredInput") ? g("requireScoredInput").checked : false,
       debug_mode: g("debugModeInput") ? g("debugModeInput").checked : false,
       plate_scaffold: g("plateScaffoldInput") ? g("plateScaffoldInput").checked : false,

@@ -1,7 +1,7 @@
 {
   "version": "5.17.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 269,
+  "total_endpoints": 270,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -161,6 +161,17 @@
         "program"
       ],
       "description": "Analyze documentation completeness"
+    },
+    {
+      "path": "/analyze_global_completeness",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "address",
+        "compact",
+        "program"
+      ],
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
     },
     {
       "path": "/analyze_struct_field_usage",
