@@ -28,6 +28,40 @@ import fun_doc as fd  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
+# _image_range — dynamic per-program image window (any base address)
+# --------------------------------------------------------------------------- #
+_SEGMENTS = (
+    "Headers: 10000000 - 100003ff\n"
+    ".text: 10001000 - 100ebfff\n"
+    ".rdata: 100ec000 - 1011bdff\n"
+    ".data: 1011c000 - 101254eb\n"
+    ".reloc: 10128000 - 101371ff\n"
+    "tdb:\n"                          # rangeless line — must be ignored
+)
+
+
+def test_image_range_from_segments(monkeypatch):
+    monkeypatch.setattr(fd, "ghidra_get", lambda path, params=None, timeout=None: _SEGMENTS)
+    lo, hi = fd._image_range("/p")
+    assert lo == 0x10000000
+    assert hi == 0x101371ff + 1          # max end, exclusive
+
+
+def test_image_range_excludes_os_overlay(monkeypatch):
+    # A TIB/PEB overlay block far above the image must not stretch the window.
+    segs = _SEGMENTS + "tib: ffdf0000 - ffdfffff\n"
+    monkeypatch.setattr(fd, "ghidra_get", lambda path, params=None, timeout=None: segs)
+    lo, hi = fd._image_range("/p")
+    assert lo == 0x10000000
+    assert hi == 0x101371ff + 1          # overlay dropped, not 0xffe00000
+
+
+def test_image_range_none_when_unavailable(monkeypatch):
+    monkeypatch.setattr(fd, "ghidra_get", lambda path, params=None, timeout=None: "")
+    assert fd._image_range("/p") is None   # caller falls back to legacy window
+
+
+# --------------------------------------------------------------------------- #
 # _sync_global_band — Complete property-map writer
 # --------------------------------------------------------------------------- #
 class _PostRec:

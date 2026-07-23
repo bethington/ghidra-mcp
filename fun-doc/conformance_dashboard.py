@@ -437,7 +437,32 @@ _GLOB_PRIM = _re.compile(
 _GLOB_LINE = _re.compile(
     r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
     r"(?:\s+xrefs=(?P<xrefs>\d+))?")
-_IMG_LO, _IMG_HI = 0x6f000000, 0x70000000  # DLL mapped range; excludes TIB/PEB/stack labels
+_IMG_LO, _IMG_HI = 0x6f000000, 0x70000000  # legacy fallback (base D2 DLL map)
+_SEG_RANGE = _re.compile(r":\s*([0-9a-fA-F]+)\s*-\s*([0-9a-fA-F]+)\s*$")
+
+
+def _image_range(program: str):
+    """(lo, hi_exclusive) for the program's own image, from /list_segments, so the
+    globals bar/inventory work at any base address (mod DLLs, exes, third-party
+    libs) instead of only the D2 0x6f window. Returns None on failure (callers
+    fall back to _IMG_LO/_IMG_HI)."""
+    try:
+        txt = _get("/list_segments", program=program)
+    except OSError:
+        return None
+    ranges = []
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = _SEG_RANGE.search(ln.strip())
+        if m:
+            ranges.append((int(m.group(1), 16), int(m.group(2), 16)))
+    if not ranges:
+        return None
+    base = min(s for s, _ in ranges)
+    window = 0x08000000  # 128MB span from base; drops OS overlay blocks
+    ends = [e for s, e in ranges if base <= s < base + window]
+    if not ends:
+        return None
+    return base, max(ends) + 1
 # Globals carry the SAME doc rungs as functions, but stored in a per-address property map
 # ("Doc") rather than Ghidra function-tags (which are function-scoped and can't attach to data).
 GLOB_DOC_MAP = "Doc"
@@ -462,6 +487,7 @@ def _global_rows(program: str) -> list[dict]:
     """In-scope image globals for a program: {addr, name, type, typed}. Parsed from the
     free list_globals text (one call, no per-global fanout). Excludes out-of-image OS
     labels (TIB/PEB), Ordinal_ export aliases, and triage-marked library data (Scope)."""
+    img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
     txt = _get("/list_globals", program=program, limit=100000)
     excluded = _scope_excluded_globals(program)
     rows = []
@@ -470,7 +496,7 @@ def _global_rows(program: str) -> list[dict]:
         if not m:
             continue
         a = int(m.group("addr"), 16)
-        if not (_IMG_LO <= a < _IMG_HI):
+        if not (img_lo <= a < img_hi):
             continue
         name = m.group("name")
         if name.startswith("Ordinal_") or ("0x%08x" % a) in excluded:
@@ -704,13 +730,14 @@ def native_types_status(program: str = None, force: bool = False) -> dict:
         return _NATIVE_CACHE[program]
     unref = inval = total = 0
     try:
+        img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
         txt = _get("/list_globals", program=program, limit=100000)
         for ln in (txt if isinstance(txt, str) else "").splitlines():
             m = _GLOB_LINE.match(ln.strip())
             if not m:
                 continue
             a = int(m.group("addr"), 16)
-            if not (_IMG_LO <= a < _IMG_HI) or m.group("name").startswith("Ordinal_"):
+            if not (img_lo <= a < img_hi) or m.group("name").startswith("Ordinal_"):
                 continue
             total += 1
             v = d2moo_types.validate_type(m.group("type")).get("verdict")
