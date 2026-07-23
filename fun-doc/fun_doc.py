@@ -2174,7 +2174,33 @@ _GA_PLACEHOLDER_TYPE = re.compile(
 _GA_AUTONAME = re.compile(
     r"^(DAT|LAB|SUB|UNK|FUN|PTR|OFF|BYTE|WORD|DWORD|QWORD|STRU|JMP|switchdata)_[0-9A-Fa-f]+$"
     r"|^g_(dw|w|b|p|f|q)?(data|unknown|unk|ptr|field|global)?_?[0-9A-Fa-f]{3,8}$", re.I)
-_GA_IMG_LO, _GA_IMG_HI = 0x6f000000, 0x70000000
+_GA_IMG_LO, _GA_IMG_HI = 0x6f000000, 0x70000000  # legacy fallback (base D2 DLL map)
+_SEG_RANGE = re.compile(r":\s*([0-9a-fA-F]+)\s*-\s*([0-9a-fA-F]+)\s*$")
+
+
+def _image_range(program):
+    """(lo, hi_exclusive) covering the program's OWN image, derived from
+    /list_segments -- so the globals assess works at any base address, not just
+    the hardcoded D2 0x6f window. OS overlay blocks (TIB/PEB, far above the
+    image) are excluded via a generous 128MB span from the base. Returns None
+    when segments can't be read (callers fall back to the legacy window)."""
+    try:
+        txt = ghidra_get("/list_segments", params={"program": program}, timeout=30)
+    except Exception:
+        return None
+    ranges = []
+    for ln in (txt if isinstance(txt, str) else "").splitlines():
+        m = _SEG_RANGE.search(ln.strip())
+        if m:
+            ranges.append((int(m.group(1), 16), int(m.group(2), 16)))
+    if not ranges:
+        return None
+    base = min(s for s, _ in ranges)
+    WINDOW = 0x08000000  # 128MB: covers any single DLL/exe image, drops OS overlays
+    ends = [e for s, e in ranges if base <= s < base + WINDOW]
+    if not ends:
+        return None
+    return base, max(ends) + 1
 
 
 def _global_meaningful_name(name):
@@ -2246,6 +2272,9 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
     def emit(s):
         print(s, flush=True)
 
+    # Image window from the program's own segments (any base), not the D2 0x6f
+    # hardcode -- so mod DLLs / exes / third-party libs get their globals scored.
+    img_lo, img_hi = _image_range(program) or (_GA_IMG_LO, _GA_IMG_HI)
     txt = ghidra_get("/list_globals", params={"program": program, "limit": 100000}, timeout=60)
     rows = []
     for ln in (txt if isinstance(txt, str) else "").splitlines():
@@ -2253,7 +2282,7 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
         if not m:
             continue
         a = int(m.group("addr"), 16)
-        if not (_GA_IMG_LO <= a < _GA_IMG_HI):
+        if not (img_lo <= a < img_hi):
             continue
         name = m.group("name")
         if name.startswith("Ordinal_"):
