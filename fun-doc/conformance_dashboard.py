@@ -407,23 +407,42 @@ def function_detail(addr: str, program: str = None) -> dict:
 
 def list_binaries() -> dict:
     """The folder + binary options for the header selectors, so the dashboard is
-    focused on ONE binary at a time (its per-program tags/maps/rollup). Sourced from
-    Ghidra's OPEN programs; the currently-active one is flagged."""
+    focused on ONE binary at a time (its per-program tags/maps/rollup).
+
+    Sourced from the UNION of Ghidra's OPEN programs and the version-control
+    CHECKED-OUT work set: a binary that's checked out but not currently open is
+    still fully queryable by path (assess/doc workers target it fine), so it must
+    stay pickable — otherwise the picker silently drops most of the project the
+    moment those programs aren't held open. Deduped by path; active is flagged."""
     out = {"binaries": [], "active": PROGRAM}
+    seen = set()
+
+    def _add(path):
+        if not path or path in seen:
+            return
+        seen.add(path)
+        folder, _, name = str(path).rpartition("/")
+        out["binaries"].append({"path": path, "name": name or path, "folder": folder or "/"})
+
     try:
         r = _get("/list_open_programs")
-        progs = r.get("programs") or r.get("open_programs") or []
-        for p in progs:
-            path = p.get("path") or p.get("program") or (p if isinstance(p, str) else None)
-            if not path:
-                continue
-            folder, _, name = str(path).rpartition("/")
-            out["binaries"].append({"path": path, "name": name or path, "folder": folder or "/"})
+        for p in (r.get("programs") or r.get("open_programs") or []):
+            _add(p.get("path") or p.get("program") or (p if isinstance(p, str) else None))
     except OSError:
         pass
+    # Checked-out work set — queryable even when not open. Optional: absent on
+    # non-versioned/local projects, in which case open programs are the whole set.
+    try:
+        r = _get("/server/checkouts")
+        for c in (r.get("checkouts") or []):
+            _add(c.get("path"))
+    except OSError:
+        pass
+
     if not out["binaries"]:                # fall back to the current program
         folder, _, name = PROGRAM.rpartition("/")
         out["binaries"] = [{"path": PROGRAM, "name": name, "folder": folder or "/"}]
+    out["binaries"].sort(key=lambda b: (b["folder"], b["name"].lower()))
     return out
 
 
