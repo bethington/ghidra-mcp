@@ -74,7 +74,9 @@ def _norm(a) -> str:
 def _tag_named(tag: str, program: str = None) -> dict:
     """{address -> name} for functions carrying `tag`."""
     try:
-        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM)
+        # limit high: the endpoint defaults to 1000, which silently caps the
+        # completeness/doc bars on large binaries (D2Client has >1000 in a band).
+        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM, limit=100000)
     except OSError:
         return {}
     return {_norm(f.get("address", "")): f.get("name") for f in (r.get("functions") or [])}
@@ -83,7 +85,8 @@ def _tag_named(tag: str, program: str = None) -> dict:
 def _tag_addrs(tag: str, program: str = None) -> set[str]:
     """Set of function addresses carrying `tag` (one search, not per-function)."""
     try:
-        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM)
+        # limit high (endpoint default 1000 undercounts big-binary bands)
+        r = _get("/search_functions_by_tag", tag=tag, program=program or PROGRAM, limit=100000)
     except OSError:
         return set()
     return {"0x" + str(f.get("address", "")).lower() for f in (r.get("functions") or [])}
@@ -145,6 +148,12 @@ def bands(program: str = None) -> dict:
     tagged = len(set().union(*sets.values())) if sets else 0
     s = summary(program)
     in_scope = s.get("in_scope")
+    if in_scope is None:
+        # The summary option is only written by the doc worker; after an
+        # assess-only pass it's absent, which makes the completeness bar bail
+        # (renderBandBar returns on in_scope==null). Fall back to the computed
+        # defined-minus-LIB_ count, same as binaries_progress does.
+        in_scope = _in_scope_fn(program, s)
     return {"bands": counts, "tagged": tagged, "in_scope": in_scope,
             "untagged": max(0, (in_scope or 0) - tagged)}
 
