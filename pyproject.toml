@@ -162,6 +162,17 @@ package = true
 # test debt the ratchet exists to squeeze. Do not add runtime modules here.
 omit = [
     "*/vendored/*",
+    # One-shot log/diagnostic CLIs. They read a live fun-doc's logs or drive a
+    # live Ghidra and cannot execute in the offline tier at all, so their 0%
+    # measured "how many operational scripts exist", not how tested the runtime
+    # is. (adversarial_reproof.py, type_unifier.py and plate_scaffold.py are
+    # deliberately NOT here — those are importable engines, i.e. real debt.)
+    "fun-doc/_analyze_runs.py",
+    "fun-doc/_diag_leaves.py",
+    "fun-doc/_extract_tools.py",
+    "fun-doc/analyze_debug.py",
+    "fun-doc/analyze_runs.py",
+    "fun-doc/audit_globals_cli.py",
     "fun-doc/audit_globals_typing.py",
     "fun-doc/batch_assess.py",
     "fun-doc/batch_picker.py",

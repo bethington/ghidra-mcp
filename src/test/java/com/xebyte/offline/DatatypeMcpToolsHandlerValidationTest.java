@@ -120,4 +120,30 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
         assertTrue("Expected 'No program loaded' but got: " + msg,
                    msg.contains("No program loaded"));
     }
+
+    // ---- rename_data_type (issue #401) -------------------------------------
+    // Renaming a struct/union/enum/typedef had no endpoint at all: the only
+    // route was clone + re-apply + delete, which drops every existing
+    // application of the old type. These pin the guard clauses; the rename
+    // itself needs a live DataTypeManager and is covered by the integration
+    // suite.
+
+    public void testRenameDataTypeRejectsEmptyOldName() {
+        Response r = dataTypes.renameDataType("", "NewName", "");
+        assertTrue(r instanceof Response.Text);
+        assertTrue(((Response.Text) r).content().contains("Old name is required"));
+    }
+
+    public void testRenameDataTypeRejectsEmptyNewName() {
+        Response r = dataTypes.renameDataType("OldName", "", "");
+        assertTrue(r instanceof Response.Text);
+        assertTrue(((Response.Text) r).content().contains("New name is required"));
+    }
+
+    public void testRenameDataTypeRequiresProgram() {
+        Response r = dataTypes.renameDataType("OldName", "NewName", "");
+        String msg = r.toJson();
+        assertTrue("Expected 'No program loaded' but got: " + msg,
+                   msg.contains("No program loaded"));
+    }
 }
