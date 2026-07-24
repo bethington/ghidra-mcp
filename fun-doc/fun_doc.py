@@ -5624,14 +5624,20 @@ def _invoke_provider_direct(
 ):
     effective_provider = provider or AI_PROVIDER
     selected_model = _require_model_name(model, effective_provider)
+    # Set by the gemini branch below: its wrapper runs quota detection inline,
+    # so the post-call quota screen would double-install the same pause.
+    skip_quota_detection = False
 
     # Pre-call quota-pause gate (Q1 + Q9): if (provider, model) is currently
     # walled, short-circuit before hitting the API. Synthesize a quota_paused
     # result so the caller can log it and the worker can pause.
     from provider_pause import (
         detect_quota_wall,
+        detect_terminal_provider_error,
         get_default_manager,
         QUOTA_PAUSE_THRESHOLD_SECONDS,
+        ResetInfo,
+        TERMINAL_ERROR_PAUSE_SECONDS,
     )
 
     pause_mgr = get_default_manager()
@@ -5670,8 +5676,13 @@ def _invoke_provider_direct(
         result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
     elif effective_provider == "gemini":
         # Gemini's wrapper already integrates quota-wall detection inline so
-        # it can break out of its retry loop — return its result directly.
-        return _invoke_gemini(prompt, selected_model, max_turns)
+        # it can break out of its retry loop. It still has to pass through
+        # the terminal-error screen below, so capture rather than return —
+        # returning early here is what let the 2026-07-24 IneligibleTierError
+        # (Code Assist individual tier retired) fail one function per minute
+        # forever instead of halting the provider.
+        result = _invoke_gemini(prompt, selected_model, max_turns)
+        skip_quota_detection = True
     else:
         result = _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
 
@@ -5682,6 +5693,34 @@ def _invoke_provider_direct(
     err_str = (meta or {}).get("provider_error") or ""
     http_status = (meta or {}).get("provider_http_status")
     if err_str:
+        # Terminal failures are screened first: they can't be retried away,
+        # and classifying one as a transient wall would hide a dead
+        # credential behind an hourly retry cycle.
+        terminal = detect_terminal_provider_error(
+            effective_provider, err_str, http_status=http_status
+        )
+        if terminal is not None:
+            until = pause_mgr.install(
+                effective_provider,
+                selected_model,
+                ResetInfo(
+                    raw_seconds=TERMINAL_ERROR_PAUSE_SECONDS,
+                    reason=terminal.reason,
+                ),
+            )
+            print(
+                f"  [{effective_provider}] provider unavailable — halting until "
+                f"{until.isoformat()} ({terminal.reason})",
+                flush=True,
+            )
+            meta = dict(meta or {})
+            meta["provider_error_type"] = "ProviderUnavailable"
+            meta["provider_terminal_error"] = True
+            meta["provider_terminal_reason"] = terminal.reason
+            meta["provider_terminal_until"] = until.isoformat()
+            return (text, meta)
+        if skip_quota_detection:
+            return result
         wall = detect_quota_wall(effective_provider, err_str, http_status=http_status)
         if wall is not None and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
             until = pause_mgr.install(effective_provider, selected_model, wall)
@@ -9057,6 +9096,28 @@ def process_function(
             logged_result="quota_paused",
             score_after=live_score,
             reason=f"quota_paused until {until_iso}",
+        )
+
+    # Terminal provider failure: credentials/entitlement are broken, so every
+    # subsequent function would fail identically. Like the quota wall this is
+    # an account-wide condition rather than a per-function quality signal, so
+    # consecutive_fails stays untouched and the function remains re-pickable —
+    # but unlike a wall it will not clear on its own, so the worker loop stops
+    # instead of advancing.
+    if meta.get("provider_terminal_error"):
+        result = "provider_unavailable"
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = result
+        reason = meta.get("provider_terminal_reason") or "provider unavailable"
+        print(
+            f"  Provider unavailable: {provider}/{selected_model} — {reason}",
+            flush=True,
+        )
+        return _finish(
+            "provider_unavailable",
+            logged_result="provider_unavailable",
+            score_after=live_score,
+            reason=reason,
         )
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data

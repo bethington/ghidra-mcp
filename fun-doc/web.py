@@ -925,6 +925,49 @@ class WorkerManager:
                     if worker["stop_flag"].is_set():
                         break
                     continue  # leave function re-pickable; pick next once healthy
+                elif result == "provider_unavailable":
+                    # Dead credentials / retired client tier. Retrying can't
+                    # fix it and every remaining function would fail the same
+                    # way, so stop with a reason the dashboard can show rather
+                    # than converting the whole queue into `failed` runs.
+                    processed -= 1
+                    worker["exit_reason"] = "provider_unavailable"
+                    self._bus.emit(
+                        "worker_stopped",
+                        {
+                            "worker_id": worker_id,
+                            "reason": "provider_unavailable",
+                            "progress": dict(worker["progress"]),
+                        },
+                    )
+                    break
+                elif result == "quota_paused":
+                    # The provider is walled: no API call was made and the
+                    # function was left untouched. This must not consume the
+                    # worker's budget or count as progress — before this
+                    # branch existed it fell through to the catch-all below
+                    # and was logged as "completed", so a walled worker
+                    # reported a clean run while re-attempting one function
+                    # until its count ran out. Yield to the pause instead
+                    # (installed by the provider subprocess, picked up
+                    # cross-process by the manager's file reload) and re-pick
+                    # work only once the wall clears.
+                    processed -= 1
+                    worker["_quota_pause_count"] = (
+                        worker.get("_quota_pause_count", 0) + 1
+                    )
+                    self._emit_status()
+                    if _yield_for_quota_pause():
+                        if worker["stop_flag"].is_set():
+                            break
+                        continue
+                    # No pause visible for our (provider, FULL-model) pair —
+                    # e.g. the wall was detected against an audit/handoff
+                    # model. Back off before re-picking so a mis-attributed
+                    # wall degrades to slow retries, never a hot loop.
+                    if worker["stop_flag"].wait(30):
+                        break
+                    continue
                 elif result in ("completed", "partial"):
                     worker["progress"]["completed"] += 1
                     session["completed"] += 1

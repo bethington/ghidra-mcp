@@ -389,3 +389,109 @@ def test_callback_calling_all_active_does_not_recurse(tmp_path):
         "Expected exactly one notify; pre-fix would have produced 2+ via the "
         "all_active <-> _notify recursion."
     )
+
+
+# ---------- cross-process pause visibility (2026-07-24 spin-loop regression) ----------
+
+
+def test_pause_installed_by_another_process_is_visible_to_readers(tmp_path):
+    """A pause installed by one manager must be seen by another sharing the
+    same state dir.
+
+    Live-repro 2026-07-24: pauses are installed by the *provider subprocess*
+    that made the walled call, but the dashboard's worker loop asks its own
+    long-lived manager whether to yield. That manager only read the file once
+    at construction, so it never saw the wall — the worker re-attempted the
+    same function until its budget ran out and reported them all as completed.
+    Reads now re-read the file when its (mtime, size) stamp changes.
+    """
+    writer = _make_mgr(tmp_path)          # stands in for the provider subprocess
+    reader = pp.ProviderPauseManager(tmp_path, jitter_fn=_no_jitter)  # dashboard
+    assert reader.wait_until("minimax", "MiniMax-M3") is None
+
+    writer.install("minimax", "MiniMax-M3", pp.ResetInfo(600.0, "429 token plan"))
+
+    assert reader.wait_until("minimax", "MiniMax-M3") is not None, (
+        "reader must observe the wall installed by the other process"
+    )
+    assert "429" in (reader.reason("minimax", "MiniMax-M3") or "")
+    assert [e[:2] for e in reader.all_active()] == [("minimax", "MiniMax-M3")]
+
+
+def test_pause_cleared_by_another_process_is_visible_to_readers(tmp_path):
+    """The converse: a clear elsewhere must release readers, otherwise a
+    manually-cleared wall would keep workers parked until restart."""
+    writer = _make_mgr(tmp_path)
+    reader = pp.ProviderPauseManager(tmp_path, jitter_fn=_no_jitter)
+    writer.install("claude", "claude-sonnet-4-6", pp.ResetInfo(600.0, "wall"))
+    assert reader.is_paused("claude", "claude-sonnet-4-6")
+
+    writer.clear("claude", "claude-sonnet-4-6")
+
+    assert not reader.is_paused("claude", "claude-sonnet-4-6")
+
+
+def test_reader_keeps_state_when_file_is_unreadable(tmp_path):
+    """A torn/partial write must not silently drop an active pause — better
+    to keep the last good view than to let workers stampede a walled API."""
+    mgr = _make_mgr(tmp_path)
+    mgr.install("minimax", "MiniMax-M3", pp.ResetInfo(600.0, "wall"))
+    path = tmp_path / pp.PAUSE_FILE_NAME
+    path.write_text("{ this is not json", encoding="utf-8")
+
+    assert mgr.wait_until("minimax", "MiniMax-M3") is not None
+
+
+# ---------- terminal (non-retryable) provider errors ----------
+
+
+def test_detect_terminal_gemini_ineligible_tier():
+    """2026-07-24: Google retired Code Assist for individuals, so every
+    gemini-cli call returns IneligibleTierError. Pre-fix this was an ordinary
+    `failed` run and the worker retried the next function forever."""
+    err = (
+        "Error authenticating: IneligibleTierError: This client is no longer "
+        "supported for Gemini Code Assist for individuals. To continue using "
+        "Gemini, please migrate to the Antigravity suite of products"
+    )
+    terminal = pp.detect_terminal_provider_error("gemini", err)
+    assert terminal is not None
+    assert "gemini" in terminal.reason
+
+
+@pytest.mark.parametrize(
+    "err",
+    [
+        "Invalid API key provided",
+        "authentication_error: bad credentials",
+        "permission_denied on resource",
+    ],
+)
+def test_detect_terminal_credential_errors(err):
+    assert pp.detect_terminal_provider_error("claude", err) is not None
+
+
+def test_detect_terminal_http_401():
+    assert pp.detect_terminal_provider_error("codex", "nope", http_status=401) is not None
+
+
+def test_quota_wall_is_never_terminal():
+    """A wall self-heals; misclassifying one as terminal would stop workers
+    that only needed to wait."""
+    err = "Error code: 429 - rate_limit_error: Token Plan usage limit reached, retry after 600 seconds"
+    assert pp.detect_quota_wall("minimax", err, http_status=429) is not None
+    assert pp.detect_terminal_provider_error("minimax", err, http_status=429) is None
+
+
+@pytest.mark.parametrize(
+    "err",
+    [
+        "",
+        "connection reset by peer",
+        "500 internal server error",
+        "request timed out",
+    ],
+)
+def test_transient_errors_are_not_terminal(err):
+    """False positives halt a healthy provider — keep the pattern set tight."""
+    assert pp.detect_terminal_provider_error("claude", err) is None

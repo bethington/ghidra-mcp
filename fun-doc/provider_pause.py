@@ -113,6 +113,12 @@ DEFAULT_FALLBACK_PAUSE_SECONDS = 3600  # 1 hour
 # Long enough to clear the threshold above, short enough to probe again soon.
 RATE_LIMIT_FALLBACK_PAUSE_SECONDS = 600  # 10 minutes
 
+# Applied when a provider fails terminally (dead credentials, retired client
+# tier). Nothing self-heals here, so the pause exists to stop churn rather
+# than to wait out a reset — an hour is long enough that a fixed credential
+# resumes on its own without the operator having to clear the pause by hand.
+TERMINAL_ERROR_PAUSE_SECONDS = 3600  # 1 hour
+
 # Random jitter window added to paused_until so workers waking together don't
 # all hit the API on the same wall-clock second (Q3 thundering-herd guard).
 JITTER_MIN_SECONDS = 30.0
@@ -295,6 +301,78 @@ def detect_quota_wall(
     return fn(error_str, http_status)
 
 
+# ---------- terminal (non-retryable) provider errors ----------
+
+
+@dataclass
+class TerminalProviderError:
+    """A provider failure that retrying cannot fix.
+
+    Unlike a quota wall — which clears on its own once the reset window
+    passes — these need a human: expired or revoked credentials, a retired
+    client tier, a plan that no longer covers the model. Workers must stop
+    rather than burn queue attempts one function at a time.
+    """
+
+    reason: str
+
+
+# Substrings that mark a permanently-broken provider. Kept deliberately
+# specific: a false positive halts a working provider, so anything that can
+# plausibly be transient (5xx, timeouts, generic "error") stays out.
+_TERMINAL_ERROR_PATTERNS = (
+    # Entitlement / tier retirement — e.g. Gemini Code Assist for individuals
+    # was retired 2026-07-24 in favour of the Antigravity suite, which turns
+    # every gemini-cli call into an IneligibleTierError.
+    "ineligibletiererror",
+    "no longer supported for",
+    "client is no longer supported",
+    "please migrate to",
+    # Credentials
+    "invalid api key",
+    "invalid_api_key",
+    "api key not valid",
+    "api key expired",
+    "authentication_error",
+    "authentication failed",
+    "unauthorized",
+    "invalid authentication",
+    "account is not authorized",
+    "permission_denied",
+    "access denied",
+)
+
+
+def detect_terminal_provider_error(
+    provider: str, error_str: str, http_status: Optional[int] = None
+) -> Optional[TerminalProviderError]:
+    """Detect a non-retryable provider failure.
+
+    Returns TerminalProviderError when the provider cannot serve requests
+    until a human intervenes, else None. Callers install a long pause and
+    stop the worker instead of advancing to the next function — otherwise a
+    dead provider quietly converts the whole queue into `failed` runs.
+    """
+    s = (error_str or "").lower()
+    if not s:
+        return None
+    # A quota wall is retryable by definition; never classify one as terminal
+    # even if its text happens to mention permissions.
+    if detect_quota_wall(provider, error_str, http_status=http_status) is not None:
+        return None
+    if http_status == 401:
+        return TerminalProviderError(
+            reason=f"{provider}: authentication rejected (401) — "
+            + _truncate_for_reason(error_str)
+        )
+    for pattern in _TERMINAL_ERROR_PATTERNS:
+        if pattern in s:
+            return TerminalProviderError(
+                reason=f"{provider}: {_truncate_for_reason(error_str)}"
+            )
+    return None
+
+
 # ---------- pause manager (Q4) ----------
 
 
@@ -315,6 +393,10 @@ class ProviderPauseManager:
         self._state_dir = Path(state_dir)
         self._lock = threading.Lock()
         self._entries: dict = {}  # (provider, model) -> (paused_until, reason)
+        # (mtime_ns, size) of the pause file as of our last read/write. Reads
+        # compare against the live stamp to pick up installs made by other
+        # processes — see _reload_if_changed_locked.
+        self._file_stamp_seen = None
         self._jitter_fn = jitter_fn or (
             lambda: random.uniform(JITTER_MIN_SECONDS, JITTER_MAX_SECONDS)
         )
@@ -368,6 +450,7 @@ class ProviderPauseManager:
         Side-effect: prunes the entry if it has expired."""
         now = datetime.now()
         with self._lock:
+            self._reload_if_changed_locked()
             entry = self._entries.get((provider, model))
             if entry is None:
                 return None
@@ -380,6 +463,7 @@ class ProviderPauseManager:
 
     def reason(self, provider: str, model: str) -> Optional[str]:
         with self._lock:
+            self._reload_if_changed_locked()
             entry = self._entries.get((provider, model))
             return entry[1] if entry else None
 
@@ -416,26 +500,64 @@ class ProviderPauseManager:
     def _path(self) -> Path:
         return self._state_dir / PAUSE_FILE_NAME
 
-    def _load(self) -> None:
+    def _file_stamp(self):
+        """(mtime_ns, size) of the pause file, or None when it is absent."""
+        try:
+            st = self._path().stat()
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def _read_entries_from_disk(self) -> Optional[dict]:
+        """Parse the pause file into an entries dict. None on unreadable /
+        malformed file so callers keep whatever they already had."""
         path = self._path()
         if not path.exists():
-            return
+            return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError):
-            return
-        entries = (data or {}).get("entries") or {}
-        for key, val in entries.items():
+            return None
+        entries = {}
+        for key, val in ((data or {}).get("entries") or {}).items():
             try:
                 if not isinstance(val, dict):
                     continue
                 provider, model = key.split(":", 1)
-                until = datetime.fromisoformat(val["paused_until"])
-                reason = val.get("reason", "")
-                self._entries[(provider, model)] = (until, reason)
+                entries[(provider, model)] = (
+                    datetime.fromisoformat(val["paused_until"]),
+                    val.get("reason", ""),
+                )
             except (ValueError, KeyError):
                 continue
+        return entries
+
+    def _reload_if_changed_locked(self) -> None:
+        """Re-read the pause file when another process has written it.
+
+        A pause is installed by whichever process made the walled API call.
+        For function workers that is a spawned provider subprocess with its
+        own manager instance, so without this the dashboard process's set
+        stays empty forever and workers never yield to a wall the subprocess
+        already discovered — they just re-attempt the same function until
+        their budget runs out. The file is the cross-process source of truth;
+        an unchanged (mtime, size) stamp means our in-memory copy is current.
+
+        Caller must hold self._lock.
+        """
+        stamp = self._file_stamp()
+        if stamp == self._file_stamp_seen:
+            return
+        entries = self._read_entries_from_disk()
+        if entries is None:  # unreadable/torn write — keep current state
+            return
+        self._file_stamp_seen = stamp
+        self._entries = entries
+
+    def _load(self) -> None:
+        with self._lock:
+            self._reload_if_changed_locked()
         # Sweep stale entries that survived a long downtime.
         self.prune_expired()
 
@@ -473,6 +595,10 @@ class ProviderPauseManager:
                     if attempt == 4:
                         raise
                     time.sleep(0.05 * (attempt + 1))
+        # Record the stamp of the file we just wrote so the next read doesn't
+        # treat our own write as a foreign change — re-reading it would be
+        # wasted work and would discard in-memory edits made since.
+        self._file_stamp_seen = self._file_stamp()
 
     def _compute_active_locked(self) -> tuple[list, bool]:
         """Return (snapshot, pruned). Acquires the lock once: prunes expired
@@ -481,6 +607,7 @@ class ProviderPauseManager:
         recursion via all_active() -> _notify() -> all_active()."""
         now = datetime.now()
         with self._lock:
+            self._reload_if_changed_locked()
             stale = [k for k, (until, _) in self._entries.items() if until <= now]
             for k in stale:
                 self._entries.pop(k)
