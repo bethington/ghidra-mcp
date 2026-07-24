@@ -108,7 +108,13 @@ jobs:
         # server. The true integration tests (GhidraMCPPluginTest,
         # EndpointRegistrationTest, AppTest) require a running Ghidra instance and are
         # excluded from this run.
-        mvn -q test -Dtest='com.xebyte.offline.*Test'
+        #
+        # com.xebyte.core is included too: those are Mockito/ProgramBuilder tests
+        # that need no server either, and they cover the no-return + flow-repair
+        # behavior (#384/#385). Matching only com.xebyte.offline meant they never
+        # ran in CI at all. The one ProgramBuilder suite self-skips via assumeTrue
+        # when GHIDRA_INSTALL_DIR is unset, which is the case here.
+        mvn -q test -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
 
     - name: Verify build artifacts
       run: |
