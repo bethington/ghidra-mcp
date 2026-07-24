@@ -9,7 +9,33 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.17.0 (Latest) — headless GZF/GAR round-trip + debugger write primitives
+### v5.17.0 (Latest) — program storage tools, flow repair, provider resilience
+
+Minor release. Closes the last two gaps in Ghidra's per-program storage
+surface: **program options / metadata** (`list_option_groups`,
+`get_program_options`, `set_program_option`, `remove_program_option`) and
+**property maps** (`list_property_maps`, `create_property_map`,
+`delete_property_map`, `set_property`, `get_property`, `remove_property`,
+`list_properties`) — typed per-address key→value stores, the clean home for
+arbitrary structured per-function data. Adds **any-address comment tools**
+(`get_comment` / `set_comment`) covering all five comment types at any
+address, where the existing comment tools were function-scoped.
+
+Flow correctness: `set_function_no_return` now synchronizes the flag across
+every thunk hop and reports verified state (#385), and the new
+`clear_flow_and_repair` wraps Ghidra's `ClearFlowAndRepairCmd` so flow
+damaged by a wrong no-return marking can be repaired without full
+re-analysis (#384).
+
+Also: `GHIDRA_MCP_AUTH_TOKEN` support in the Python bridge (#358), headless
+Java script execution (#368), CORS preflight fixed for browser MCP clients,
+outbound archive/BSim destinations now fail closed (#391), and fun-doc no
+longer burns its queue when a provider is quota-walled or terminally
+broken. 271 tools.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.15.0 — headless GZF/GAR round-trip + debugger write primitives
 
 Minor release. Headless program (`.gzf`) and project (`.gar`) archive
 round-trip endpoints — `/export_program`, `/import_program`,
@@ -23,7 +49,7 @@ primitives for driving controlled execution of inlined code fragments.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 
-### v5.14.1 — community-driven tools: /get_current_selection + GUI /open_project
+### v5.12.0 — community-driven tools: /get_current_selection + GUI /open_project
 
 Minor release. Two new endpoints filed/scoped by community feedback,
 plus a quiet headless parity fix that surfaced while writing the

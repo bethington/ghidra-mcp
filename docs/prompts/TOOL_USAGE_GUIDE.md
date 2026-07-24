@@ -208,6 +208,83 @@ XREF COUNT: 2 references
 - `validate_data_type_exists(type_name)` - Check if type exists
 - `can_rename_at_address(address)` - Check what operation is appropriate
 
+## Per-Program Storage: Options and Property Maps (v5.17.0+)
+
+Two typed stores that live *inside* the Ghidra program database, so anything
+written here travels with the `.gzf` and survives a re-open.
+
+### Program options — per-program settings and metadata
+
+Read or write any typed option in any group (Program Information, Analyzers,
+Decompiler, …).
+
+```text
+list_option_groups(program="")                       -> group names
+get_program_options(group, program="")               -> {name: value} in that group
+set_program_option(group, name, value, type="", program="")
+remove_program_option(group, name, program="")
+```
+
+`set_program_option` infers the type from an existing option when `type` is
+omitted, accepts `string|int|long|double|float|boolean`, and creates custom
+options on demand — which makes it a durable place to record project-level
+facts (e.g. a curation pass version) without inventing a side file.
+
+### Property maps — typed per-address key→value stores
+
+Where a comment is prose, a property is data. Use these when you need
+structured per-address values you can query back exactly.
+
+```text
+list_property_maps(program="")                       -> existing maps + types
+create_property_map(name, type, program="")          -> type: int|long|string|void
+set_property(name, address, value, program="")
+get_property(name, address, program="")
+list_properties(name, program="")                    -> every address carrying it
+remove_property(name, address, program="")
+delete_property_map(name, program="")
+```
+
+A `void` map is a pure marker set (address is either in it or not) — ideal for
+"reviewed" / "needs-rework" flags. For richer records, store JSON in a
+`string` map. Object maps are read-only: they require a registered `Saveable`
+type that can't be created over HTTP.
+
+**Gotcha:** as with every write endpoint, `program` is a *query* parameter.
+Omitting it writes to whichever program is active, which is how per-program
+data leaks into the wrong binary during multi-version work.
+
+## Any-Address Comments (v5.17.0+)
+
+The function-scoped comment tools can't touch data or undefined bytes. These
+two work at any address and cover all five Ghidra comment types
+(`plate`, `pre`, `post`, `eol`, `repeatable`):
+
+```text
+get_comment(address, type, program="")
+set_comment(address, type, comment, program="")
+```
+
+Use these to satisfy the "every documented global carries a comment" rule —
+`set_plate_comment` only reaches functions. Passing an empty `comment` clears
+that comment type at the address.
+
+## Flow Repair (v5.17.0+)
+
+```text
+set_function_no_return(address, no_return, program="")
+clear_flow_and_repair(address, program="")
+```
+
+`set_function_no_return` synchronizes the flag across every thunk hop and the
+terminal target, and its response reports the verified `function_no_return` /
+`terminal_no_return` state — trust that, not the request you sent.
+
+When a function was *wrongly* marked no-return, clearing the flag alone does
+not restore the call fallthrough that Ghidra already deleted. Run
+`clear_flow_and_repair(address)` afterwards to rebuild the damaged flow
+without a full re-analysis.
+
 ## Cross-Binary Documentation Propagation (v1.9.4+)
 
 These tools enable documentation sharing across different versions of the same binary by matching functions based on their normalized opcode hashes.
