@@ -117,7 +117,7 @@ jobs:
     - name: Offline test gate (block pre-release on red tests)
       run: |
         echo "Running offline Java tests..."
-        mvn -q test -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+        mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
         echo "Running Python unit tests..."
         uv run --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
         echo "✅ Offline test gate passed"

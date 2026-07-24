@@ -126,7 +126,7 @@ jobs:
         # tests need live Ghidra and stay on the self-hosted release-regression path;
         # here we run everything that passes without a Ghidra server.
         echo "Running offline Java tests..."
-        mvn -q test -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+        mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
         echo "Running Python unit tests..."
         uv run --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
         echo "✅ Offline test gate passed"

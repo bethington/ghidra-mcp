@@ -145,6 +145,17 @@
             <version>${ghidra.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- jdom2 (test only) — ghidra.framework.options.OptionType's static initializer
+             builds a CUSTOM_TYPE constant that reaches SaveState -> jdom2. Any offline
+             test that names an OptionType constant (e.g. the set_program_option type
+             tests) fails with NoClassDefFoundError without it. Same version Ghidra
+             ships in Framework/Generic/lib. -->
+        <dependency>
+            <groupId>org.jdom</groupId>
+            <artifactId>jdom2</artifactId>
+            <version>2.0.6.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <finalName>${project.artifactId}-${project.version}</finalName>
@@ -179,8 +190,9 @@
                 </configuration>
             </plugin>
             <!-- JaCoCo — line coverage for the offline test tier. Report lands in
-                 target/site/jacoco/ on every `mvn test`. Baseline-only for now
-                 (no coverage gate); disable with -Djacoco.skip=true. -->
+                 target/site/jacoco/ on every `mvn test`. Disable with
+                 -Djacoco.skip=true. The coverage GATE that consumes this data
+                 lives in the `coverage-gate` profile at the bottom of this file. -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -347,6 +359,59 @@
                                 <goals>
                                     <goal>build</goal>
                                 </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Coverage gate. Opt-in via -Pcoverage-gate; CI enables it on the
+             full offline run.
+
+             It is a RATCHET, not a target: the minimum sits just under the
+             measured offline-tier coverage so a regression fails the build
+             while ordinary work doesn't. Raise it as coverage improves; never
+             lower it to make a build pass. (Mirrors the Python cov-fail-under
+             floors in CI.)
+
+             The number is low because it measures the OFFLINE tier only — the
+             integration suites that exercise the services need a live Ghidra
+             on 8089 and don't run in CI.
+
+             It lives in a profile rather than the default build because the
+             rule is only meaningful for a FULL run: `mvn test -Dtest=OneClass`
+             legitimately covers a few percent of the codebase, and gating that
+             by default would fail every targeted local test run. -->
+        <profile>
+            <id>coverage-gate</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>0.8.15</version>
+                        <executions>
+                            <execution>
+                                <id>jacoco-check</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <rule>
+                                            <element>BUNDLE</element>
+                                            <limits>
+                                                <limit>
+                                                    <counter>LINE</counter>
+                                                    <value>COVEREDRATIO</value>
+                                                    <minimum>0.075</minimum>
+                                                </limit>
+                                            </limits>
+                                        </rule>
+                                    </rules>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>

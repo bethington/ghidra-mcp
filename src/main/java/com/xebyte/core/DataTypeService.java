@@ -13,6 +13,8 @@ import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.util.Msg;
+import ghidra.util.InvalidNameException;
+import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 import javax.swing.SwingUtilities;
@@ -2052,6 +2054,86 @@ public class DataTypeService {
     // Backward compatibility overload
     public Response moveDataTypeToCategory(String typeName, String categoryPath) {
         return moveDataTypeToCategory(typeName, categoryPath, null);
+    }
+
+    /**
+     * Rename a data type in place, preserving every existing application of it.
+     *
+     * <p>Before this existed the only way to change a type's name was
+     * {@code clone_data_type} + re-apply + delete the original, which silently
+     * dropped the applications of the old type. Filed as issue #401 (follow-up
+     * to #93).</p>
+     */
+    @McpTool(path = "/rename_data_type", method = "POST",
+             description = "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it",
+             category = "datatype")
+    public Response renameDataType(
+            @Param(value = "old_name", source = ParamSource.BODY,
+                   description = "Current type name; may be bare (Foo) or category-qualified (/MyCat/Foo)") String oldName,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                   description = "New type name. Must be unique within the type's category.") String newName,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        // Argument guards run before the program lookup so a malformed call
+        // reports the actual problem instead of "No program loaded".
+        if (oldName == null || oldName.isEmpty()) return Response.text("Old name is required");
+        if (newName == null || newName.isEmpty()) return Response.text("New name is required");
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        StringBuilder result = new StringBuilder();
+
+        try {
+            threadingStrategy.executeWrite(program, "Rename data type", () -> {
+                DataTypeManager dtm = program.getDataTypeManager();
+                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, oldName);
+
+                if (dataType == null) {
+                    result.append("Data type not found: ").append(oldName);
+                    return null;
+                }
+
+                // Built-in types (int, char, ...) are owned by the built-in
+                // manager, not the program; setName would either fail or
+                // corrupt the shared archive.
+                if (dataType instanceof BuiltInDataType) {
+                    result.append("Cannot rename built-in data type: ").append(oldName);
+                    return null;
+                }
+
+                if (newName.equals(dataType.getName())) {
+                    result.append("Data type '").append(oldName).append("' already has that name");
+                    return null;
+                }
+
+                // A same-named sibling in the destination category would make
+                // the rename ambiguous; report it rather than letting Ghidra
+                // auto-uniquify to Foo.conflict.
+                Category category = dtm.getCategory(dataType.getCategoryPath());
+                if (category != null && category.getDataType(newName) != null) {
+                    result.append("A data type named '").append(newName)
+                          .append("' already exists in category '")
+                          .append(dataType.getCategoryPath().getPath()).append("'");
+                    return null;
+                }
+
+                try {
+                    dataType.setName(newName);
+                } catch (InvalidNameException | DuplicateNameException e) {
+                    result.append("Error renaming data type: ").append(e.getMessage());
+                    return null;
+                }
+
+                result.append("Successfully renamed data type '").append(oldName)
+                      .append("' to '").append(newName).append("'");
+                return null;
+            });
+        } catch (Exception e) {
+            result.append("Error renaming data type: ").append(e.getMessage());
+        }
+
+        return Response.text(result.toString());
     }
 
     // -----------------------------------------------------------------------

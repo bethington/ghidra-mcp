@@ -31,7 +31,7 @@ Also: `GHIDRA_MCP_AUTH_TOKEN` support in the Python bridge (#358), headless
 Java script execution (#368), CORS preflight fixed for browser MCP clients,
 outbound archive/BSim destinations now fail closed (#391), and fun-doc no
 longer burns its queue when a provider is quota-walled or terminally
-broken. 271 tools.
+broken. 272 tools.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 

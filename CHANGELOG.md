@@ -11,8 +11,21 @@ Complete version history for the Ghidra MCP Server project.
 - **`clear_flow_and_repair` (1 new endpoint).** Wraps Ghidra's
   `ClearFlowAndRepairCmd` so flow damaged by a wrongly-applied no-return
   marking can be repaired without a full re-analysis. Companion to the thunk
-  no-return synchronization below; closes #384. Tool count 269 → 271 (with
-  `set_function_no_return`'s verified-state response).
+  no-return synchronization below; closes #384. Tool count 270 → 271.
+
+- **`analyze_global_completeness` (1 new endpoint).** The data-address analog
+  of `analyze_function_completeness`: scores a global's documentation on a
+  budgeted 0-100 scale across six axes (name, plate comment, real type,
+  formatted bytes — core; enum/equate and struct membership — advanced and
+  forgiven in `effective_score`), and drives the `Complete` property-map band
+  plus DOC_DRAFT-at-target. Tool count 269 → 270.
+
+- **`rename_data_type` (1 new endpoint).** Renames a struct, union, enum, or
+  typedef in place, preserving every existing application of it. The only
+  previous route was clone → re-apply → delete the original, which silently
+  dropped those applications. Rejects built-in types and reports a same-named
+  sibling in the destination category rather than letting Ghidra auto-uniquify
+  to `Foo.conflict`. Closes #401 (follow-up to #93). Tool count 271 → 272.
 
 - **`GHIDRA_MCP_AUTH_TOKEN` for the Python bridge.** The bridge now forwards
   the shared-secret token on every request, so a plugin started with auth

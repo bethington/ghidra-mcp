@@ -2,7 +2,7 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 271 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 272 MCP tools for binary analysis.
 
 - **Package**: `com.xebyte` | **Version**: 5.17.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
 
@@ -46,7 +46,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (271 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (272 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 
@@ -213,8 +213,13 @@ mvn test -Dtest='com.xebyte.offline.*Test'
 
 **Offline Python (no Ghidra needed — the whole performance/ dir minus 4 integration-flavored files):**
 
+Run these through `uv run --group fun-doc`. Without that group `fun_doc.py`
+calls `sys.exit(1)` on its missing SQLAlchemy import, which surfaces as a
+pytest INTERNALERROR **during collection** — zero tests run and the failure
+looks nothing like a missing dependency.
+
 ```text
-pytest tests/performance/ \
+uv run --group fun-doc python -m pytest tests/performance/ \
   --ignore=tests/performance/test_batch_scoring_consistency.py \
   --ignore=tests/performance/test_health_endpoint.py \
   --ignore=tests/performance/test_http_concurrency.py \
