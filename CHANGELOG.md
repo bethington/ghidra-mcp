@@ -4,9 +4,20 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.17.0 - 2026-07-24 (minor: program storage tools, flow repair, provider resilience)
 
 ### Added
+
+- **`clear_flow_and_repair` (1 new endpoint).** Wraps Ghidra's
+  `ClearFlowAndRepairCmd` so flow damaged by a wrongly-applied no-return
+  marking can be repaired without a full re-analysis. Companion to the thunk
+  no-return synchronization below; closes #384. Tool count 269 → 271 (with
+  `set_function_no_return`'s verified-state response).
+
+- **`GHIDRA_MCP_AUTH_TOKEN` for the Python bridge.** The bridge now forwards
+  the shared-secret token on every request, so a plugin started with auth
+  enabled is reachable from `bridge-mcp-ghidra` instead of rejecting it.
+  Closes #358.
 
 - **Program-option and property-map storage tools (11 new endpoints).** Closes
   the two gaps in Ghidra's per-program / per-address storage surface that had no
@@ -50,6 +61,30 @@ Complete version history for the Ghidra MCP Server project.
     execute on each PR; wired into `build-status`.
 
 ### Fixed
+
+- **Headless mode couldn't run Java Ghidra scripts.** `run_ghidra_script`
+  rejected `.java` scripts under the headless server because the Java script
+  provider was never initialized. Closes #368.
+
+- **Deploy no longer holds the Ghidra process.** `tools.setup deploy` launched
+  Ghidra as a child and waited on it, so the deploy command never returned
+  while the GUI stayed open. The launcher is now detached.
+
+- **fun-doc: walled or dead providers no longer burn the queue.** Two live
+  failures on 2026-07-24. (1) A quota-walled worker re-attempted the *same*
+  function until its budget ran out and reported every attempt as
+  `completed`: `quota_paused` had no branch in the worker result ladder (it
+  fell through to a catch-all that counts as completed), and the pause —
+  installed by the provider subprocess that made the walled call — was
+  invisible to the dashboard's manager because it only read the pause file
+  at construction. Reads now re-read on an (mtime, size) change, and a walled
+  attempt consumes no budget and parks the worker until the wall clears.
+  (2) A provider that fails terminally (dead credentials, retired client
+  tier — Google retired Gemini Code Assist for individuals that day, making
+  every call an `IneligibleTierError`) had no halt at all and converted the
+  whole queue into `failed` runs one function at a time. Terminal failures
+  are now detected, pause the provider, and stop the worker with
+  `exit_reason=provider_unavailable`.
 
 - **Browser MCP clients (MCP Inspector) couldn't connect over the HTTP
   transports — CORS preflight got 405.** The stock SDK apps behind
@@ -164,6 +199,11 @@ Complete version history for the Ghidra MCP Server project.
   `requirements*.txt` files and `pytest.ini` were removed (folded into
   `pyproject.toml`); `tools.setup` installs deps via `uv sync` and deploys the
   built wheel.
+- **fun-doc: OpenD2 conformance port pipeline** (`fun-doc/port_pipeline.py`) —
+  a document → port → prove workflow that classifies a documented function,
+  mints emulation vectors, writes a C draft, and runs it against an isolated
+  conformance harness. Surfaced in the dashboard's Conformance tab. Internal
+  curation subsystem; not exposed as MCP tools. (#381, #363)
 - **CI builds and attaches a wheel.** Release / pre-release workflows build the
   bridge wheel with `uv build` and publish `ghidra_mcp_bridge-X.Y.Z-py3-none-any.whl`
   as the GitHub Release asset instead of the raw bridge script. Test/lint jobs run
