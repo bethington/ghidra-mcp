@@ -259,10 +259,14 @@ jobs:
         # subsystems get extracted and tested, never lower it.
         # The denominator excludes vendored code and live-only one-shot
         # operational scripts via [tool.coverage.run] omit in pyproject.toml
-        # (re-measured 40% on 2026-07-24, after the worker quota-pause tests
+        # (re-measured 31.85% on 2026-07-24, after the worker quota-pause tests
         # and pruning six live-only diagnostic CLIs from the denominator)
         # — see the policy comment there before adding entries.
-        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=38 \
+        # NOTE when re-measuring: this job's denominator is NOT fun-doc alone.
+        # pyproject's addopts add --cov=bridge_mcp_ghidra/tools/debugger on top
+        # of the --cov=fun-doc below, and those are largely unexercised here, so
+        # a local run with `-o addopts=""` reads several points HIGHER than CI.
+        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=30 \
           --ignore=tests/performance/test_batch_scoring_consistency.py \
           --ignore=tests/performance/test_health_endpoint.py \
           --ignore=tests/performance/test_http_concurrency.py \
