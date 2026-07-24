@@ -174,10 +174,11 @@ jobs:
         # uv installs the bridge package (editable) + test group from the lock.
         # Coverage sources (bridge_mcp_ghidra, tools, debugger) come from the
         # addopts in pyproject.toml. The fail-under floor is a RATCHET: it sits
-        # a few points below the measured baseline (51% on 2026-07-03) to absorb
+        # a few points below the measured baseline (61% on 2026-07-24, after
+        # static_tools.py and debugger/tracing.py went to 100%) to absorb
         # platform/version skew — raise it as coverage improves, never lower it.
         uv run --python ${{ matrix.python-version }} --group test \
-          pytest tests/unit/ -v --tb=short --cov-fail-under=46
+          pytest tests/unit/ -v --tb=short --cov-fail-under=58
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
@@ -258,9 +259,10 @@ jobs:
         # subsystems get extracted and tested, never lower it.
         # The denominator excludes vendored code and live-only one-shot
         # operational scripts via [tool.coverage.run] omit in pyproject.toml
-        # (re-measured 29.18% on 2026-07-18 after the port-pipeline/globals
-        # script wave) — see the policy comment there before adding entries.
-        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=26 \
+        # (re-measured 40% on 2026-07-24, after the worker quota-pause tests
+        # and pruning six live-only diagnostic CLIs from the denominator)
+        # — see the policy comment there before adding entries.
+        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=38 \
           --ignore=tests/performance/test_batch_scoring_consistency.py \
           --ignore=tests/performance/test_health_endpoint.py \
           --ignore=tests/performance/test_http_concurrency.py \
