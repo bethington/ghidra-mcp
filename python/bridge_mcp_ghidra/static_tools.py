@@ -46,7 +46,42 @@ def list_instances() -> str:
                 and inst.get("url") == state._active_tcp
             )
 
-    return json.dumps({"instances": instances}, indent=2)
+    return json.dumps(
+        {"instances": [_summarize_instance(i) for i in instances]}, indent=2
+    )
+
+
+# A project can hold hundreds of programs; only the open ones are actionable.
+MAX_OPEN_PROGRAMS_LISTED = 25
+
+
+def _summarize_instance(inst: dict) -> dict:
+    """Drop an instance's full program roster, keeping a count and the open ones.
+
+    /mcp/instance_info returns EVERY program in the project. Against a real
+    project (626 programs, measured 2026-07-24) that made list_instances
+    return ~90KB and blow past MCP result limits — the tool failed precisely
+    when it was connected to something worth listing. Nothing downstream reads
+    the roster: connect_instance matches on project name.
+
+    Entries are dicts ({name, path, open}) from /mcp/instance_info, or bare
+    strings from /list_open_programs — where being listed *is* being open.
+    """
+    programs = inst.get("programs")
+    if not isinstance(programs, list):
+        return inst
+
+    summary = {k: v for k, v in inst.items() if k != "programs"}
+    open_names = [
+        (p.get("path") or p.get("name")) if isinstance(p, dict) else p
+        for p in programs
+        if not isinstance(p, dict) or p.get("open")
+    ]
+    summary["program_count"] = len(programs)
+    summary["open_programs"] = open_names[:MAX_OPEN_PROGRAMS_LISTED]
+    if len(open_names) > MAX_OPEN_PROGRAMS_LISTED:
+        summary["open_programs_truncated"] = len(open_names) - MAX_OPEN_PROGRAMS_LISTED
+    return summary
 
 
 @mcp.tool()
@@ -337,11 +372,22 @@ async def check_tools(tools: str) -> str:
     for td in state._full_schema:
         all_known[td["name"]] = td.get("category", "unknown")
 
+    # With no schema fetched there is nothing to check a name against, and
+    # every Ghidra tool would be reported "not_found" — indistinguishable from
+    # a tool that genuinely doesn't exist. Say "unknown" and name the fix.
+    schema_available = bool(all_known)
+
     # Check each tool
     results: dict[str, dict] = {}
     for name in tool_names:
         if name in STATIC_TOOL_NAMES:
             results[name] = {"status": "callable", "type": "static"}
+        elif not schema_available:
+            results[name] = {
+                "status": "unknown",
+                "reason": "no instance connected — tool schema not loaded",
+                "fix": "connect_instance(project)",
+            }
         elif name in state._dynamic_tool_names:
             results[name] = {
                 "status": "callable",

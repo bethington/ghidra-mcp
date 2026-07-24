@@ -987,3 +987,127 @@ class TestAutoConnect(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestListInstancesPayloadSize(unittest.TestCase):
+    """list_instances must stay small enough to actually return.
+
+    Live failure 2026-07-24: connected to a 626-program project, the tool
+    returned ~90KB because /mcp/instance_info hands back the entire program
+    roster — so it broke exactly when it was pointed at a real project. The
+    roster is summarized to a count plus the open programs; nothing
+    downstream reads it (connect_instance matches on project name).
+    """
+
+    @staticmethod
+    def _big_instance(n=626, open_index=18):
+        programs = [
+            {
+                "name": f"Prog{i}.dll",
+                "path": f"/Mods/PD2-S12/Prog{i}.dll",
+                "open": i == open_index,
+            }
+            for i in range(n)
+        ]
+        return {
+            "socket": "/tmp/ghidra.sock",
+            "pid": 60196,
+            "project": "diablo2",
+            "programs": programs,
+            "tcp_port": 8089,
+        }
+
+    def _run(self, instance):
+        with isolated_bridge() as bridge, patch.object(
+            bridge.discovery, "discover_instances", return_value=[instance]
+        ), patch.object(
+            bridge.discovery, "discover_active_tcp_instance", return_value=None
+        ):
+            raw = bridge.list_instances()
+        return raw, json.loads(raw)["instances"][0]
+
+    def test_large_project_roster_is_summarized(self):
+        raw, inst = self._run(self._big_instance())
+
+        self.assertNotIn("programs", inst, "full roster must not be inlined")
+        self.assertEqual(inst["program_count"], 626)
+        self.assertEqual(inst["open_programs"], ["/Mods/PD2-S12/Prog18.dll"])
+        # The real payload was ~90k; anything in that neighborhood is a
+        # regression regardless of how the summary is spelled.
+        self.assertLess(len(raw), 8000, f"payload too large: {len(raw)} chars")
+
+    def test_identifying_fields_survive_summarization(self):
+        _, inst = self._run(self._big_instance())
+
+        for key in ("socket", "pid", "project", "tcp_port", "connected"):
+            self.assertIn(key, inst)
+
+    def test_open_program_list_is_capped(self):
+        """A pathological number of open programs must not reintroduce the
+        original problem."""
+        programs = [{"name": f"P{i}.dll", "open": True} for i in range(80)]
+        inst = self._big_instance()
+        inst["programs"] = programs
+        _, summarized = self._run(inst)
+
+        self.assertEqual(len(summarized["open_programs"]), 25)
+        self.assertEqual(summarized["open_programs_truncated"], 55)
+
+    def test_string_program_entries_are_treated_as_open(self):
+        """/list_open_programs returns bare names — being listed is being open."""
+        inst = self._big_instance()
+        inst["programs"] = ["A.dll", "B.dll"]
+        _, summarized = self._run(inst)
+
+        self.assertEqual(summarized["program_count"], 2)
+        self.assertEqual(summarized["open_programs"], ["A.dll", "B.dll"])
+
+    def test_instance_without_programs_key_is_untouched(self):
+        inst = {"socket": "/tmp/s", "pid": 1, "project": "p"}
+        _, summarized = self._run(inst)
+
+        self.assertEqual(summarized["project"], "p")
+        self.assertNotIn("program_count", summarized)
+
+
+class TestCheckToolsWithoutSchema(unittest.TestCase):
+    """check_tools must distinguish "not connected" from "doesn't exist".
+
+    Live failure 2026-07-24: called before connect_instance, every Ghidra
+    tool came back "not_found" — the same answer a genuinely missing tool
+    gets. That sent the caller looking for a deleted endpoint when the real
+    fix was one connect_instance call away.
+    """
+
+    def test_unconnected_reports_unknown_not_missing(self):
+        with isolated_bridge() as bridge:
+            bridge.state._full_schema = []
+            bridge.state._dynamic_tool_names[:] = []
+            data = asyncio.run(bridge.check_tools("rename_function_by_address"))
+
+        entry = json.loads(data)["results"]["rename_function_by_address"]
+        self.assertEqual(entry["status"], "unknown")
+        self.assertIn("connect_instance", entry["fix"])
+
+    def test_static_tools_still_callable_without_schema(self):
+        """The static tools work before any connection — they must not be
+        swept up in the "unknown" answer."""
+        with isolated_bridge() as bridge:
+            bridge.state._full_schema = []
+            data = asyncio.run(bridge.check_tools("list_instances"))
+
+        self.assertEqual(
+            json.loads(data)["results"]["list_instances"]["status"], "callable"
+        )
+
+    def test_missing_tool_is_still_not_found_when_schema_present(self):
+        """With a schema loaded the distinction must still be made — this is
+        what keeps the fix from degrading into "everything is unknown"."""
+        with isolated_bridge() as bridge:
+            bridge.state._full_schema = [
+                {"name": "rename_function_by_address", "category": "rename"}
+            ]
+            bridge.state._dynamic_tool_names[:] = []
+            data = asyncio.run(bridge.check_tools("no_such_tool"))
+
+        self.assertEqual(json.loads(data)["results"]["no_such_tool"]["status"], "not_found")
