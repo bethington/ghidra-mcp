@@ -128,6 +128,14 @@ def matrix(program: str = None) -> dict:
     s = summary(program)
     in_scope = s.get("in_scope")
     evaluated = len(conf_tagged | doc_tagged)
+    if in_scope is None:
+        # Same fallback as bands(): the summary option is only written by the
+        # sync tool / doc worker. When it's absent — e.g. a binary that never
+        # went through conformance intake, like D2Client — compute in-scope as
+        # defined-minus-library so the doc/conformance bars have a real
+        # denominator. Without this the frontend divides thousands of tagged
+        # functions by the `|| 1` fallback and renders e.g. 326700%.
+        in_scope = _in_scope_fn(program, s)
     if in_scope is not None:                       # the none/none cell = never-evaluated
         cell["none"]["none"] = max(0, in_scope - evaluated)
     return {"rows": rows, "cols": cols, "cell": cell,
@@ -162,7 +170,10 @@ def intake(program: str = None) -> dict:
     """The intake lane: never-evaluated (in-scope, no tag) and the excluded library set."""
     s = summary(program)
     m = matrix(program)
-    return {"untriaged": m["cell"]["none"]["none"], "in_scope": s.get("in_scope"),
+    # Prefer the matrix's in_scope: it already applied the defined-minus-library
+    # fallback when the summary option is absent, so the "X / Y in scope" header
+    # isn't blank for a binary that never went through conformance intake.
+    return {"untriaged": m["cell"]["none"]["none"], "in_scope": m.get("in_scope"),
             "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
 
 
