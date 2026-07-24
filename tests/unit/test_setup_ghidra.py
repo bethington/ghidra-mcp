@@ -471,7 +471,11 @@ def test_start_ghidra_detaches_from_parent_session_on_posix(
         ),
     )
 
-    assert start_ghidra(ghidra_path) == 0
+    # Pass repo_root so start_ghidra() doesn't fall back to Path.cwd(): with
+    # os.name monkeypatched to a non-"nt" value, pathlib.Path.cwd() would try to
+    # instantiate a PosixPath and raise on a Windows host. (Matches the Windows
+    # test below, which already passes repo_root.)
+    assert start_ghidra(ghidra_path, repo_root=tmp_path) == 0
     assert recorded["command"] == [str(launcher)]
     assert recorded["kwargs"]["start_new_session"] is True
 
@@ -494,7 +498,11 @@ def test_start_ghidra_does_not_detach_on_non_posix(
         ),
     )
 
-    assert start_ghidra(ghidra_path) == 0
+    # Pass repo_root so start_ghidra() doesn't fall back to Path.cwd(): with
+    # os.name monkeypatched to a non-"nt" value, pathlib.Path.cwd() would try to
+    # instantiate a PosixPath and raise on a Windows host. (Matches the Windows
+    # test below, which already passes repo_root.)
+    assert start_ghidra(ghidra_path, repo_root=tmp_path) == 0
     assert recorded["kwargs"]["start_new_session"] is False
 
 
