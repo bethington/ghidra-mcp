@@ -3452,6 +3452,17 @@ DEFAULT_QUEUE_CONFIG = {
     # source. Disable by setting False if you have a binary where the
     # detector misfires on user code.
     "skip_library_code": True,
+    # Providers that must never be selected — for a worker, an audit pass, an
+    # escalation, or a complexity handoff. Names from SUPPORTED_PROVIDERS.
+    # Empty by default. Set e.g. ["gemini"] to retire a provider whose backend
+    # is dead (Google retired Gemini Code Assist for individuals 2026-07-24)
+    # without editing the model tables. Env FUNDOC_DISABLED_PROVIDERS
+    # (comma-separated) overrides this list for a single run.
+    "disabled_providers": [],
+    # System-health audit watcher (fun-doc/audit/, report-only). On by default.
+    # Set False here or FUNDOC_AUDIT_WATCHER=0 to stop it starting with the
+    # dashboard. The env var wins over this key.
+    "audit_watcher": True,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
@@ -3523,12 +3534,24 @@ def build_worker_config_snapshot(queue, primary_provider):
     """
     cfg = (queue or {}).get("config") or {}
 
+    # A disabled provider must not be frozen into the snapshot for the audit or
+    # handoff role — otherwise a worker started while the provider is disabled
+    # would still route those passes to it. Drop them to None here, at the one
+    # point every worker's config is frozen. (The primary provider is guarded
+    # earlier, at start_worker.)
+    disabled = get_disabled_providers(queue)
+
+    def _role_provider(name):
+        return None if (name and name.lower() in disabled) else name
+
     # Top-level worker policy (Tier 1 + Tier 2 from the design discussion)
     snapshot = {
         "good_enough_score": int(cfg.get("good_enough_score", 80)),
-        "audit_provider": cfg.get("audit_provider"),
+        "audit_provider": _role_provider(cfg.get("audit_provider")),
         "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
-        "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
+        "complexity_handoff_provider": _role_provider(
+            cfg.get("complexity_handoff_provider")
+        ),
         "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
         "skip_library_code": bool(cfg.get("skip_library_code", True)),
         "plate_scaffold": bool(cfg.get("plate_scaffold", False)),
@@ -3605,6 +3628,49 @@ def load_priority_queue():
     return queue
 
 
+_FALSEY_ENV = {"0", "false", "off", "no", "disable", "disabled"}
+
+
+class _AuditWatcherDisabled(Exception):
+    """Internal sentinel: audit watcher is switched off. Not an error."""
+
+
+def audit_watcher_enabled(queue=None):
+    """Whether the system-health audit watcher should start.
+
+    Env FUNDOC_AUDIT_WATCHER wins (so an operator can silence it for one run
+    without editing config); otherwise config.audit_watcher; default on.
+    """
+    env = os.environ.get("FUNDOC_AUDIT_WATCHER")
+    if env is not None:
+        return env.strip().lower() not in _FALSEY_ENV
+    cfg = (queue or load_priority_queue()).get("config", {})
+    return bool(cfg.get("audit_watcher", True))
+
+
+def get_disabled_providers(queue=None):
+    """Set of providers that must not be selected for any role.
+
+    Union of config.disabled_providers and the FUNDOC_DISABLED_PROVIDERS env
+    var (comma-separated). Env is additive, not a replacement, so an operator
+    can retire one more provider for a run without dropping the config list.
+    Unknown names are ignored so a typo can't silently disable everything.
+    """
+    names = set()
+    cfg = (queue or load_priority_queue()).get("config", {})
+    for n in cfg.get("disabled_providers") or []:
+        names.add(str(n).strip().lower())
+    env = os.environ.get("FUNDOC_DISABLED_PROVIDERS", "")
+    for n in env.split(","):
+        if n.strip():
+            names.add(n.strip().lower())
+    return {n for n in names if n in SUPPORTED_PROVIDERS}
+
+
+def provider_is_disabled(provider, queue=None):
+    return (provider or "").strip().lower() in get_disabled_providers(queue)
+
+
 def get_auto_escalation_provider(current_provider, queue=None):
     """Return the explicitly configured retry provider for dashboard workers.
 
@@ -3620,6 +3686,8 @@ def get_auto_escalation_provider(current_provider, queue=None):
     if not target or target in ("off", current_provider):
         return None
     if target not in SUPPORTED_PROVIDERS:
+        return None
+    if provider_is_disabled(target, queue):
         return None
     return target
 
@@ -10129,7 +10197,20 @@ def main():
             # the dashboard. Reads rules from audit/rules.yaml, subscribes
             # to the shared event bus, records matches to audit/queue.jsonl.
             # No agent drains the queue yet (Phase 3).
+            #
+            # Off switch: set FUNDOC_AUDIT_WATCHER=0 (or false/off/no) to skip
+            # starting it, or `config.audit_watcher: false` in
+            # priority_queue.json for a persistent default. The env var wins so
+            # an operator can silence a noisy watcher for one run without
+            # editing config. Both default to on — the watcher is report-only
+            # and cheap, and it has already caught a real deadlock.
             try:
+                if not audit_watcher_enabled():
+                    print(
+                        "  Audit watcher: disabled "
+                        "(FUNDOC_AUDIT_WATCHER / config.audit_watcher)"
+                    )
+                    raise _AuditWatcherDisabled()
                 from audit.registry import AuditRegistry
                 from audit.watcher import AuditWatcher, load_rules_from_yaml
                 import requests as _audit_requests
@@ -10163,6 +10244,8 @@ def main():
                     )
                 else:
                     print("  Audit watcher: rules.yaml not found; skipping")
+            except _AuditWatcherDisabled:
+                pass  # off switch already logged above
             except ImportError as _audit_exc:
                 print(f"  Audit watcher: import failed ({_audit_exc}); skipping")
             except Exception as _audit_exc:

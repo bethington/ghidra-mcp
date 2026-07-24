@@ -292,6 +292,17 @@ class WorkerManager:
         mode="functions",
         addresses=None,
     ):
+        # Refuse a disabled provider up front (config.disabled_providers /
+        # FUNDOC_DISABLED_PROVIDERS) — e.g. gemini once Google retired its
+        # backend. Clear message beats a worker that fails every function.
+        from fun_doc import provider_is_disabled as _provider_is_disabled
+
+        if _provider_is_disabled(provider):
+            raise ValueError(
+                f"Provider '{provider}' is disabled "
+                "(config.disabled_providers / FUNDOC_DISABLED_PROVIDERS)."
+            )
+
         # Q9: globals worker requires a binary — refuse early with a clear
         # message rather than launching a worker that can't pick a target.
         if mode == "globals" and not binary:
