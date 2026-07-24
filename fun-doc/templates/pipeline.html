@@ -723,12 +723,17 @@
     });
   }
   function renderBars(s,m){
-    const inscope=s.in_scope||1;
+    // in_scope can be absent from the summary option (only the sync tool writes
+    // it); matrix() computes a defined-minus-library fallback, so prefer its
+    // value. If neither is a real positive number, render "-" rather than
+    // dividing by 1 — that fallback turned 3267 tagged functions into 326700%.
+    const inscope=((m&&m.in_scope>0)?m.in_scope:((s&&s.in_scope>0)?s.in_scope:0));
     const col=c=>(m.rows||[]).reduce((a,rk)=>a+(((m.cell||{})[rk]||{})[c]||0),0);   // DOC column summed over all conf rows
     const row=rk=>(m.cols||[]).reduce((a,ck)=>a+(((m.cell||{})[rk]||{})[ck]||0),0);  // conf row summed over all doc cols
+    const pct=n=>inscope>0?`${(100*n/inscope).toFixed(1)}%`:"&mdash;";
     // ---- Functions - Documentation: untagged -> DRAFT -> REVIEWED -> VERIFIED ----
     const dd=col("DOC_DRAFT"), dr=col("DOC_REVIEWED"), dv=col("DOC_VERIFIED"), docTagged=dd+dr+dv;
-    document.getElementById("docPct").innerHTML=`<b>${(100*dv/inscope).toFixed(1)}%</b> at VERIFIED &middot; ${(100*docTagged/inscope).toFixed(1)}% any`;
+    document.getElementById("docPct").innerHTML=`<b>${pct(dv)}</b> at VERIFIED &middot; ${pct(docTagged)} any`;
     seg(document.getElementById("docBar"),document.getElementById("docLegend"),[
       {label:"untagged",n:Math.max(0,inscope-docTagged),c:"var(--text-muted)"},
       {label:"DRAFT",n:dd,c:RUNG_COLOR.DOC_DRAFT},
@@ -740,7 +745,7 @@
     // ---- Functions - Conformance: none -> DRAFT -> VECTORS -> LIVE -> BATTLETESTED -> REGRESSION ----
     const cDr=row("CONF_DRAFT"), cVe=row("CONF_VECTORS"), cLi=row("CONF_LIVE"), cBa=row("CONF_BATTLETESTED"), cRe=row("CONF_REGRESSION");
     const proven=cDr+cVe+cLi+cBa+cRe;
-    document.getElementById("confPct").innerHTML=`<b>${(100*proven/inscope).toFixed(1)}%</b> of in-scope proven`;
+    document.getElementById("confPct").innerHTML=`<b>${pct(proven)}</b> of in-scope proven`;
     seg(document.getElementById("confBar"),document.getElementById("confLegend"),[
       {label:"none",n:Math.max(0,inscope-proven),c:"var(--text-muted)"},
       {label:"DRAFT",n:cDr,c:RUNG_COLOR.CONF_DRAFT},
