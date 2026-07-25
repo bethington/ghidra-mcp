@@ -42,7 +42,7 @@ FUN_DOC_DIR = SCRIPT_DIR.parent
 REPO_ROOT = FUN_DOC_DIR.parent
 
 
-def _mask_dsn_password(url: str) -> str:
+def _redact_dsn(url: str) -> str:
     """Mask the password in a ``postgresql://user:pw@host/db`` URL so it never
     lands in terminal history / CI logs. sqlite and passwordless URLs pass
     through unchanged."""
@@ -274,7 +274,7 @@ def cmd_prep(args) -> int:
     target = args.binary or "<your-binary>"
     # The v5.8 storage factory reads exactly one env var: FUN_DOC_DB_URL.
     # Backend is inferred from the URL scheme (sqlite: vs postgresql:).
-    shown_url = _mask_dsn_password(url)
+    shown_url = _redact_dsn(url)
     if shown_url != url:
         print("  # NOTE: the DB password below is masked as *** — substitute your own.")
     if sys.platform == "win32":
