@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.17.0 (Latest) — program storage tools, flow repair, provider resilience
+### v6.0.0 (Latest) — program storage tools, flow repair, provider resilience
 
 Minor release. Closes the last two gaps in Ghidra's per-program storage
 surface: **program options / metadata** (`list_option_groups`,

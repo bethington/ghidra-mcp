@@ -4,7 +4,15 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v5.17.0 - 2026-07-24 (minor: program storage tools, flow repair, provider resilience)
+## v6.0.0 - 2026-07-25 (major: security hardening with a breaking default, program storage tools, provider resilience)
+
+> **⚠️ Breaking change.** The HTTP servers now reject cross-origin browser
+> requests and non-loopback `Host` headers when running without
+> `GHIDRA_MCP_AUTH_TOKEN` (see the anti-CSRF / DNS-rebinding guard below). A
+> browser-based client on loopback without a token now receives `403`. The MCP
+> bridge / CLI (loopback `Host`, no `Origin`) is unaffected. Set
+> `GHIDRA_MCP_AUTH_TOKEN` to restore cross-origin/remote access. This
+> backward-incompatible default is why this release is a major version bump.
 
 ### Security (pre-release hardening)
 
