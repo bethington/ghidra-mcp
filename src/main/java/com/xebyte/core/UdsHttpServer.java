@@ -211,6 +211,23 @@ public class UdsHttpServer {
                 return;
             }
 
+            // Enforce bearer auth uniformly across every UDS context (the TCP
+            // path does this in GhidraMCPPlugin.safeHandler). The socket is
+            // already same-user by 0700/0600 perms, but honoring the token here
+            // keeps the documented "every HTTP request must carry the token"
+            // contract true on both transports. No cross-origin/Host guard is
+            // needed: a browser cannot open a Unix domain socket, so the
+            // CSRF / DNS-rebinding vector does not exist here. Health endpoints
+            // stay exempt so liveness probes work token-less.
+            SecurityConfig sec = SecurityConfig.getInstance();
+            if (sec.isAuthEnabled() && !isAuthExemptPath(path)) {
+                String authHeader = headers.getFirst("Authorization");
+                if (!sec.matchesBearerAuth(authHeader)) {
+                    sendUnauthorized(out);
+                    return;
+                }
+            }
+
             ByteArrayInputStream bodyStream = new ByteArrayInputStream(body);
             UdsHttpExchange exchange = new UdsHttpExchange(method, uri, headers, bodyStream, out);
 
@@ -245,6 +262,31 @@ public class UdsHttpServer {
             prev = c;
         }
         return sb.length() > 0 ? sb.toString() : null;
+    }
+
+    /**
+     * Health-style paths that skip the bearer-auth check, mirroring
+     * {@code isAuthExempt} on the TCP servers. Exact match only — a
+     * {@code startsWith} would let {@code /mcp/health/../delete_file} inherit
+     * the exemption.
+     */
+    private static boolean isAuthExemptPath(String path) {
+        return "/mcp/health".equals(path)
+                || "/health".equals(path)
+                || "/check_connection".equals(path);
+    }
+
+    private void sendUnauthorized(OutputStream out) throws IOException {
+        byte[] bodyBytes = "{\"error\": \"Unauthorized\"}".getBytes(StandardCharsets.UTF_8);
+        String response = "HTTP/1.1 401 Unauthorized\r\n" +
+                "Content-Type: application/json\r\n" +
+                "WWW-Authenticate: Bearer\r\n" +
+                "Content-Length: " + bodyBytes.length + "\r\n" +
+                "Connection: close\r\n" +
+                "\r\n";
+        out.write(response.getBytes(StandardCharsets.US_ASCII));
+        out.write(bodyBytes);
+        out.flush();
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {

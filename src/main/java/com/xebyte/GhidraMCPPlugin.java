@@ -2217,6 +2217,21 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             try {
                 if (!isAuthExempt(path)) {
                     com.xebyte.core.SecurityConfig sec = com.xebyte.core.SecurityConfig.getInstance();
+                    // Anti-CSRF / DNS-rebinding: reject cross-origin browser
+                    // requests (and non-loopback Host) when running token-less
+                    // on loopback. No-op once a token is configured.
+                    String crossOriginError = sec.rejectCrossOriginRequest(
+                            exchange.getRequestHeaders().getFirst("Host"),
+                            exchange.getRequestHeaders().getFirst("Origin"));
+                    if (crossOriginError != null) {
+                        byte[] body = ("{\"error\": \"" + crossOriginError + "\"}")
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.getResponseHeaders().set("Content-Type", "application/json");
+                        exchange.sendResponseHeaders(403, body.length);
+                        exchange.getResponseBody().write(body);
+                        exchange.getResponseBody().close();
+                        return;
+                    }
                     if (sec.isAuthEnabled()) {
                         String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
                         if (!sec.matchesBearerAuth(authHeader)) {

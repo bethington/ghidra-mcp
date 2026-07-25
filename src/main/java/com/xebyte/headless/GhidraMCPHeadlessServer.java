@@ -683,6 +683,19 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         return server.createContext(path, exchange -> {
             if (!isAuthExempt(path)) {
                 com.xebyte.core.SecurityConfig sec = com.xebyte.core.SecurityConfig.getInstance();
+                // Anti-CSRF / DNS-rebinding guard (no-op once a token is set).
+                String crossOriginError = sec.rejectCrossOriginRequest(
+                        exchange.getRequestHeaders().getFirst("Host"),
+                        exchange.getRequestHeaders().getFirst("Origin"));
+                if (crossOriginError != null) {
+                    byte[] body = ("{\"error\": \"" + crossOriginError + "\"}").getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(403, body.length);
+                    try (OutputStream os = exchange.getResponseBody()) {
+                        os.write(body);
+                    }
+                    return;
+                }
                 if (sec.isAuthEnabled()) {
                     String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
                     if (!sec.matchesBearerAuth(authHeader)) {

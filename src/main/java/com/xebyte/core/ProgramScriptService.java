@@ -1362,6 +1362,11 @@ public class ProgramScriptService {
         if (folderPath == null || folderPath.trim().isEmpty() || folderPath.equals("/")) {
             return Response.err("path parameter is required");
         }
+        // Containment: honor GHIDRA_MCP_PROJECT_FOLDER for this mutating op.
+        // No-op when no scope is set (default).
+        if (!SecurityConfig.getInstance().isPathInProjectScope(folderPath)) {
+            return Response.err("Access denied: path is outside the configured project scope.");
+        }
 
         try {
             ghidra.framework.model.DomainFolder current = project.getProjectData().getRootFolder();
@@ -1393,6 +1398,13 @@ public class ProgramScriptService {
         }
         if (filePath == null || filePath.trim().isEmpty()) {
             return Response.err("filePath parameter is required");
+        }
+        // Containment: a destructive op must honor GHIDRA_MCP_PROJECT_FOLDER.
+        // The read side (FrontEndProgramProvider) already scopes which programs
+        // are returned; without this check a caller could delete files outside
+        // the configured scope. No-op when no scope is set (default).
+        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)) {
+            return Response.err("Access denied: path is outside the configured project scope.");
         }
 
         try {
@@ -1888,6 +1900,16 @@ public class ProgramScriptService {
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        // Defense in depth: the script-execution gate belongs on the sink, not
+        // only on the callers. runGhidraScriptWithCapture already checks this
+        // before delegating here; enforcing it again means no current or future
+        // caller (including any re-wired /run_script route) can reach arbitrary
+        // Ghidra script execution with GHIDRA_MCP_ALLOW_SCRIPTS unset.
+        if (!SecurityConfig.getInstance().areScriptsAllowed()) {
+            return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
+                + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
+                + "runGhidraScript executes any script resolvable via the Ghidra script path.");
+        }
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
