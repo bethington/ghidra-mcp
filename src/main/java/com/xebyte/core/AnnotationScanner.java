@@ -75,6 +75,21 @@ public class AnnotationScanner {
         return Collections.unmodifiableList(descriptors);
     }
 
+    /**
+     * Add a descriptor to the schema output for a route that is registered
+     * directly (e.g. {@code server.createContext(...)}/{@code safeContext(...)})
+     * rather than discovered via {@code @McpTool} reflection. Unlike
+     * {@link #scanService(Object)}, this does NOT add a dispatch entry to
+     * {@link #getEndpoints()} — the caller already owns routing for the path.
+     * Used by {@link ManualToolDescriptors} so hand-registered utility/server/
+     * project routes appear in {@code /mcp/schema} (and therefore the bridge's
+     * dynamic tool discovery) instead of being live-but-invisible.
+     */
+    public void addManualDescriptor(ToolDescriptor descriptor) {
+        descriptors.add(descriptor);
+        descriptors.sort(Comparator.comparing(ToolDescriptor::path));
+    }
+
     /** Generate a JSON schema string describing all discovered tools. */
     public String generateSchema() {
         StringBuilder sb = new StringBuilder();
