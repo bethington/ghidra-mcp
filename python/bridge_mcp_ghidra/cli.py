@@ -100,18 +100,14 @@ def _build_http_app(transport: str, bind_host: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="GhidraMCP Bridge -- MCP<->HTTP multiplexer"
-    )
+    parser = argparse.ArgumentParser(description="GhidraMCP Bridge -- MCP<->HTTP multiplexer")
     parser.add_argument(
         "--mcp-host",
         type=str,
         default="127.0.0.1",
         help="Host for HTTP transport (streamable-http or sse)",
     )
-    parser.add_argument(
-        "--mcp-port", type=int, help="Port for HTTP transport (streamable-http or sse)"
-    )
+    parser.add_argument("--mcp-port", type=int, help="Port for HTTP transport (streamable-http or sse)")
     parser.add_argument(
         "--transport",
         type=str,
@@ -137,21 +133,16 @@ def main():
         "--default-groups",
         type=str,
         default=None,
-        help="Comma-separated list of default tool groups to load on connect "
-        "(default: listing,function,program)",
+        help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
     )
     args = parser.parse_args()
 
     state._lazy_mode = args.lazy
     if args.default_groups is not None:
-        state._default_groups = {
-            g.strip() for g in args.default_groups.split(",") if g.strip()
-        }
+        state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
 
     if not state._lazy_mode:
-        logger.info(
-            "Loading all tool groups on startup (clients that don't support tools/list_changed need this)"
-        )
+        logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
     _auto_connect()
 
     mcp.settings.log_level = "INFO"
@@ -180,9 +171,7 @@ def main():
                     "GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 — any page in the "
                     "user's browser can drive this server."
                 )
-                mcp.settings.transport_security = TransportSecuritySettings(
-                    enable_dns_rebinding_protection=False
-                )
+                mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
             else:
                 allowed = _wildcard_allowed_hosts()
                 extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
@@ -193,7 +182,8 @@ def main():
                     "allowed Host headers: %s. Extend with "
                     "GHIDRA_MCP_ALLOWED_HOSTS=host1,host2 if a remote client "
                     "is rejected.",
-                    _host, allowed,
+                    _host,
+                    allowed,
                 )
                 mcp.settings.transport_security = TransportSecuritySettings(
                     enable_dns_rebinding_protection=True,
@@ -207,12 +197,15 @@ def main():
                 allowed_origins=[f"http://{_host}:*", "http://localhost:*", "http://127.0.0.1:*"],
             )
     logger.info(f"Starting MCP bridge ({args.transport})")
-    if args.transport in ("sse", "streamable-http"):
-        host = args.mcp_host
-        port = args.mcp_port if args.mcp_port else mcp.settings.port
-        path = "/sse" if args.transport == "sse" else "/mcp"
-        logger.info(f"MCP endpoint: http://{host}:{port}{path}")
-        app = _build_http_app(args.transport, host)
-        uvicorn.run(app, host=host, port=port, log_level=mcp.settings.log_level.lower())
-    else:
-        mcp.run(transport=args.transport)
+    try:
+        if args.transport in ("sse", "streamable-http"):
+            host = args.mcp_host
+            port = args.mcp_port if args.mcp_port else mcp.settings.port
+            path = "/sse" if args.transport == "sse" else "/mcp"
+            logger.info(f"MCP endpoint: http://{host}:{port}{path}")
+            app = _build_http_app(args.transport, host)
+            uvicorn.run(app, host=host, port=port, log_level=mcp.settings.log_level.lower())
+        else:
+            mcp.run(transport=args.transport)
+    finally:
+        state.shutdown_worker_pool(wait=False)

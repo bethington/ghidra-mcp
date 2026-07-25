@@ -40,9 +40,12 @@ from .config import (  # noqa: F401
     DEFAULT_TCP_PORT,
     DEFAULT_TCP_URL,
     ENDPOINT_TIMEOUTS,
+    MAX_CONCURRENT_GHIDRA_REQUESTS,
+    MAX_REQUEST_TIMEOUT_SECONDS,
     MANAGEMENT_TOOL_NAMES,
     STATIC_TOOL_NAMES,
     TCP_PORT_SCAN_RANGE,
+    REQUEST_TIMEOUT_GRACE_SECONDS,
     _ALL_STATIC_TOOL_NAMES,
     logger,
 )
@@ -62,6 +65,8 @@ from .validation import (  # noqa: F401
     validate_tool_name,
 )
 from .transport import (  # noqa: F401
+    RequestNotSentError,
+    RequestOutcomeUnknownError,
     UnixHTTPConnection,
     do_request,
     get_socket_dir,

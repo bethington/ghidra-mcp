@@ -1,5 +1,6 @@
 """Dynamic tool registration from /mcp/schema, plus tool-group management."""
 
+import asyncio
 import inspect
 import json
 import sys
@@ -33,8 +34,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     # wrong-binary hazard strict mode closes. (open_program/close_program use
     # path/name, so they have no selector here and are unaffected.)
     program_selectors = [
-        name for name in properties
-        if name == "program" or name.endswith("_program") or name.startswith("program_")
+        name for name in properties if name == "program" or name.endswith("_program") or name.startswith("program_")
     ]
     is_post = http_method.upper() == "POST"
     has_schema_dry_run = "dry_run" in properties
@@ -48,11 +48,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     def handler(**kwargs):
         # Sanitize address parameters before dispatch
         for pname, pdef in properties.items():
-            if (
-                pdef.get("param_type") == "address"
-                and pname in kwargs
-                and kwargs[pname] is not None
-            ):
+            if pdef.get("param_type") == "address" and pname in kwargs and kwargs[pname] is not None:
                 kwargs[pname] = sanitize_address(str(kwargs[pname]))
         # Synthetic bridge dry-run goes as a query param. Schema-declared
         # dry_run must stay in kwargs so its declared source (query/body) wins.
@@ -65,11 +61,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # explicitly provided, but the bridge is schema-driven and doesn't
         # know which were defaults. Empty string is not a meaningful value
         # for any current Ghidra endpoint — safe to filter.
-        filtered = {
-            k: v
-            for k, v in kwargs.items()
-            if v is not None and not (isinstance(v, str) and v == "")
-        }
+        filtered = {k: v for k, v in kwargs.items() if v is not None and not (isinstance(v, str) and v == "")}
         # Strict mode: refuse if any program selector is missing, so a forgotten
         # one fails loudly instead of running against the server's current
         # program. filtered has already dropped None and "", so absence is the
@@ -78,20 +70,20 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             missing = [p for p in program_selectors if p not in filtered]
             if missing:
                 names = ", ".join(f"`{p}=`" for p in missing)
-                return json.dumps({
-                    "error": (
-                        f"Missing required program selector(s): {names} "
-                        "(GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS is set). "
-                        "Pass each explicitly to target the intended open program(s)."
-                    )
-                })
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Missing required program selector(s): {names} "
+                            "(GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS is set). "
+                            "Pass each explicitly to target the intended open program(s)."
+                        )
+                    }
+                )
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
             if use_synthetic_dry_run and is_truthy(dry_run):
                 str_params["dry_run"] = "true"
-            return dispatch.dispatch_get(
-                endpoint, params=str_params if str_params else None
-            )
+            return dispatch.dispatch_get(endpoint, params=str_params if str_params else None)
         else:
             body_data = {}
             query_params = {}
@@ -120,9 +112,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             default = None
             py_type = py_type | None if py_type != str else str | None
 
-        param = inspect.Parameter(
-            pname, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=py_type
-        )
+        param = inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=py_type)
         if default is inspect.Parameter.empty:
             required_params.append(param)
         else:
@@ -157,7 +147,16 @@ def _register_tool_def(tool_def: dict) -> bool:
     http_method = tool_def.get("http_method", "GET")
     input_schema = tool_def.get("input_schema", {"type": "object", "properties": {}})
 
-    handler = _build_tool_function(endpoint, http_method, input_schema)
+    sync_handler = _build_tool_function(endpoint, http_method, input_schema)
+
+    async def handler(**kwargs):
+        # FastMCP calls synchronous tools directly on its event loop. Keep the
+        # blocking Ghidra HTTP lifecycle in a worker thread so one slow request
+        # cannot close or starve the entire MCP session.
+        return await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+
+    handler.__signature__ = sync_handler.__signature__
+    handler.__annotations__ = sync_handler.__annotations__
     handler.__name__ = name
     handler.__doc__ = description
 
@@ -173,16 +172,11 @@ def _report_tool_registration_failures(failures: list[str]) -> None:
 
     shown = "; ".join(failures[:8])
     suffix = "..." if len(failures) > 8 else ""
-    sys.stderr.write(
-        f"[bridge_mcp_ghidra] {len(failures)} tool(s) failed to register: "
-        f"{shown}{suffix}\n"
-    )
+    sys.stderr.write(f"[bridge_mcp_ghidra] {len(failures)} tool(s) failed to register: " f"{shown}{suffix}\n")
     sys.stderr.flush()
 
 
-def register_tools_from_schema(
-    schema: list[dict], groups: set[str] | None = None
-) -> int:
+def register_tools_from_schema(schema: list[dict], groups: set[str] | None = None) -> int:
     """Register MCP tools from parsed schema.
 
     Args:
@@ -191,60 +185,65 @@ def register_tools_from_schema(
 
     Returns: count of registered tools.
     """
-    # Remove previously registered dynamic tools
-    for name in state._dynamic_tool_names:
-        try:
-            mcp._tool_manager._tools.pop(name, None)
-        except Exception as e:
-            # Reaches into FastMCP internals; if its private structure changes this
-            # would silently leak tools across reloads. Log so the breakage is visible.
-            logger.warning(
-                "Failed to unregister dynamic tool %r via mcp._tool_manager._tools "
-                "(FastMCP internals may have changed): %s", name, e)
-    state._dynamic_tool_names.clear()
-    state._loaded_groups.clear()
+    with state._tool_registry_lock:
+        # Remove previously registered dynamic tools
+        for name in state._dynamic_tool_names:
+            try:
+                mcp._tool_manager._tools.pop(name, None)
+            except Exception as e:
+                # Reaches into FastMCP internals; if its private structure changes this
+                # would silently leak tools across reloads. Log so the breakage is visible.
+                logger.warning(
+                    "Failed to unregister dynamic tool %r via mcp._tool_manager._tools "
+                    "(FastMCP internals may have changed): %s",
+                    name,
+                    e,
+                )
+        state._dynamic_tool_names.clear()
+        state._loaded_groups.clear()
 
-    # Store full schema for lazy loading
-    state._full_schema = _normalize_tool_def_names(schema)
+        # Store full schema for lazy loading
+        state._full_schema = _normalize_tool_def_names(schema)
 
-    count = 0
-    failures: list[str] = []
-    for tool_def in state._full_schema:
-        category = tool_def.get("category", "unknown")
-        if groups is not None and category not in groups:
-            continue
-        try:
-            if _register_tool_def(tool_def):
-                state._loaded_groups.add(category)
-                count += 1
-        except Exception as e:
-            name = tool_def.get("name", "<unnamed>")
-            failures.append(f"{name}: {e}")
+        count = 0
+        failures: list[str] = []
+        for tool_def in state._full_schema:
+            category = tool_def.get("category", "unknown")
+            if groups is not None and category not in groups:
+                continue
+            try:
+                if _register_tool_def(tool_def):
+                    state._loaded_groups.add(category)
+                    count += 1
+            except Exception as e:
+                name = tool_def.get("name", "<unnamed>")
+                failures.append(f"{name}: {e}")
 
-    _report_tool_registration_failures(failures)
+        _report_tool_registration_failures(failures)
 
-    return count
+        return count
 
 
 def _load_group(group_name: str) -> list[str]:
     """Load tools for a specific group from cached schema. Returns list of newly loaded tool names."""
-    loaded_names: list[str] = []
-    failures: list[str] = []
-    for tool_def in state._full_schema:
-        if tool_def.get("category") != group_name:
-            continue
-        name = tool_def["name"]
-        if name in state._dynamic_tool_names:
-            continue  # Already loaded
-        try:
-            if _register_tool_def(tool_def):
-                loaded_names.append(name)
-        except Exception as e:
-            failures.append(f"{name}: {e}")
-    if loaded_names:
-        state._loaded_groups.add(group_name)
-    _report_tool_registration_failures(failures)
-    return loaded_names
+    with state._tool_registry_lock:
+        loaded_names: list[str] = []
+        failures: list[str] = []
+        for tool_def in state._full_schema:
+            if tool_def.get("category") != group_name:
+                continue
+            name = tool_def["name"]
+            if name in state._dynamic_tool_names:
+                continue  # Already loaded
+            try:
+                if _register_tool_def(tool_def):
+                    loaded_names.append(name)
+            except Exception as e:
+                failures.append(f"{name}: {e}")
+        if loaded_names:
+            state._loaded_groups.add(group_name)
+        _report_tool_registration_failures(failures)
+        return loaded_names
 
 
 def _unload_group(group_name: str) -> int:
@@ -252,26 +251,29 @@ def _unload_group(group_name: str) -> int:
     if group_name in state._default_groups:
         return 0  # Default groups can't be unloaded
 
-    to_remove = []
-    for tool_def in state._full_schema:
-        if tool_def.get("category") == group_name:
-            name = tool_def["name"]
-            if name in state._dynamic_tool_names:
-                to_remove.append(name)
+    with state._tool_registry_lock:
+        to_remove = []
+        for tool_def in state._full_schema:
+            if tool_def.get("category") == group_name:
+                name = tool_def["name"]
+                if name in state._dynamic_tool_names:
+                    to_remove.append(name)
 
-    for name in to_remove:
-        try:
-            mcp._tool_manager._tools.pop(name, None)
-            state._dynamic_tool_names.remove(name)
-        except Exception as e:
-            # See unregister note above: FastMCP-internals access, log on failure.
-            logger.warning(
-                "Failed to unload tool %r via mcp._tool_manager._tools "
-                "(FastMCP internals may have changed): %s", name, e)
+        for name in to_remove:
+            try:
+                mcp._tool_manager._tools.pop(name, None)
+                state._dynamic_tool_names.remove(name)
+            except Exception as e:
+                # See unregister note above: FastMCP-internals access, log on failure.
+                logger.warning(
+                    "Failed to unload tool %r via mcp._tool_manager._tools " "(FastMCP internals may have changed): %s",
+                    name,
+                    e,
+                )
 
-    if to_remove:
-        state._loaded_groups.discard(group_name)
-    return len(to_remove)
+        if to_remove:
+            state._loaded_groups.discard(group_name)
+        return len(to_remove)
 
 
 def _get_group_info() -> list[dict]:
@@ -299,7 +301,10 @@ def _get_group_info() -> list[dict]:
     return result
 
 
-def _fetch_and_register_schema(load_all: bool = False) -> int:
+def _fetch_and_register_schema(
+    load_all: bool = False,
+    connection: state.ConnectionSnapshot | None = None,
+) -> int:
     """Fetch /mcp/schema from connected instance and register tools.
 
     Args:
@@ -309,16 +314,27 @@ def _fetch_and_register_schema(load_all: bool = False) -> int:
     """
     if not load_all:
         load_all = not state._lazy_mode
-    text, status = transport.do_request("GET", "/mcp/schema", timeout=10)
+    schema = _fetch_schema(connection=connection)
+    groups = None if load_all else state._default_groups
+    return register_tools_from_schema(schema, groups=groups)
+
+
+def _fetch_schema(connection: state.ConnectionSnapshot | None = None) -> list[dict]:
+    """Fetch and parse /mcp/schema without mutating registered tools."""
+    text, status = transport.do_request(
+        "GET",
+        "/mcp/schema",
+        timeout=10,
+        connection=connection,
+    )
     if status != 200:
         raise RuntimeError(f"Failed to fetch schema: HTTP {status}")
     raw = json.loads(text)
-    schema = _parse_schema(raw)
-    groups = None if load_all else state._default_groups
-    return register_tools_from_schema(schema, groups=groups)
+    return _parse_schema(raw)
 
 
 async def _notify_tools_changed(ctx: Context | None) -> None:
     """Send tools/list_changed notification if context is available."""
     if ctx is not None and ctx._request_context is not None:
+        state.remember_tools_changed_context(ctx)
         await ctx.request_context.session.send_tool_list_changed()

@@ -24,7 +24,10 @@ ENDPOINT_TIMEOUTS = {
     "import_file": 300,
     "run_ghidra_script": 1800,
     "run_script_inline": 1800,
-    "decompile_function": 45,
+    # Ghidra's default decompile cap is 60s. The bridge must outlive it so the
+    # plugin can return a structured timeout instead of writing into a closed
+    # socket after the client has already gone away.
+    "decompile_function": 75,
     "set_function_prototype": 45,
     "rename_function": 45,
     "rename_function_by_address": 45,
@@ -33,6 +36,18 @@ ENDPOINT_TIMEOUTS = {
     "apply_function_documentation": 60,
     "default": 30,
 }
+
+REQUEST_TIMEOUT_GRACE_SECONDS = 15
+# Long-running endpoints may legitimately ask Ghidra to spend 1800 seconds on
+# work (for example run_script_inline/run_ghidra_script or a user-raised
+# decompile timeout). Keep the transport alive slightly longer so the bridge can
+# receive and forward Ghidra's final status instead of closing first.
+MAX_REQUEST_TIMEOUT_SECONDS = 1815
+
+try:
+    MAX_CONCURRENT_GHIDRA_REQUESTS = max(1, int(os.getenv("GHIDRA_MCP_MAX_CONCURRENT_REQUESTS", "4")))
+except ValueError:
+    MAX_CONCURRENT_GHIDRA_REQUESTS = 4
 
 DEFAULT_TCP_URL = "http://127.0.0.1:8089"
 DEFAULT_TCP_PORT = 8089

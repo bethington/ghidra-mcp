@@ -128,10 +128,10 @@ class TestListInstances(unittest.TestCase):
     annotate each discovered instance with a correct `connected` flag."""
 
     def test_no_instances_returns_note(self):
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.discovery, "discover_active_tcp_instance", return_value=None
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(bridge.discovery, "discover_active_tcp_instance", return_value=None),
         ):
             data = json.loads(bridge.list_instances())
 
@@ -145,10 +145,10 @@ class TestListInstances(unittest.TestCase):
         active = {"transport": "tcp", "url": "http://127.0.0.1:8089", "project": "A"}
         other = {"transport": "tcp", "url": "http://127.0.0.1:8090", "project": "B"}
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[dict(other)]
-        ), patch.object(
-            bridge.discovery, "discover_active_tcp_instance", return_value=dict(active)
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[dict(other)]),
+            patch.object(bridge.discovery, "discover_active_tcp_instance", return_value=dict(active)),
         ):
             bridge.state._transport_mode = "tcp"
             bridge.state._active_tcp = "http://127.0.0.1:8089"
@@ -163,10 +163,10 @@ class TestListInstances(unittest.TestCase):
         uds = {"socket": "/tmp/ghidra-1.sock", "pid": 1, "project": "A"}
         uds2 = {"socket": "/tmp/ghidra-2.sock", "pid": 2, "project": "B"}
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[dict(uds), dict(uds2)]
-        ), patch.object(
-            bridge.discovery, "discover_active_tcp_instance", return_value=None
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[dict(uds), dict(uds2)]),
+            patch.object(bridge.discovery, "discover_active_tcp_instance", return_value=None),
         ):
             bridge.state._transport_mode = "uds"
             bridge.state._active_socket = "/tmp/ghidra-1.sock"
@@ -189,10 +189,10 @@ class TestListInstances(unittest.TestCase):
             "url": "http://127.0.0.1:8089",
         }
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[dict(uds)]
-        ), patch.object(
-            bridge.discovery, "discover_active_tcp_instance", return_value=None
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[dict(uds)]),
+            patch.object(bridge.discovery, "discover_active_tcp_instance", return_value=None),
         ):
             bridge.state._transport_mode = "tcp"
             bridge.state._active_tcp = "http://127.0.0.1:8089"
@@ -216,14 +216,15 @@ class TestConnectInstanceFailures(unittest.TestCase):
     def test_uds_schema_fetch_failure_reports_socket(self):
         one = [{"project": "diablo2", "socket": "/tmp/d2.sock", "pid": 42}]
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=True
-        ), patch.object(
-            bridge.registry,
-            "_fetch_and_register_schema",
-            side_effect=RuntimeError("HTTP 503"),
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(
+                bridge.registry,
+                "_fetch_schema",
+                side_effect=RuntimeError("HTTP 503"),
+            ),
         ):
             data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
 
@@ -237,12 +238,12 @@ class TestConnectInstanceFailures(unittest.TestCase):
         exact pass misses, so it needs its own case."""
         one = [{"project": "diablo2", "socket": "/tmp/d2.sock", "pid": 42}]
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=True
-        ), patch.object(
-            bridge.registry, "_fetch_and_register_schema", return_value=3
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=3),
         ):
             bridge.state._full_schema = []
             data = json.loads(asyncio.run(bridge.connect_instance("diablo")))
@@ -267,16 +268,14 @@ class TestConnectInstanceFailures(unittest.TestCase):
         ]
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=False
-        ), patch.object(
-            bridge.discovery, "_scan_tcp_for_project"
-        ) as scan, patch.object(
-            bridge.registry, "_fetch_and_register_schema", return_value=5
-        ), patch.dict(
-            os.environ, env, clear=True
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=5),
+            patch.dict(os.environ, env, clear=True),
         ):
             bridge.state._full_schema = []
             data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
@@ -294,12 +293,11 @@ class TestConnectInstanceFailures(unittest.TestCase):
         """GHIDRA_MCP_URL wins over discovery, so it is also the one place a
         remote/hostile URL can enter. validate_server_url must refuse it before
         any schema fetch happens."""
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.registry, "_fetch_and_register_schema"
-        ) as fetch, patch.dict(
-            os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema") as fetch,
+            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
         ):
             data = json.loads(asyncio.run(bridge.connect_instance("anything")))
 
@@ -313,16 +311,16 @@ class TestConnectInstanceFailures(unittest.TestCase):
         to a dead endpoint instead of reconnecting."""
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.discovery, "_scan_tcp_for_project", return_value=None
-        ), patch.object(
-            bridge.registry,
-            "_fetch_and_register_schema",
-            side_effect=ConnectionRefusedError("connection refused"),
-        ), patch.dict(
-            os.environ, env, clear=True
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value=None),
+            patch.object(
+                bridge.registry,
+                "_fetch_schema",
+                side_effect=ConnectionRefusedError("connection refused"),
+            ),
+            patch.dict(os.environ, env, clear=True),
         ):
             bridge.state._transport_mode = "none"
             data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
@@ -392,9 +390,7 @@ class TestLoadToolGroup(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
             seed_schema(bridge, defs, loaded_groups=set())
-            data = json.loads(
-                asyncio.run(bridge.load_tool_group("stg_beta", ctx=ctx))
-            )
+            data = json.loads(asyncio.run(bridge.load_tool_group("stg_beta", ctx=ctx)))
             # The tool must be genuinely callable now, not merely reported.
             registered = "stg_load_b" in bridge.mcp._tool_manager._tools
             unrelated = "stg_load_a" in bridge.mcp._tool_manager._tools
@@ -493,9 +489,7 @@ class TestUnloadToolGroup(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
             seed_schema(bridge, defs, loaded_groups={"stg_alpha", "stg_beta"})
-            data = json.loads(
-                asyncio.run(bridge.unload_tool_group("stg_beta", ctx=ctx))
-            )
+            data = json.loads(asyncio.run(bridge.unload_tool_group("stg_beta", ctx=ctx)))
             still_registered = "stg_unload_b" in bridge.mcp._tool_manager._tools
             sibling_kept = "stg_unload_a" in bridge.mcp._tool_manager._tools
 
@@ -512,9 +506,7 @@ class TestUnloadToolGroup(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
             seed_schema(bridge, [tool_def("stg_idle_a", "stg_alpha")], loaded_groups=set())
-            data = json.loads(
-                asyncio.run(bridge.unload_tool_group("stg_alpha", ctx=ctx))
-            )
+            data = json.loads(asyncio.run(bridge.unload_tool_group("stg_alpha", ctx=ctx)))
 
         self.assertIn("not loaded", data["message"])
         self.assertNotIn("error", data)
@@ -547,10 +539,7 @@ class TestCheckTools(unittest.TestCase):
             seed_schema(bridge, defs, loaded_groups={"stg_alpha"})
             data = json.loads(
                 asyncio.run(
-                    bridge.check_tools(
-                        " list_instances , stg_check_loaded ,"
-                        "stg_check_unloaded,stg_check_missing"
-                    )
+                    bridge.check_tools(" list_instances , stg_check_loaded ," "stg_check_unloaded,stg_check_missing")
                 )
             )
 
@@ -563,9 +552,7 @@ class TestCheckTools(unittest.TestCase):
         self.assertEqual(results["stg_check_loaded"]["group"], "stg_alpha")
         # A known tool whose group is not loaded gets the exact fix-up call.
         self.assertEqual(results["stg_check_unloaded"]["status"], "not_loaded")
-        self.assertEqual(
-            results["stg_check_unloaded"]["fix"], 'load_tool_group("stg_beta")'
-        )
+        self.assertEqual(results["stg_check_unloaded"]["fix"], 'load_tool_group("stg_beta")')
         # An unknown name is not_found -- no group, no fix.
         self.assertEqual(results["stg_check_missing"], {"status": "not_found"})
         self.assertEqual(data["summary"], "2/4 callable")
@@ -619,9 +606,7 @@ class TestSearchTools(unittest.TestCase):
         self.assertEqual(by_name["stg_rename_function"]["status"], "callable")
         self.assertNotIn("fix", by_name["stg_rename_function"])
         self.assertEqual(by_name["stg_list_globals"]["status"], "not_loaded")
-        self.assertEqual(
-            by_name["stg_list_globals"]["fix"], 'load_tool_group("stg_globals")'
-        )
+        self.assertEqual(by_name["stg_list_globals"]["fix"], 'load_tool_group("stg_globals")')
 
     def test_limit_caps_results_but_match_count_stays_honest(self):
         with isolated_bridge() as bridge:
@@ -649,9 +634,7 @@ class TestSearchTools(unittest.TestCase):
         long_desc = "rename " + ("x" * 400)
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
-            seed_schema(
-                bridge, [tool_def("stg_long", "stg_misc", long_desc)], loaded_groups=set()
-            )
+            seed_schema(bridge, [tool_def("stg_long", "stg_misc", long_desc)], loaded_groups=set())
             data = json.loads(asyncio.run(bridge.search_tools("rename")))
 
         self.assertEqual(len(data["matches"][0]["description"]), 160)
@@ -695,9 +678,10 @@ class TestImportFile(unittest.TestCase):
     def test_payload_omits_unset_language_and_compiler_spec(self):
         """Ghidra auto-detects the format when `language` is absent; sending
         an explicit null would defeat that, so the keys must be omitted."""
-        with isolated_bridge() as bridge, patch.object(
-            bridge.dispatch, "dispatch_post", return_value='{"data": {}}'
-        ) as post:
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.dispatch, "dispatch_post", return_value='{"data": {}}') as post,
+        ):
             asyncio.run(bridge.import_file(r"C:\bins\game.exe"))
 
         post.assert_called_once_with(
@@ -710,9 +694,10 @@ class TestImportFile(unittest.TestCase):
         )
 
     def test_raw_binary_payload_includes_language_and_compiler_spec(self):
-        with isolated_bridge() as bridge, patch.object(
-            bridge.dispatch, "dispatch_post", return_value='{"data": {}}'
-        ) as post:
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.dispatch, "dispatch_post", return_value='{"data": {}}') as post,
+        ):
             asyncio.run(
                 bridge.import_file(
                     "/fw/image.bin",
@@ -737,8 +722,9 @@ class TestImportFile(unittest.TestCase):
     def test_non_json_response_is_returned_verbatim(self):
         """The Ghidra server can answer with a plain-text error; import_file
         must pass it through instead of raising a JSONDecodeError."""
-        with isolated_bridge() as bridge, patch.object(
-            bridge.dispatch, "dispatch_post", return_value="Import failed: no such file"
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.dispatch, "dispatch_post", return_value="Import failed: no such file"),
         ):
             result = asyncio.run(bridge.import_file("/nope.bin"))
 
@@ -746,12 +732,14 @@ class TestImportFile(unittest.TestCase):
 
     def test_no_poll_task_when_analysis_not_started(self):
         fake = FakeAsyncio()
-        with isolated_bridge() as bridge, patch.object(
-            bridge.static_tools, "asyncio", fake
-        ), patch.object(
-            bridge.dispatch,
-            "dispatch_post",
-            return_value=json.dumps({"data": {"analyzing": False, "name": "x.exe"}}),
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.static_tools, "asyncio", fake),
+            patch.object(
+                bridge.dispatch,
+                "dispatch_post",
+                return_value=json.dumps({"data": {"analyzing": False, "name": "x.exe"}}),
+            ),
         ):
             asyncio.run(bridge.import_file("/x.exe", ctx=make_ctx()))
 
@@ -761,12 +749,14 @@ class TestImportFile(unittest.TestCase):
         """Without a ctx there is no session to notify, so spawning a 30-minute
         poll loop would just burn requests forever."""
         fake = FakeAsyncio()
-        with isolated_bridge() as bridge, patch.object(
-            bridge.static_tools, "asyncio", fake
-        ), patch.object(
-            bridge.dispatch,
-            "dispatch_post",
-            return_value=json.dumps({"data": {"analyzing": True, "name": "x.exe"}}),
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.static_tools, "asyncio", fake),
+            patch.object(
+                bridge.dispatch,
+                "dispatch_post",
+                return_value=json.dumps({"data": {"analyzing": True, "name": "x.exe"}}),
+            ),
         ):
             asyncio.run(bridge.import_file("/x.exe"))
 
@@ -783,15 +773,16 @@ class TestImportFile(unittest.TestCase):
             await fake.tasks[0]  # drive the poll loop to completion
             return result
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.static_tools, "asyncio", fake
-        ), patch.object(
-            bridge.dispatch,
-            "dispatch_post",
-            return_value=json.dumps({"data": {"analyzing": True, "name": "game.exe"}}),
-        ), patch.object(
-            bridge.dispatch, "dispatch_get", return_value=status
-        ) as status_get:
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.static_tools, "asyncio", fake),
+            patch.object(
+                bridge.dispatch,
+                "dispatch_post",
+                return_value=json.dumps({"data": {"analyzing": True, "name": "game.exe"}}),
+            ),
+            patch.object(bridge.dispatch, "dispatch_get", return_value=status) as status_get,
+        ):
             asyncio.run(scenario(bridge))
 
         status_get.assert_called_with("/analysis_status", {"program": "game.exe"})
@@ -812,17 +803,20 @@ class TestImportFile(unittest.TestCase):
             await bridge.import_file("/x.exe", ctx=ctx)
             await fake.tasks[0]
 
-        with isolated_bridge() as bridge, patch.object(
-            bridge.static_tools, "asyncio", fake
-        ), patch.object(
-            bridge.dispatch,
-            "dispatch_post",
-            return_value=json.dumps({"data": {"analyzing": True, "name": "game.exe"}}),
-        ), patch.object(
-            bridge.dispatch,
-            "dispatch_get",
-            side_effect=[ConnectionError("boom"), "not json at all", done],
-        ) as status_get:
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.static_tools, "asyncio", fake),
+            patch.object(
+                bridge.dispatch,
+                "dispatch_post",
+                return_value=json.dumps({"data": {"analyzing": True, "name": "game.exe"}}),
+            ),
+            patch.object(
+                bridge.dispatch,
+                "dispatch_get",
+                side_effect=[ConnectionError("boom"), "not json at all", done],
+            ) as status_get,
+        ):
             asyncio.run(scenario(bridge))
 
         self.assertEqual(status_get.call_count, 3)
@@ -866,13 +860,12 @@ class TestAutoConnect(unittest.TestCase):
         bridge = self._bridge
         one = [{"socket": "/tmp/d2.sock", "pid": 42, "project": "diablo2"}]
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=True
-        ), patch.object(
-            bridge.registry, "_fetch_and_register_schema", return_value=271
-        ) as fetch:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=271) as fetch,
+        ):
             bridge._auto_connect()
 
         fetch.assert_called_once()
@@ -886,16 +879,15 @@ class TestAutoConnect(unittest.TestCase):
         bridge = self._bridge
         one = [{"socket": "/tmp/d2.sock", "pid": 42, "project": "diablo2"}]
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=True
-        ), patch.object(
-            bridge.registry,
-            "_fetch_and_register_schema",
-            side_effect=RuntimeError("HTTP 500"),
-        ), patch.dict(
-            os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(
+                bridge.registry,
+                "_fetch_schema",
+                side_effect=RuntimeError("HTTP 500"),
+            ),
+            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
         ):
             bridge._auto_connect()
 
@@ -919,16 +911,15 @@ class TestAutoConnect(unittest.TestCase):
         ]
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=one
-        ), patch.object(
-            bridge.transport, "uds_supported", return_value=False
-        ), patch.object(
-            bridge.registry,
-            "_fetch_and_register_schema",
-            side_effect=ConnectionRefusedError("nope"),
-        ), patch.dict(
-            os.environ, env, clear=True
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(
+                bridge.registry,
+                "_fetch_schema",
+                side_effect=ConnectionRefusedError("nope"),
+            ),
+            patch.dict(os.environ, env, clear=True),
         ):
             bridge._auto_connect()
 
@@ -939,12 +930,11 @@ class TestAutoConnect(unittest.TestCase):
         bridge = self._bridge
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.registry, "_fetch_and_register_schema", return_value=12
-        ), patch.dict(
-            os.environ, env, clear=True
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=12),
+            patch.dict(os.environ, env, clear=True),
         ):
             bridge._auto_connect()
 
@@ -955,14 +945,14 @@ class TestAutoConnect(unittest.TestCase):
         bridge = self._bridge
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.registry,
-            "_fetch_and_register_schema",
-            side_effect=ConnectionRefusedError("nope"),
-        ), patch.dict(
-            os.environ, env, clear=True
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(
+                bridge.registry,
+                "_fetch_schema",
+                side_effect=ConnectionRefusedError("nope"),
+            ),
+            patch.dict(os.environ, env, clear=True),
         ):
             bridge._auto_connect()
 
@@ -972,12 +962,10 @@ class TestAutoConnect(unittest.TestCase):
     def test_non_local_env_url_is_never_auto_connected(self):
         bridge = self._bridge
 
-        with patch.object(
-            bridge.discovery, "discover_instances", return_value=[]
-        ), patch.object(
-            bridge.registry, "_fetch_and_register_schema"
-        ) as fetch, patch.dict(
-            os.environ, {"GHIDRA_MCP_URL": "http://10.0.0.5:8089"}
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema") as fetch,
+            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://10.0.0.5:8089"}),
         ):
             bridge._auto_connect()
 
@@ -1018,10 +1006,10 @@ class TestListInstancesPayloadSize(unittest.TestCase):
         }
 
     def _run(self, instance):
-        with isolated_bridge() as bridge, patch.object(
-            bridge.discovery, "discover_instances", return_value=[instance]
-        ), patch.object(
-            bridge.discovery, "discover_active_tcp_instance", return_value=None
+        with (
+            isolated_bridge() as bridge,
+            patch.object(bridge.discovery, "discover_instances", return_value=[instance]),
+            patch.object(bridge.discovery, "discover_active_tcp_instance", return_value=None),
         ):
             raw = bridge.list_instances()
         return raw, json.loads(raw)["instances"][0]
@@ -1096,17 +1084,13 @@ class TestCheckToolsWithoutSchema(unittest.TestCase):
             bridge.state._full_schema = []
             data = asyncio.run(bridge.check_tools("list_instances"))
 
-        self.assertEqual(
-            json.loads(data)["results"]["list_instances"]["status"], "callable"
-        )
+        self.assertEqual(json.loads(data)["results"]["list_instances"]["status"], "callable")
 
     def test_missing_tool_is_still_not_found_when_schema_present(self):
         """With a schema loaded the distinction must still be made — this is
         what keeps the fix from degrading into "everything is unknown"."""
         with isolated_bridge() as bridge:
-            bridge.state._full_schema = [
-                {"name": "rename_function_by_address", "category": "rename"}
-            ]
+            bridge.state._full_schema = [{"name": "rename_function_by_address", "category": "rename"}]
             bridge.state._dynamic_tool_names[:] = []
             data = asyncio.run(bridge.check_tools("no_such_tool"))
 

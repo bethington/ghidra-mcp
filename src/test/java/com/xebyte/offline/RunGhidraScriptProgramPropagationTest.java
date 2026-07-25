@@ -79,19 +79,19 @@ public class RunGhidraScriptProgramPropagationTest extends TestCase {
         String src = readSource();
         String body = extractAnnotatedMethodBody(src, "/run_ghidra_script");
 
-        // The 3-arg runGhidraScript call must be present and must include
-        // programName. We require the literal `programName` token because
+        // The 4-arg runGhidraScript call must be present and must include
+        // programName plus timeoutSeconds. We require the literal `programName` token because
         // the @Param is named that way and it's the parameter the operator
         // actually controls.
-        Pattern threeArgCall = Pattern.compile(
-                "runGhidraScript\\s*\\(\\s*[^,]+,\\s*[^,]+,\\s*programName\\s*\\)",
+        Pattern timeoutAwareCall = Pattern.compile(
+                "runGhidraScript\\s*\\(\\s*[^,]+,\\s*[^,]+,\\s*programName\\s*,\\s*timeoutSeconds\\s*\\)",
                 Pattern.MULTILINE | Pattern.DOTALL);
         assertTrue(
-                "runGhidraScriptWithCapture must call the 3-arg runGhidraScript "
-                        + "and pass `programName` as the third argument — without it, "
+                "runGhidraScriptWithCapture must call the timeout-aware runGhidraScript "
+                        + "and pass `programName` plus `timeoutSeconds` — without it, "
                         + "the script executes against the session currentProgram "
                         + "instead of the operator's requested program.",
-                threeArgCall.matcher(body).find());
+                timeoutAwareCall.matcher(body).find());
     }
 
     public void testRunGhidraScriptWithCaptureDoesNotCallTwoArgOverload() throws IOException {

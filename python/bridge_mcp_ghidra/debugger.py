@@ -5,6 +5,7 @@ Each tool proxies an HTTP request to ``debugger/server.py`` on
 """
 
 import http.client
+import inspect
 import json
 import os
 import sys
@@ -66,7 +67,20 @@ def _debugger_tool(*dargs, **dkwargs):
     exposed as an MCP tool, keeping the tool list uncluttered on non-Windows.
     """
     if _DEBUGGER_ACTIVE:
-        return mcp.tool(*dargs, **dkwargs)
+        registrar = mcp.tool(*dargs, **dkwargs)
+
+        def _register(fn):
+            async def _async_wrapper(*args, **kwargs):
+                return await state.run_blocking_ghidra_call(fn, *args, **kwargs)
+
+            _async_wrapper.__name__ = fn.__name__
+            _async_wrapper.__doc__ = fn.__doc__
+            _async_wrapper.__annotations__ = fn.__annotations__
+            _async_wrapper.__signature__ = inspect.signature(fn)
+            registrar(_async_wrapper)
+            return fn
+
+        return _register
 
     def _skip(fn):
         return fn
@@ -87,20 +101,32 @@ def _debugger_request(
     # GHIDRA_DEBUGGER_URL is operator-set — mirrors the Ghidra TCP URL policy
     # and stops a stray/hostile env value from redirecting debugger traffic.
     if not validate_server_url(DEBUGGER_URL):
-        return json.dumps({
-            "error": f"Refusing to use non-loopback debugger URL: {DEBUGGER_URL}. "
-            "GHIDRA_DEBUGGER_URL must be http://<127.0.0.1|localhost|::1>:<port>."
-        })
+        return json.dumps(
+            {
+                "error": f"Refusing to use non-loopback debugger URL: {DEBUGGER_URL}. "
+                "GHIDRA_DEBUGGER_URL must be http://<127.0.0.1|localhost|::1>:<port>."
+            }
+        )
     parsed = urlparse(DEBUGGER_URL)
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
+    cancel_handle = state.get_request_cancel_handle()
+    if cancel_handle is not None and not cancel_handle.register_connection(conn):
+        return json.dumps({"error": f"Debugger request aborted before start: {path}"})
     try:
+        conn.connect()
+        if cancel_handle is not None and cancel_handle.aborted:
+            return json.dumps({"error": f"Debugger request aborted before send: {path}"})
         url = path
         if query:
             url += "?" + urlencode(query)
         headers = {"Content-Type": "application/json"} if body else {}
-        conn.request(
-            method, url, body=json.dumps(body) if body else None, headers=headers
-        )
+        if cancel_handle is not None:
+            with cancel_handle.hold_send_window(conn) as can_send:
+                if not can_send:
+                    return json.dumps({"error": f"Debugger request aborted before send: {path}"})
+                conn.request(method, url, body=json.dumps(body) if body else None, headers=headers)
+        else:
+            conn.request(method, url, body=json.dumps(body) if body else None, headers=headers)
         resp = conn.getresponse()
         data = resp.read().decode("utf-8")
         if resp.status >= 400:
@@ -120,6 +146,8 @@ def _debugger_request(
     except Exception as e:
         return json.dumps({"error": f"Debugger request failed: {e}"})
     finally:
+        if cancel_handle is not None:
+            cancel_handle.unregister_connection(conn)
         conn.close()
 
 
@@ -143,11 +171,7 @@ def debugger_attach(target: str) -> str:
             programs_text = dispatch.dispatch_get("/list_open_programs")
             if programs_text:
                 programs_data = json.loads(programs_text)
-                programs = (
-                    programs_data
-                    if isinstance(programs_data, list)
-                    else programs_data.get("programs", [])
-                )
+                programs = programs_data if isinstance(programs_data, list) else programs_data.get("programs", [])
                 # image_base is already present on each /list_open_programs
                 # entry (ProgramScriptService.listOpenPrograms emits it) —
                 # use it directly. The previous /get_metadata round-trip
@@ -168,12 +192,9 @@ def debugger_attach(target: str) -> str:
                     if prog_path and image_base:
                         ghidra_bases[prog_path] = image_base
                 if ghidra_bases:
-                    _debugger_request(
-                        "POST", "/debugger/sync_modules", {"ghidra_bases": ghidra_bases}
-                    )
+                    _debugger_request("POST", "/debugger/sync_modules", {"ghidra_bases": ghidra_bases})
                     logger.info(
-                        "debugger_attach: auto-synced %d Ghidra image base(s) "
-                        "to the debugger address map",
+                        "debugger_attach: auto-synced %d Ghidra image base(s) " "to the debugger address map",
                         len(ghidra_bases),
                     )
                 else:
@@ -222,9 +243,7 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
         dll: DLL name (e.g. "D2Common.dll").
         ordinal: Ordinal number (e.g. 10624).
     """
-    return _debugger_request(
-        "GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)}
-    )
+    return _debugger_request("GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)})
 
 
 @_debugger_tool()
@@ -310,9 +329,7 @@ def debugger_registers() -> str:
 
 
 @_debugger_tool()
-def debugger_read_memory(
-    address: str, size: int = 64, address_type: str = "runtime", module: str = ""
-) -> str:
+def debugger_read_memory(address: str, size: int = 64, address_type: str = "runtime", module: str = "") -> str:
     """Read memory from the debugged process.
 
     Returns hex dump and 32-bit DWORD interpretation of the memory region.
@@ -346,9 +363,7 @@ def debugger_stack_trace(depth: int = 20) -> str:
 
 
 @_debugger_tool()
-def debugger_read_args(
-    convention: str = "__stdcall", count: int = 4, arg_names: str = ""
-) -> str:
+def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names: str = "") -> str:
     """Read function arguments at the current breakpoint based on calling convention.
 
     Reads arguments from registers and stack according to the calling convention.
@@ -438,9 +453,7 @@ def debugger_trace_list() -> str:
 
 
 @_debugger_tool()
-def debugger_watch_memory(
-    ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
-) -> str:
+def debugger_watch_memory(ghidra_address: str, size: int = 4, access: str = "write", module: str = "") -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
     Limited to 4 simultaneous watchpoints (x86 debug register limit).
