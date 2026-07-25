@@ -6,6 +6,46 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v5.17.0 - 2026-07-24 (minor: program storage tools, flow repair, provider resilience)
 
+### Security (pre-release hardening)
+
+- **Anti-CSRF / DNS-rebinding guard on the HTTP servers.** Loopback binding
+  does not stop a web page the operator visits from issuing a cross-origin
+  `fetch()` to `127.0.0.1` (responses are `text/plain` and bodies parse as JSON
+  regardless of Content-Type, so it is a CORS "simple request" with no
+  preflight), nor a DNS-rebinding attacker from pointing a hostname at loopback.
+  The TCP plugin (`safeHandler`) and headless server (`safeContext`) now reject
+  requests whose `Origin` is cross-site or whose `Host` is non-loopback, via
+  `SecurityConfig.rejectCrossOriginRequest`. **Behavior change:** a
+  browser-based client on loopback without a token now receives `403` unless
+  `GHIDRA_MCP_AUTH_TOKEN` is set (which disables the guard — the token becomes
+  the control and the operator may then bind a non-loopback address).
+  Non-browser clients (the MCP bridge: loopback `Host`, no `Origin`) are
+  unaffected.
+- **UDS transport now honors `GHIDRA_MCP_AUTH_TOKEN`.** The Unix-domain-socket
+  server enforced no auth, so a configured token silently did not apply there.
+  It is now checked at the single dispatch choke point in `UdsHttpServer`,
+  covering every context including GUI-registered ones. Health endpoints stay
+  exempt.
+- **Destructive project ops honor `GHIDRA_MCP_PROJECT_FOLDER`.** `delete_file`
+  and `create_folder` now enforce the project-scope containment guard that
+  previously gated only reads.
+- **Script-execution gate moved onto the sink.** The 3-arg `runGhidraScript`
+  now enforces `GHIDRA_MCP_ALLOW_SCRIPTS` itself, and the dead, ungated
+  `/run_script` route was removed from `EndpointRegistry` so it cannot be
+  re-wired into an ungated code-execution endpoint.
+- **fun-doc dashboard: anti-CSRF/rebinding guard.** The Flask dashboard rejects
+  cross-origin and non-loopback-`Host` requests (`FUN_DOC_DASHBOARD_ORIGINS`
+  widens the allow-list; `FUN_DOC_DASHBOARD_TOKEN` provides a bearer escape
+  hatch for programmatic/remote API clients behind an authenticating proxy).
+- **Credential leaks closed.** The DB DSN is password-masked before logging in
+  `db/migrate.py` and `scripts/v58_smoke.py`; the `storage` block (which may
+  hold a Postgres URL with a password) is stripped from `GET /api/queue/config`
+  and the `queue_changed` socket broadcast. Ghidra symbol/type names are now
+  HTML-escaped in the dashboard's pipeline view (stored-XSS when RE'ing
+  untrusted binaries).
+- **Docker: runs as a non-root `ghidra` user**, and the builder no longer
+  disables TLS verification when downloading Ghidra.
+
 ### Added
 
 - **`clear_flow_and_repair` (1 new endpoint).** Wraps Ghidra's

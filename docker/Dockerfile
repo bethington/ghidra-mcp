@@ -25,10 +25,10 @@ RUN apt-get update && apt-get install -y \
 
 # Download Ghidra
 WORKDIR /opt
-RUN wget -q --no-check-certificate \
+RUN wget -q \
     "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_DATE}.zip" \
     -O ghidra.zip || \
-    wget -q --no-check-certificate \
+    wget -q \
     "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC.zip" \
     -O ghidra.zip
 
@@ -129,6 +129,18 @@ COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
 # Copy entrypoint script and fix line endings (Windows -> Unix)
 COPY docker/entrypoint.sh /app/
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Drop root. The headless server parses untrusted binaries, so run it as an
+# unprivileged user to contain any parser / file-write bug. The runtime data
+# and project volumes plus the Ghidra user-settings home must be writable by
+# it; /data and /projects are chown'd before the VOLUME declaration so the
+# anonymous volumes inherit ghidra ownership. HOME drives Java's user.home,
+# where Ghidra writes its per-user settings.
+RUN groupadd --gid 1000 ghidra \
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/ghidra ghidra \
+    && chown -R ghidra:ghidra /app /data /projects /home/ghidra
+ENV HOME=/home/ghidra
+USER ghidra
 
 # Expose port
 EXPOSE 8089

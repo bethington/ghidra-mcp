@@ -107,6 +107,30 @@ def _record_applied(conn, backend: str, version: int, name: str) -> None:
         )
 
 
+def _redact_dsn(target):
+    """Mask the password in a ``postgresql://`` DSN so it is safe to log.
+    sqlite paths (no credentials) and passwordless URLs pass through
+    unchanged. Never let a raw Postgres password reach stdout / CI logs."""
+    if not isinstance(target, str) or "://" not in target:
+        return target
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(target)
+        if parts.password is None:
+            return target
+        netloc = parts.hostname or ""
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        if parts.username:
+            netloc = f"{parts.username}:***@{netloc}"
+        return urlunsplit(
+            (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
+        )
+    except Exception:
+        return "<redacted-dsn>"
+
+
 def _connect(backend: str, url: Optional[str]):
     if backend == "sqlite":
         import sqlite3
@@ -274,7 +298,7 @@ def migrate(backend: str, url: Optional[str] = None) -> int:
                 conn.executescript(sql)
                 _record_applied(conn, backend, version, name)
                 applied_count += 1
-                print(f"[migrate] applied {version:04d}_{name} ({backend}) at {target}")
+                print(f"[migrate] applied {version:04d}_{name} ({backend}) at {_redact_dsn(target)}")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -282,7 +306,7 @@ def migrate(backend: str, url: Optional[str] = None) -> int:
         finally:
             conn.close()
     if applied_count == 0:
-        print(f"[migrate] {backend} schema already up to date at {target}")
+        print(f"[migrate] {backend} schema already up to date at {_redact_dsn(target)}")
     return applied_count
 
 
