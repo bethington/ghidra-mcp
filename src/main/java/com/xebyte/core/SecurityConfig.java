@@ -164,10 +164,25 @@ public final class SecurityConfig {
      *                       null returns true (unscoped equivalent)
      */
     public boolean isPathInProjectScope(String domainFilePath) {
-        if (projectFolderScope == null) return true;
+        return pathWithinScope(domainFilePath, projectFolderScope);
+    }
+
+    /**
+     * Prefix-collision-safe scope match, factored out for direct unit testing
+     * (the instance method reads {@code projectFolderScope} from the env once
+     * at construction, so the branch where a scope <em>is</em> configured is
+     * awkward to exercise otherwise).
+     *
+     * <p>A null {@code scopePrefix} (no scope configured) or null
+     * {@code domainFilePath} both return true — the unscoped default. The
+     * {@code equals || startsWith(prefix + "/")} idiom prevents prefix-collision
+     * escapes (e.g. {@code /Mods/PD2-S12-OTHER} does NOT match {@code /Mods/PD2-S12}).
+     */
+    public static boolean pathWithinScope(String domainFilePath, String scopePrefix) {
+        if (scopePrefix == null) return true;
         if (domainFilePath == null) return true;
-        if (domainFilePath.equals(projectFolderScope)) return true;
-        return domainFilePath.startsWith(projectFolderScope + "/");
+        if (domainFilePath.equals(scopePrefix)) return true;
+        return domainFilePath.startsWith(scopePrefix + "/");
     }
 
     /** True when {@code GHIDRA_MCP_FILE_ROOT} is set. */
@@ -214,6 +229,96 @@ public final class SecurityConfig {
         return "Refusing to bind " + bindAddress
                 + " without GHIDRA_MCP_AUTH_TOKEN. Set the env var to a"
                 + " strong shared secret before binding to a non-loopback address.";
+    }
+
+    /**
+     * Anti-DNS-rebinding / anti-CSRF guard for the loopback-trust deployment.
+     *
+     * <p>When no auth token is configured (the default), the server trusts any
+     * local caller — but a web page on <em>any</em> site the operator visits can
+     * still issue a cross-origin {@code fetch()} to {@code 127.0.0.1} (responses
+     * are {@code text/plain} and bodies parse as JSON regardless of
+     * Content-Type, so it is a CORS "simple request" with no preflight), and a
+     * DNS-rebinding attacker can point a hostname at loopback. This rejects
+     * those by requiring the {@code Host} header — and the {@code Origin} header
+     * when a browser sends one — to name a loopback address. Non-browser CLI
+     * clients (the MCP bridge over TCP) send a loopback Host and no Origin, so
+     * they pass unaffected.
+     *
+     * <p><b>Not enforced when a token is set:</b> the bearer token is the auth
+     * control then (an attacker page cannot supply it, and adding an
+     * {@code Authorization} header forces a CORS preflight that fails), and the
+     * operator may legitimately bind a non-loopback interface and reach it by
+     * hostname/IP — where a loopback-only Host check would be wrong.
+     *
+     * @param hostHeader   the request {@code Host} header (may be null)
+     * @param originHeader the request {@code Origin} header (may be null)
+     * @return null if the request is allowed; a stable error message (no
+     *         attacker-controlled input reflected) if it must be rejected 403
+     */
+    public String rejectCrossOriginRequest(String hostHeader, String originHeader) {
+        if (isAuthEnabled()) return null;  // token is the control; hostnames may be non-loopback
+        if (originHeader != null && !originHeader.trim().isEmpty()
+                && !isLoopbackOriginHeader(originHeader)) {
+            return "Cross-origin request refused. This loopback server rejects browser "
+                    + "requests from other origins to prevent CSRF / DNS-rebinding. Set "
+                    + "GHIDRA_MCP_AUTH_TOKEN to allow authenticated cross-origin access.";
+        }
+        if (hostHeader != null && !hostHeader.trim().isEmpty()
+                && !isLoopbackHostHeader(hostHeader)) {
+            return "Request refused: non-loopback Host header. This blocks DNS-rebinding "
+                    + "attacks against the loopback server. Set GHIDRA_MCP_AUTH_TOKEN to "
+                    + "bind and reach a non-loopback address.";
+        }
+        return null;
+    }
+
+    /** True if an HTTP {@code Host} header names a loopback address. */
+    public static boolean isLoopbackHostHeader(String hostHeader) {
+        return isLoopbackHostName(extractHost(hostHeader));
+    }
+
+    /**
+     * True if an {@code Origin} header names a loopback address. The literal
+     * string {@code "null"} (an opaque origin from sandboxed / {@code file://}
+     * contexts) is NOT loopback and returns false.
+     */
+    public static boolean isLoopbackOriginHeader(String originHeader) {
+        if (originHeader == null) return false;
+        String o = originHeader.trim();
+        if (o.isEmpty() || o.equalsIgnoreCase("null")) return false;
+        int scheme = o.indexOf("://");
+        String authority = scheme >= 0 ? o.substring(scheme + 3) : o;
+        int slash = authority.indexOf('/');   // Origin carries no path, but strip defensively
+        if (slash >= 0) authority = authority.substring(0, slash);
+        return isLoopbackHostName(extractHost(authority));
+    }
+
+    private static boolean isLoopbackHostName(String host) {
+        if (host == null) return false;
+        return host.equals("127.0.0.1") || host.equals("localhost") || host.equals("::1");
+    }
+
+    /**
+     * Extract the lowercased host from an HTTP {@code Host} header or a URL
+     * authority, stripping any port and IPv6 brackets. Returns null for
+     * null/empty input.
+     */
+    public static String extractHost(String authority) {
+        if (authority == null) return null;
+        String a = authority.trim();
+        if (a.isEmpty()) return null;
+        if (a.startsWith("[")) {                 // IPv6 literal: [::1]:8089 or [::1]
+            int end = a.indexOf(']');
+            return (end > 0 ? a.substring(1, end) : a).toLowerCase();
+        }
+        int colon = a.indexOf(':');
+        // Only strip a trailing :port when there's exactly one colon. A bare
+        // IPv6 (multiple colons, no brackets) has no port to split off.
+        if (colon >= 0 && a.indexOf(':', colon + 1) < 0) {
+            return a.substring(0, colon).toLowerCase();
+        }
+        return a.toLowerCase();
     }
 
     /**

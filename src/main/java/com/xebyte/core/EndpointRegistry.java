@@ -1201,9 +1201,11 @@ public class EndpointRegistry {
             params(qStr("path", "Program path in project"), qBool("auto_analyze", false, "Run auto-analysis")),
             (q, b) -> programScriptService.openProgramFromProject(str(q, "path"), bool(q, "auto_analyze")));
 
-        post("/run_script", "Execute a Ghidra script by path",
-            params(bStr("script_path"), bStrOpt("args"), pProg()),
-            (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "script_path"), bodyStr(b, "args"), str(q, "program")));
+        // NOTE: /run_script (raw runGhidraScript by path) is intentionally NOT
+        // registered. Use /run_ghidra_script (output capture + timeout), which
+        // enforces the GHIDRA_MCP_ALLOW_SCRIPTS gate. runGhidraScript itself now
+        // also enforces the gate at the sink, so re-adding this route would not
+        // reintroduce an ungated RCE — but keep it unregistered regardless.
 
         post("/run_script_inline", "Execute inline Ghidra script code",
               params(bStr("code"), bStrOpt("args"), pProg()),
