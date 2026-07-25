@@ -132,7 +132,10 @@ public class ServerManager {
                     String json = ep.handler().handle(query, body).toJson();
                     sendJsonResponse(exchange, json);
                 } catch (Exception e) {
-                    sendJsonResponse(exchange, Response.err(e.getMessage()).toJson());
+                    // Uncaught handler failure: log full detail, return generic.
+                    Msg.error(ServerManager.class, "Unhandled error on " + ep.path(), e);
+                    sendJsonResponse(exchange, Response.err(
+                        "Internal server error. See the Ghidra application log for details.").toJson());
                 }
             });
         }

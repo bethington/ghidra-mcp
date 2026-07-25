@@ -129,4 +129,28 @@ public class SecurityConfigCrossOriginTest extends TestCase {
         assertFalse(SecurityConfig.pathWithinScope("/Mods/PD2-S12-OTHER/x.dll", "/Mods/PD2-S12"));
         assertFalse(SecurityConfig.pathWithinScope("/Vanilla/1.00/D2Common.dll", "/Mods/PD2-S12"));
     }
+
+    // ---- exceedsMaxBody (request-body cap) -------------------------------
+
+    public void testExceedsMaxBodyUnderLimit() {
+        assertFalse(SecurityConfig.exceedsMaxBody(null));
+        assertFalse(SecurityConfig.exceedsMaxBody(""));
+        assertFalse(SecurityConfig.exceedsMaxBody("0"));
+        assertFalse(SecurityConfig.exceedsMaxBody("1024"));
+        assertFalse(SecurityConfig.exceedsMaxBody(
+            String.valueOf(SecurityConfig.MAX_REQUEST_BODY_BYTES)));  // exactly at limit is OK
+    }
+
+    public void testExceedsMaxBodyOverLimit() {
+        assertTrue(SecurityConfig.exceedsMaxBody(
+            String.valueOf(SecurityConfig.MAX_REQUEST_BODY_BYTES + 1)));
+        assertTrue(SecurityConfig.exceedsMaxBody("999999999999"));  // ~1 TB
+    }
+
+    public void testExceedsMaxBodyUnparseableIsFalse() {
+        // Garbage Content-Length is not a fast-reject; the actual read is
+        // still bounded downstream. Must not throw.
+        assertFalse(SecurityConfig.exceedsMaxBody("not-a-number"));
+        assertFalse(SecurityConfig.exceedsMaxBody("  "));
+    }
 }

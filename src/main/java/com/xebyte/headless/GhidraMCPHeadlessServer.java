@@ -410,8 +410,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                         ? JsonHelper.parseBody(exchange.getRequestBody()) : Map.of();
                     sendResponse(exchange, ep.handler().handle(query, body).toJson());
                 } catch (Exception e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    sendResponse(exchange, "{\"error\": \"" + msg.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
+                    // Uncaught handler failure: log full detail, return generic
+                    // (avoid leaking paths/class names to the client).
+                    ghidra.util.Msg.error(GhidraMCPHeadlessServer.class,
+                        "Unhandled error on " + ep.path(), e);
+                    sendResponse(exchange,
+                        "{\"error\": \"Internal server error. See the Ghidra application log for details.\"}");
                 }
             });
         }
@@ -775,6 +779,10 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
+                // Bound accumulation so a huge body can't exhaust memory.
+                if (sb.length() > com.xebyte.core.SecurityConfig.MAX_REQUEST_BODY_BYTES) {
+                    return params;  // oversized — treat as no params
+                }
             }
             body = sb.toString();
         }

@@ -92,6 +92,51 @@ public class HardeningWiringTest extends TestCase {
                 src.contains("post(\"/run_script\""));
     }
 
+    /** Request bodies must be bounded on every transport. */
+    public void testRequestBodiesAreBounded() throws IOException {
+        assertTrue("JsonHelper.parseBody must bound the read via readNBytes",
+                read("core", "JsonHelper.java").contains("readNBytes"));
+        assertTrue("TCP parsePostParams must bound the read",
+                read("GhidraMCPPlugin.java").contains("readNBytes")
+                        && read("GhidraMCPPlugin.java").contains("exceedsMaxBody"));
+        assertTrue("UDS must reject oversized Content-Length (413)",
+                read("core", "UdsHttpServer.java").contains("MAX_REQUEST_BODY_BYTES"));
+    }
+
+    /**
+     * Top-level uncaught-exception handlers must not echo raw exception text
+     * to the client (path / class-name disclosure). Deliberate per-endpoint
+     * validation messages are unaffected.
+     */
+    public void testTopLevelErrorsAreGeneric() throws IOException {
+        String plugin = read("GhidraMCPPlugin.java");
+        assertTrue("safeHandler catch must return a generic message",
+                plugin.contains("Internal server error. See the Ghidra application log"));
+        assertTrue("headless catch must return a generic message",
+                read("headless", "GhidraMCPHeadlessServer.java")
+                        .contains("Internal server error. See the Ghidra application log"));
+        assertTrue("UDS handler catch must return a generic message",
+                read("core", "ServerManager.java")
+                        .contains("Internal server error. See the Ghidra application log"));
+    }
+
+    /** Headless filesystem endpoints must honor GHIDRA_MCP_FILE_ROOT. */
+    public void testHeadlessFsEndpointsEnforceFileRoot() throws IOException {
+        String src = read("headless", "HeadlessManagementService.java");
+        // create_project, export_program, import_program, archive_project all
+        // route their path input through the containment helper.
+        int helperUses = countOccurrences(src, "resolveWithinRootOrLog(");
+        assertTrue("Expected create/export/import/archive to each call "
+                + "resolveWithinRootOrLog (>=4 uses incl. helper def), found " + helperUses,
+                helperUses >= 5);
+    }
+
+    private static int countOccurrences(String s, String sub) {
+        int n = 0, i = 0;
+        while ((i = s.indexOf(sub, i)) >= 0) { n++; i += sub.length(); }
+        return n;
+    }
+
     /** Extract a method body by walking forward from its @McpTool path. */
     private static String body(String src, String mcpPath) {
         int at = src.indexOf("path = \"" + mcpPath + "\"");

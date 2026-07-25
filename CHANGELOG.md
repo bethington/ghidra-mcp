@@ -45,6 +45,23 @@ Complete version history for the Ghidra MCP Server project.
   untrusted binaries).
 - **Docker: runs as a non-root `ghidra` user**, and the builder no longer
   disables TLS verification when downloading Ghidra.
+- **Defense-in-depth hardening.** Request bodies are capped at 64 MiB on every
+  transport (TCP, headless, UDS) so a lying/absent `Content-Length` cannot force
+  an unbounded allocation. Top-level uncaught-exception handlers now log the
+  detail server-side and return a generic message instead of echoing exception
+  text (path / class-name disclosure) — deliberate per-endpoint validation
+  errors are unchanged. The headless filesystem endpoints (`create_project`,
+  `export_program`, `import_program`, `archive_project`) now honor
+  `GHIDRA_MCP_FILE_ROOT` containment like `load_program` already did. The bridge
+  refuses to proxy to a non-loopback `GHIDRA_DEBUGGER_URL`.
+
+- **Known / accepted (documented, not changed):** the OpenD2 conformance *port
+  pipeline* compiles and runs LLM-authored C by design — it is operator-gated,
+  localhost-only, and never enabled by default; run it only against trusted
+  input. An internal RFC-1918 host (`10.0.10.30`) remains in pre-scrub git
+  history (no credential — the password was already masked); the working tree is
+  clean. `/server/authenticate` receives the Ghidra *server* password as a
+  request field over the loopback/token-gated channel.
 
 ### Added
 

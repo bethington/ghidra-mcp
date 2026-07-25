@@ -15,6 +15,7 @@ from . import dispatch
 from . import state
 from .config import DEBUGGER_URL, DEBUGGER_TOOL_NAMES, logger
 from .server import mcp
+from .validation import validate_server_url
 
 # Hosts for which a debugger server is local to this machine. On a non-Windows
 # host a local debugger server can never run (dbgeng/WinDbg is Windows-only), so
@@ -81,6 +82,15 @@ def _debugger_request(
     timeout: int = 30,
 ) -> str:
     """Send a request to the debugger server. Returns JSON string."""
+    # The debugger server exposes powerful primitives (attach, read/write
+    # memory, breakpoints). Refuse to proxy to a non-loopback URL even though
+    # GHIDRA_DEBUGGER_URL is operator-set — mirrors the Ghidra TCP URL policy
+    # and stops a stray/hostile env value from redirecting debugger traffic.
+    if not validate_server_url(DEBUGGER_URL):
+        return json.dumps({
+            "error": f"Refusing to use non-loopback debugger URL: {DEBUGGER_URL}. "
+            "GHIDRA_DEBUGGER_URL must be http://<127.0.0.1|localhost|::1>:<port>."
+        })
     parsed = urlparse(DEBUGGER_URL)
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
     try:

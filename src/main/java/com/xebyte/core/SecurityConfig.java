@@ -48,6 +48,32 @@ public final class SecurityConfig {
 
     private static final SecurityConfig INSTANCE = new SecurityConfig();
 
+    /**
+     * Hard ceiling on an HTTP request body, in bytes. Bounds the memory a
+     * single request can force the server to allocate (a lying or absent
+     * {@code Content-Length} otherwise lets {@code readAllBytes()} grow
+     * unbounded). Generous enough for the largest legitimate batch operations
+     * (thousands of rename/comment entries) while stopping a multi-GB
+     * allocation DoS. Bodies carry JSON metadata only — file imports pass a
+     * path, not file bytes — so 64 MiB is comfortably above real usage.
+     */
+    public static final long MAX_REQUEST_BODY_BYTES = 64L * 1024 * 1024;
+
+    /**
+     * True when a {@code Content-Length} header value parses to a size over
+     * {@link #MAX_REQUEST_BODY_BYTES}. A null/absent/unparseable header returns
+     * false (the actual read is still bounded downstream), so this is only a
+     * fast-reject for honest clients that declare an oversized body.
+     */
+    public static boolean exceedsMaxBody(String contentLengthHeader) {
+        if (contentLengthHeader == null) return false;
+        try {
+            return Long.parseLong(contentLengthHeader.trim()) > MAX_REQUEST_BODY_BYTES;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     private final byte[] tokenBytes;     // null if auth disabled
     private final boolean scriptsAllowed;
     private final String fileRoot;       // null if disabled
