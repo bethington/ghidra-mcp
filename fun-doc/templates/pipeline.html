@@ -394,7 +394,7 @@
   <div class="types-bar" id="typesBar">
     <span class="tb-icon">&#9888;</span>
     <span class="tb-msg" id="typesBarMsg">Loading type status&hellip;</span>
-    <button class="btn go tb-btn" id="typesBarBtn" onclick="loadTypes()">Load types</button>
+    <button class="btn go tb-btn" id="typesBarBtn" onclick="typesBarAction()">Load types</button>
     <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('typesBar').classList.remove('active')">&times;</button>
   </div>
 
@@ -1070,6 +1070,7 @@
   // ---------- canonical D2MOO types: session-cached check + slide-out bar ----------
   const _typesChecked = new Set();   // programs checked this session (once-per-session cadence)
   let _typesBusy = false;
+  let _globalsTypingActive = false;  // true while a globals worker runs on the current binary
   function _shortBin(p){ return (p||'').split(/[\\/]/).pop() || p || 'this binary'; }
   // ORDERED checks: (1) missing/stale canonical types FIRST (prerequisite -- can't normalize to
   // uint32_t until it exists); (2) only once loaded, warn about existing NATIVE-typed variables.
@@ -1092,20 +1093,44 @@
       btn.disabled=false; btn.textContent = st.stale ? "Reload types" : "Load types";
       bar.classList.add("active"); return;
     }
-    // (2) LOADED -> INFORMATIONAL warning if existing variables use native / untyped (undefined*)
-    // types. No fix button: Ghidra collapses stdint typedefs to their width builtin, so bulk
-    // scalar normalization is cosmetic -- real typing is the doc pipeline's job (struct identity).
+    // (2) LOADED -> ACTIONABLE bar when globals are genuinely untyped (undefined*).
+    // The button starts a continuous globals-typing worker; the bar hides itself
+    // while that worker runs (see maybeToggleTypesBarForWorkers) and re-scans on
+    // stop. Trigger is UNTYPED-ONLY (nt.invalid): native-width scalars (nt.unrefined)
+    // are often a legitimately final type, so triggering on them would pin the bar
+    // permanently. Native-width still shows as secondary context when the bar is up.
+    if(_globalsTypingActive){ bar.classList.remove("active","busy","ok"); return; }
     const nt = await api("/native_types_status"+(force?"?force=1":""));
-    if(nt && nt.native > 0){
+    if(nt && nt.invalid > 0){
       bar.classList.remove("busy","ok"); bar.dataset.mode="detect";
-      btn.style.display="none";                      // detection only -- no action
-      const parts=[];
-      if(nt.unrefined) parts.push(`${nt.unrefined.toLocaleString()} on native width types`);
-      if(nt.invalid)   parts.push(`${nt.invalid.toLocaleString()} still untyped (undefined*)`);
-      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals &mdash; these need real D2MOO types (via the Document/Prove lanes).`;
+      btn.style.display=""; btn.disabled=false; btn.textContent="Start typing worker";
+      const parts=[`${nt.invalid.toLocaleString()} untyped (undefined*)`];
+      if(nt.unrefined) parts.push(`${nt.unrefined.toLocaleString()} on native width`);
+      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals &mdash; start a globals worker to apply real D2MOO types.`;
       bar.classList.add("active"); return;
     }
-    bar.classList.remove("active","busy","ok");     // all clean
+    bar.classList.remove("active","busy","ok");     // all clean (no untyped globals)
+  }
+
+  // The bar button does different things per mode: "load" the canonical type
+  // vocabulary, or "detect" -> kick off a continuous globals-typing worker.
+  function typesBarAction(){
+    const mode=document.getElementById("typesBar").dataset.mode;
+    if(mode==="detect") startGlobalsTyping(); else loadTypes();
+  }
+
+  // One click: start a continuous globals worker on the current binary using the
+  // dashboard's selected (primary) provider — start_worker rejects it if that
+  // provider is disabled, so this tracks the operator's provider decision. The
+  // bar hides optimistically; worker_status keeps it hidden while the worker runs.
+  function startGlobalsTyping(){
+    if(!socket){ flash("no socket"); return; }
+    if(!PROGRAM){ flash("no binary selected"); return; }
+    const provider=document.getElementById("provider").value;
+    socket.emit("request_start_globals_worker",{binary:PROGRAM, provider, count:0, continuous:true});
+    flash(`typing globals on ${_shortBin(PROGRAM)} (${provider})`);
+    _globalsTypingActive=true;
+    document.getElementById("typesBar").classList.remove("active");
   }
   function loadTypes(){
     if(_typesBusy || !PROGRAM || !socket){ return; }
@@ -1234,6 +1259,24 @@
         stt.innerHTML = esc(`${cnt} | ${pr.completed||0}ok ${pr.failed||0}fail${skip}${to}`) + (cur ? ` | <span class="wp-current">${esc(cur)}</span>` : '');
       }
     });
+    maybeToggleTypesBarForWorkers(w);
+  }
+
+  // Tie the globals-typing bar's visibility to whether a globals worker is
+  // actually running on the current binary: hide it while one is active, and
+  // when it stops, re-scan (force) so the bar re-shows the updated — hopefully
+  // smaller — untyped count, or stays gone once the backlog is clear.
+  function maybeToggleTypesBarForWorkers(w){
+    const LIVE = ['starting','running','stopping','quota_paused'];
+    const active = (w||[]).some(x =>
+      x.mode==='globals' && x.binary===PROGRAM && LIVE.includes(x.status));
+    if(active===_globalsTypingActive) return;   // no transition
+    _globalsTypingActive = active;
+    if(active){
+      document.getElementById("typesBar").classList.remove("active");  // hide while working
+    } else {
+      checkTypes(true);   // worker stopped -> fresh scan, re-show remaining backlog
+    }
   }
 
   // ---------- socket (live-dot + streaming worker output + push refresh) ----------
@@ -1246,7 +1289,13 @@
     let wsTimer;
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
-    socket.on("worker_error",e=>flash(`error: ${e.error||'worker'}`));
+    socket.on("worker_error",e=>{
+      flash(`error: ${e.error||'worker'}`);
+      // A globals-typing launch we optimistically hid the bar for was rejected
+      // (e.g. disabled provider, binary already held) -- undo the optimistic
+      // hide so the backlog warning comes back.
+      if(_globalsTypingActive){ _globalsTypingActive=false; checkTypes(true); }
+    });
     // --- scan lifecycle (steering panel) ---
     socket.on("scan_acknowledged",d=>setScanStatus(`scan accepted${d.program?' for '+d.program:''}${d.refresh?' (full refresh)':''}…`));
     socket.on("scan_started",d=>setScanStatus(`scan started (${d.mode||'incremental'}${d.folder?': '+d.folder:''})`));

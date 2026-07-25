@@ -469,6 +469,10 @@ class WorkerManager:
                     "continuous": w.get("continuous", False),
                     "model": w["model"],
                     "binary": w["binary"],
+                    # Lane the worker runs in (functions / globals / port). The
+                    # pipeline page keys the globals-typing bar on this so it can
+                    # hide while a globals worker is active on the binary.
+                    "mode": w.get("mode", "functions"),
                     "status": w["status"],
                     "restored": bool(w.get("restored", False)),
                     "timeout_count": int(w.get("timeout_count", 0) or 0),

@@ -96,6 +96,27 @@ def test_get_status_includes_exit_reason_field(web_module):
     assert rows[0]["exit_reason"] is None
 
 
+def test_get_status_surfaces_mode(web_module):
+    """The pipeline page keys the globals-typing bar on the worker's mode
+    (hide the bar while a globals worker runs on the binary), so get_status
+    must expose it."""
+    mgr = _make_mgr(web_module)
+    _stub_worker(mgr, worker_id="gw", mode="globals", binary="D2Client.dll")
+    row = next(r for r in mgr.get_status() if r["id"] == "gw")
+    assert row["mode"] == "globals"
+    assert row["binary"] == "D2Client.dll"
+
+
+def test_get_status_mode_defaults_to_functions(web_module):
+    """A worker dict without an explicit mode reports 'functions' rather than
+    omitting the key — the frontend compares mode==='globals' unconditionally."""
+    mgr = _make_mgr(web_module)
+    w = _stub_worker(mgr, worker_id="nomode")
+    w.pop("mode", None)
+    row = next(r for r in mgr.get_status() if r["id"] == "nomode")
+    assert row["mode"] == "functions"
+
+
 def test_get_status_surfaces_no_eligible_candidates(web_module):
     """When the worker recorded an exit_reason, get_status() echoes it
     verbatim so the dashboard can label the pane."""
