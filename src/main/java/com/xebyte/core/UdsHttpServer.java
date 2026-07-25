@@ -182,6 +182,10 @@ public class UdsHttpServer {
 
             byte[] body = new byte[0];
             if (contentLength > 0) {
+                if (contentLength > SecurityConfig.MAX_REQUEST_BODY_BYTES) {
+                    sendError(out, 413, "Request body exceeds the maximum allowed size");
+                    return;
+                }
                 body = in.readNBytes(contentLength);
             }
 

@@ -1879,7 +1879,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Parse post body form params, e.g. oldName=foo&newName=bar
      */
     private Map<String, String> parsePostParams(HttpExchange exchange) throws IOException {
-        byte[] body = exchange.getRequestBody().readAllBytes();
+        // Bounded read: never let a lying/absent Content-Length force an
+        // unbounded allocation. Oversized bodies are truncated to empty.
+        int cap = (int) com.xebyte.core.SecurityConfig.MAX_REQUEST_BODY_BYTES;
+        byte[] body = exchange.getRequestBody().readNBytes(cap + 1);
+        if (body.length > com.xebyte.core.SecurityConfig.MAX_REQUEST_BODY_BYTES) {
+            return new HashMap<>();
+        }
         String bodyStr = new String(body, StandardCharsets.UTF_8);
         Map<String, String> params = new HashMap<>();
         for (String pair : bodyStr.split("&")) {
@@ -2244,14 +2250,30 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                             return;
                         }
                     }
+                    // Reject an oversized declared body up front (the actual
+                    // read is bounded downstream regardless of Content-Length).
+                    if (com.xebyte.core.SecurityConfig.exceedsMaxBody(
+                            exchange.getRequestHeaders().getFirst("Content-Length"))) {
+                        byte[] body = "{\"error\": \"Request body too large\"}"
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.getResponseHeaders().set("Content-Type", "application/json");
+                        exchange.sendResponseHeaders(413, body.length);
+                        exchange.getResponseBody().write(body);
+                        exchange.getResponseBody().close();
+                        return;
+                    }
                 }
                 handler.handle(exchange);
             } catch (Throwable e) {
+                // Uncaught handler failure: log full detail server-side (Ghidra
+                // log) and return a generic message. Echoing e.getMessage() can
+                // leak absolute paths, class names, and internal state.
+                // Deliberate validation errors are returned by the handlers
+                // themselves via Response.err (HTTP 200) and are unaffected.
+                Msg.error(this, "Unhandled error handling " + path, e);
                 try {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    String safeMsg = msg.replace("\\", "\\\\").replace("\"", "\\\"")
-                                       .replace("\n", "\\n").replace("\r", "\\r");
-                    sendResponse(exchange, "{\"error\": \"" + safeMsg + "\"}");
+                    sendResponse(exchange,
+                        "{\"error\": \"Internal server error. See the Ghidra application log for details.\"}");
                 } catch (Throwable ignored) {
                     // Last resort - response already sent or exchange broken
                     Msg.error(this, "Failed to send error response", ignored);

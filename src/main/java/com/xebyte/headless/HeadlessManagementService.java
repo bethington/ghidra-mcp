@@ -91,6 +91,29 @@ public class HeadlessManagementService {
             + " (auto-detect failed; for raw firmware pass `language`, e.g. 'ARM:LE:32:Cortex')");
     }
 
+    /**
+     * Resolve a caller-supplied filesystem path against {@code GHIDRA_MCP_FILE_ROOT},
+     * matching the containment {@link #loadProgram} already applies. Returns the
+     * canonical {@link File} when allowed, or {@code null} (after a server-side
+     * log that keeps the configured root out of the client response) when a root
+     * is configured and the path escapes it. With no root set the path is
+     * returned canonicalized — pre-v5.4.1 behavior, so general users are
+     * unaffected.
+     */
+    private File resolveWithinRootOrLog(String userPath, String endpoint) {
+        SecurityConfig security = SecurityConfig.getInstance();
+        Path resolved = security.resolveWithinFileRoot(userPath);
+        if (resolved == null) {
+            Msg.warn(this, "Rejected " + endpoint + " for '" + userPath
+                + "': outside configured GHIDRA_MCP_FILE_ROOT (" + security.getFileRoot() + ")");
+            return null;
+        }
+        return resolved.toFile();
+    }
+
+    private static final String FILE_ROOT_DENY =
+        "Access denied: path is outside the configured file root";
+
     // ========================================================================
     // Project management
     // ========================================================================
@@ -101,6 +124,9 @@ public class HeadlessManagementService {
             @Param(value = "name", source = ParamSource.BODY) String name) {
         if (parentDir == null || parentDir.isEmpty()) return Response.err("parentDir required");
         if (name == null || name.isEmpty()) return Response.err("name required");
+        File parent = resolveWithinRootOrLog(parentDir, "/create_project");
+        if (parent == null) return Response.err(FILE_ROOT_DENY);
+        parentDir = parent.getPath();
         try {
             boolean ok = programProvider.createProject(parentDir, name);
             if (ok) {
@@ -249,7 +275,8 @@ public class HeadlessManagementService {
             return Response.err("program_name required");
         }
         String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
-        File dir = new File(dirPath);
+        File dir = resolveWithinRootOrLog(dirPath, "/export_program");
+        if (dir == null) return Response.err(FILE_ROOT_DENY);
         if (!dir.isDirectory()) {
             return Response.err("output_dir not a directory: " + dir.getAbsolutePath());
         }
@@ -302,7 +329,8 @@ public class HeadlessManagementService {
         if (gzfPath == null || gzfPath.isEmpty()) {
             return Response.err("gzf_path required");
         }
-        File gzf = new File(gzfPath);
+        File gzf = resolveWithinRootOrLog(gzfPath, "/import_program");
+        if (gzf == null) return Response.err(FILE_ROOT_DENY);
 
         HeadlessProgramProvider.ImportResult res =
             programProvider.importProgramFromGzf(gzf, targetFolder, targetName, overwrite);
@@ -337,7 +365,8 @@ public class HeadlessManagementService {
             @Param(value = "output_name", source = ParamSource.BODY, defaultValue = "",
                 description = "Output file name. Defaults to `<project>.gar`. `.gar` is appended if missing.") String outputName) {
         String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
-        File dir = new File(dirPath);
+        File dir = resolveWithinRootOrLog(dirPath, "/archive_project");
+        if (dir == null) return Response.err(FILE_ROOT_DENY);
         if (!dir.isDirectory()) {
             return Response.err("output_dir not a directory: " + dir.getAbsolutePath());
         }

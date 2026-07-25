@@ -16,6 +16,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -2865,7 +2866,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             socketio.emit("queue_changed", {"action": "drain_done", **result})
             return jsonify({"ok": True, **result})
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            print(f"[web] drain_done failed: {e}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal error; see server log."}), 500
 
     @app.route("/api/queue/refresh", methods=["POST"])
     def refresh_candidates():
@@ -3549,7 +3552,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
             return jsonify(cw.coverage_summary())
         except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
-            return jsonify({"error": str(exc), "total_ported": 0, "by_program": {}})
+            print(f"[web] coverage_summary failed: {exc}")
+            traceback.print_exc()
+            return jsonify({"error": "coverage unavailable", "total_ported": 0, "by_program": {}})
 
     @app.route("/api/conformance/pipeline", methods=["GET"])
     def conformance_pipeline():
@@ -3638,7 +3643,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
             return jsonify(cw.get_sidebyside(program, address))
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": str(exc)}), 500
+            print(f"[web] get_sidebyside failed: {exc}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal error; see server log."}), 500
 
     @app.route("/api/context/binary", methods=["POST"])
     def set_active_binary():
