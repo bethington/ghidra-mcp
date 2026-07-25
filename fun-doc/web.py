@@ -2825,7 +2825,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                                 response["status"] = "already_done"
                                 response["good_enough"] = good_enough
         except Exception as e:
-            response = {"ok": True, "status": "queued", "score_error": str(e)}
+            print(f"[web] pin scoring failed: {e}")
+            traceback.print_exc()
+            response = {"ok": True, "status": "queued", "score_error": "scoring failed; see server log"}
 
         response["key"] = key
         socketio.emit(
@@ -2930,8 +2932,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return jsonify({"ok": True, "worker_id": worker_id, "mode": mode})
         except ValueError as e:
             # Controlled launch-rejection messages (per-binary lock, unknown
-            # provider) — safe and useful to surface to the caller.
-            return jsonify({"ok": False, "error": str(e)}), 409
+            # provider) — safe and useful to surface to the caller. Every
+            # ValueError raised by WorkerManager.start_worker builds its
+            # message from fixed literals plus fields the caller supplied in
+            # this same request (provider name, binary path) — never
+            # server-internal state. CodeQL's stack-trace-exposure query
+            # can't prove that from the taint flow alone, so this is a
+            # reviewed false positive; suppressed rather than degraded to a
+            # generic 500 that would hide genuinely actionable feedback.
+            return jsonify({"ok": False, "error": str(e)}), 409  # codeql[py/stack-trace-exposure]
         except Exception:  # noqa: BLE001
             app.logger.exception("HTTP worker start failed")
             return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500
@@ -3217,7 +3226,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 }
             )
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+            print(f"[web] inventory_status failed: {exc}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal error; see server log."}), 500
 
     @app.route("/api/inventory/toggle", methods=["POST"])
     def inventory_toggle():
@@ -3282,7 +3293,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             socketio.emit("inventory_reset", {"ok": True, "path": path})
             return jsonify({"ok": True, "removed": removed, "path": path})
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+            print(f"[web] inventory_reset failed: {exc}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal error; see server log."}), 500
 
     # --- Global-variable inventory (v5.7.0) ---
 
@@ -3348,7 +3361,9 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "binaries": binaries,
             })
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+            print(f"[web] global_inventory_status failed: {exc}")
+            traceback.print_exc()
+            return jsonify({"error": "Internal error; see server log."}), 500
 
     @app.route("/api/global_inventory/toggle", methods=["POST"])
     def global_inventory_toggle():
