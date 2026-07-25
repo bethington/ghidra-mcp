@@ -660,10 +660,30 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             }));
         }
+        // These routes are registered below via their own server.createContext(...)
+        // calls (utility/server/project/tool endpoints that predate the @McpTool
+        // convention), so they are already live and callable. Without this they
+        // stayed invisible in /mcp/schema -- and therefore invisible to the Python
+        // bridge's dynamic tool discovery -- even though a caller who knew the raw
+        // path could reach them. Found via a live-schema-vs-catalog diff (v6.0.0).
+        com.xebyte.core.ManualToolDescriptors.addAll(scanner,
+            "/batch_apply_documentation", "/batch_set_variable_types", "/check_connection",
+            "/exit_ghidra", "/get_current_address", "/get_current_function",
+            "/get_current_selection", "/get_data_type_size", "/get_version",
+            "/mcp/health", "/mcp/schema", "/open_project", "/project/info",
+            "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
+            "/server/admin/terminate_checkout", "/server/admin/users", "/server/authenticate",
+            "/server/checkouts", "/server/connect", "/server/disconnect",
+            "/server/repositories", "/server/repository/create", "/server/repository/file",
+            "/server/repository/files", "/server/status", "/server/version_control/add",
+            "/server/version_control/checkin", "/server/version_control/checkout",
+            "/server/version_control/undo_checkout", "/server/version_history",
+            "/tool/goto_address", "/tool/launch_codebrowser", "/tool/running_tools");
         // Reflect the live count so /get_version.endpoint_count matches
-        // what /mcp/schema actually serves. Previously a hardcoded constant
-        // that drifted as services added new @McpTool methods.
-        VersionInfo.setEndpointCount(scanner.getEndpoints().size());
+        // what /mcp/schema actually serves. Includes both the dispatch-table
+        // (@McpTool-scanned) endpoints and the manually-registered routes just
+        // added to the schema above.
+        VersionInfo.setEndpointCount(scanner.getDescriptors().size());
 
         // ==========================================================================
         // SCHEMA ENDPOINT — Serves machine-readable API metadata

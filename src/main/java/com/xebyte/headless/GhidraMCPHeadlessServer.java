@@ -420,8 +420,30 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             });
         }
 
-        // Store scanner size for dynamic endpoint count reporting
-        registeredEndpointCount = scanner.getEndpoints().size();
+        // These routes are registered below via their own safeContext(...) calls
+        // (utility/server/project endpoints that predate the @McpTool convention),
+        // so they are already live and callable. Without this they stayed
+        // invisible in /mcp/schema -- and therefore invisible to the Python
+        // bridge's dynamic tool discovery. Mirrors the GUI-side wiring in
+        // GhidraMCPPlugin; see ManualToolDescriptors for the shared metadata
+        // source. Found via a live-schema-vs-catalog diff (v6.0.0).
+        com.xebyte.core.ManualToolDescriptors.addAll(scanner,
+            "/batch_set_variable_types", "/check_connection", "/configure_analyzer",
+            "/delete_project", "/exit_ghidra", "/get_current_address",
+            "/get_current_function", "/get_data_type_size", "/get_version", "/health",
+            "/list_projects", "/mcp/schema", "/move_file", "/move_folder",
+            "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
+            "/server/admin/terminate_checkout", "/server/admin/users",
+            "/server/checkouts", "/server/connect", "/server/disconnect",
+            "/server/repositories", "/server/repository/create", "/server/repository/file",
+            "/server/repository/files", "/server/version_control/add",
+            "/server/version_control/checkin", "/server/version_control/checkout",
+            "/server/version_control/undo_checkout", "/server/version_history");
+        // Store scanner size for dynamic endpoint count reporting. Now includes
+        // both the dispatch-table (@McpTool-scanned) endpoints and the manually-
+        // registered routes just added to the schema above -- countEndpoints()
+        // no longer needs a hand-maintained "+30" offset for these.
+        registeredEndpointCount = scanner.getDescriptors().size();
 
         // ==========================================================================
         // SCHEMA ENDPOINT — Serves machine-readable API metadata
@@ -613,11 +635,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private int countEndpoints() {
-        // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
-        // 30 = infrastructure + schema + remaining manual createContext registrations
-        // (was 31; -2 after #180 dropped /create_folder + /delete_file as duplicates)
-        // (was 29; +1 after adding /server/admin/terminate_all_checkouts for GUI parity)
-        return registeredEndpointCount + 30;
+        // registeredEndpointCount now includes both the annotation-scanned
+        // endpoints and the manually-registered routes added via
+        // ManualToolDescriptors.addAll(...) above -- no more hand-maintained
+        // offset to keep in sync as routes are added or removed.
+        return registeredEndpointCount;
     }
 
     public void stop() {
