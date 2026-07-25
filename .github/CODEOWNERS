@@ -1,0 +1,12 @@
+# Code owners for ghidra-mcp.
+# Ordered by specificity; the last matching pattern for a given path wins.
+# Assigning a global owner enables required-review branch protection and gives
+# Dependabot / Scorecard a review target.
+
+* @bethington
+
+# Security-sensitive surfaces — keep these under explicit ownership.
+/src/main/java/com/xebyte/core/SecurityConfig.java   @bethington
+/src/main/java/com/xebyte/core/UdsHttpServer.java    @bethington
+/.github/                                            @bethington
+/SECURITY.md                                         @bethington

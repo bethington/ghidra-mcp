@@ -557,6 +557,13 @@
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
+  // ---------- html escaping ----------
+  // Escapes & < > " ' so it is safe in BOTH element-text and double-quoted
+  // attribute contexts. Ghidra function/symbol/type names are attacker-
+  // controllable when reverse-engineering untrusted binaries, so every name
+  // rendered via innerHTML must pass through this.
+  const escHtml=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>(
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   // ---------- theme ----------
   function setTheme(t){ document.documentElement.setAttribute("data-theme",t); localStorage.setItem("fd_theme",t); document.getElementById("themeSel").value=t; }
   setTheme(localStorage.getItem("fd_theme")||"d2-dark");
@@ -893,8 +900,8 @@
     document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
     if(g.summary) segGlob(g.summary);
     document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
-      `<tr><td class="fn gname" title="${r.name}">${r.name}</td>`+
-      `<td class="gtype ${r.typed?'':'untyped'}" title="${r.type}">${r.type||'-'}</td>`+
+      `<tr><td class="fn gname" title="${escHtml(r.name)}">${escHtml(r.name)}</td>`+
+      `<td class="gtype ${r.typed?'':'untyped'}" title="${escHtml(r.type)}">${escHtml(r.type)||'-'}</td>`+
       `<td>${badge(r.doc)}</td>`+
       `</tr>`).join("")
       ||'<div class="worker-empty">none</div>';
@@ -906,7 +913,7 @@
     (inv.rows||[]).forEach(f=>{ NAME_BY_ADDR[bareAddr(f.address)]=f.name; });
     renderPins();
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
-      `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${f.name}">${f.name}</td><td class="mono" style="color:var(--text-muted)">${f.address}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
+      `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${escHtml(f.name)}">${escHtml(f.name)}</td><td class="mono" style="color:var(--text-muted)">${escHtml(f.address)}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
       `<td class="act">${isPinned(f.address)?`<button class="pin-btn pinned" title="pinned — unpin" onclick="event.stopPropagation();unpin('fn','${f.address}')">&#9733;</button>`:`<button class="pin-btn" title="pin — Doc &amp; Prove workers prioritize this" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button>`}</td></tr>`).join("");
   }
   async function openFn(addr){

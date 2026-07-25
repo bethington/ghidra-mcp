@@ -10,6 +10,7 @@ Features:
 - Run log stats: model performance, stuck functions
 """
 
+import hmac
 import json
 import os
 import sys
@@ -25,6 +26,45 @@ from flask_socketio import SocketIO, emit as sio_emit
 from event_bus import get_bus
 
 import uuid
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _authority_host(value):
+    """Extract the lowercased host from a Host header, an Origin, or a URL
+    authority — stripping scheme, path, port, and IPv6 brackets. Returns None
+    for empty input, and the literal "null" for an opaque Origin (which is
+    never loopback). Mirrors SecurityConfig.extractHost on the Java side."""
+    if not value:
+        return None
+    v = value.strip()
+    if not v:
+        return None
+    if v.lower() == "null":
+        return "null"
+    if "://" in v:                      # Origin: scheme://host[:port]
+        v = v.split("://", 1)[1]
+    v = v.split("/", 1)[0]              # drop any path
+    if v.startswith("["):              # IPv6 literal: [::1]:8089 or [::1]
+        end = v.find("]")
+        return (v[1:end] if end > 0 else v).lower()
+    if v.count(":") == 1:              # host:port -> host (single colon only)
+        v = v.rsplit(":", 1)[0]
+    return v.lower()
+
+
+def _redact_config_secrets(cfg):
+    """Return a copy of the queue config safe to send to clients. The
+    `storage` block can hold a Postgres URL with an embedded password
+    (config.storage.url), which must never reach the browser or a socket
+    broadcast. DB storage is configured via FUN_DOC_DB_URL / the JSON file and
+    is never edited through the dashboard, so dropping it is lossless for the
+    UI."""
+    if not isinstance(cfg, dict):
+        return cfg
+    redacted = dict(cfg)
+    redacted.pop("storage", None)
+    return redacted
 
 # Shared across workers so adaptive-refresh trigger fires once per stale run
 # even with multiple concurrent workers hitting the threshold simultaneously.
@@ -1395,6 +1435,54 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         ]
 
     socketio = SocketIO(app, async_mode="threading", cors_allowed_origins=allowed_origins)
+
+    # --- Anti-CSRF / DNS-rebinding guard -------------------------------------
+    # The dashboard binds 127.0.0.1 only, but loopback binding does NOT stop a
+    # web page on any site the operator visits from issuing a cross-origin
+    # fetch() to 127.0.0.1, nor a DNS-rebinding attacker from pointing a
+    # hostname at loopback. Every /api/* route here is an unauthenticated
+    # control-plane action (start/stop workers, rewrite provider config, drive
+    # the compile-and-run port pipeline), so this mirrors the Java server's
+    # SecurityConfig.rejectCrossOriginRequest: reject browser requests whose
+    # Origin is not allow-listed and requests whose Host is not loopback.
+    #
+    # Top-level navigations (no Origin header) and same-origin XHR/socket.io
+    # (Origin == the loopback dashboard origin) pass untouched, so the local
+    # browser UI is unaffected. allowed_origins widens only via
+    # FUN_DOC_DASHBOARD_ORIGINS (reverse-proxy / remote setups), which should
+    # be paired with FUN_DOC_DASHBOARD_TOKEN below and a proxy that
+    # authenticates users.
+    _dashboard_token = os.environ.get("FUN_DOC_DASHBOARD_TOKEN", "").strip()
+    _allowed_hosts = {_authority_host(o) for o in allowed_origins}
+    _allowed_hosts.discard(None)
+
+    @app.before_request
+    def _guard_cross_origin():
+        # Escape hatch for programmatic / remote API clients: a correct bearer
+        # token bypasses the Origin/Host checks (a browser CSRF cannot supply
+        # it, and adding the header forces a CORS preflight that fails).
+        if _dashboard_token:
+            supplied = request.headers.get("Authorization", "")
+            if hmac.compare_digest(supplied, f"Bearer {_dashboard_token}"):
+                return None
+        origin = request.headers.get("Origin")
+        if origin and origin not in allowed_origins:
+            return (
+                jsonify({"error": "Cross-origin request refused. This dashboard "
+                         "rejects requests from other origins to prevent CSRF / "
+                         "DNS-rebinding. Set FUN_DOC_DASHBOARD_ORIGINS (and "
+                         "FUN_DOC_DASHBOARD_TOKEN) for remote access."}),
+                403,
+            )
+        host = _authority_host(request.headers.get("Host"))
+        if host is not None and host not in _allowed_hosts:
+            return (
+                jsonify({"error": "Request refused: non-allow-listed Host header "
+                         "(DNS-rebinding guard). Set FUN_DOC_DASHBOARD_ORIGINS for "
+                         "reverse-proxy / remote setups."}),
+                403,
+            )
+        return None
 
     # Wire EventBus -> SocketIO bridge
     bus = event_bus or get_bus()
@@ -3040,9 +3128,11 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                     print(f"  Global scorer toggle failed: {_exc}")
             queue["config"] = cfg
             save_queue(queue)
-            socketio.emit("queue_changed", {"action": "config", "config": cfg})
-            return jsonify({"ok": True, "config": cfg})
-        return jsonify({"config": queue.get("config", dict(DEFAULT_QUEUE_CONFIG))})
+            safe_cfg = _redact_config_secrets(cfg)
+            socketio.emit("queue_changed", {"action": "config", "config": safe_cfg})
+            return jsonify({"ok": True, "config": safe_cfg})
+        return jsonify({"config": _redact_config_secrets(
+            queue.get("config", dict(DEFAULT_QUEUE_CONFIG)))})
 
     @app.route("/api/inventory/status", methods=["GET"])
     def inventory_status():
