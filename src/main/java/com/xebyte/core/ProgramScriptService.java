@@ -1723,12 +1723,29 @@ public class ProgramScriptService {
                 loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
             }
 
-            // Suppress the "Analysis Options" dialog — we handle analysis programmatically
-            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+            // NOTE: do NOT call markProgramNotToAskToAnalyze here, ahead of the
+            // branches below. It mutates the program DB, and AutoAnalysisManager's
+            // own DomainObjectListener reacts to *any* program change by scheduling
+            // a background "Auto Analysis" task (the same mechanism documented on
+            // saveWithRetry above) -- confirmed root cause of a real, intermittent
+            // bug: that premature background pass could already be "actively
+            // running" by the time runAutoAnalysisAndPersistFlags below called its
+            // own startAnalysis(), which per its own javadoc is then a no-op
+            // ("if actively running... return immediately"), leaving
+            // waitForAnalysis() to wait on whatever partial pass Ghidra's own
+            // listener decided to run instead of the real one. Reproduced live:
+            // a fresh import came back with function_count 9 instead of 530, with
+            // analyzed:true and no error anywhere. Both branches below already set
+            // this flag themselves, inside their own transaction, so the call here
+            // was pure redundant risk with no benefit.
 
             boolean autoAnalyzed = false;
             if (autoAnalyze) {
-                autoAnalyzed = runAutoAnalysisAndPersistFlags(program, false);
+                // force=true (reAnalyzeAll first): unconditionally re-queues every
+                // analyzer regardless of anything Ghidra's own listeners may have
+                // already scheduled, closing the race described above. Matches
+                // /reanalyze, which has never shown this symptom.
+                autoAnalyzed = runAutoAnalysisAndPersistFlags(program, true);
             } else {
                 try {
                     suppressAnalysisPrompt(program);
