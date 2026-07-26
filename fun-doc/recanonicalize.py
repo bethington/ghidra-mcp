@@ -115,15 +115,15 @@ def rewrite_plates(program: str = PROGRAM, do_apply: bool = False) -> dict:
         c = dn.canonicalize(name, cand.read_text(encoding="utf-8"))
         if not c.get("ok"):
             continue
-        cur = fun_doc.ghidra_get("/get_plate_comment", params={"address": addr, "program": program})
-        cur_txt = cur.get("comment", "") if isinstance(cur, dict) else str(cur)
+        cur = fun_doc.ghidra_get("/get_comment", params={"address": addr, "program": program})
+        cur_txt = (cur.get("plate") or "") if isinstance(cur, dict) else str(cur)
         new_txt, edits = _rewrite_plate_body(cur_txt, c, dn)
         if not edits or new_txt == cur_txt:
             continue
         touched.append((name, edits))
         if do_apply:
-            fun_doc.ghidra_post("/set_plate_comment",
-                                data={"address": addr, "comment": new_txt},
+            fun_doc.ghidra_post("/set_comment",
+                                data={"address": addr, "comment": new_txt, "type": "plate"},
                                 params={"program": program})
     if do_apply and touched:
         fun_doc.ghidra_post("/save_program", data={"program": prog})
@@ -138,18 +138,19 @@ def apply(program: str = PROGRAM) -> dict:
     applied, renames = [], {}
     stamp = datetime.date.today().isoformat()
     for name, addr, proposed, reason in b["resolved"]:
-        r = fun_doc.ghidra_post("/rename_function_by_address",
-                                data={"function_address": addr, "new_name": proposed},
+        r = fun_doc.ghidra_post("/rename_function",
+                                data={"old_name": addr, "new_name": proposed},
                                 params={"program": prog})
         ok = not (isinstance(r, dict) and r.get("error")) and "success" in str(r).lower()
         if ok:
-            cur = fun_doc.ghidra_get("/get_plate_comment", params={"address": addr, "program": program})
-            cur_txt = cur.get("comment", "") if isinstance(cur, dict) else str(cur)
+            cur = fun_doc.ghidra_get("/get_comment", params={"address": addr, "program": program})
+            cur_txt = (cur.get("plate") or "") if isinstance(cur, dict) else str(cur)
             note = (f"[D2MOO-DERIVED NAME {stamp}] was '{name}' (offset-derived transcription); "
                     f"real field per D2MOO reimplementation: {reason}. Community-canonical.")
             if "[D2MOO-DERIVED NAME" not in cur_txt:
-                fun_doc.ghidra_post("/set_plate_comment",
-                                    data={"address": addr, "comment": (note + "\n\n" + cur_txt).strip()},
+                fun_doc.ghidra_post("/set_comment",
+                                    data={"address": addr, "comment": (note + "\n\n" + cur_txt).strip(),
+                                          "type": "plate"},
                                     params={"program": program})
             applied.append((name, proposed))
             renames[name] = proposed
@@ -158,12 +159,13 @@ def apply(program: str = PROGRAM) -> dict:
     for name, addr, reason in b["no_field"]:
         if "SUSPECT" not in str(reason):
             continue
-        cur = fun_doc.ghidra_get("/get_plate_comment", params={"address": addr, "program": program})
-        cur_txt = cur.get("comment", "") if isinstance(cur, dict) else str(cur)
+        cur = fun_doc.ghidra_get("/get_comment", params={"address": addr, "program": program})
+        cur_txt = (cur.get("plate") or "") if isinstance(cur, dict) else str(cur)
         if "[D2MOO REVIEW" not in cur_txt:
-            fun_doc.ghidra_post("/set_plate_comment",
+            fun_doc.ghidra_post("/set_comment",
                                 data={"address": addr, "comment":
-                                      (f"[D2MOO REVIEW {stamp}] {reason}\n\n" + cur_txt).strip()},
+                                      (f"[D2MOO REVIEW {stamp}] {reason}\n\n" + cur_txt).strip(),
+                                      "type": "plate"},
                                 params={"program": program})
             applied.append((name, "(review-flagged, not renamed)"))
     if applied:

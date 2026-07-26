@@ -146,7 +146,7 @@ Ghidra (or hit the Tool Option toggle to force a refresh), and:
 
 - `add_struct_field("entry_count", uint32)` keeps the name as
   `entry_count` instead of rewriting to `dwEntry_count`.
-- `rename_or_label(addr, "PlayerInventory")` succeeds — the `g_` prefix
+- `rename_symbol(addr, "PlayerInventory")` succeeds — the `g_` prefix
   is no longer required.
 - `set_global(addr, name=..., plate_comment="...")` validates against
   the `Purpose`/`Notes` sections instead of the default trio.
@@ -155,11 +155,11 @@ Ghidra (or hit the Tool Option toggle to force a refresh), and:
 
 Five endpoints accept an optional `strict_mode` body parameter:
 
-- `/rename_function_by_address`
+- `/rename_function`
 - `/apply_data_type`
 - `/set_global`
-- `/rename_or_label`
-- `/rename_global_variable`
+- `/rename_symbol`
+- `/rename_symbol`
 
 Values:
 

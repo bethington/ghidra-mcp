@@ -1083,9 +1083,9 @@ class TestCheckToolsWithoutSchema(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._full_schema = []
             bridge.state._dynamic_tool_names[:] = []
-            data = asyncio.run(bridge.check_tools("rename_function_by_address"))
+            data = asyncio.run(bridge.check_tools("rename_function"))
 
-        entry = json.loads(data)["results"]["rename_function_by_address"]
+        entry = json.loads(data)["results"]["rename_function"]
         self.assertEqual(entry["status"], "unknown")
         self.assertIn("connect_instance", entry["fix"])
 
@@ -1105,7 +1105,7 @@ class TestCheckToolsWithoutSchema(unittest.TestCase):
         what keeps the fix from degrading into "everything is unknown"."""
         with isolated_bridge() as bridge:
             bridge.state._full_schema = [
-                {"name": "rename_function_by_address", "category": "rename"}
+                {"name": "rename_function", "category": "rename"}
             ]
             bridge.state._dynamic_tool_names[:] = []
             data = asyncio.run(bridge.check_tools("no_such_tool"))

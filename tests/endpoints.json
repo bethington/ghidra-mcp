@@ -1163,7 +1163,7 @@
         "address",
         "program"
       ],
-      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
     },
     {
       "path": "/get_current_address",
@@ -2517,7 +2517,7 @@
         "type",
         "program"
       ],
-      "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; unlike set_plate_comment this can set a PLATE comment on a data global."
+      "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; sets a PLATE comment on a function or a data global alike."
     },
     {
       "path": "/set_function_no_return",
@@ -2540,7 +2540,7 @@
         "calling_convention",
         "program"
       ],
-      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function \u00e2\u20ac\u201d call rename_function_by_address separately if needed."
+      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function \u00e2\u20ac\u201d call rename_function separately if needed."
     },
     {
       "path": "/set_function_tag_comment",

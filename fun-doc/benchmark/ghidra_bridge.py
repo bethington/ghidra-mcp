@@ -109,7 +109,7 @@ def scrape_function_state(program: str, address: str) -> dict:
         "/get_function_variables",
         params={"program": program, "address": address, "limit": 64},
     )
-    plate = _get("/get_plate_comment", params={"program": program, "address": address})
+    plate = _get("/get_comment", params={"program": program, "address": address})
 
     # Normalize signature. Ghidra returns a structured dict; extract
     # name + return + params.
@@ -151,7 +151,7 @@ def scrape_function_state(program: str, address: str) -> dict:
 
     plate_text = ""
     if isinstance(plate, dict):
-        plate_text = plate.get("comment", "") or plate.get("plate", "") or ""
+        plate_text = plate.get("plate", "") or ""
     elif isinstance(plate, str):
         plate_text = plate
 
@@ -195,21 +195,22 @@ def restore_pristine(program: str, address: str, snapshot: dict) -> None:
     pristine_name = snapshot.get("name") or f"FUN_{address}"
     try:
         _post(
-            "/rename_function_by_address",
+            "/rename_function",
             params={"program": program},
-            data={"function_address": address, "new_name": pristine_name},
+            data={"old_name": address, "new_name": pristine_name},
         )
     except GhidraBridgeError as e:
         print(f"  [restore] rename failed: {e}")
 
-    # 2. Reset plate comment. Ghidra's set_plate_comment with empty
+    # 2. Reset plate comment. set_comment(type="plate") with an empty
     # string clears the comment. (Confirmed behavior — not the per-
     # function set_comments which needs "" to preserve vs explicit null.)
     try:
         _post(
-            "/set_plate_comment",
+            "/set_comment",
             params={"program": program},
-            data={"address": address, "comment": snapshot.get("plate") or ""},
+            data={"address": address, "comment": snapshot.get("plate") or "",
+                  "type": "plate"},
         )
     except GhidraBridgeError as e:
         print(f"  [restore] plate reset failed: {e}")
@@ -254,7 +255,7 @@ def restore_pristine(program: str, address: str, snapshot: dict) -> None:
                 continue
             try:
                 _post(
-                    "/set_local_variable_type",
+                    "/set_variable_type",
                     params={"program": program},
                     data={
                         "function_address": address,

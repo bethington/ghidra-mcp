@@ -151,18 +151,21 @@ def test_fundoc_calls_use_known_endpoint_params():
     )
 
 
-def test_rename_function_by_address_uses_function_address():
+def test_rename_function_uses_old_name():
     """Spot-check the specific #207 regression: the archive-apply path
-    must call /rename_function_by_address with `function_address`, never
-    `address`."""
+    must call /rename_function with `old_name` (which accepts a name OR an
+    address), never a bare `address`."""
     calls = _collect_ghidra_calls()
     rename_calls = [(ln, keys) for ln, p, keys in calls
-                    if p == "/rename_function_by_address"]
-    assert rename_calls, "expected at least one /rename_function_by_address call"
+                    if p == "/rename_function"]
+    assert rename_calls, "expected at least one /rename_function call"
     for lineno, keys in rename_calls:
         assert "address" not in keys, (
-            f"fun_doc.py:{lineno} — /rename_function_by_address still uses "
-            f"`address`; the endpoint param is `function_address` (#207)"
+            f"fun_doc.py:{lineno} — /rename_function still uses `address`; "
+            f"the endpoint param is `old_name` (#207)"
+        )
+        assert "old_name" in keys, (
+            f"fun_doc.py:{lineno} — /rename_function must pass `old_name`"
         )
 
 

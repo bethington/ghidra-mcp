@@ -6,11 +6,11 @@ Tests for the 9 Phase 1 endpoints:
 - get_function_callers
 - get_function_variables
 - set_function_prototype
-- set_local_variable_type
+- set_variable_type
 - create_struct
 - apply_data_type
 - batch_rename_variables
-- set_plate_comment
+- set_comment
 """
 
 import pytest
@@ -174,11 +174,11 @@ class TestVariableType:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_set_local_variable_type(self, http_client, sample_address):
+    def test_set_variable_type(self, http_client, sample_address):
         """Test setting local variable type."""
         # This may fail if variable doesn't exist, which is valid
         response = http_client.post(
-            "/set_local_variable_type",
+            "/set_variable_type",
             data={
                 "function_address": sample_address,
                 "variable_name": "local_8",
@@ -190,10 +190,10 @@ class TestVariableType:
         assert "success" in response.text.lower() or "error" in response.text.lower()
 
     @pytest.mark.requires_program
-    def test_set_local_variable_type_invalid_address(self, http_client):
+    def test_set_variable_type_invalid_address(self, http_client):
         """Test variable type with invalid address."""
         response = http_client.post(
-            "/set_local_variable_type",
+            "/set_variable_type",
             data={
                 "function_address": "invalid",
                 "variable_name": "test",
@@ -356,12 +356,13 @@ class TestPlateComment:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_set_plate_comment(self, http_client, sample_address):
+    def test_set_comment_plate(self, http_client, sample_address):
         """Test setting plate comment."""
         response = http_client.post(
-            "/set_plate_comment",
+            "/set_comment",
             data={
-                "function_address": sample_address,
+                "address": sample_address,
+                "type": "plate",
                 "comment": "Test plate comment from automated tests",
             },
         )
@@ -370,20 +371,20 @@ class TestPlateComment:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_set_plate_comment_empty(self, http_client, sample_address):
+    def test_set_comment_plate_empty(self, http_client, sample_address):
         """Test setting empty plate comment (to clear)."""
         response = http_client.post(
-            "/set_plate_comment",
-            data={"function_address": sample_address, "comment": ""},
+            "/set_comment",
+            data={"address": sample_address, "type": "plate", "comment": ""},
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_set_plate_comment_invalid_address(self, http_client):
+    def test_set_comment_plate_invalid_address(self, http_client):
         """Test plate comment with invalid address."""
         response = http_client.post(
-            "/set_plate_comment",
-            data={"function_address": "invalid", "comment": "Test"},
+            "/set_comment",
+            data={"address": "invalid", "type": "plate", "comment": "Test"},
         )
         # Accept 200 with error, 400 (bad request), or 500 (server error)
         assert response.status_code in [200, 400, 500]

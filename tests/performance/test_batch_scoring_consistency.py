@@ -1,13 +1,13 @@
 """
-Regression test for batch_analyze_completeness vs analyze_function_completeness
-returning the same data.
+Regression test for analyze_function_completeness bulk mode (addresses=) vs
+its single mode (function_address=) returning the same data.
 
-Background: batch_analyze_completeness was originally a naive for-loop calling
-analyze_function_completeness inside a single invokeAndWait, which caused GUI
-lockup. It was rewritten to chunk the work into groups of 5 with Thread.sleep
-yields. That rewrite must produce the same scores as calling the single
-endpoint individually — otherwise fun-doc's scan would drift from manual
-inspection.
+Background: the bulk path was originally a naive for-loop calling the single
+analysis inside one invokeAndWait, which caused GUI lockup. It was rewritten to
+chunk the work with Thread.sleep yields. That rewrite must produce the same
+scores as calling the single mode individually — otherwise fun-doc's scan would
+drift from manual inspection. In 6.0.0 the separate batch_analyze_completeness
+tool was folded into analyze_function_completeness as the `addresses` parameter.
 
 This test picks N random functions, hits both paths, and asserts key fields
 match.
@@ -64,11 +64,10 @@ def test_batch_and_individual_scoring_agree(server_url, server_available):
     sample = non_thunks[:SAMPLE_SIZE]
     addresses = [f"0x{f['address']}" for f in sample]
 
-    # Batch path
-    batch_resp = requests.post(
-        f"{server_url}/batch_analyze_completeness",
-        params={"program": program},
-        json={"addresses": addresses},
+    # Bulk path
+    batch_resp = requests.get(
+        f"{server_url}/analyze_function_completeness",
+        params={"program": program, "addresses": ",".join(addresses)},
         timeout=120,
     )
     assert batch_resp.status_code == 200
@@ -115,7 +114,7 @@ def test_batch_and_individual_scoring_agree(server_url, server_available):
             mismatches.append(f"{addr} function_name: batch={b_name}, individual={i_name}")
 
     if mismatches:
-        msg = "batch_analyze_completeness does not match individual calls:\n" + "\n".join(
+        msg = "bulk analyze_function_completeness does not match individual calls:\n" + "\n".join(
             f"  {m}" for m in mismatches[:10]
         )
         pytest.fail(msg)
@@ -124,13 +123,19 @@ def test_batch_and_individual_scoring_agree(server_url, server_available):
 @pytest.mark.requires_program
 def test_batch_analyze_empty_addresses_rejected(server_url, server_available):
     """Empty address list should be rejected cleanly, not return stale data
-    from a previous call or crash the EDT."""
+    from a previous call or crash the EDT.
+
+    With the 6.0.0 CSV parameter an empty `addresses` is indistinguishable
+    from "omitted", so the tool falls through to single mode and errors on the
+    empty function_address. Either shape counts as a clean refusal — what this
+    pins is that empty input never hangs, crashes the EDT, or replays results.
+    """
     if not server_available:
         pytest.skip("Ghidra HTTP server not available")
 
-    r = requests.post(
-        f"{server_url}/batch_analyze_completeness",
-        json={"addresses": []},
+    r = requests.get(
+        f"{server_url}/analyze_function_completeness",
+        params={"addresses": ""},
         timeout=30,
     )
     # Accept either 200 with error field or an HTTP error — both are valid

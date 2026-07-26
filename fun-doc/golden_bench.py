@@ -47,7 +47,7 @@ def snapshot(address: str, name: str, *, program: str = PROGRAM_PATH) -> dict:
     """Capture everything we are about to destroy. Written BEFORE any strip."""
     import fun_doc
     addr = address if str(address).startswith("0x") else f"0x{address}"
-    plate = fun_doc.ghidra_get("/get_plate_comment",
+    plate = fun_doc.ghidra_get("/get_comment",
                                params={"address": addr, "program": program})
     dec = str(fun_doc.ghidra_get("/decompile_function",
                                  params={"address": addr, "program": program}))
@@ -73,8 +73,8 @@ def strip(address: str, name: str, *, program: str = PROGRAM_PATH) -> dict:
     addr = address if str(address).startswith("0x") else f"0x{address}"
     prog = _prog_name(program)
     out = {}
-    out["plate"] = fun_doc.ghidra_post("/set_plate_comment",
-                                       data={"address": addr, "comment": STRIP_STUB},
+    out["plate"] = fun_doc.ghidra_post("/set_comment",
+                                       data={"address": addr, "comment": STRIP_STUB, "type": "plate"},
                                        params={"program": program})
     out["tags"] = fun_doc.ghidra_post("/remove_function_tag",
                                       data={"function": addr, "tags": ",".join(_ALL_TAGS),
@@ -101,12 +101,12 @@ def restore(name: str, *, program: str = PROGRAM_PATH) -> dict:
         plate_text = plate.get("comment") or ""
     elif isinstance(plate, str):
         try:
-            plate_text = json.loads(plate).get("comment", "")
+            plate_text = json.loads(plate).get("plate", "")
         except Exception:
             plate_text = plate
     if plate_text:
-        out["plate"] = fun_doc.ghidra_post("/set_plate_comment",
-                                           data={"address": addr, "comment": plate_text},
+        out["plate"] = fun_doc.ghidra_post("/set_comment",
+                                           data={"address": addr, "comment": plate_text, "type": "plate"},
                                            params={"program": program})
     if snap.get("prototype"):
         out["prototype"] = fun_doc.ghidra_post("/set_function_prototype",
@@ -122,8 +122,9 @@ def report(address: str, name: str, snap: dict, run_summary: dict, *,
     """The benchmark score: what the pipeline regenerated vs what was there."""
     import fun_doc
     addr = address if str(address).startswith("0x") else f"0x{address}"
-    plate_after = str(fun_doc.ghidra_get("/get_plate_comment",
-                                         params={"address": addr, "program": program}))
+    _after = fun_doc.ghidra_get("/get_comment",
+                                params={"address": addr, "program": program})
+    plate_after = ((_after.get("plate") or "") if isinstance(_after, dict) else str(_after))
     dec = str(fun_doc.ghidra_get("/decompile_function",
                                  params={"address": addr, "program": program}))
     m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",

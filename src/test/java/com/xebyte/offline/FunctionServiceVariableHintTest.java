@@ -11,7 +11,7 @@ import static org.junit.Assert.*;
 
 /**
  * Unit tests for FunctionService.buildVariableNameHint — the guidance appended to a
- * "variable not found" error from set_local_variable_type. Pure string logic, no Ghidra
+ * "variable not found" error from set_variable_type. Pure string logic, no Ghidra
  * runtime, so it runs in the offline tier.
  */
 public class FunctionServiceVariableHintTest {

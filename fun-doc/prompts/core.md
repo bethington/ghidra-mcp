@@ -44,7 +44,7 @@ g_:global prefix (g_dwCount, g_pMain, g_szPath)  pfn:func_ptr (PascalCase, no g_
 Struct pointers: p+StructName (pUnit, pInventory, ppItem for double ptr)
 ```
 
-**Type normalization**: undefined1->byte, undefined2->ushort, undefined4->uint/int/float/ptr (by usage), undefined8->double/longlong. Use Ghidra builtins (dword, byte, ushort) not Windows types (DWORD, BYTE) for `set_local_variable_type`.
+**Type normalization**: undefined1->byte, undefined2->ushort, undefined4->uint/int/float/ptr (by usage), undefined8->double/longlong. Use Ghidra builtins (dword, byte, ushort) not Windows types (DWORD, BYTE) for `set_variable_type`.
 
 ## Critical Rules
 

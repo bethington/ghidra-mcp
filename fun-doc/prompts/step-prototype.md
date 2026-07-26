@@ -1,7 +1,7 @@
 # Step 2: Rename Function + Set Prototype
 
 ## Allowed Tools
-- `rename_function_by_address`
+- `rename_function`
 - `set_function_prototype`
 - `get_function_callers`
 - `decompile_function`
@@ -22,8 +22,8 @@ If signals are mixed or weak: no prefix.
 **Step 2b: Choose the full name (prefix + PascalCase verb)**
 
 1. Combine the prefix decision with a descriptive PascalCase name: `DATATBLS_FreeResourceBuffer`, `PATH_FindNearestPosition`
-2. If no rename is needed (current name already has correct prefix + accurate description): **SKIP** `rename_function_by_address`.
-3. If the name needs changing: call `rename_function_by_address` with the complete prefixed name.
+2. If no rename is needed (current name already has correct prefix + accurate description): **SKIP** `rename_function`.
+3. If the name needs changing: call `rename_function` with the complete prefixed name.
 
 Call rename + prototype in parallel **only when rename is actually needed**. If later tool calls in the same pass need to re-query the function, use its address instead of assuming the new name is available immediately. If rename is skipped, call only `set_function_prototype`.
 
@@ -42,7 +42,7 @@ Invalid patterns:
 
 ## Verb Specificity Tier (HARD-ENFORCED)
 
-`rename_function_by_address` will REJECT names that fail these rules with a structured error. The model must retry with a better name; the function is unchanged on rejection.
+`rename_function` will REJECT names that fail these rules with a structured error. The model must retry with a better name; the function is unchanged on rejection.
 
 **Tier 1** (specific verbs — accept any specifier):
 `Allocate`, `Append`, `Apply`, `Calculate`, `Compile`, `Compress`, `Connect`, `Decode`, `Decompress`, `Decrypt`, `Destroy`, `Detect`, `Encode`, `Encrypt`, `Free`, `Generate`, `Initialize`, `Insert`, `Iterate`, `Lookup`, `Match`, `Merge`, `Parse`, `Render`, `Resolve`, `Schedule`, `Serialize`, `Sort`, `Subscribe`, `Truncate`, `Validate`
@@ -72,7 +72,7 @@ If your candidate name fails: replace the vague verb with a more specific one OR
 
 ## No Token-Subset Duplicates (HARD-ENFORCED)
 
-`rename_function_by_address` will REJECT a name that is a strict token-subset (or superset) of another already-named function in the same program — same module-prefix scope. Examples:
+`rename_function` will REJECT a name that is a strict token-subset (or superset) of another already-named function in the same program — same module-prefix scope. Examples:
 
 | Existing | Candidate | Verdict |
 |---|---|---|
@@ -85,7 +85,7 @@ If the rejection error includes a `conflicts_with` field, do not just suffix `_2
 
 ## Handling a Rejection Round-Trip
 
-When `rename_function_by_address` returns `{"status": "rejected", "error": ...}`, the function name was NOT changed. Do not assume the rename succeeded. Read the `message` and `suggestion` fields, pick a better name, and retry. Common rejection codes:
+When `rename_function` returns `{"status": "rejected", "error": ...}`, the function name was NOT changed. Do not assume the rename succeeded. Read the `message` and `suggestion` fields, pick a better name, and retry. Common rejection codes:
 - `vague_verb` — verb is Tier 3 with too few specifiers; add specifiers or pick a Tier 1/2 verb.
 - `weak_noun_only` — only weak nouns after the verb; replace with a concrete domain term.
 - `missing_specifier` — single-token name; add a specifier.

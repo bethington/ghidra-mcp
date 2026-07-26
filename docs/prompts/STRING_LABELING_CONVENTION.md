@@ -31,14 +31,14 @@ For each string, analyze its content and determine the appropriate category:
    - Is it a date/time string? -> szMonth_, szDay_, szDateFormat_
 
 3. Construct the label: sz[Category]_[Description]
-4. Apply using batch_create_labels for efficiency
+4. Apply using create_label for efficiency
 ```
 
 ### Phase 3: Batch Application
 
 ```
 1. Group strings by category (process 20-30 at a time)
-2. Use batch_create_labels with array of {address, name} pairs
+2. Use create_label with array of {address, name} pairs
 3. Track success/skip/fail counts
 4. Continue until all strings are labeled
 ```
@@ -231,7 +231,7 @@ Default fallback                        -> szGame_ or szStr_
 | Tool | Purpose |
 |------|---------|
 | `list_strings` | Retrieve all defined strings with addresses |
-| `batch_create_labels` | Apply labels efficiently in batches |
+| `create_label` | Apply labels efficiently in batches |
 | `create_label` | Apply single label |
 | `get_xrefs_to` | Analyze string usage context |
 | `decompile_function` | Understand how string is used |
@@ -249,7 +249,7 @@ labels = [
     {"address": "0x6fb7f5f0", "name": "szCRT_R6029_NetRuntimeError"},
     {"address": "0x6fb7f694", "name": "szCRT_R6028_HeapInitError"}
 ]
-# Use batch_create_labels(labels)
+# Use create_label(labels)
 ```
 
 ---

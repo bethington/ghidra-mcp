@@ -3,7 +3,7 @@ Regression test for the HTTP server threading contract.
 
 Background: GhidraMCPPlugin.java used to call `server.setExecutor(null)`, which
 serialized ALL HTTP requests through a single thread. Symptom: any slow request
-(save_program, batch_analyze_completeness) blocked every subsequent request —
+(save_program, bulk analyze_function_completeness) blocked every subsequent request —
 even cheap read-only ones like /mcp/schema.
 
 Measured during diagnosis:
@@ -72,7 +72,7 @@ def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_
         program = None
 
     if not program:
-        pytest.skip("No program loaded — cannot exercise batch_analyze_completeness")
+        pytest.skip("No program loaded — cannot exercise bulk completeness scoring")
 
     # Phase 1 — baseline
     baseline_ms = []
@@ -106,10 +106,10 @@ def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_
     def slow_call():
         start = time.perf_counter()
         try:
-            resp = requests.post(
-                f"{server_url}/batch_analyze_completeness",
-                params={"program": program},
-                json={"addresses": addresses},
+            resp = requests.get(
+                f"{server_url}/analyze_function_completeness",
+                params={"program": program,
+                        "addresses": ",".join(addresses)},
                 timeout=300,
             )
             slow_elapsed[0] = time.perf_counter() - start

@@ -12,7 +12,7 @@ Tests for the 12 Phase 4 endpoints:
 - get_assembly_context
 - analyze_struct_field_usage
 - get_field_access_context
-- rename_or_label
+- rename_symbol
 - can_rename_at_address
 """
 
@@ -273,12 +273,12 @@ class TestSmartRename:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_rename_or_label(self, http_client, sample_address):
+    def test_rename_symbol_at_address(self, http_client, sample_address):
         """Test smart rename or label creation."""
         unique_name = f"TestLabel_{uuid.uuid4().hex[:8]}"
-        response = http_client.post("/rename_or_label", data={
-            "address": sample_address,
-            "name": unique_name
+        response = http_client.post("/rename_symbol", data={
+            "target": sample_address,
+            "new_name": unique_name
         })
         assert response.status_code == 200
         # Should return success or error
@@ -286,20 +286,20 @@ class TestSmartRename:
         assert "success" in text or "error" in text
 
     @pytest.mark.requires_program
-    def test_rename_or_label_missing_address(self, http_client):
+    def test_rename_symbol_missing_target(self, http_client):
         """Test rename with missing address."""
-        response = http_client.post("/rename_or_label", data={
-            "name": "TestLabel"
+        response = http_client.post("/rename_symbol", data={
+            "new_name": "TestLabel"
         })
         assert response.status_code in [200, 400, 500]
         if response.status_code == 200:
             assert "error" in response.text.lower()
 
     @pytest.mark.requires_program
-    def test_rename_or_label_missing_name(self, http_client, sample_address):
+    def test_rename_symbol_missing_new_name(self, http_client, sample_address):
         """Test rename with missing name."""
-        response = http_client.post("/rename_or_label", data={
-            "address": sample_address
+        response = http_client.post("/rename_symbol", data={
+            "target": sample_address
         })
         assert response.status_code in [200, 400, 500]
         if response.status_code == 200:

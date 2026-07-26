@@ -224,9 +224,9 @@ public class EndpointRegistrationTest extends TestCase {
             "namespaces", "data", "strings", "searchFunctions", "decompile",
             "renameFunction", "renameData", "xrefs_to", "xrefs_from", "function_xrefs",
             "function_labels", "get_function_by_address", "get_current_address",
-            "get_current_function", "disassemble_function", "set_decompiler_comment",
-            "set_disassembly_comment", "rename_function_by_address", "set_function_prototype",
-            "set_local_variable_type",
+            "get_current_function", "disassemble_function", "set_comment",
+            "rename_function", "set_function_prototype",
+            "set_variable_type",
 
             // Advanced endpoints that should be in the source
             "find_byte_patterns", "program_stats", "create_label", "all_labels",

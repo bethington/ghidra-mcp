@@ -9,8 +9,7 @@
 - `create_struct`
 - `modify_struct_field`
 - `add_struct_field`
-- `set_local_variable_type`
-- `set_parameter_type`
+- `set_variable_type`
 
 ## Struct Creation Gate
 
@@ -35,7 +34,7 @@
 2. **Check existing structs** (reuse-first):
    - `get_struct_layout(struct_name)` if the variable is already typed as a struct pointer
    - `search_data_types(name_pattern)` to find structs with matching names or known patterns
-   - If a compatible struct exists: apply it via `set_local_variable_type(var, "ExistingStruct *")`
+   - If a compatible struct exists: apply it via `set_variable_type(var, "ExistingStruct *")`
 3. **Create new struct only if gate conditions are met**:
    - Fields must be a JSON array:
      ```json
@@ -45,7 +44,7 @@
      Do NOT use `name:type` string format -- it will fail silently.
 4. **Wire the types together**:
    - `modify_struct_field(struct, "offset:16", new_type="uint", new_name="dwField10")` for unnamed fields
-   - `set_local_variable_type(var, "BaseStruct *")` to apply the struct type
+   - `set_variable_type(var, "BaseStruct *")` to apply the struct type
 5. Scoring is handled externally -- do not call `analyze_function_completeness`.
 
 ## Naming Confidence

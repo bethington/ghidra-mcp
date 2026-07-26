@@ -977,7 +977,7 @@ public class FunctionService {
     /**
      * Endpoint wrapper for setFunctionPrototype that converts PrototypeResult to Response.
      */
-    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function_by_address separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setFunctionPrototypeEndpoint(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1206,14 +1206,14 @@ public class FunctionService {
 
     /**
      * Build the decompiler-default-name guidance appended to a "variable not found"
-     * error from set_local_variable_type. Pure function of the requested name and the
+     * error from set_variable_type. Pure function of the requested name and the
      * current high-symbol names, so it is unit-testable without a live decompile.
      *
      * <p>Ghidra default names follow {@code <prefix>Var<digits>} (uVar1, puVar3, iVar5,
      * psVar7, ...). When such a name misses, there are two recoverable causes:
      * <ul>
      *   <li><b>SSA-renumber drift</b> — same-prefix default names still exist but with
-     *       different digits, because a previous set_local_variable_type call re-decompiled
+     *       different digits, because a previous set_variable_type call re-decompiled
      *       and renumbered the temporaries. Fix: batch with set_variables.</li>
      *   <li><b>Renamed-away / register-resident</b> — no default-named variables remain at
      *       all (they were renamed, or the function is register/SIMD-heavy so Ghidra names
@@ -1235,9 +1235,9 @@ public class FunctionService {
                 .anyMatch(n -> n != null && n.startsWith(prefix) && n.matches("^[a-z]+Var\\d+$"));
         if (hasSamePrefix) {
             return "Hint: this looks like SSA-renumber drift from a previous "
-                    + "set_local_variable_type call in the same function. "
+                    + "set_variable_type call in the same function. "
                     + "Use set_variables for ALL variable type+rename changes in one "
-                    + "atomic call to avoid this — individual set_local_variable_type "
+                    + "atomic call to avoid this — individual set_variable_type "
                     + "calls trigger re-decompilation that renumbers SSA temporaries. ";
         }
         boolean hasAnyDefaultName = availableNames.stream()
@@ -1258,7 +1258,7 @@ public class FunctionService {
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
     // set_local_variable_type merged into set_variable_type in 6.0.0; kept as the shared impl
-    // that set_variable_type (and set_parameter_type) delegate to.
+    // that set_variable_type (and set_variable_type) delegate to.
     public Response setLocalVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1388,7 +1388,7 @@ public class FunctionService {
                             if (!baseTypeName.isEmpty() && !baseTypeName.equals("void")) {
                                 resultMsg.append(". Hint: struct '").append(baseTypeName)
                                     .append("' does not exist. Create it first with create_struct(name=\"")
-                                    .append(baseTypeName).append("\", fields=[...]), then retry set_local_variable_type.");
+                                    .append(baseTypeName).append("\", fields=[...]), then retry set_variable_type.");
                             }
                         }
                         return null;
@@ -1447,7 +1447,7 @@ public class FunctionService {
     }
 
     /**
-     * Endpoint wrapper for set_parameter_type (delegates to setLocalVariableType).
+     * Parameter-typing entry point (delegates to setLocalVariableType).
      */
     // set_parameter_type merged into set_variable_type in 6.0.0; kept as an internal helper.
     public Response setParameterTypeEndpoint(
@@ -1615,7 +1615,7 @@ public class FunctionService {
             category = "function")
     public Response setDecompilerVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY) String functionAddress,
-            @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
+            @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"}) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
             @Param(value = "program", defaultValue = "") String programName) {
         if ("this".equals(variableName)) {

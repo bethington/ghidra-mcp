@@ -62,8 +62,8 @@ def test_scrape_function_state_normalizes_signature_and_locals(monkeypatch):
                     ]
                 }
             )
-        if path.startswith("/get_plate_comment"):
-            return _mock_response({"comment": "Computes CRC-16-CCITT..."})
+        if path.startswith("/get_comment"):
+            return _mock_response({"plate": "Computes CRC-16-CCITT..."})
         raise AssertionError(f"Unexpected GET {path}")
 
     monkeypatch.setattr(ghidra_bridge.requests, "get", fake_get)
@@ -112,8 +112,8 @@ def test_find_function_by_name_returns_none_when_not_found(monkeypatch):
 
 
 def test_restore_pristine_issues_expected_writes(monkeypatch):
-    """restore_pristine must call rename + set_plate + set_prototype +
-    set_local_variable_type. We capture the posts and assert the shape."""
+    """restore_pristine must call rename + set_comment + set_prototype +
+    set_variable_type. We capture the posts and assert the shape."""
     posts = []
 
     def fake_post(url, json=None, params=None, timeout=None):
@@ -136,10 +136,10 @@ def test_restore_pristine_issues_expected_writes(monkeypatch):
 
     paths = [p["path"].split("?")[0] for p in posts]
     # Must at minimum rename, set plate, set prototype, and set local type
-    assert "/rename_function_by_address" in paths
-    assert "/set_plate_comment" in paths
+    assert "/rename_function" in paths
+    assert "/set_comment" in paths
     assert "/set_function_prototype" in paths
-    assert "/set_local_variable_type" in paths
+    assert "/set_variable_type" in paths
 
 
 def test_unreachable_ghidra_raises_bridge_error(monkeypatch):

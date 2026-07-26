@@ -386,7 +386,7 @@ model **discover** the rest on demand instead of registering everything:
 - `list_tool_groups()` — list all categories and their load state.
 - `load_tool_group("datatype")` / `unload_tool_group("datatype")` — load or
   drop a category at runtime.
-- `check_tools("rename_or_label,batch_set_comments")` — confirm specific tools
+- `check_tools("rename_symbol,batch_set_comments")` — confirm specific tools
   are callable right now.
 
 `search_tools` works in both eager and `--lazy` modes, so agents that honor
@@ -450,11 +450,11 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 | `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/load_program`, `/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
 
 Name-quality enforcement is separate from security. By default,
-`rename_function_by_address` and global write endpoints reject names that fail
+`rename_function` and global write endpoints reject names that fail
 the built-in quality gates, and struct field writes apply the built-in field
 prefix convention. Disable the built-in convention layer with **Edit > Tool
 Options > GhidraMCP HTTP Server > Strict Naming Enforcement**. The same Tool
-Options checkbox covers `rename_data`, `rename_global_variable`,
+Options checkbox covers `rename_symbol` (all symbol kinds),
 `set_global`, the `apply_data_type` prefix/type guard, and struct-field
 Hungarian prefix auto-fixes in `create_struct`, `add_struct_field`, and
 `modify_struct_field`. The setting is read when the MCP server starts or
@@ -807,7 +807,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
 - `delete_bookmark` - Delete bookmark
-- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function)
+- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike)
 - `set_bookmark` - Set bookmark
 - `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
 

@@ -156,7 +156,7 @@ class TestSafeRenameOperations:
             500,
         ], f"Unexpected status: {response.status_code}, body: {response.text}"
 
-    def test_rename_function_by_address_same_name(
+    def test_rename_function_by_address_arg_same_name(
         self, http_client, first_named_function
     ):
         """Rename function by address to its current name."""
@@ -164,8 +164,8 @@ class TestSafeRenameOperations:
         address = first_named_function["address"]
 
         response = http_client.post(
-            "/rename_function_by_address",
-            data={"address": address, "old_name": name, "new_name": name},
+            "/rename_function",
+            data={"old_name": address, "new_name": name},
         )
 
         assert response.status_code in [200, 400, 404, 500]
@@ -174,13 +174,13 @@ class TestSafeRenameOperations:
 class TestSafeCommentOperations:
     """Test comment operations by reading and writing same comments."""
 
-    def test_set_plate_comment_preserve(self, http_client, first_function):
+    def test_set_comment_plate_preserve(self, http_client, first_function):
         """Read plate comment and write it back."""
         address = first_function["address"]
 
         # Get current plate comment
         get_response = http_client.get(
-            "/get_plate_comment", params={"address": address}
+            "/get_comment", params={"address": address}
         )
 
         if get_response.status_code != 200:
@@ -195,38 +195,39 @@ class TestSafeCommentOperations:
         try:
             data = json.loads(get_response.text)
             if isinstance(data, dict):
-                current_comment = data.get("comment", "") or ""
+                current_comment = data.get("plate", "") or ""
         except json.JSONDecodeError:
             pass
 
         # Write the same comment back
         set_response = http_client.post(
-            "/set_plate_comment", data={"address": address, "comment": current_comment}
+            "/set_comment",
+            data={"address": address, "type": "plate", "comment": current_comment},
         )
 
         # Should succeed
         assert set_response.status_code in [200, 400, 404]
 
-    def test_set_decompiler_comment_preserve(self, http_client, first_function):
+    def test_set_comment_pre_preserve(self, http_client, first_function):
         """Set decompiler comment to empty or existing (safe operation)."""
         address = first_function["address"]
 
         # Decompiler comments are typically per-line, use function entry
         response = http_client.post(
-            "/set_decompiler_comment",
-            json_data={"address": address, "comment": ""},
+            "/set_comment",
+            json_data={"address": address, "type": "pre", "comment": ""},
         )
 
         # May not have existing comment, empty should be safe
         # 500 may occur if endpoint has issues with empty comments
         assert response.status_code in [200, 400, 404, 500]
 
-    def test_set_disassembly_comment_preserve(self, http_client, first_function):
+    def test_set_comment_eol_preserve(self, http_client, first_function):
         """Set disassembly comment to empty (safe operation)."""
         address = first_function["address"]
 
         response = http_client.post(
-            "/set_disassembly_comment", data={"address": address, "comment": ""}
+            "/set_comment", data={"address": address, "type": "eol", "comment": ""}
         )
 
         # 500 may occur if endpoint has issues with empty comments
@@ -341,7 +342,7 @@ class TestSafeDataTypeOperations:
         """Validate that common data types exist."""
         for type_name in ["int", "char", "void", "uint"]:
             response = http_client.get(
-                "/validate_data_type_exists", params={"type_name": type_name}
+                "/validate_data_type", params={"type_name": type_name}
             )
             assert response.status_code == 200
 
@@ -355,7 +356,7 @@ class TestSafeDataTypeOperations:
 
         # Get size of int
         size_response = http_client.get(
-            "/get_data_type_size", params={"type_name": "int"}
+            "/get_type_size", params={"type_name": "int"}
         )
         # May be 404 if endpoint not available
         assert size_response.status_code in [200, 404]
@@ -364,14 +365,15 @@ class TestSafeDataTypeOperations:
 class TestSafeLabelOperations:
     """Test label operations by working with existing labels."""
 
-    def test_rename_label_same_name(self, http_client, first_label):
+    def test_rename_symbol_label_same_name(self, http_client, first_label):
         """Rename a label to its current name."""
         name = first_label["name"]
         address = first_label["address"]
 
         response = http_client.post(
-            "/rename_label",
-            data={"address": address, "old_name": name, "new_name": name},
+            "/rename_symbol",
+            data={"target": address, "kind": "label", "old_name": name,
+                  "new_name": name},
         )
 
         # Should succeed or indicate no change needed
@@ -570,18 +572,12 @@ class TestWriteEndpointAvailability:
         "endpoint,method",
         [
             ("/rename_function", "POST"),
-            ("/rename_function_by_address", "POST"),
-            ("/rename_data", "POST"),
-            ("/rename_global_variable", "POST"),
-            ("/rename_label", "POST"),
+            ("/rename_symbol", "POST"),
             ("/create_label", "POST"),
             ("/delete_label", "POST"),
-            ("/set_plate_comment", "POST"),
-            ("/set_decompiler_comment", "POST"),
-            ("/set_disassembly_comment", "POST"),
+            ("/set_comment", "POST"),
             ("/set_function_prototype", "POST"),
-            ("/set_local_variable_type", "POST"),
-            ("/set_parameter_type", "POST"),
+            ("/set_variable_type", "POST"),
             ("/rename_variables", "POST"),
             ("/create_struct", "POST"),
             ("/add_struct_field", "POST"),

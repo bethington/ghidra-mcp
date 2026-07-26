@@ -4,7 +4,7 @@
 
 On 32-bit Windows PE binaries, member functions often use `__thiscall`: the receiver lives in **ECX**.
 
-Ghidra models that as an **auto-parameter** named `this` with storage like `ECX:4 (auto)`. Auto-parameters are **immutable** through the program API — the Ghidra docs state plainly: *"Within the Program API, auto-parameters may not be directly manipulated and are immutable."* Calls such as `HighFunctionDBUtil.updateDBVariable`, `Parameter.setDataType`, or `set_local_variable_type` on `this` fail with errors like `Cannot modify auto-parameter: this`.
+Ghidra models that as an **auto-parameter** named `this` with storage like `ECX:4 (auto)`. Auto-parameters are **immutable** through the program API — the Ghidra docs state plainly: *"Within the Program API, auto-parameters may not be directly manipulated and are immutable."* Calls such as `HighFunctionDBUtil.updateDBVariable`, `Parameter.setDataType`, or `set_variable_type` on `this` fail with errors like `Cannot modify auto-parameter: this`.
 
 That is a **Ghidra platform rule**, not a bug in the MCP bridge.
 

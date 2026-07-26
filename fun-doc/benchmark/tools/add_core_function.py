@@ -80,13 +80,13 @@ def _fetch_decompilation(program: str, address: str) -> str:
 def _fetch_plate(program: str, address: str) -> str:
     try:
         resp = _get(
-            "/get_plate_comment",
+            "/get_comment",
             params={"program": program, "address": address},
         )
     except GhidraBridgeError:
         return ""
     if isinstance(resp, dict):
-        return resp.get("comment", "") or resp.get("plate", "") or ""
+        return resp.get("plate", "") or ""
     return str(resp or "")
 
 

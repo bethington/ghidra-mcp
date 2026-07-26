@@ -428,9 +428,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // GhidraMCPPlugin; see ManualToolDescriptors for the shared metadata
         // source. Found via a live-schema-vs-catalog diff (v6.0.0).
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
-            "/batch_set_variable_types", "/check_connection", "/configure_analyzer",
+            "/check_connection", "/configure_analyzer",
             "/delete_project", "/exit_ghidra", "/get_current_address",
-            "/get_current_function", "/get_data_type_size", "/get_version", "/health",
+            "/get_current_function", "/get_version", "/health",
             "/list_projects", "/mcp/schema", "/move_file", "/move_folder",
             "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
             "/server/admin/terminate_checkout", "/server/admin/users",

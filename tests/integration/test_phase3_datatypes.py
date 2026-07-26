@@ -12,8 +12,8 @@ Tests for the 15 Phase 3 endpoints:
 - remove_struct_field
 - delete_data_type
 - search_data_types
-- validate_data_type_exists
-- get_data_type_size
+- validate_data_type
+- get_type_size
 - get_struct_layout
 - get_enum_values
 - clone_data_type
@@ -367,7 +367,7 @@ class TestValidateDataType:
     def test_validate_existing_type(self, http_client):
         """Test validating an existing type."""
         response = http_client.get(
-            "/validate_data_type_exists", params={"type_name": "int"}
+            "/validate_data_type", params={"type_name": "int"}
         )
         assert response.status_code == 200
         text = response.text
@@ -378,7 +378,7 @@ class TestValidateDataType:
     def test_validate_nonexistent_type(self, http_client):
         """Test validating non-existent type."""
         response = http_client.get(
-            "/validate_data_type_exists",
+            "/validate_data_type",
             params={"type_name": f"NonExistent_{uuid.uuid4().hex[:8]}"},
         )
         assert response.status_code == 200
@@ -394,7 +394,7 @@ class TestGetDataTypeSize:
     @pytest.mark.requires_program
     def test_get_size_builtin(self, http_client):
         """Test getting size of builtin type."""
-        response = http_client.get("/get_data_type_size", params={"type_name": "int"})
+        response = http_client.get("/get_type_size", params={"type_name": "int"})
         # Skip if endpoint not available (headless-only endpoint)
         if response.status_code == 404:
             pytest.skip("Endpoint not available in this mode")
@@ -406,7 +406,7 @@ class TestGetDataTypeSize:
     def test_get_size_nonexistent(self, http_client):
         """Test getting size of non-existent type."""
         response = http_client.get(
-            "/get_data_type_size",
+            "/get_type_size",
             params={"type_name": f"NonExistent_{uuid.uuid4().hex[:8]}"},
         )
         # Skip if endpoint not available (headless-only endpoint)
@@ -561,7 +561,7 @@ class TestPhase3Integration:
 
         # Validate it exists (may fail if struct not created)
         response = http_client.get(
-            "/validate_data_type_exists", params={"type_name": struct_name}
+            "/validate_data_type", params={"type_name": struct_name}
         )
         assert response.status_code == 200
         # Skip rest of test if struct wasn't created
@@ -577,7 +577,7 @@ class TestPhase3Integration:
 
         # Get size (optional endpoint)
         response = http_client.get(
-            "/get_data_type_size", params={"type_name": struct_name}
+            "/get_type_size", params={"type_name": struct_name}
         )
         if response.status_code != 404:
             assert response.status_code == 200

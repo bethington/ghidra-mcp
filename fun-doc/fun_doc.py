@@ -775,13 +775,13 @@ def check_archive_for_match(func, func_name, live_score, run_id):
 
     try:
         if new_name and not new_name.startswith("FUN_"):
-            # /rename_function_by_address: function_address + new_name are
-            # BODY params (ParamSource.BODY), program is QUERY. Sending the
-            # body params as query made this silently no-op — the endpoint
-            # saw null function_address and errored (#207).
+            # /rename_function: old_name (accepts a name OR an address) +
+            # new_name are BODY params (ParamSource.BODY), program is QUERY.
+            # Sending the body params as query made this silently no-op — the
+            # endpoint saw null old_name and errored (#207).
             ghidra_post(
-                "/rename_function_by_address",
-                data={"function_address": address, "new_name": new_name},
+                "/rename_function",
+                data={"old_name": address, "new_name": new_name},
                 params={"program": program},
             )
         if plate:
@@ -2045,7 +2045,7 @@ def sync_band_tags_sweep(program, emit=print):
     qp = {"program": program}   # program in QUERY -> target this program, not the active one
     for i in range(0, len(to_add), CHUNK):
         try:
-            ghidra_post("/batch_add_function_tags",
+            ghidra_post("/add_function_tag",
                         {"assignments": to_add[i:i + CHUNK], "program": program},
                         params=qp, timeout=120)
         except Exception as e:
@@ -2383,7 +2383,7 @@ def _score_single(addr_hex, prog_path=None):
 
 
 def _parse_batch_results(addresses, offset, resp):
-    """Parse a `/batch_analyze_completeness` response into (score_map, count).
+    """Parse an `/analyze_function_completeness` bulk response into (score_map, count).
 
     Returns (dict of address -> score_info, number of valid entries extracted).
     The offset is the starting index into `addresses` for this batch.
@@ -2478,10 +2478,13 @@ def _batch_score(
 
         if batch_works is not False:
             timeout = first_batch_timeout if i == 0 else PER_BATCH_TIMEOUT
-            resp = ghidra_post(
-                "/batch_analyze_completeness",
-                data={"addresses": batch},
-                params=params,
+            # 6.0.0: batch_analyze_completeness folded into
+            # analyze_function_completeness (GET, addresses=comma-separated).
+            # BATCH_SIZE is 6, so the query string stays well inside any
+            # request-line limit.
+            resp = ghidra_get(
+                "/analyze_function_completeness",
+                params={**params, "addresses": ",".join(batch)},
                 timeout=timeout,
             )
 
@@ -2607,10 +2610,9 @@ def _batch_score(
         still_failed = 0
         for j in range(0, len(retry_addrs), RETRY_SIZE):
             chunk = retry_addrs[j : j + RETRY_SIZE]
-            resp = ghidra_post(
-                "/batch_analyze_completeness",
-                data={"addresses": chunk},
-                params=params,
+            resp = ghidra_get(
+                "/analyze_function_completeness",
+                params={**params, "addresses": ",".join(chunk)},
                 timeout=PER_BATCH_TIMEOUT,
             )
             if resp and isinstance(resp, dict) and "results" in resp:
@@ -4020,7 +4022,7 @@ def refresh_candidate_scores(
     """Batch-refresh the live completeness scores of the top-N ROI candidates.
 
     Avoids the "walk through 6 stale candidates fetching one at a time" problem
-    by doing a single `/batch_analyze_completeness` call per program. Updates
+    by doing a single bulk `/analyze_function_completeness` call per program. Updates
     state.json in place so the next selector pass sees fresh data.
 
     Parameters:
@@ -4868,7 +4870,7 @@ def _variables_for_prompt(variables):
 
     The raw endpoint intentionally reports stack-frame/decompiler artifacts for
     humans and debugging. Prompting is different: phantom locals are not visible
-    in decompiled source and cannot be targeted by set_local_variable_type, so
+    in decompiled source and cannot be targeted by set_variable_type, so
     showing them in the normal work list mostly creates false work.
     """
     if not isinstance(variables, dict):
@@ -4909,7 +4911,7 @@ def _append_variables_section(sections, variables, *, refresh_note=True):
         )
     note = (
         "*Variable types may already be resolved by decompiler — check `needs_type` "
-        "field before calling `set_local_variable_type`."
+        "field before calling `set_variable_type`."
     )
     if refresh_note:
         note += " Refresh with `get_function_variables` after any prototype change."
@@ -5040,7 +5042,7 @@ def _extract_work_items(completeness):
             )
             items.append(
                 "**BATCH RULE**: Collect ALL addresses below, then submit them in ONE `batch_set_comments` call "
-                "with `comment_type='EOL_COMMENT'`. Do NOT call `set_disassembly_comment` individually — "
+                "with `comment_type='EOL_COMMENT'`. Do NOT call `set_comment(type='eol')` individually — "
                 "each call wastes a full API turn."
             )
             for c in constants[:20]:
@@ -5207,7 +5209,7 @@ def build_fix_prompt(func_name, address, ghidra_data, program=None):
     )
     sections.append("")
     sections.append(
-        "- **Function name**: Does it accurately describe behavior? Is it missing a module prefix it should have (check Source: line, callee family, behavior domain — 2+ signals = must prefix)? If rename needed, `rename_function_by_address` with the full prefixed name."
+        "- **Function name**: Does it accurately describe behavior? Is it missing a module prefix it should have (check Source: line, callee family, behavior domain — 2+ signals = must prefix)? If rename needed, `rename_function` with the full prefixed name."
     )
     sections.append(
         "- **Prototype**: Are parameter types correct? Is calling convention right? If wrong, `set_function_prototype`."
@@ -5516,7 +5518,7 @@ def build_verify_prompt(func_name, address, ghidra_data, program=None):
         "3. Plate comment accuracy: Does the one-line summary match the decompiled behavior?"
     )
     sections.append(
-        "4. Quick fixes: If obvious issues found, fix directly using rename_function_by_address, rename_variables, or batch_set_comments."
+        "4. Quick fixes: If obvious issues found, fix directly using rename_function, rename_variables, or batch_set_comments."
     )
     sections.append("")
     sections.append("Report one of:")
@@ -6538,7 +6540,7 @@ _MINIMAX_DOC_TOOL_ALLOWLIST = {
     "get_function_documentation",
     "get_function_xrefs",
     "get_function_jump_targets",
-    "get_plate_comment",
+    "get_comment",
     "get_assembly_context",
     "get_xrefs_from",
     "get_xrefs_to",
@@ -6559,7 +6561,7 @@ _MINIMAX_DOC_TOOL_ALLOWLIST = {
     "list_calling_conventions",
     "list_external_locations",
     "list_bookmarks",
-    "validate_data_type_exists",
+    "validate_data_type",
     "get_valid_data_types",
     "analyze_function_complete",
     "analyze_function_completeness",
@@ -6568,28 +6570,22 @@ _MINIMAX_DOC_TOOL_ALLOWLIST = {
     "analyze_struct_field_usage",
     "analyze_for_documentation",
     # ── Write ─────────────────────────────────────────────────────────────
-    "rename_function_by_address",
+    "rename_function",
     "rename_variables",
-    "rename_variable",
-    "rename_or_label",
-    "rename_label",
-    "rename_global_variable",
+    "rename_symbol",
     "batch_rename_function_components",
-    "batch_create_labels",
+    "create_label",
     "set_function_prototype",
-    "set_local_variable_type",
-    "set_parameter_type",
+    "set_variable_type",
     "set_variables",
-    "set_plate_comment",
+    "set_comment",
     "batch_set_comments",
-    "set_disassembly_comment",
-    "set_decompiler_comment",
     "apply_data_type",
     # ── Globals (v5.7.0+) ────────────────────────────────────────────────
     # `set_global` is the canonical atomic writer for global variables
     # (type + array_length + name + plate in one transaction). Without
     # these three, the globals worker model burns 5-10 wasted tool calls
-    # fighting `apply_data_type` + `rename_or_label` + `batch_set_comments`
+    # fighting `apply_data_type` + `rename_symbol` + `batch_set_comments`
     # individually — exactly what was observed in production on the
     # ExceptionList global. Audit endpoints are read-only but required so
     # the model can verify its own writes mid-turn.
@@ -6864,7 +6860,7 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
             "content": (
                 "You are a reverse engineering assistant with access to Ghidra MCP tools. "
                 "Call tools to analyze and document functions. Be thorough and precise.\n\n"
-                "CRITICAL EFFICIENCY RULE: Never call `set_disassembly_comment` more than once. "
+                "CRITICAL EFFICIENCY RULE: Never call `set_comment(type='eol')` more than once. "
                 "Always batch ALL disassembly/EOL comments into a SINGLE `batch_set_comments` call "
                 "with comment_type='EOL_COMMENT'. Each separate API call costs a full round-trip. "
                 "Collect all addresses that need EOL comments first, then submit them together."
@@ -7115,7 +7111,7 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                 # the occasional multi-tool-call turn to finish rather than be cut
                 # mid-turn. FUNDOC_TOOL_CALL_CAP still hard-overrides if set.
                 _env_cap = os.environ.get("FUNDOC_TOOL_CALL_CAP")
-                _tool_cap = int(_env_cap) if _env_cap else max(max_turns + 10, 30)
+                _tool_cap = int(_env_cap) if _env_cap else max(max_turns + 10, 100)
                 if tool_call_count > _tool_cap:
                     print(
                         f"  [minimax] Tool call cap reached ({tool_call_count}), stopping",
@@ -7336,7 +7332,7 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                 "append": (
                     "The ghidra-mcp MCP tools are already registered and "
                     "immediately callable. Invoke them directly by either "
-                    "the short name (e.g. `set_local_variable_type`, "
+                    "the short name (e.g. `set_variable_type`, "
                     "`rename_variables`, `batch_set_comments`, "
                     "`get_function_variables`, `set_function_prototype`, "
                     "`decompile_function`) or the fully-qualified form "
@@ -7344,7 +7340,7 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                     "to look them up — they are not deferred tools.\n\n"
                     "EFFICIENCY RULE: When adding disassembly/EOL comments, "
                     "batch ALL of them into ONE `batch_set_comments` call with "
-                    "comment_type='EOL_COMMENT'. Never call `set_disassembly_comment` "
+                    "comment_type='EOL_COMMENT'. Never call `set_comment(type='eol')` "
                     "more than once per run."
                 ),
             },
@@ -8149,17 +8145,14 @@ def _inject_tool_block(prompt):
     RELEVANT_TOOLS = {
         "analyze_for_documentation",
         "get_function_variables",
-        "get_plate_comment",
+        "get_comment",
         "set_variables",
-        "rename_function_by_address",
+        "rename_function",
         "set_function_prototype",
-        "set_local_variable_type",
-        "set_parameter_type",
-        "batch_set_variable_types",
-        "rename_variable",
+        "set_variable_type",
         "rename_variables",
         "batch_set_comments",
-        "rename_or_label",
+        "rename_symbol",
         "apply_data_type",
         "search_data_types",
         "get_struct_layout",
@@ -8185,7 +8178,7 @@ def _inject_tool_block(prompt):
         tool_block += f"\n\n**NOT registered** (do NOT call): {', '.join(f'`{t}`' for t in sorted(missing))}"
     tool_block += (
         "\n\n**Batching rule**: Use `batch_set_comments` with `comment_type='EOL_COMMENT'` "
-        "for ALL disassembly comments in a single call. Never call `set_disassembly_comment` "
+        "for ALL disassembly comments in a single call. Never call `set_comment(type='eol')` "
         "more than once per run — batch every address together.\n"
     )
     return prompt + "\n" + tool_block
@@ -9771,7 +9764,7 @@ def process_function(
     )
     # Look up the post-rescore name so the dashboard's function-block
     # footer can show the renamed function (the model often calls
-    # rename_function_by_address during documentation). State has been
+    # rename_function during documentation). State has been
     # synced via _rescore_and_sync above, so it's the source of truth.
     fresh_name_for_event = func.get("name")
     try:
@@ -10997,8 +10990,8 @@ def _build_global_prompt(prog_path, address, audit_before, prompt_dir=None):
         f"# CRITICAL: pass `program=\"{prog_path}\"` to EVERY tool call.\n\n"
         f"You are processing a global in the program `{prog_path}`.\n"
         f"Multiple programs are open in this Ghidra session. If you call\n"
-        f"`set_global`, `apply_data_type`, `rename_or_label`,\n"
-        f"`rename_global_variable`, `batch_set_comments`, `audit_global`,\n"
+        f"`set_global`, `apply_data_type`, `rename_symbol`,\n"
+        f"`batch_set_comments`, `audit_global`,\n"
         f"or any other write/audit tool **without** the `program` parameter,\n"
         f"Ghidra will route it to whichever program is currently focused in\n"
         f"the UI — almost certainly NOT this one. The write will silently\n"
@@ -11361,8 +11354,8 @@ def process_global(
             f"more specific about THIS global's purpose. Decompile one or two "
             f"of its xref callers to pin down its role; scope the descriptor "
             f"by subsystem and role rather than a generic word. Then use "
-            f"`rename_or_label(program=\"{prog_path}\", address=\"{address}\", "
-            f"name=<new unique name>)` and re-audit."
+            f"`rename_symbol(program=\"{prog_path}\", target=\"{address}\", "
+            f"new_name=<new unique name>)` and re-audit."
         )
         _text2, meta2 = invoke_claude(
             _build_global_prompt(prog_path, address, audit_after) + correction,
@@ -12480,14 +12473,19 @@ def _ghidra_audit_flag(program_name, address, text, marker="[AUDIT"):
     phrase whose presence means 'already flagged this concern' -- distinct markers
     (name vs type) let both coexist without one suppressing the other. Best-effort."""
     try:
-        cur = ghidra_get("/get_plate_comment",
+        cur = ghidra_get("/get_comment",
                          params={"address": f"0x{address}", "program": program_name})
-        existing = cur.get("comment") if isinstance(cur, dict) else (cur or "")
+        # get_comment returns every kind; `comment` is the first non-empty of
+        # any kind, so read `plate` explicitly.
+        existing = cur.get("plate") if isinstance(cur, dict) else (cur or "")
         if marker in (existing or ""):
             return "already-flagged"
         body = text + ("\n\n" + existing if existing else "")
-        ghidra_post("/set_plate_comment",
-                    data={"address": f"0x{address}", "comment": body, "program": program_name})
+        # program goes in QUERY on writes (@Param defaults to ParamSource.QUERY)
+        # — in the body it is ignored and the write leaks to the active program.
+        ghidra_post("/set_comment",
+                    data={"address": f"0x{address}", "comment": body, "type": "plate"},
+                    params={"program": program_name})
         return "flagged"
     except Exception as e:  # noqa: BLE001
         return f"error:{e}"
@@ -12521,8 +12519,8 @@ def _post_proof_name_audit(program_name, address, func_name, decompiled, *, prov
             # by ADDRESS, survives the rename), so a wrong call is revertible and a
             # later canonical (string/xref/D2MOO) can still refine it. Auto-names take
             # the same path -- they just always qualify.
-            r = ghidra_post("/rename_function_by_address",
-                            data={"function_address": f"0x{address}", "new_name": proposed},
+            r = ghidra_post("/rename_function",
+                            data={"old_name": f"0x{address}", "new_name": proposed},
                             params={"program": program_name})
             renamed = not (isinstance(r, dict) and r.get("error"))
             if renamed:
@@ -12913,9 +12911,9 @@ def _post_proof_plate_audit(program_name, address, func_name, decompiled, *, pro
     if os.environ.get("FUNDOC_PLATE_AUDIT", "1") != "1":
         return
     try:
-        cur = ghidra_get("/get_plate_comment",
+        cur = ghidra_get("/get_comment",
                          params={"address": f"0x{address}", "program": program_name})
-        plate = cur.get("comment") if isinstance(cur, dict) else (cur or "")
+        plate = cur.get("plate") if isinstance(cur, dict) else (cur or "")
         if not plate:
             return
         text, meta = invoke_claude(build_plate_audit_prompt(func_name, plate, decompiled),
@@ -12941,9 +12939,10 @@ def _post_proof_plate_audit(program_name, address, func_name, decompiled, *, pro
         if corrected and _mk(corrected) >= _mk(plate) and len(corrected) >= int(0.6 * len(plate)):
             trail = (f"[CORRECTED {datetime.now().date().isoformat()}] proof-backed plate fix -- was: "
                      f"\"{says}\"; now: {correction}\n\n")
-            ghidra_post("/set_plate_comment",
+            ghidra_post("/set_comment",
                         data={"address": f"0x{address}", "comment": trail + corrected,
-                              "program": program_name})
+                              "type": "plate"},
+                        params={"program": program_name})
             ghidra_post("/save_program", data={"program": program_name})
             log("plate_audit_correct", name=func_name, fix=correction[:80])
             return
@@ -13426,11 +13425,11 @@ def _writeback_shadow_leaf_note(program_name, address):
     via set_function_prototype -- this note flags every case for that review."""
     marker = "shadow_leaf (live-pointer getter)"  # present in both manual + auto notes
     try:
-        cur = ghidra_get("/get_plate_comment",
+        cur = ghidra_get("/get_comment",
                          params={"address": f"0x{address}", "program": program_name})
         existing = ""
         if isinstance(cur, dict):
-            existing = cur.get("comment") or ""
+            existing = cur.get("plate") or ""
         elif isinstance(cur, str):
             existing = cur
         if marker in existing:
@@ -13445,8 +13444,9 @@ def _writeback_shadow_leaf_note(program_name, address):
                 f"Not statically emulable; SHADOW-provable against the running game. "
                 f"If a double-deref proves an extra pointer level, correct the prototype.")
         body = note + ("\n\n" + existing if existing else "")
-        ghidra_post("/set_plate_comment",
-                    {"address": f"0x{address}", "comment": body, "program": program_name})
+        ghidra_post("/set_comment",
+                    {"address": f"0x{address}", "comment": body, "type": "plate"},
+                    params={"program": program_name})
     except Exception:
         pass
 

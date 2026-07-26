@@ -100,4 +100,4 @@ State files are gitignored. Delete `state.db` (or both `state.db` and `state.jso
 
 ## Relationship to GhidraMCP
 
-fun-doc is a consumer of the MCP tools, not a provider. It calls `analyze_function_completeness`, `decompile_function`, `rename_function_by_address`, `batch_set_comments`, etc. through Claude Code's MCP integration. No fun-doc code ships as part of the plugin JAR or the Python bridge.
+fun-doc is a consumer of the MCP tools, not a provider. It calls `analyze_function_completeness`, `decompile_function`, `rename_function`, `batch_set_comments`, etc. through Claude Code's MCP integration. No fun-doc code ships as part of the plugin JAR or the Python bridge.

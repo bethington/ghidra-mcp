@@ -26,4 +26,4 @@
 ## Important
 - Prototype changes wipe plate comments. If plate comment exists, note its content before changing prototype and reapply it in the same pass.
 - Prototype changes trigger re-decompilation. Variable list will be stale after this step.
-- `set_function_prototype` does not rename the function. If the function name also needs to change, call `rename_function_by_address` separately.
+- `set_function_prototype` does not rename the function. If the function name also needs to change, call `rename_function` separately.

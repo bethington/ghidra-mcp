@@ -241,8 +241,10 @@ def consistency_gate(program: str, address: str, name: str, reimpl_cpp: str, *,
 
     disasm = str(fun_doc.ghidra_get("/disassemble_function",
                                     params={"address": addr, "program": program}))
-    plate = str(fun_doc.ghidra_get("/get_plate_comment",
-                                   params={"address": addr, "program": program}))
+    _plate_resp = fun_doc.ghidra_get("/get_comment",
+                                     params={"address": addr, "program": program})
+    plate = ((_plate_resp.get("plate") or "") if isinstance(_plate_resp, dict)
+             else str(_plate_resp))
     # MECHANICAL stub detection -- never trust the model to notice absence. Strip the
     # routing/bench markers; if no substantive BEHAVIORAL text remains, the plate is
     # missing and MUST be regenerated (its absence blocks DOC_VERIFIED if that fails).
@@ -305,8 +307,8 @@ def consistency_gate(program: str, address: str, name: str, reimpl_cpp: str, *,
         body += (f"\n\nPROVEN one-to-one (consistency-gated {stamp}): documentation "
                  f"derived from a reimplementation proven bit-exact against the "
                  f"original by a discriminating live proof.")
-        r = fun_doc.ghidra_post("/set_plate_comment",
-                                data={"address": addr, "comment": body},
+        r = fun_doc.ghidra_post("/set_comment",
+                                data={"address": addr, "comment": body, "type": "plate"},
                                 params={"program": program})
         plate_written = not (isinstance(r, dict) and r.get("error"))
         mech_applied.append(f"plate regenerated from proven behavior "
@@ -329,8 +331,9 @@ def consistency_gate(program: str, address: str, name: str, reimpl_cpp: str, *,
                 + " | ".join(semantic_flags))
         cur = plate if plate and "error" not in plate[:40].lower() else ""
         if "[CONSISTENCY GATE" not in cur:
-            fun_doc.ghidra_post("/set_plate_comment",
-                                data={"address": addr, "comment": (note + "\n\n" + cur).strip()},
+            fun_doc.ghidra_post("/set_comment",
+                                data={"address": addr, "comment": (note + "\n\n" + cur).strip(),
+                                      "type": "plate"},
                                 params={"program": program})
     if mech_applied or semantic_flags:
         fun_doc.ghidra_post("/save_program", data={"program": prog_name})
@@ -429,8 +432,8 @@ def prove_doc(address: str, name: str, *, program: str = PROGRAM_PATH,
         if d2moo_names.is_offset_name(name):
             c = d2moo_names.canonicalize(name, reimpl)
             if c.get("ok"):
-                rr = fun_doc.ghidra_post("/rename_function_by_address",
-                                         data={"function_address": addr_hex,
+                rr = fun_doc.ghidra_post("/rename_function",
+                                         data={"old_name": addr_hex,
                                                "new_name": c["proposed_name"]},
                                          params={"program": Path(program).name})
                 renamed = "success" in str(rr).lower()
@@ -439,11 +442,14 @@ def prove_doc(address: str, name: str, *, program: str = PROGRAM_PATH,
                     note = (f"[D2MOO-DERIVED NAME {stamp}] was '{name}' (offset-derived); "
                             f"real field per D2MOO: {c['reason']}."
                             + ("  SUBSYSTEM CORRECTED." if c.get("corrected_subsystem") else ""))
-                    cur = str(fun_doc.ghidra_get("/get_plate_comment",
-                                                 params={"address": addr_hex, "program": program}))
+                    _cur_resp = fun_doc.ghidra_get("/get_comment",
+                                                   params={"address": addr_hex, "program": program})
+                    cur = ((_cur_resp.get("plate") or "") if isinstance(_cur_resp, dict)
+                           else str(_cur_resp))
                     if "[D2MOO-DERIVED NAME" not in cur:
-                        fun_doc.ghidra_post("/set_plate_comment",
-                                            data={"address": addr_hex, "comment": (note + "\n\n"
+                        fun_doc.ghidra_post("/set_comment",
+                                            data={"address": addr_hex, "type": "plate",
+                                                  "comment": (note + "\n\n"
                                                   + (cur if "error" not in cur[:40].lower() else "")).strip()},
                                             params={"program": program})
                     fun_doc.ghidra_post("/save_program", data={"program": Path(program).name})

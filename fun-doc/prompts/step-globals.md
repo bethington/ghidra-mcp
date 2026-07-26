@@ -289,7 +289,7 @@ not.
 
 ## What NOT to do
 
-- **Don't chain `apply_data_type` → `rename_data` → `batch_set_comments`** for globals. Use `set_global` instead — it's atomic, single-transaction, and partial application is structurally impossible.
+- **Don't chain `apply_data_type` → `rename_symbol` → `batch_set_comments`** for globals. Use `set_global` instead — it's atomic, single-transaction, and partial application is structurally impossible.
 - **Don't pass `undefined4` to `apply_data_type` on a global.** It "works" but leaves the global in a worse state than before (the existing real type, if any, gets clobbered).
 - **Don't rename a global without setting its type first**, unless the type is already correct. The Hungarian-vs-type check uses the current type, so renaming first then changing type can leave a Hungarian/type mismatch you have to fix later.
 - **Don't write filler plate comments** like "global counter" or "this is a flag." The ≥4-word check passes those, but they add no information. The reader gets no value.
