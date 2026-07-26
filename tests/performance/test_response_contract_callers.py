@@ -29,16 +29,45 @@ FUN_DOC = REPO_ROOT / "fun-doc"
 RESHAPED = {
     "decompile_function": ("decompiled_text", '"decompiled"'),
     "disassemble_function": ("disasm_text", "disasm_lines", '"instructions"'),
-    "get_function_by_address": ("_envelope_items", '.get("name")', "func_resp.get"),
+    # A consumer that returns the dict straight through (bh/grade's client
+    # method) is already correct -- the record *is* the payload it wants.
+    "get_function_by_address": ("_envelope_items", '.get("name")', "func_resp.get",
+                                "isinstance(out, dict)"),
     "list_segments": ("_envelope_items", "_segments_text", '"segments"'),
     "list_globals": ("_envelope_items", "_globals_text", '"globals"'),
     "list_exports": ("_envelope_items", '"exports"'),
     "get_metadata": ("_envelope_items", ".get("),
 }
 
-# How far after the call site to look for the unwrap. Generous on purpose: a
-# false negative here is a production break, a false positive is a code comment.
-WINDOW = 10
+def _enclosing_function(lines: list[str], idx: int) -> tuple[int, int]:
+    """Line range of the function containing `lines[idx]`.
+
+    Scanning a fixed window after the call site was the obvious approach and the
+    wrong one: real code puts an error guard and a state update between the
+    fetch and the unwrap, so any window is either too small (false alarms) or
+    big enough to bleed into the next function (missed breaks). The enclosing
+    function is the scope that actually matters -- that is where the response
+    variable lives and dies.
+    """
+    start = 0
+    indent = 0
+    for i in range(idx, -1, -1):
+        stripped = lines[i].lstrip()
+        if stripped.startswith("def ") or stripped.startswith("async def "):
+            start = i
+            indent = len(lines[i]) - len(stripped)
+            break
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i]
+        if not line.strip():
+            continue
+        if (len(line) - len(line.lstrip())) <= indent and (
+            line.lstrip().startswith(("def ", "async def ", "class "))
+        ):
+            end = i
+            break
+    return start, end
 
 # Modules that legitimately pass responses through without interpreting them.
 EXEMPT = {
@@ -68,8 +97,9 @@ def test_reshaped_endpoint_consumers_unwrap(endpoint: str, helpers: tuple[str, .
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            window = "\n".join(lines[max(0, i - 3):i + WINDOW])
-            if any(h in window for h in helpers):
+            start, end = _enclosing_function(lines, i)
+            scope = "\n".join(lines[start:end])
+            if any(h in scope for h in helpers):
                 continue
             # str(resp) on a reshaped response is the specific bug: it stringifies
             # a dict instead of failing loudly.

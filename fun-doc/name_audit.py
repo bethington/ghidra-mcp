@@ -44,10 +44,9 @@ def _resolve_fn_name(addr_hex):
         return _fn_name_cache[addr_hex]
     r = ghidra_get("/get_function_by_address",
                    params={"address": f"0x{addr_hex}", "program": PROG})
-    name = None
-    m = re.match(r"Function:\s+(\S+)\s+at\s+", str(r or ""))
-    if m:
-        name = m.group(1)
+    # 6.0.0: /get_function_by_address returns a record, not
+    # "Function: <name> at <addr>" prose.
+    name = r.get("name") if isinstance(r, dict) else None
     _fn_name_cache[addr_hex] = name
     return name
 

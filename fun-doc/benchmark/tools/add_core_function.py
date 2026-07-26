@@ -73,7 +73,7 @@ def _fetch_decompilation(program: str, address: str) -> str:
     except GhidraBridgeError as e:
         return f"[decompile failed: {e}]"
     if isinstance(resp, dict):
-        return resp.get("c") or resp.get("code") or resp.get("decompilation") or str(resp)
+        return resp.get("decompiled") or ""
     return str(resp)
 
 
