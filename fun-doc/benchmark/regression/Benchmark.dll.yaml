@@ -200,8 +200,12 @@ endpoint_smoke:
     assert:
       type: "nonempty"
 
+  # The param is `pattern`, not `query`. Before 6.0.0 the wrong name produced a
+  # plain-text "Search pattern is required", which satisfied `nonempty` -- so
+  # this case passed while testing nothing. Converting errors to {"error": ...}
+  # in stage 5 surfaced it.
   - endpoint: "/search_data_types"
-    params: { query: "int" }
+    params: { pattern: "int" }
     assert:
       type: "nonempty"
 
