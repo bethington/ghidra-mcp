@@ -570,79 +570,6 @@ public class FunctionService {
     // ========================================================================
 
     /**
-     * Rename a function by its name.
-     */
-    @McpTool(path = "/rename_function", method = "POST", description = "Rename function by old and new name", category = "function")
-    public Response renameFunction(
-            @Param(value = "old_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldName,
-            @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (oldName == null || oldName.isEmpty()) {
-            return Response.err("Old function name is required");
-        }
-
-        if (newName == null || newName.isEmpty()) {
-            return Response.err("New function name is required");
-        }
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean successFlag = new AtomicBoolean(false);
-
-        try {
-            threadingStrategy.executeWrite(program, "Rename function via HTTP", () -> {
-                boolean found = false;
-                for (Function func : program.getFunctionManager().getFunctions(true)) {
-                    if (func.getName().equals(oldName)) {
-                        found = true;
-                        func.setName(newName, SourceType.USER_DEFINED);
-                        successFlag.set(true);
-                        resultMsg.append("Success: Renamed function '").append(oldName)
-                                .append("' to '").append(newName).append("'");
-                        break;
-                    }
-                }
-
-                if (!found) {
-                    resultMsg.append("Error: Function '").append(oldName).append("' not found");
-                }
-                return null;
-            });
-
-            // Force event processing to ensure changes propagate
-            if (successFlag.get()) {
-                program.flushEvents();
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute rename on Swing thread", e);
-        }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (successFlag.get()) {
-            List<String> nameWarnings = NamingConventions.validateFunctionName(newName, false);
-            if (nameWarnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
-            } else {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", text, "warnings", nameWarnings));
-            }
-        }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
-    }
-
-    public Response renameFunction(String oldName, String newName) {
-        return renameFunction(oldName, newName, null);
-    }
-
-    /**
      * Rename a variable in a function.
      */
     @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function. Accepts function_name or function_address; address is more stable after recent renames.", category = "function")
@@ -788,14 +715,13 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    @McpTool(path = "/rename_function_by_address", method = "POST", description = "Rename function at specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/rename_function", method = "POST", description = "Rename a function identified by name OR address. Runs the full naming-quality gate (verb-tier specificity + token-subset collision) with an optional strict_mode override. Replaces rename_function_by_address.", category = "function")
     public Response renameFunctionByAddress(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
+            @Param(value = "old_name", source = ParamSource.BODY,
+                   aliases = {"function_address", "function", "oldName"},
+                   description = "Function name or address to rename. Address accepts 0x<hex> or "
+                               + "<space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact "
+                               + "function name.") String functionAddrStr,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",

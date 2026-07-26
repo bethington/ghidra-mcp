@@ -412,56 +412,6 @@ public class DataTypeService {
         return getValidDataTypes(category, null);
     }
 
-    /**
-     * NEW v1.6.0: Check if data type exists in type manager
-     */
-    @McpTool(path = "/validate_data_type_exists", description = "Check if a data type exists", category = "datatype")
-    public Response validateDataTypeExists(
-            @Param(value = "type_name", description = "Data type name") String typeName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-                    DataTypeManager dtm = program.getDataTypeManager();
-                    DataType dt = dtm.getDataType(typeName);
-
-                    if (dt != null) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "exists", true,
-                            "category", dt.getCategoryPath().getPath(),
-                            "size", dt.getLength()
-                        )));
-                    } else {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "exists", false
-                        )));
-                    }
-                } catch (Exception e) {
-                    responseRef.set(Response.err(e.getMessage()));
-                }
-            });
-
-            if (responseRef.get() != null) {
-                return responseRef.get();
-            }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        return Response.err("Unknown failure");
-    }
-
-    // Backward compatibility overload
-    public Response validateDataTypeExists(String typeName) {
-        return validateDataTypeExists(typeName, null);
-    }
-
     // -----------------------------------------------------------------------
     // Data Type Creation Methods
     // -----------------------------------------------------------------------
@@ -2143,27 +2093,38 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    @McpTool(path = "/validate_data_type", description = "Validate data type applicability at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/validate_data_type", description = "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.", category = "datatype")
     public Response validateDataType(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "type_name", description = "Data type name") String typeName,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                   description = "Optional address. Omit to check type existence only; provide to validate "
+                               + "applicability at that address (memory range/alignment/conflicts). Accepts "
+                               + "0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).") String addressStr,
+            @Param(value = "type_name", description = "Data type name (bare names resolve across all categories)") String typeName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.text("Address is required");
         if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
+
+        DataTypeManager dtm = program.getDataTypeManager();
+        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
+
+        // Existence-only mode (no address) — replaces validate_data_type_exists. Uses the
+        // bare-name resolver (findDataTypeByNameInAllCategories) so 'int'/'DWORD'/'char *'
+        // resolve instead of requiring a full path like '/int' (BUG-1 fix).
+        if (addressStr == null || addressStr.isEmpty()) {
+            if (dataType != null) {
+                return Response.ok(JsonHelper.mapOf("exists", true,
+                        "type_name", typeName,
+                        "category", dataType.getCategoryPath().getPath(),
+                        "size", dataType.getLength()));
+            }
+            return Response.ok(JsonHelper.mapOf("exists", false, "type_name", typeName));
+        }
 
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) return Response.text(ServiceUtils.getLastParseError());
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
             if (dataType == null) {
                 return Response.text("Data type not found: " + typeName);

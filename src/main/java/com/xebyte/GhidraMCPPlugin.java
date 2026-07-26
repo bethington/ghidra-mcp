@@ -669,7 +669,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
             "/batch_apply_documentation", "/batch_set_variable_types", "/check_connection",
             "/exit_ghidra", "/get_current_address", "/get_current_function",
-            "/get_current_selection", "/get_data_type_size", "/get_version",
+            "/get_current_selection", "/get_version",
             "/mcp/health", "/mcp/schema", "/open_project", "/project/info",
             "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
             "/server/admin/terminate_checkout", "/server/admin/users", "/server/authenticate",
@@ -811,40 +811,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 || Boolean.parseBoolean(String.valueOf(params.get("headless")));
             String programToLaunch = params.get("program") != null ? params.get("program").toString() : null;
             sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
-        }));
-
-        // GET_DATA_TYPE_SIZE - Get the size in bytes of a data type (not yet in service layer)
-        server.createContext("/get_data_type_size", safeHandler(exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String typeName = qparams.get("type_name");
-
-            if (typeName == null || typeName.isEmpty()) {
-                sendResponse(exchange, "{\"error\": \"type_name parameter is required\"}");
-                return;
-            }
-
-            Program program = getCurrentProgram();
-            if (program == null) {
-                sendResponse(exchange, "{\"error\": \"No program open\"}");
-                return;
-            }
-
-            DataType dt = resolveDataType(program.getDataTypeManager(), typeName);
-            if (dt == null) {
-                sendResponse(exchange, "{\"error\": \"Data type not found: " + typeName + "\"}");
-                return;
-            }
-
-            String category = dt.getCategoryPath().toString();
-            if (category.equals("/")) {
-                category = "builtin";
-            }
-
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"type_name\": \"").append(dt.getName()).append("\", ");
-            sb.append("\"size\": ").append(dt.getLength()).append(", ");
-            sb.append("\"category\": \"").append(category.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"}");
-            sendResponse(exchange, sb.toString());
         }));
 
         // BATCH_SET_VARIABLE_TYPES - Set types for multiple variables (uses local optimized method)
@@ -1205,7 +1171,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     private String renameFunction(String oldName, String newName, String programName) {
-        return functionService.renameFunction(oldName, newName, programName).toJson();
+        return functionService.renameFunctionByAddress(oldName, newName, programName).toJson();
     }
 
     private String renameDataAtAddress(String addressStr, String newName, String programName) {
@@ -3378,13 +3344,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
         return dataTypeService.validateFunctionPrototype(functionAddress, prototype, callingConvention).toJson();
-    }
-
-    /**
-     * NEW v1.6.0: Check if data type exists in type manager
-     */
-    private String validateDataTypeExists(String typeName) {
-        return dataTypeService.validateDataTypeExists(typeName).toJson();
     }
 
     /**
