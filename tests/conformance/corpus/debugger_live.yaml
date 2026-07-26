@@ -1,0 +1,172 @@
+# Debugger conformance corpus (Phase 2 fixture).
+#
+# Drives Ghidra's live TraceRmi debugger surface through actual MCP calls --
+# tools/list + tools/call -- not the raw HTTP harness in
+# tools/setup/ghidra.py's run_debugger_live_test, which proves the backend
+# works but exercises the plugin's HTTP routes directly, not the MCP
+# protocol layer this suite exists to cover.
+#
+# Opt-in tier: launching a live debug session takes real time and needs a
+# working dbgeng/WDK backend, so `--tier debugger` must be requested
+# explicitly. It is never included in the default combined run (see
+# run_conformance.py's tier filter, same treatment as `destructive`).
+#
+# Scope: the 13 debugger_* tools that don't need a dynamic (post-ASLR)
+# address as an argument. set_breakpoint, remove_breakpoint, read_memory,
+# static_to_dynamic, and dynamic_to_static all take an address that only
+# exists once the target is loaded and shifts on every single launch --
+# confirmed live: BenchmarkDebug.exe's static image base 0x00400000 loads at
+# a randomized runtime base (observed 0x00c20000, will differ next launch).
+# This YAML format has no mechanism to feed one case's response into a later
+# case's args, so those 5 tools remain skipped pending that mechanism --
+# tracked in project memory as a follow-up, not silently dropped.
+#
+# Sequencing matters here, unusually: cases run in file order (top to
+# bottom), and later cases depend on earlier ones leaving a live session in
+# place. debugger_launch must run first. debugger_resume must run last --
+# BenchmarkDebug.exe is launched with `--seconds 180` and self-exits once
+# running, and leaving it stopped instead is exactly how a stuck,
+# taskkill-proof process was found earlier (see feedback_graceful_ghidra_
+# lifecycle / project_mcp_response_contract memory).
+#
+# Tool names: several of these collide with a bridge-side static proxy tool
+# of the same short name that forwards to the *separate* standalone
+# debugger server (python -m debugger, port 8099) -- an entirely different
+# subsystem from the in-process TraceRmi surface this corpus drives.
+# EndpointsJsonParityTest's schema disambiguates the collision with a `_2`
+# suffix on the in-process one: status_2, modules_2, registers_2,
+# stack_trace_2, list_breakpoints_2, step_into_2, step_over_2. Tools with no
+# name collision (launch, traces, launch_offers, resume, interrupt,
+# step_out) keep their plain name. Confirmed live: calling the plain name
+# for a colliding tool returns {"error": "Debugger server not running at
+# http://127.0.0.1:8099 ..."} even with a real TraceRmi session active --
+# that error is the signature of having picked the wrong one.
+
+defaults:
+  timeout: 60
+
+tool_cases:
+  - tool: debugger_launch
+    name: live_launch
+    tier: debugger
+    snapshot: false
+    timeout: 120
+    args:
+      executable_path: '{REPO_ROOT}\fun-doc\benchmark\build\BenchmarkDebug.exe'
+      args: "--seconds 180"
+      cwd: '{REPO_ROOT}\fun-doc\benchmark\build'
+      timeout_seconds: 90
+      program: "BenchmarkDebug.exe"
+      offer: "BATCH_FILE:local-dbgeng.bat"
+    assert:
+      no_error: true
+      json_keys: ["status", "trace_name"]
+
+  - tool: debugger_status_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+      json_equals: { debugger_active: true, trace_active: true, target_connected: true }
+
+  - tool: debugger_traces
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+      contains: ["BenchmarkDebug"]
+
+  - tool: debugger_modules_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+      contains: ["BenchmarkDebug.exe"]
+
+  - tool: debugger_registers_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+      json_keys: ["RIP", "RSP", "RAX"]
+
+  - tool: debugger_stack_trace_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { depth: 8 }
+    assert:
+      no_error: true
+      nonempty: true
+
+  - tool: debugger_list_breakpoints_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+
+  - tool: debugger_launch_offers
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { program: "BenchmarkDebug.exe" }
+    assert:
+      no_error: true
+      contains: ["dbgeng"]
+
+  - tool: debugger_step_into_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+
+  - tool: debugger_step_over_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+
+  - tool: debugger_step_out
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+
+  # No assertion beyond MCP-level success/failure: whether interrupt errors
+  # ("already stopped") or succeeds both indicate correct, expected
+  # behavior depending on the exact execution state left by the steps
+  # above, and this suite has no way to know which without an address-aware
+  # step-by-step trace of its own.
+  - tool: debugger_interrupt
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert: {}
+
+  # Always last: leave the target running rather than stopped. Launched
+  # with --seconds 180, it self-exits once running -- stopped is exactly
+  # the state that left a taskkill-proof zombie process behind before.
+  - tool: debugger_resume
+    name: live
+    tier: debugger
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
