@@ -40,12 +40,12 @@ endpoint_smoke:
     assert:
       type: "lines"
       min_lines: 4
-      contains: [".text:", ".rdata:", ".data:"]
+      contains: [".text", ".rdata", ".data"]
 
   - endpoint: "/get_metadata"
     assert:
       type: "text"
-      contains: ["Architecture: x86", "Function Count:", "Total Memory Size:"]
+      contains: ["\"architecture\": \"x86\"", "function_count", "total_memory_size"]
 
   - endpoint: "/get_entry_points"
     assert:

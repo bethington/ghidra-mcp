@@ -1076,7 +1076,16 @@ def _list_benchmark_exports(repo_root: Path, mcp_url: str) -> list[tuple[str, st
     )
     _ensure_mcp_ok("/list_exports", payload)
     exports: list[tuple[str, str]] = []
-    if isinstance(payload, str):
+    if isinstance(payload, dict):
+        # 6.0.0 response contract: {"exports": [{"name", "address"}], "count", ...}
+        for export in payload.get("exports") or []:
+            if not isinstance(export, dict):
+                continue
+            name = str(export.get("name") or "")
+            address = export.get("address")
+            if name and address:
+                exports.append((name, str(address)))
+    elif isinstance(payload, str):
         for line in payload.splitlines():
             match = re.match(r"(.+?)\s+->\s+([0-9a-fA-Fx]+)\s*$", line.strip())
             if match:
@@ -1612,7 +1621,31 @@ def _bench_text(parsed: object) -> str:
     return str(parsed)
 
 
+def _bench_envelope_items(parsed: object) -> list | None:
+    """Items from a 6.0.0 list-shaped response, or None if it isn't one.
+
+    The contract is {"<plural>": [...], "count", ...}. Rather than hardcode
+    every plural key, find the single list-valued key alongside a "count" --
+    that combination only occurs in the list envelope.
+    """
+    if not isinstance(parsed, dict) or "count" not in parsed:
+        return None
+    list_keys = [k for k, v in parsed.items() if isinstance(v, list)]
+    if len(list_keys) != 1:
+        return None
+    return parsed[list_keys[0]]
+
+
 def _bench_lines(parsed: object) -> list[str]:
+    """One line per logical item.
+
+    Post-6.0.0 the list tools return records, so "lines" means "items": each
+    record is rendered compactly so `contains` needles still match field values
+    and `min_lines` still counts results.
+    """
+    items = _bench_envelope_items(parsed)
+    if items is not None:
+        return [item if isinstance(item, str) else json.dumps(item) for item in items]
     text = _bench_text(parsed)
     return [line for line in text.splitlines() if line.strip()]
 
@@ -1623,13 +1656,16 @@ def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str
     p_query = {"program": program_path}
 
     _, meta = _bench_get(repo_root, mcp_url, "/get_metadata", p_query)
-    meta_text = _bench_text(meta)
-    if "architecture" in prog and f"Architecture: {prog['architecture']}" not in meta_text:
-        failures.append(f"program.architecture: expected 'Architecture: {prog['architecture']}' in /get_metadata; got snippet: {meta_text[:120]!r}")
-    if "language" in prog and prog["language"] not in meta_text:
-        failures.append(f"program.language: expected '{prog['language']}' in /get_metadata; got snippet: {meta_text[:120]!r}")
-    if "compiler" in prog and f"Compiler: {prog['compiler']}" not in meta_text:
-        failures.append(f"program.compiler: expected 'Compiler: {prog['compiler']}' in /get_metadata")
+    meta_fields = meta if isinstance(meta, dict) else {}
+    for key, field in (("architecture", "architecture"),
+                       ("language", "language"),
+                       ("compiler", "compiler")):
+        if key not in prog:
+            continue
+        actual = str(meta_fields.get(field, ""))
+        if str(prog[key]) != actual:
+            failures.append(
+                f"program.{key}: expected {prog[key]!r} from /get_metadata.{field}; got {actual!r}")
 
     if "function_count_min" in prog:
         _, fc = _bench_get(repo_root, mcp_url, "/get_function_count", p_query)
@@ -1645,11 +1681,15 @@ def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str
 
     if "segments" in prog:
         _, segs = _bench_get(repo_root, mcp_url, "/list_segments", p_query)
-        seg_text = _bench_text(segs)
+        seg_names = {
+            item.get("name") for item in (_bench_envelope_items(segs) or [])
+            if isinstance(item, dict)
+        }
         for spec in prog["segments"]:
-            need = spec["name"] + ":"
-            if need not in seg_text:
-                failures.append(f"program.segments: expected '{need}' in /list_segments")
+            if spec["name"] not in seg_names:
+                failures.append(
+                    f"program.segments: expected a segment named {spec['name']!r}; "
+                    f"got {sorted(n for n in seg_names if n)}")
 
     if "must_contain_strings" in prog:
         _, strs = _bench_get(repo_root, mcp_url, "/list_strings", p_query)

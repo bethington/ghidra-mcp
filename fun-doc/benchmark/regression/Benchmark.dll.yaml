@@ -108,7 +108,7 @@ endpoint_smoke:
     assert:
       type: "lines"
       min_lines: 4
-      contains: [".text:", ".rdata:", ".data:"]
+      contains: [".text", ".rdata", ".data"]
 
   - endpoint: "/list_strings"
     assert:
@@ -164,7 +164,7 @@ endpoint_smoke:
   - endpoint: "/get_metadata"
     assert:
       type: "text"
-      contains: ["Architecture: x86", "Function Count:", "Compiler: windows"]
+      contains: ["\"architecture\": \"x86\"", "function_count", "\"compiler\": \"windows\""]
 
   - endpoint: "/get_address_spaces"
     assert:
