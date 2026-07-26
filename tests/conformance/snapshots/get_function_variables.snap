@@ -1,4 +1,26 @@
-Error executing tool get_function_variables: 1 validation error for get_function_variablesArguments
-limit
-  Input should be a valid string [type=string_type, input_value=5, input_type=int]
-    For further information visit http<PATH>//errors.pydantic.dev/2.13/v/string_type
+{
+  "function_address": "10001000",
+  "function_name": "calc_crc16",
+  "locals": [],
+  "parameters": [
+    {
+      "name": "param_1",
+      "needs_rename": true,
+      "needs_type": false,
+      "ordinal": 0,
+      "storage": "Stack[0x4]:4",
+      "suggested_prefix": "n",
+      "type": "int"
+    },
+    {
+      "name": "param_2",
+      "needs_rename": true,
+      "needs_type": false,
+      "ordinal": 1,
+      "storage": "Stack[0x8]:4",
+      "suggested_prefix": "dw",
+      "type": "uint"
+    }
+  ],
+  "total_locals": 0
+}

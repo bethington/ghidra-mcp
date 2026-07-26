@@ -3672,7 +3672,7 @@
           "name": "limit",
           "required": false,
           "source": "query",
-          "type": "string"
+          "type": "integer"
         },
         {
           "default": "all",

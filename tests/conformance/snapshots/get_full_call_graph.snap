@@ -1,5 +1,26 @@
-FUN_1000130e@1000130e -> __SEH_prolog4@10001b60
-dllmain_crt_dispatch@100012bb -> FUN_10001418@10001418
-dllmain_crt_dispatch@100012bb -> FUN_1000130e@1000130e
-dllmain_crt_dispatch@100012bb -> ___scrt_dllmain_crt_thread_attach@100017b1
-dllmain_crt_dispatch@100012bb -> ___scrt_dllmain_crt_thread_detach@100017d0
+{
+  "count": 5,
+  "edges": [
+    {
+      "callee": "__SEH_prolog4@10001b60",
+      "caller": "FUN_1000130e@1000130e"
+    },
+    {
+      "callee": "FUN_10001418@10001418",
+      "caller": "dllmain_crt_dispatch@100012bb"
+    },
+    {
+      "callee": "FUN_1000130e@1000130e",
+      "caller": "dllmain_crt_dispatch@100012bb"
+    },
+    {
+      "callee": "___scrt_dllmain_crt_thread_attach@100017b1",
+      "caller": "dllmain_crt_dispatch@100012bb"
+    },
+    {
+      "callee": "___scrt_dllmain_crt_thread_detach@100017d0",
+      "caller": "dllmain_crt_dispatch@100012bb"
+    }
+  ],
+  "format": "edges"
+}

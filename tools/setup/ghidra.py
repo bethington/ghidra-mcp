@@ -1704,13 +1704,17 @@ def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
     addr = entry["address"]
     p_query = {"program": program_path, "address": addr}
 
-    # /get_function_by_address gives us the canonical name + thunk flag in text form.
+    # /get_function_by_address returns a record: {name, address, signature,
+    # entry_point, body_start, body_end}.
     _, by_addr = _bench_get(repo_root, mcp_url, "/get_function_by_address", p_query)
-    by_addr_text = _bench_text(by_addr)
+    by_addr_fields = by_addr if isinstance(by_addr, dict) else {}
+    resolved = bool(by_addr_fields.get("name")) and "error" not in by_addr_fields
     if "name" in entry:
-        needle = f"Function: {entry['name']} at"
-        if needle not in by_addr_text:
-            failures.append(f"function@{addr}.name: expected '{needle}' in /get_function_by_address; got: {by_addr_text[:160]!r}")
+        actual_name = str(by_addr_fields.get("name", ""))
+        if actual_name != entry["name"]:
+            failures.append(
+                f"function@{addr}.name: expected {entry['name']!r} from "
+                f"/get_function_by_address.name; got {actual_name!r}")
 
     # /get_function_signature returns JSON with structural fields.
     _, sig = _bench_get(repo_root, mcp_url, "/get_function_signature", p_query)
@@ -1744,24 +1748,25 @@ def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
             if s not in actual:
                 failures.append(f"function@{addr}.callee_names_contains: expected {s!r} in /get_function_signature.callee_names")
     if "return_type_contains" in entry:
-        # Return type appears in the by_addr "Signature:" line.
-        sig_line = ""
-        for line in by_addr_text.splitlines():
-            if line.strip().startswith("Signature:"):
-                sig_line = line
-                break
-        if entry["return_type_contains"] not in sig_line:
-            failures.append(f"function@{addr}.return_type_contains: expected {entry['return_type_contains']!r} in 'Signature:' line; got {sig_line!r}")
+        signature = str(by_addr_fields.get("signature", ""))
+        if entry["return_type_contains"] not in signature:
+            failures.append(
+                f"function@{addr}.return_type_contains: expected "
+                f"{entry['return_type_contains']!r} in /get_function_by_address.signature; "
+                f"got {signature!r}")
     if "is_thunk" in entry:
-        # /get_function_by_address doesn't expose thunk explicitly in text;
-        # rely on the signature presence as a proxy. Treat is_thunk:false
-        # as "we got a signature" — sufficient for the user-authored functions.
-        if entry["is_thunk"] is False and not by_addr_text.strip().startswith("Function:"):
+        # The record has no explicit thunk flag; "did it resolve at all" is the
+        # same proxy the text form used, just read from a field instead of a
+        # line prefix.
+        if entry["is_thunk"] is False and not resolved:
             failures.append(f"function@{addr}.is_thunk=false: function did not resolve via /get_function_by_address")
     if "signature_contains" in entry:
+        signature = str(by_addr_fields.get("signature", ""))
         for needle in entry["signature_contains"]:
-            if needle not in by_addr_text:
-                failures.append(f"function@{addr}.signature_contains: expected {needle!r} in /get_function_by_address")
+            if needle not in signature:
+                failures.append(
+                    f"function@{addr}.signature_contains: expected {needle!r} in "
+                    f"/get_function_by_address.signature; got {signature!r}")
 
     if entry.get("xref_count_to_min", 0) > 0:
         _, xrefs = _bench_get(repo_root, mcp_url, "/get_xrefs_to", p_query)

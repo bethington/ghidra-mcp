@@ -145,7 +145,10 @@ endpoint_smoke:
   - endpoint: "/list_calling_conventions"
     assert:
       type: "lines"
-      min_lines: 5
+      # 4 conventions for x86:LE:32:default. The old text form carried an
+      # "Available Calling Conventions (N):" header plus a blank line, so the
+      # pre-6.0.0 line count was inflated by 2.
+      min_lines: 4
       contains: ["__cdecl", "__stdcall", "__fastcall"]
 
   - endpoint: "/list_classes"

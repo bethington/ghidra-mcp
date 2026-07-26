@@ -1,5 +1,43 @@
-IMAGE_DOS_HEADER_10000000 @ 10000000 [IMAGE_DOS_HEADER] (128 bytes)
-DAT_10000080 @ 10000080 [IMAGE_RICH_HEADER] (112 bytes)
-IMAGE_NT_HEADERS32_10000108 @ 10000108 [IMAGE_NT_HEADERS32] (248 bytes)
-DAT_10000200 @ 10000200 [IMAGE_SECTION_HEADER] (40 bytes)
-DAT_10000228 @ 10000228 [IMAGE_SECTION_HEADER] (40 bytes)
+{
+  "count": 5,
+  "data_items": [
+    {
+      "address": "10000000",
+      "block": "Headers",
+      "label": "IMAGE_DOS_HEADER_10000000",
+      "size": 128,
+      "type": "IMAGE_DOS_HEADER"
+    },
+    {
+      "address": "10000080",
+      "block": "Headers",
+      "label": "DAT_10000080",
+      "size": 112,
+      "type": "IMAGE_RICH_HEADER"
+    },
+    {
+      "address": "10000108",
+      "block": "Headers",
+      "label": "IMAGE_NT_HEADERS32_10000108",
+      "size": 248,
+      "type": "IMAGE_NT_HEADERS32"
+    },
+    {
+      "address": "10000200",
+      "block": "Headers",
+      "label": "DAT_10000200",
+      "size": 40,
+      "type": "IMAGE_SECTION_HEADER"
+    },
+    {
+      "address": "10000228",
+      "block": "Headers",
+      "label": "DAT_10000228",
+      "size": 40,
+      "type": "IMAGE_SECTION_HEADER"
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 2957
+}

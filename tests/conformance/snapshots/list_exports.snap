@@ -1,5 +1,28 @@
-Ordinal_2 -> 10001000
-calc_crc16 -> 10001000
-_calc_crc16@8 -> 10001000
-Ordinal_3 -> 10001130
-compute_gcd -> 10001130
+{
+  "count": 5,
+  "exports": [
+    {
+      "address": "10001000",
+      "name": "Ordinal_2"
+    },
+    {
+      "address": "10001000",
+      "name": "calc_crc16"
+    },
+    {
+      "address": "10001000",
+      "name": "_calc_crc16@8"
+    },
+    {
+      "address": "10001130",
+      "name": "Ordinal_3"
+    },
+    {
+      "address": "10001130",
+      "name": "compute_gcd"
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 28
+}

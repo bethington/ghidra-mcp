@@ -1,4 +1,24 @@
-From 10000134 [DATA]
-From 1000020c [DATA]
-From 100139ac [DATA]
-From Entry Point [EXTERNAL]
+{
+  "count": 4,
+  "limit": 5,
+  "offset": 0,
+  "references": [
+    {
+      "from_address": "10000134",
+      "type": "DATA"
+    },
+    {
+      "from_address": "1000020c",
+      "type": "DATA"
+    },
+    {
+      "from_address": "100139ac",
+      "type": "DATA"
+    },
+    {
+      "from_address": "Entry Point",
+      "type": "EXTERNAL"
+    }
+  ],
+  "total": 4
+}

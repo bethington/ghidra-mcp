@@ -1,5 +1,13 @@
-<lambda_03fcd07e894ec930e3f35da366ca99d6> | demangler | 1 bytes | /Demangler/<lambda_03fcd07e894ec930e3f35da366ca99d6>
-<lambda_03fcd07e894ec930e3f35da366ca99d6> * | demangler | 4 bytes | /Demangler/<lambda_03fcd07e894ec930e3f35da366ca99d6> *
-<lambda_15ade71b0218206bbe3333a0c9b79046> | demangler | 1 bytes | /Demangler/<lambda_15ade71b0218206bbe3333a0c9b79046>
-<lambda_15ade71b0218206bbe3333a0c9b79046> * | demangler | 4 bytes | /Demangler/<lambda_15ade71b0218206bbe3333a0c9b79046> *
-<lambda_207f2d024fc103971653565357d6cd41> | demangler | 1 bytes | /Demangler/<lambda_207f2d024fc103971653565357d6cd41>
+{
+  "count": 5,
+  "data_types": [
+    "<lambda_03fcd07e894ec930e3f35da366ca99d6> | demangler | 1 bytes | /Demangler/<lambda_03fcd07e894ec930e3f35da366ca99d6>",
+    "<lambda_03fcd07e894ec930e3f35da366ca99d6> * | demangler | 4 bytes | /Demangler/<lambda_03fcd07e894ec930e3f35da366ca99d6> *",
+    "<lambda_15ade71b0218206bbe3333a0c9b79046> | demangler | 1 bytes | /Demangler/<lambda_15ade71b0218206bbe3333a0c9b79046>",
+    "<lambda_15ade71b0218206bbe3333a0c9b79046> * | demangler | 4 bytes | /Demangler/<lambda_15ade71b0218206bbe3333a0c9b79046> *",
+    "<lambda_207f2d024fc103971653565357d6cd41> | demangler | 1 bytes | /Demangler/<lambda_207f2d024fc103971653565357d6cd41>"
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 260
+}

@@ -1,5 +1,13 @@
-WinDef.h
-PE
-mbstring.h
-ehdata.h
-ehdata.h/functions
+{
+  "categories": [
+    "WinDef.h",
+    "PE",
+    "mbstring.h",
+    "ehdata.h",
+    "ehdata.h/functions"
+  ],
+  "count": 5,
+  "limit": 5,
+  "offset": 0,
+  "total": 13
+}
