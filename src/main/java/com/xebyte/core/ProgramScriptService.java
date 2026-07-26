@@ -102,17 +102,6 @@ public class ProgramScriptService {
         return null;
     }
 
-    // AbstractAnalyzer options are keyed by the analyzer's own display name
-    // under Program.ANALYSIS_PROPERTIES. "PDB Universal" logs a warning on
-    // essentially every binary this MCP server analyzes -- synthetic
-    // benchmark fixtures and closed-source game DLLs alike never have a
-    // matching PDB -- and Ghidra's AutoAnalysisPlugin pops an unconditional
-    // "Auto Analysis Summary" dialog (no suppress option exists) whenever the
-    // analysis message log has ANY entries. That dialog blocks the Swing
-    // event thread, and with it every other MCP request, until a human
-    // dismisses it. See runAutoAnalysisAndPersistFlags.
-    private static final String NOISY_PDB_ANALYZER_OPTION = "PDB Universal";
-
     private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
         if (program == null) {
             return false;
@@ -134,35 +123,11 @@ public class ProgramScriptService {
             boolean txOk = false;
             try {
                 ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
-
-                // Disable the noisy PDB analyzer for just this automated run
-                // (see NOISY_PDB_ANALYZER_OPTION) and restore it afterward,
-                // so interactive/GUI-triggered analysis still gets normal PDB
-                // matching -- this only silences the analysis-summary popup
-                // for the auto_analyze=true API path.
-                Options analysisOptions = program.getOptions(Program.ANALYSIS_PROPERTIES);
-                boolean pdbWasEnabled = false;
-                try {
-                    pdbWasEnabled = analysisOptions.getBoolean(NOISY_PDB_ANALYZER_OPTION, false);
-                    if (pdbWasEnabled) {
-                        analysisOptions.setBoolean(NOISY_PDB_ANALYZER_OPTION, false);
-                    }
-                } catch (Exception ignored) {
-                    // Option not registered on this program/language -- nothing to silence.
-                    pdbWasEnabled = false;
+                if (force) {
+                    mgr.reAnalyzeAll(null);
                 }
-
-                try {
-                    if (force) {
-                        mgr.reAnalyzeAll(null);
-                    }
-                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                    mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
-                } finally {
-                    if (pdbWasEnabled) {
-                        analysisOptions.setBoolean(NOISY_PDB_ANALYZER_OPTION, true);
-                    }
-                }
+                mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
