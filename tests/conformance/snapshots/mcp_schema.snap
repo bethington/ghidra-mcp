@@ -6525,6 +6525,8 @@
           "type": "string"
         },
         {
+          "allow_empty": true,
+          "description": "Comment text. An empty string clears this comment kind at the address.",
           "name": "comment",
           "required": true,
           "source": "body",

@@ -1,7 +1,8 @@
 {
   "address": "10001000",
-  "comment": "__stdcall calc_crc16,8",
+  "comment": "0x1000  2  _calc_crc16@8",
+  "eol": "",
   "has_comment": true,
-  "plate": "__stdcall calc_crc16,8",
+  "plate": "",
   "pre": "0x1000  2  _calc_crc16@8"
 }

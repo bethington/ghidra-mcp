@@ -58,30 +58,34 @@ tool_cases:
         plate: "CONFORMANCE PLATE MARKER"
         eol: "CONFORMANCE EOL MARKER"
 
-  # FINDING (2026-07-26): a comment cannot be cleared through MCP.
-  # CommentService only rejects comment == null, but an empty-string argument
-  # never reaches Java as "" -- it is dropped before binding and arrives as
-  # null, so the tool answers "Comment text is required". The operator docs
-  # claim an empty comment clears that kind; it does not.
-  # These cases pin the ACTUAL behavior so the gap is visible rather than
-  # asserted-away. When clearing is fixed, they should flip to no_error.
-  # Consequence: the markers written above persist until the next
-  # reset_benchmark_fixture. Acceptable on a disposable benchmark binary.
+  # Clearing: an empty comment removes that kind. This was unreachable through
+  # MCP until @Param(allowEmpty = true) -- the bridge dropped "" before dispatch
+  # so it arrived as null and the tool answered "Comment text is required".
+  # The read-back is the point: a write tool that returns success without
+  # writing is exactly what a snapshot cannot catch.
   - tool: set_comment
-    name: clear_plate_is_rejected
+    name: clear_plate
     tier: write
     snapshot: false
     args: { address: "0x10001000", type: "plate", comment: "" }
     assert:
-      error_contains: ["Comment text is required"]
+      no_error: true
 
   - tool: set_comment
-    name: clear_eol_is_rejected
+    name: clear_eol
     tier: write
     snapshot: false
     args: { address: "0x10001000", type: "eol", comment: "" }
     assert:
-      error_contains: ["Comment text is required"]
+      no_error: true
+
+  - tool: get_comment
+    name: readback_cleared
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      not_contains: ["CONFORMANCE PLATE MARKER", "CONFORMANCE EOL MARKER"]
 
   # ---- function tags: add_function_tag absorbed the batch form -------------
   - tool: add_function_tag
