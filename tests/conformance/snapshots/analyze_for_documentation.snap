@@ -85,17 +85,17 @@
     },
     {
       "is_phantom": false,
-      "name": "param_1",
-      "storage": "Stack[0x4]:4",
-      "type": "int"
-    },
-    {
-      "is_phantom": false,
       "name": "uVar6",
       "needs_rename": true,
       "storage": "register:0000001c:4",
       "suggested_prefix": "dw",
       "type": "uint"
+    },
+    {
+      "is_phantom": false,
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
     },
     {
       "is_phantom": false,

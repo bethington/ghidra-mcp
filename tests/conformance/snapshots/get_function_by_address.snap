@@ -1,4 +1,8 @@
-Function: calc_crc16 at 10001000
-Signature: ushort __stdcall calc_crc16(int param_1, uint param_2)
-Entry: 10001000
-Body: 10001000 - 10001119
+{
+  "address": "10001000",
+  "body_end": "10001119",
+  "body_start": "10001000",
+  "entry_point": "10001000",
+  "name": "calc_crc16",
+  "signature": "ushort calc_crc16(int param_1, uint param_2)"
+}

@@ -409,16 +409,16 @@
     {
       "in_decompiled_code": true,
       "is_phantom": false,
-      "name": "param_1",
-      "storage": "Stack[0x4]:4",
-      "type": "int"
+      "name": "uVar6",
+      "storage": "register:0000001c:4",
+      "type": "uint"
     },
     {
       "in_decompiled_code": true,
       "is_phantom": false,
-      "name": "uVar6",
-      "storage": "register:0000001c:4",
-      "type": "uint"
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
     },
     {
       "in_decompiled_code": true,

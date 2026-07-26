@@ -1,5 +1,13 @@
-calc_crc16
-FUN_10001120
-compute_gcd
-get_stat_list_flags
-get_stat_list_layer
+{
+  "count": 5,
+  "limit": 5,
+  "methods": [
+    "calc_crc16",
+    "FUN_10001120",
+    "compute_gcd",
+    "get_stat_list_flags",
+    "get_stat_list_layer"
+  ],
+  "offset": 0,
+  "total": 464
+}

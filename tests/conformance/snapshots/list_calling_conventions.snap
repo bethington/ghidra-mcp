@@ -1,6 +1,9 @@
-Available Calling Conventions (4):
-
-- __stdcall
-- __cdecl
-- __fastcall
-- __thiscall
+{
+  "calling_conventions": [
+    "__stdcall",
+    "__cdecl",
+    "__fastcall",
+    "__thiscall"
+  ],
+  "count": 4
+}

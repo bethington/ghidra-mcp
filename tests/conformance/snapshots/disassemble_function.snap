@@ -1,91 +1,369 @@
-10001000: PUSH EBX 
-10001001: MOV EBX,dword ptr [ESP + 0xc] 
-10001005: PUSH EBP 
-10001006: MOV EBP,dword ptr [ESP + 0xc] 
-1000100a: PUSH EDI 
-1000100b: XOR EDI,EDI 
-1000100d: MOV dword ptr [ESP + 0x10],0xffff 
-10001015: TEST EBX,EBX 
-10001017: JZ 0x1000110f 
-1000101d: PUSH ESI 
-1000101e: NOP 
-10001020: MOVZX EAX,byte ptr [EDI + EBP*0x1] 
-10001024: SHL AX,0x8 
-10001028: MOV SI,word ptr [ESP + 0x14] 
-1000102d: XOR SI,AX 
-10001030: MOV word ptr [ESP + 0x14],SI 
-10001035: MOV EAX,dword ptr [ESP + 0x14] 
-10001039: LEA ECX,[EAX + EAX*0x1] 
-1000103c: MOV EAX,ECX 
-1000103e: XOR EAX,0x1021 
-10001043: TEST SI,SI 
-10001046: MOVZX EDX,AX 
-10001049: MOVZX EAX,CX 
-1000104c: CMOVNS EDX,EAX 
-1000104f: MOVZX ESI,DX 
-10001052: LEA ECX,[ESI + ESI*0x1] 
-10001055: MOV EAX,ECX 
-10001057: XOR EAX,0x1021 
-1000105c: TEST SI,SI 
-1000105f: MOVZX EDX,AX 
-10001062: MOVZX EAX,CX 
-10001065: CMOVNS EDX,EAX 
-10001068: MOVZX ESI,DX 
-1000106b: LEA ECX,[ESI + ESI*0x1] 
-1000106e: MOV EAX,ECX 
-10001070: XOR EAX,0x1021 
-10001075: TEST SI,SI 
-10001078: MOVZX EDX,AX 
-1000107b: MOVZX EAX,CX 
-1000107e: CMOVNS EDX,EAX 
-10001081: MOVZX ESI,DX 
-10001084: LEA ECX,[ESI + ESI*0x1] 
-10001087: MOV EAX,ECX 
-10001089: XOR EAX,0x1021 
-1000108e: TEST SI,SI 
-10001091: MOVZX EDX,AX 
-10001094: MOVZX EAX,CX 
-10001097: CMOVNS EDX,EAX 
-1000109a: MOVZX ESI,DX 
-1000109d: LEA ECX,[ESI + ESI*0x1] 
-100010a0: MOV EAX,ECX 
-100010a2: XOR EAX,0x1021 
-100010a7: TEST SI,SI 
-100010aa: MOVZX EDX,AX 
-100010ad: MOVZX EAX,CX 
-100010b0: CMOVNS EDX,EAX 
-100010b3: MOVZX ESI,DX 
-100010b6: LEA ECX,[ESI + ESI*0x1] 
-100010b9: MOV EAX,ECX 
-100010bb: XOR EAX,0x1021 
-100010c0: TEST SI,SI 
-100010c3: MOVZX EDX,AX 
-100010c6: MOVZX EAX,CX 
-100010c9: CMOVNS EDX,EAX 
-100010cc: MOVZX ESI,DX 
-100010cf: LEA ECX,[ESI + ESI*0x1] 
-100010d2: MOV EAX,ECX 
-100010d4: XOR EAX,0x1021 
-100010d9: TEST SI,SI 
-100010dc: MOVZX EDX,AX 
-100010df: MOVZX EAX,CX 
-100010e2: CMOVNS EDX,EAX 
-100010e5: MOVZX ESI,DX 
-100010e8: LEA ECX,[ESI + ESI*0x1] 
-100010eb: MOV EAX,ECX 
-100010ed: XOR EAX,0x1021 
-100010f2: TEST SI,SI 
-100010f5: MOVZX EDX,AX 
-100010f8: MOVZX EAX,CX 
-100010fb: CMOVNS EDX,EAX 
-100010fe: INC EDI 
-100010ff: MOVZX EAX,DX 
-10001102: MOV dword ptr [ESP + 0x14],EAX 
-10001106: CMP EDI,EBX 
-10001108: JC 0x10001020 
-1000110e: POP ESI 
-1000110f: MOV AX,word ptr [ESP + 0x10] 
-10001114: POP EDI 
-10001115: POP EBP 
-10001116: POP EBX 
-10001117: RET 0x8
+{
+  "count": 91,
+  "instructions": [
+    {
+      "address": "10001000",
+      "instruction": "PUSH EBX"
+    },
+    {
+      "address": "10001001",
+      "instruction": "MOV EBX,dword ptr [ESP + 0xc]"
+    },
+    {
+      "address": "10001005",
+      "instruction": "PUSH EBP"
+    },
+    {
+      "address": "10001006",
+      "instruction": "MOV EBP,dword ptr [ESP + 0xc]"
+    },
+    {
+      "address": "1000100a",
+      "instruction": "PUSH EDI"
+    },
+    {
+      "address": "1000100b",
+      "instruction": "XOR EDI,EDI"
+    },
+    {
+      "address": "1000100d",
+      "instruction": "MOV dword ptr [ESP + 0x10],0xffff"
+    },
+    {
+      "address": "10001015",
+      "instruction": "TEST EBX,EBX"
+    },
+    {
+      "address": "10001017",
+      "instruction": "JZ 0x1000110f"
+    },
+    {
+      "address": "1000101d",
+      "instruction": "PUSH ESI"
+    },
+    {
+      "address": "1000101e",
+      "instruction": "NOP"
+    },
+    {
+      "address": "10001020",
+      "instruction": "MOVZX EAX,byte ptr [EDI + EBP*0x1]"
+    },
+    {
+      "address": "10001024",
+      "instruction": "SHL AX,0x8"
+    },
+    {
+      "address": "10001028",
+      "instruction": "MOV SI,word ptr [ESP + 0x14]"
+    },
+    {
+      "address": "1000102d",
+      "instruction": "XOR SI,AX"
+    },
+    {
+      "address": "10001030",
+      "instruction": "MOV word ptr [ESP + 0x14],SI"
+    },
+    {
+      "address": "10001035",
+      "instruction": "MOV EAX,dword ptr [ESP + 0x14]"
+    },
+    {
+      "address": "10001039",
+      "instruction": "LEA ECX,[EAX + EAX*0x1]"
+    },
+    {
+      "address": "1000103c",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "1000103e",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "10001043",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "10001046",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "10001049",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "1000104c",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "1000104f",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "10001052",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "10001055",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "10001057",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "1000105c",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "1000105f",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "10001062",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "10001065",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "10001068",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "1000106b",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "1000106e",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "10001070",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "10001075",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "10001078",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "1000107b",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "1000107e",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "10001081",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "10001084",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "10001087",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "10001089",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "1000108e",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "10001091",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "10001094",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "10001097",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "1000109a",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "1000109d",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "100010a0",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "100010a2",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "100010a7",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "100010aa",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "100010ad",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "100010b0",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "100010b3",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "100010b6",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "100010b9",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "100010bb",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "100010c0",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "100010c3",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "100010c6",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "100010c9",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "100010cc",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "100010cf",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "100010d2",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "100010d4",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "100010d9",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "100010dc",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "100010df",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "100010e2",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "100010e5",
+      "instruction": "MOVZX ESI,DX"
+    },
+    {
+      "address": "100010e8",
+      "instruction": "LEA ECX,[ESI + ESI*0x1]"
+    },
+    {
+      "address": "100010eb",
+      "instruction": "MOV EAX,ECX"
+    },
+    {
+      "address": "100010ed",
+      "instruction": "XOR EAX,0x1021"
+    },
+    {
+      "address": "100010f2",
+      "instruction": "TEST SI,SI"
+    },
+    {
+      "address": "100010f5",
+      "instruction": "MOVZX EDX,AX"
+    },
+    {
+      "address": "100010f8",
+      "instruction": "MOVZX EAX,CX"
+    },
+    {
+      "address": "100010fb",
+      "instruction": "CMOVNS EDX,EAX"
+    },
+    {
+      "address": "100010fe",
+      "instruction": "INC EDI"
+    },
+    {
+      "address": "100010ff",
+      "instruction": "MOVZX EAX,DX"
+    },
+    {
+      "address": "10001102",
+      "instruction": "MOV dword ptr [ESP + 0x14],EAX"
+    },
+    {
+      "address": "10001106",
+      "instruction": "CMP EDI,EBX"
+    },
+    {
+      "address": "10001108",
+      "instruction": "JC 0x10001020"
+    },
+    {
+      "address": "1000110e",
+      "instruction": "POP ESI"
+    },
+    {
+      "address": "1000110f",
+      "instruction": "MOV AX,word ptr [ESP + 0x10]"
+    },
+    {
+      "address": "10001114",
+      "instruction": "POP EDI"
+    },
+    {
+      "address": "10001115",
+      "instruction": "POP EBP"
+    },
+    {
+      "address": "10001116",
+      "instruction": "POP EBX"
+    },
+    {
+      "address": "10001117",
+      "instruction": "RET 0x8"
+    }
+  ]
+}

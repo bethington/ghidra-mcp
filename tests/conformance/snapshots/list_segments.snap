@@ -1,5 +1,58 @@
-Headers: 10000000 - 100003ff
-.text: 10001000 - 1000d9ff
-.rdata: 1000e000 - 100141ff
-.data: 10015000 - 100162db
-.fptable: 10017000 - 100171ff
+{
+  "count": 5,
+  "limit": 5,
+  "offset": 0,
+  "segments": [
+    {
+      "end": "100003ff",
+      "executable": false,
+      "initialized": true,
+      "name": "Headers",
+      "readable": true,
+      "size": 1024,
+      "start": "10000000",
+      "writable": false
+    },
+    {
+      "end": "1000d9ff",
+      "executable": true,
+      "initialized": true,
+      "name": ".text",
+      "readable": true,
+      "size": 51712,
+      "start": "10001000",
+      "writable": false
+    },
+    {
+      "end": "100141ff",
+      "executable": false,
+      "initialized": true,
+      "name": ".rdata",
+      "readable": true,
+      "size": 25088,
+      "start": "1000e000",
+      "writable": false
+    },
+    {
+      "end": "100162db",
+      "executable": false,
+      "initialized": true,
+      "name": ".data",
+      "readable": true,
+      "size": 4828,
+      "start": "10015000",
+      "writable": true
+    },
+    {
+      "end": "100171ff",
+      "executable": false,
+      "initialized": true,
+      "name": ".fptable",
+      "readable": true,
+      "size": 512,
+      "start": "10017000",
+      "writable": true
+    }
+  ],
+  "total": 7
+}

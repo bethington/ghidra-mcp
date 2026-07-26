@@ -1,29 +1,189 @@
-Ordinal_2 @ 10001000 [Label] [external entry]
-calc_crc16 @ 10001000 [Function] (2 params) [external entry]
-_calc_crc16@8 @ 10001000 [Label] [external entry]
-Ordinal_3 @ 10001130 [Label] [external entry]
-compute_gcd @ 10001130 [Function] (2 params) [external entry]
-_compute_gcd@8 @ 10001130 [Label] [external entry]
-Ordinal_5 @ 10001150 [Label] [external entry]
-get_stat_list_flags @ 10001150 [Function] (1 params) [external entry]
-_get_stat_list_flags@4 @ 10001150 [Label] [external entry]
-Ordinal_6 @ 10001170 [Label] [external entry]
-get_stat_list_layer @ 10001170 [Function] (1 params) [external entry]
-_get_stat_list_layer@4 @ 10001170 [Label] [external entry]
-Ordinal_7 @ 10001180 [Label] [external entry]
-get_stat_list_owner_guid @ 10001180 [Function] (1 params) [external entry]
-_get_stat_list_owner_guid@4 @ 10001180 [Label] [external entry]
-Ordinal_8 @ 100011a0 [Label] [external entry]
-get_stat_list_prev_link @ 100011a0 [Function] (1 params) [external entry]
-_get_stat_list_prev_link@4 @ 100011a0 [Label] [external entry]
-Ordinal_9 @ 100011c0 [Label] [external entry]
-stat_list_add @ 100011c0 [Function] (4 params) [external entry]
-_stat_list_add@16 @ 100011c0 [Label] [external entry]
-Ordinal_1 @ 10001210 [Label] [external entry]
-advance_parser_state @ 10001210 [Function] (2 params) [external entry]
-_advance_parser_state@8 @ 10001210 [Label] [external entry]
-Ordinal_4 @ 100012a0 [Label] [external entry]
-compute_str_len @ 100012a0 [Function] (1 params) [external entry]
-_compute_str_len@4 @ 100012a0 [Label] [external entry]
-entry @ 10001608 [Function] (3 params) [external entry]
-IMAGE_DOS_HEADER_10000000 @ 10000000 [Label] [program entry]
+{
+  "count": 29,
+  "entry_points": [
+    {
+      "address": "10001000",
+      "kind": "external_entry",
+      "name": "Ordinal_2",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001000",
+      "kind": "external_entry",
+      "name": "calc_crc16",
+      "param_count": 2,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001000",
+      "kind": "external_entry",
+      "name": "_calc_crc16@8",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001130",
+      "kind": "external_entry",
+      "name": "Ordinal_3",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001130",
+      "kind": "external_entry",
+      "name": "compute_gcd",
+      "param_count": 2,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001130",
+      "kind": "external_entry",
+      "name": "_compute_gcd@8",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001150",
+      "kind": "external_entry",
+      "name": "Ordinal_5",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001150",
+      "kind": "external_entry",
+      "name": "get_stat_list_flags",
+      "param_count": 1,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001150",
+      "kind": "external_entry",
+      "name": "_get_stat_list_flags@4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001170",
+      "kind": "external_entry",
+      "name": "Ordinal_6",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001170",
+      "kind": "external_entry",
+      "name": "get_stat_list_layer",
+      "param_count": 1,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001170",
+      "kind": "external_entry",
+      "name": "_get_stat_list_layer@4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001180",
+      "kind": "external_entry",
+      "name": "Ordinal_7",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001180",
+      "kind": "external_entry",
+      "name": "get_stat_list_owner_guid",
+      "param_count": 1,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001180",
+      "kind": "external_entry",
+      "name": "_get_stat_list_owner_guid@4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100011a0",
+      "kind": "external_entry",
+      "name": "Ordinal_8",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100011a0",
+      "kind": "external_entry",
+      "name": "get_stat_list_prev_link",
+      "param_count": 1,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "100011a0",
+      "kind": "external_entry",
+      "name": "_get_stat_list_prev_link@4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100011c0",
+      "kind": "external_entry",
+      "name": "Ordinal_9",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100011c0",
+      "kind": "external_entry",
+      "name": "stat_list_add",
+      "param_count": 4,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "100011c0",
+      "kind": "external_entry",
+      "name": "_stat_list_add@16",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001210",
+      "kind": "external_entry",
+      "name": "Ordinal_1",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001210",
+      "kind": "external_entry",
+      "name": "advance_parser_state",
+      "param_count": 2,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10001210",
+      "kind": "external_entry",
+      "name": "_advance_parser_state@8",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100012a0",
+      "kind": "external_entry",
+      "name": "Ordinal_4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "100012a0",
+      "kind": "external_entry",
+      "name": "compute_str_len",
+      "param_count": 1,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "100012a0",
+      "kind": "external_entry",
+      "name": "_compute_str_len@4",
+      "symbol_type": "Label"
+    },
+    {
+      "address": "10001608",
+      "kind": "external_entry",
+      "name": "entry",
+      "param_count": 3,
+      "symbol_type": "Function"
+    },
+    {
+      "address": "10000000",
+      "kind": "program_entry",
+      "name": "IMAGE_DOS_HEADER_10000000",
+      "symbol_type": "Label"
+    }
+  ]
+}

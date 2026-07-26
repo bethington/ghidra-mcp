@@ -1,5 +1,13 @@
-<lambda_ae742caa10f662c28703da3d2ea5e57e>
-<lambda_af42a3ee9806e9a7305d451646e05244>
-<lambda_f03950bc5685219e0bcd2087efbe011e>
-KERNEL32.DLL
-__FrameHandler3
+{
+  "classes": [
+    "<lambda_ae742caa10f662c28703da3d2ea5e57e>",
+    "<lambda_af42a3ee9806e9a7305d451646e05244>",
+    "<lambda_f03950bc5685219e0bcd2087efbe011e>",
+    "KERNEL32.DLL",
+    "__FrameHandler3"
+  ],
+  "count": 5,
+  "limit": 5,
+  "offset": 0,
+  "total": 17
+}

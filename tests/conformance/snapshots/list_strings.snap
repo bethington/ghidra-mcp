@@ -1,5 +1,33 @@
-1000e4f8: "__based("
-1000e504: "__cdecl"
-1000e50c: "__stdcall"
-1000e518: "__thiscall"
-1000e524: "__fastcall"
+{
+  "count": 5,
+  "limit": 5,
+  "offset": 0,
+  "strings": [
+    {
+      "address": "1000e4f8",
+      "length": 8,
+      "value": "__based("
+    },
+    {
+      "address": "1000e504",
+      "length": 7,
+      "value": "__cdecl"
+    },
+    {
+      "address": "1000e50c",
+      "length": 9,
+      "value": "__stdcall"
+    },
+    {
+      "address": "1000e518",
+      "length": 10,
+      "value": "__thiscall"
+    },
+    {
+      "address": "1000e524",
+      "length": 10,
+      "value": "__fastcall"
+    }
+  ],
+  "total": 280
+}

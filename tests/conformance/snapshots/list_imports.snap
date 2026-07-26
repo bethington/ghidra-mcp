@@ -1,22 +1,28 @@
-[
-  {
-    "address": "EXTERNAL:00000001",
-    "name": "QueryPerformanceCounter"
-  },
-  {
-    "address": "EXTERNAL:00000002",
-    "name": "GetCurrentProcessId"
-  },
-  {
-    "address": "EXTERNAL:00000003",
-    "name": "GetCurrentThreadId"
-  },
-  {
-    "address": "EXTERNAL:00000004",
-    "name": "GetSystemTimeAsFileTime"
-  },
-  {
-    "address": "EXTERNAL:00000005",
-    "name": "InitializeSListHead"
-  }
-]
+{
+  "count": 5,
+  "imports": [
+    {
+      "address": "EXTERNAL:00000001",
+      "name": "QueryPerformanceCounter"
+    },
+    {
+      "address": "EXTERNAL:00000002",
+      "name": "GetCurrentProcessId"
+    },
+    {
+      "address": "EXTERNAL:00000003",
+      "name": "GetCurrentThreadId"
+    },
+    {
+      "address": "EXTERNAL:00000004",
+      "name": "GetSystemTimeAsFileTime"
+    },
+    {
+      "address": "EXTERNAL:00000005",
+      "name": "InitializeSListHead"
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 71
+}

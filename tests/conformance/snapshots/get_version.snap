@@ -1,8 +1,8 @@
 {
-  "build_number": "20260726-032614",
-  "build_timestamp": "20260726-032614",
+  "build_number": "20260726-054342",
+  "build_timestamp": "20260726-054342",
   "endpoint_count": 235,
-  "full_version": "6.0.0 (build 20260726-032614, 20260726-032614)",
+  "full_version": "6.0.0 (build 20260726-054342, 20260726-054342)",
   "ghidra_version": "12.1.2",
   "java_version": "21.0.7",
   "plugin_name": "GhidraMCP",
