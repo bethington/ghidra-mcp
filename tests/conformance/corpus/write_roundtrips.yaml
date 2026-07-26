@@ -1,0 +1,247 @@
+# Write-tier round-trips against Benchmark.dll.
+#
+# Snapshots cannot prove a write happened. A snapshot passes as long as the
+# response text is unchanged, so a tool that stopped writing entirely -- while
+# still returning {"status": "success"} -- looks perfectly healthy. That is
+# precisely the failure a reimplementation produces, so it is precisely what
+# this file exists to catch.
+#
+# Each sequence is: write -> read back and assert the change took -> restore.
+# Cases run in file order, so the read-back sees the write.
+#
+# snapshot: false throughout. These assert MEANING, not shape, and their
+# responses legitimately differ run to run (addresses, generated names).
+#
+# Target: Benchmark.dll, built from fun-doc/benchmark/src and reset to pristine
+# by reset_benchmark_fixture. Never point this at a real RE target.
+
+defaults:
+  args:
+    program: "Benchmark.dll"
+  timeout: 60
+
+tool_cases:
+
+  # ---- comments: set_comment absorbed the plate/pre/eol family in 6.0.0 -----
+  - tool: set_comment
+    name: write_plate
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000", type: "plate", comment: "CONFORMANCE PLATE MARKER" }
+    assert:
+      no_error: true
+
+  - tool: get_comment
+    name: readback_plate
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_equals: { plate: "CONFORMANCE PLATE MARKER" }
+
+  - tool: set_comment
+    name: write_eol
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000", type: "eol", comment: "CONFORMANCE EOL MARKER" }
+    assert:
+      no_error: true
+
+  # Proves the kinds are independent: writing eol must not disturb plate.
+  - tool: get_comment
+    name: readback_both_kinds
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_equals:
+        plate: "CONFORMANCE PLATE MARKER"
+        eol: "CONFORMANCE EOL MARKER"
+
+  # FINDING (2026-07-26): a comment cannot be cleared through MCP.
+  # CommentService only rejects comment == null, but an empty-string argument
+  # never reaches Java as "" -- it is dropped before binding and arrives as
+  # null, so the tool answers "Comment text is required". The operator docs
+  # claim an empty comment clears that kind; it does not.
+  # These cases pin the ACTUAL behavior so the gap is visible rather than
+  # asserted-away. When clearing is fixed, they should flip to no_error.
+  # Consequence: the markers written above persist until the next
+  # reset_benchmark_fixture. Acceptable on a disposable benchmark binary.
+  - tool: set_comment
+    name: clear_plate_is_rejected
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000", type: "plate", comment: "" }
+    assert:
+      error_contains: ["Comment text is required"]
+
+  - tool: set_comment
+    name: clear_eol_is_rejected
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000", type: "eol", comment: "" }
+    assert:
+      error_contains: ["Comment text is required"]
+
+  # ---- function tags: add_function_tag absorbed the batch form -------------
+  - tool: add_function_tag
+    name: add_tag
+    tier: write
+    snapshot: false
+    args: { function: "0x10001000", tags: "CONFORMANCE_TAG" }
+    assert:
+      no_error: true
+
+  - tool: get_function_tags
+    name: readback_tag
+    tier: write
+    snapshot: false
+    args: { function: "0x10001000" }
+    assert:
+      contains: ["CONFORMANCE_TAG"]
+
+  - tool: remove_function_tag
+    name: remove_tag
+    tier: write
+    snapshot: false
+    args: { function: "0x10001000", tags: "CONFORMANCE_TAG" }
+    assert:
+      no_error: true
+
+  - tool: get_function_tags
+    name: readback_tag_removed
+    tier: write
+    snapshot: false
+    args: { function: "0x10001000" }
+    assert:
+      not_contains: ["CONFORMANCE_TAG"]
+
+  # ---- labels: create_label absorbed batch_create_labels -------------------
+  - tool: create_label
+    name: create
+    tier: write
+    snapshot: false
+    args: { address: "0x10001010", name: "conformance_probe_label" }
+    assert:
+      no_error: true
+
+  - tool: get_function_labels
+    name: readback_label
+    tier: write
+    snapshot: false
+    args: { name: "0x10001000" }
+    assert:
+      contains: ["conformance_probe_label"]
+
+  - tool: delete_label
+    name: delete
+    tier: write
+    snapshot: false
+    args: { address: "0x10001010", name: "conformance_probe_label" }
+    assert:
+      no_error: true
+
+  - tool: get_function_labels
+    name: readback_label_removed
+    tier: write
+    snapshot: false
+    args: { name: "0x10001000" }
+    assert:
+      not_contains: ["conformance_probe_label"]
+
+  # ---- function rename: rename_function absorbed rename_function_by_address
+  # old_name accepts a name OR an address, which is the merge worth pinning.
+  - tool: rename_function
+    name: rename_by_address
+    tier: write
+    snapshot: false
+    args: { old_name: "0x10001130", new_name: "ConformanceRenamedGcd" }
+    assert:
+      no_error: true
+
+  - tool: get_function_by_address
+    name: readback_rename
+    tier: write
+    snapshot: false
+    args: { address: "0x10001130" }
+    assert:
+      json_equals: { name: "ConformanceRenamedGcd" }
+
+  - tool: rename_function
+    name: rename_back_by_name
+    tier: write
+    snapshot: false
+    args: { old_name: "ConformanceRenamedGcd", new_name: "compute_gcd" }
+    assert:
+      no_error: true
+
+  - tool: get_function_by_address
+    name: readback_rename_restored
+    tier: write
+    snapshot: false
+    args: { address: "0x10001130" }
+    assert:
+      json_equals: { name: "compute_gcd" }
+
+  # ---- struct lifecycle ----------------------------------------------------
+  - tool: create_struct
+    name: create
+    tier: write
+    snapshot: false
+    args:
+      name: "ConformanceProbeStruct"
+      fields: '[{"name":"count","type":"uint"},{"name":"flag","type":"byte"}]'
+    assert:
+      no_error: true
+
+  - tool: get_struct_layout
+    name: readback_struct
+    tier: write
+    snapshot: false
+    args: { struct_name: "ConformanceProbeStruct" }
+    assert:
+      contains: ["ConformanceProbeStruct"]
+
+  - tool: delete_data_type
+    name: delete_struct
+    tier: write
+    snapshot: false
+    args: { type_name: "ConformanceProbeStruct" }
+    assert:
+      no_error: true
+
+  - tool: validate_data_type
+    name: readback_struct_deleted
+    tier: write
+    snapshot: false
+    args: { type_name: "ConformanceProbeStruct" }
+    assert:
+      json_equals: { exists: false }
+
+  # ---- bookmarks -----------------------------------------------------------
+  - tool: set_bookmark
+    name: create
+    tier: write
+    snapshot: false
+    args:
+      address: "0x10001000"
+      category: "Conformance"
+      comment: "conformance probe bookmark"
+    assert:
+      no_error: true
+
+  - tool: list_bookmarks
+    name: readback_bookmark
+    tier: write
+    snapshot: false
+    args: {}
+    assert:
+      contains: ["conformance probe bookmark"]
+
+  - tool: delete_bookmark
+    name: delete
+    tier: write
+    snapshot: false
+    args: { address: "0x10001000", category: "Conformance" }
+    assert:
+      no_error: true
