@@ -115,7 +115,7 @@ def run(program: str) -> dict:
         if ordn not in ORD_ADDR:
             continue   # un-exported (bench_LookupMonster) -> Phase 2 (needs FUN_ discovery)
         addr = ORD_ADDR[ordn]
-        disasm = str(fun_doc.ghidra_get("/disassemble_function",
+        disasm = fun_doc.disasm_text(fun_doc.ghidra_get("/disassemble_function",
                                         params={"address": addr, "program": program}))
         recovered = _facts_from_translators(name, disasm, abi_static)
         results[name] = {"address": addr, "shape": meta["shape"],

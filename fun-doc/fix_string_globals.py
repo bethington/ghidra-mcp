@@ -82,7 +82,11 @@ def list_all_globals():
     txt = gget("/list_globals", limit=20000,
                filter="all", type_filter="all", include_all_sections="false")
     if isinstance(txt, dict):
-        txt = txt.get("text") or txt.get("result") or str(txt)
+        # 6.0.0: {"globals": [...], "count", "total"}. Entries are still
+        # preformatted lines, so join them for LINE_RE below.
+        items = txt.get("globals")
+        txt = (chr(10).join(str(x) for x in items) if isinstance(items, list)
+               else txt.get("text") or txt.get("result") or "")
     out = []
     for m in LINE_RE.finditer(txt):
         out.append({"name": m["name"].strip(), "addr": m["addr"].lower(),

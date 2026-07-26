@@ -190,6 +190,18 @@ def check_oracle_alive(timeout: float = 3.0) -> bool:
 
 _CANDIDATE_ERR_RE = re.compile(r"candidates[\\/](\w+)\.cpp\((\d+)[,)]")
 _MSVC_ERR_LINE_RE = re.compile(r"error [A-Z]+\d+.*")
+# LNK2005 (duplicate symbol) references *.obj filenames, not `candidates\X.cpp(line,col)`
+# -- _CANDIDATE_ERR_RE never matches it, so a duplicate-symbol collision between two
+# candidates used to fall through to a blanket, unattributed "build_provider" failure
+# with NOTHING healed, poisoning the shared build for every other candidate on every
+# subsequent prove until a human noticed and fixed it by hand (confirmed live 2026-07-25:
+# a stray duplicate `GetByte0x94` between candidates/GetByte0x94.cpp and
+# candidates/unit_field_getters.cpp broke 16+ consecutive prove attempts across
+# unrelated functions before anyone caught it). Captures (dup_stem, symbol, orig_stem):
+# dup_stem's object is the one the linker was processing when it hit the redefinition,
+# orig_stem's object is where the symbol was first defined.
+_DUP_SYMBOL_RE = re.compile(
+    r"(\w+)\.obj\s*:\s*error LNK2005:\s*(\S+)\s+already defined in\s+(\w+)\.obj")
 
 
 def _classify_prove_failure(out: str) -> tuple:
@@ -201,12 +213,52 @@ def _classify_prove_failure(out: str) -> tuple:
     if "handler-exception" in o:
         return "marshal_fault", ("SEH fault inside the oracle handler -- usually a wrong "
                                  "callconv/slot-count (check RET n) or a bad pointer arg")
-    if "error C" in o or "fatal error" in o:
+    if "error C" in o or "fatal error" in o or "error LNK" in o:
         errs = "; ".join(m.group(0) for m in _MSVC_ERR_LINE_RE.finditer(o))[:400]
         return "build_provider", errs or "compile error in provider build"
     if "DIVERGED" in o or "MISMATCH" in o.upper():
         return "mismatch", "original != reimpl on >=1 vector (see output)"
     return "prove", (o.strip().splitlines() or ["no output"])[-1][:200]
+
+
+def _find_duplicate_symbol_offender(out: str, current_name: str):
+    """Attribute an LNK2005 duplicate-symbol build failure (see _DUP_SYMBOL_RE).
+
+    Returns None if no duplicate-symbol line resolves to two real candidate files
+    (leave it to the generic build_provider bucket). Otherwise (stage, detail,
+    quarantine_name):
+      * quarantine_name set   -> a candidate that is CLEARLY the intruder relative
+        to current_name is safe to sideline automatically (see cases below) --
+        quarantine it (move, not delete -- see quarantine_candidate) and retry.
+      * quarantine_name None  -> either current_name's own fresh draft is the
+        redefinition (stage='build_candidate', feed to the normal fix loop), or
+        the collision is between two OLD, ESTABLISHED siblings that both compile
+        fine and have nothing to do with what's being proved right now -- there is
+        no correctness basis to prefer one over the other automatically (both
+        "work"; only one is semantically right, e.g. the 2026-07-25 GetByte0x94 /
+        unit_field_getters collision where the two bodies differed on a NULL
+        check), so surface it distinctly instead of silently deleting code.
+    """
+    for dup_stem, symbol, orig_stem in _DUP_SYMBOL_RE.findall(out):
+        if dup_stem == orig_stem:
+            continue
+        if not (CANDIDATES_DIR / f"{dup_stem}.cpp").exists() or \
+           not (CANDIDATES_DIR / f"{orig_stem}.cpp").exists():
+            continue  # not two real candidates -- leave to the generic bucket
+        detail = (f"duplicate symbol {symbol}: {dup_stem}.cpp and {orig_stem}.cpp "
+                  f"both export it, poisoning the shared provider build")
+        if dup_stem == current_name:
+            # OUR fresh draft is the redefinition -- our own problem, not an
+            # established sibling's; feed it to the fix loop (rename/regenerate)
+            # instead of quarantining code that predates this attempt.
+            return "build_candidate", detail, None
+        if orig_stem == current_name:
+            # A DIFFERENT candidate just redefined the symbol WE already own --
+            # it's the intruder, and current_name is what the caller is actively
+            # trying to prove, so keeping it and sidelining the newcomer is safe.
+            return "build_provider_duplicate_symbol", detail, dup_stem
+        return "build_provider_duplicate_symbol", detail, None
+    return None
 
 
 def build_provider_attributed(current_name: str, *, config: str = "Release",
@@ -224,6 +276,10 @@ def build_provider_attributed(current_name: str, *, config: str = "Release",
       * offender is a SIBLING    -> remove the stale broken sibling (a failed
         candidate has no staged value; its content lives in run logs), log it,
         and REBUILD -- healing the cascade instead of misattributing it.
+    LNK2005 duplicate-symbol failures (a DIFFERENT MSBuild error shape -- see
+    _find_duplicate_symbol_offender) get the same attribution+heal treatment where
+    it's safe, and a distinct 'build_provider_duplicate_symbol' stage (instead of
+    the old unattributed blanket 'build_provider') where it isn't.
     Returns {ok, stage, detail, healed:[names]}."""
     healed: list = []
     build_dir = str(D2MOO_REPO / "build-1.13c")
@@ -256,6 +312,17 @@ def build_provider_attributed(current_name: str, *, config: str = "Release",
                     "detail": errs or "candidate compile error", "healed": healed}
         siblings = [n for n in offenders if n != current_name]
         if not siblings:
+            dup = _find_duplicate_symbol_offender(out, current_name)
+            if dup is not None:
+                stage, detail, quarantine_name = dup
+                if quarantine_name:
+                    print(f"[build-heal] quarantining duplicate-symbol candidate "
+                          f"{quarantine_name}.cpp (collided with {current_name}, "
+                          f"poisoning the shared provider build)")
+                    quarantine_candidate(quarantine_name, detail)
+                    healed.append(quarantine_name)
+                    continue
+                return {"ok": False, "stage": stage, "detail": detail, "healed": healed}
             return {"ok": False, "stage": "build_provider",
                     "detail": errs or out[-500:], "healed": healed}
         for n in siblings:
@@ -1015,6 +1082,32 @@ def remove_candidate(name: str) -> None:
             p.unlink()
         except OSError:
             pass
+
+
+QUARANTINE_DIR = CANDIDATES_DIR / "_quarantine"
+
+
+def quarantine_candidate(name: str, reason: str) -> None:
+    """MOVE (not delete) a candidate's .cpp out of the glob path into
+    candidates/_quarantine/, for the one duplicate-symbol self-heal case where the
+    file being sidelined is NOT known to be broken code (unlike remove_candidate's
+    broken-compile siblings) -- it may well be a correct, working reimpl that only
+    lost a symbol-name coin flip. CMake's `candidates/*.cpp` glob is non-recursive
+    (see CMakeLists.txt) so anything under _quarantine/ silently drops out of the
+    build without losing the source. Appends one line to _quarantine/MANIFEST.txt
+    so a human can find and review/restore it later. Best-effort."""
+    QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
+    src = CANDIDATES_DIR / f"{name}.cpp"
+    try:
+        src.replace(QUARANTINE_DIR / f"{name}.cpp")
+    except OSError:
+        return
+    try:
+        ts = datetime.datetime.utcnow().isoformat()
+        with open(QUARANTINE_DIR / "MANIFEST.txt", "a", encoding="utf-8") as f:
+            f.write(f"{ts}\t{name}\t{reason}\n")
+    except OSError:
+        pass
 
 
 def write_candidate(reimpl_cpp: str, name: str) -> Path:

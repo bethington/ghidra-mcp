@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fun_doc import ghidra_get  # noqa: E402
+from fun_doc import disasm_text, ghidra_get  # noqa: E402
 
 DB = str(Path(__file__).parent / "state.db")
 PROG = "/Mods/PD2-S12/D2Common.dll"
@@ -67,7 +67,7 @@ def normalized_disasm(address):
     a = address.lstrip("0x").lower() if address.lower().startswith("0x") else address.lower()
     d = ghidra_get("/disassemble_function",
                    params={"address": f"0x{a}", "program": PROG})
-    text = str(d or "")
+    text = disasm_text(d)
     if not text or "error" in text[:60].lower():
         return None
 

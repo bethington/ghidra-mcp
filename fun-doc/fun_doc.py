@@ -2175,7 +2175,57 @@ _GA_AUTONAME = re.compile(
     r"^(DAT|LAB|SUB|UNK|FUN|PTR|OFF|BYTE|WORD|DWORD|QWORD|STRU|JMP|switchdata)_[0-9A-Fa-f]+$"
     r"|^g_(dw|w|b|p|f|q)?(data|unknown|unk|ptr|field|global)?_?[0-9A-Fa-f]{3,8}$", re.I)
 _GA_IMG_LO, _GA_IMG_HI = 0x6f000000, 0x70000000  # legacy fallback (base D2 DLL map)
-_SEG_RANGE = re.compile(r":\s*([0-9a-fA-F]+)\s*-\s*([0-9a-fA-F]+)\s*$")
+def decompiled_text(resp):
+    """Pseudocode out of a 6.0.0 /decompile_function response.
+
+    Single mode returns {"name", "address", "decompiled"}; bulk mode returns
+    {name: code, ...}. Before 6.0.0 single mode returned bare C text, which is
+    the self-inconsistency the response-contract migration removed.
+    """
+    if isinstance(resp, dict):
+        if isinstance(resp.get("decompiled"), str):
+            return resp["decompiled"]
+        if "error" in resp:
+            return ""
+    return resp if isinstance(resp, str) else ""
+
+
+def disasm_lines(resp):
+    """Legacy "addr: instruction ; comment" lines from /disassemble_function.
+
+    The endpoint now returns one record per instruction. Callers that pattern-
+    match the old listing format render it back here rather than each growing
+    their own copy of the format string.
+    """
+    out = []
+    for ins in _envelope_items(resp, "instructions"):
+        if not isinstance(ins, dict):
+            continue
+        line = f"{ins.get('address', '')}: {ins.get('instruction', '')}"
+        comment = ins.get("comment")
+        if comment:
+            line += f" ; {comment}"
+        out.append(line)
+    return out
+
+
+def disasm_text(resp):
+    """`disasm_lines` joined, for callers that regex over the whole listing."""
+    return chr(10).join(disasm_lines(resp))
+
+
+def _envelope_items(resp, key):
+    """Items out of a 6.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
+
+    Returns [] for anything unexpected (error payload, transport failure) so
+    callers keep their existing "no data -> fall back" behavior rather than
+    raising on a shape they did not expect.
+    """
+    if isinstance(resp, dict):
+        items = resp.get(key)
+        if isinstance(items, list):
+            return items
+    return []
 
 
 def _image_range(program):
@@ -2189,10 +2239,11 @@ def _image_range(program):
     except Exception:
         return None
     ranges = []
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
-        m = _SEG_RANGE.search(ln.strip())
-        if m:
-            ranges.append((int(m.group(1), 16), int(m.group(2), 16)))
+    for seg in _envelope_items(txt, "segments"):
+        try:
+            ranges.append((int(seg["start"], 16), int(seg["end"], 16)))
+        except (KeyError, TypeError, ValueError):
+            continue
     if not ranges:
         return None
     base = min(s for s, _ in ranges)
@@ -2277,8 +2328,8 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
     img_lo, img_hi = _image_range(program) or (_GA_IMG_LO, _GA_IMG_HI)
     txt = ghidra_get("/list_globals", params={"program": program, "limit": 100000}, timeout=60)
     rows = []
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
-        m = _GA_LINE.match(ln.strip())
+    for ln in _envelope_items(txt, "globals"):
+        m = _GA_LINE.match(str(ln).strip())
         if not m:
             continue
         a = int(m.group("addr"), 16)
@@ -2966,9 +3017,14 @@ def fetch_function_data(program, address, mode="FIX"):
     # auto-follow /api/navigate surface was retired with it, 2026-07-17.)
 
     # Decompile
-    data["decompiled"] = ghidra_get(
+    _dec_resp = ghidra_get(
         "/decompile_function", params={"address": f"0x{address}", "program": program}
     )
+    # Preserve the None-means-unavailable signal: the offline / not-a-function
+    # detectors below distinguish "no response" from "empty pseudocode", and
+    # collapsing both to "" would make an unreachable Ghidra look like a
+    # function with no body.
+    data["decompiled"] = decompiled_text(_dec_resp) if _dec_resp else None
     if ghidra_last_call_timed_out():
         data["decompile_timeout"] = True
         return data
@@ -3059,7 +3115,10 @@ def fetch_function_data(program, address, mode="FIX"):
     # SOMETHING, the LLM might still extract value, so we don't short-
     # circuit.
     if not data["decompile_timeout"] and not data["ghidra_offline"]:
-        decompiled_is_error = _is_error_response(data.get("decompiled"))
+        # Check the RAW response, not the rendered text: decompiled_text()
+        # turns an {"error": ...} payload into "", which would hide exactly the
+        # signal this gate exists to detect.
+        decompiled_is_error = _is_error_response(_dec_resp)
         completeness = data.get("completeness")
         completeness_missing_name = (
             not completeness

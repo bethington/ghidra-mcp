@@ -239,7 +239,7 @@ def consistency_gate(program: str, address: str, name: str, reimpl_cpp: str, *,
         except Exception:
             model = None
 
-    disasm = str(fun_doc.ghidra_get("/disassemble_function",
+    disasm = fun_doc.disasm_text(fun_doc.ghidra_get("/disassemble_function",
                                     params={"address": addr, "program": program}))
     _plate_resp = fun_doc.ghidra_get("/get_comment",
                                      params={"address": addr, "program": program})
@@ -254,7 +254,7 @@ def consistency_gate(program: str, address: str, name: str, reimpl_cpp: str, *,
                          r"SHADOW-provable|documentation intentionally cleared)[^\n]*",
                          "", _behavioral)
     plate_is_stub = len(re.sub(r"[\s\\n]+", "", _behavioral)) < 120
-    dec = str(fun_doc.ghidra_get("/decompile_function",
+    dec = fun_doc.decompiled_text(fun_doc.ghidra_get("/decompile_function",
                                  params={"address": addr, "program": program}))
     proto_m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",
                         dec.replace("\r", ""), re.MULTILINE)

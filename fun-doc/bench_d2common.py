@@ -145,7 +145,7 @@ def extract(names: list, program: str = None) -> dict:
         if not addr:
             print(f"[extract] {name}: not in registry -- skip")
             continue
-        dec = str(fun_doc.ghidra_get("/decompile_function",
+        dec = fun_doc.decompiled_text(fun_doc.ghidra_get("/decompile_function",
                                      params={"address": addr, "program": prog}))
         m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",
                       dec.replace("\r", ""), re.MULTILINE)
@@ -207,8 +207,8 @@ Output STRICT JSON only:
 
 def generate(addr: str, program: str, provider=None, model=None) -> dict:
     import fun_doc
-    dec = str(fun_doc.ghidra_get("/decompile_function", params={"address": addr, "program": program}))
-    dis = str(fun_doc.ghidra_get("/disassemble_function", params={"address": addr, "program": program}))
+    dec = fun_doc.decompiled_text(fun_doc.ghidra_get("/decompile_function", params={"address": addr, "program": program}))
+    dis = fun_doc.disasm_text(fun_doc.ghidra_get("/disassemble_function", params={"address": addr, "program": program}))
     prompt = _GEN_PROMPT.format(decompiled=dec[:4000], disasm=dis[:3000])
     prov = provider or fun_doc.AI_PROVIDER
     mdl = model

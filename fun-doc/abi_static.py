@@ -165,6 +165,9 @@ def derive_abi(disasm_text: str) -> dict:
     data_globals: list = []
     written: set = set()
     reg_args: set = set()
+    # First-seen (program) order of reg_args -- see the "reg_args" key below for
+    # why this must NOT be re-derived from the set via sorted().
+    reg_args_order: list = []
     depth = 0          # linear ESP delta (bytes pushed since entry)
     approx = False
 
@@ -254,7 +257,20 @@ def derive_abi(disasm_text: str) -> dict:
             m = re.match(r"^(0x[0-9a-fA-F]+|\d+)$", ops.strip()) if ops.strip() else None
             ret_imms.add(int(m.group(1), 0) if m else 0)
 
-        reg_args |= {r for r in reads if r not in written and r not in ("EBP",)}
+        new_args = {r for r in reads if r not in written and r not in ("EBP",)}
+        reg_args |= new_args
+        # Preserve the order registers were FIRST read as incoming args -- this is
+        # the compiler's actual parameter order for a register_explicit ABI (arg 1
+        # in whichever register it happens to choose, arg 2 in the next, ...).
+        # Register NAME has no bearing on argument position (EAX isn't always
+        # "first"), so appending in first-seen order here (falling back to a
+        # sorted tiebreak only for registers newly read in the SAME instruction,
+        # where true sub-instruction order can't be recovered from one disasm
+        # line) is required for apply_static_abi's positional reg_args[idx]
+        # mapping to land on the right register.
+        for r in sorted(new_args):
+            if r not in reg_args_order:
+                reg_args_order.append(r)
         written |= writes
 
     # --- synthesize ---
@@ -294,7 +310,16 @@ def derive_abi(disasm_text: str) -> dict:
     helper_calls = [c for c in calls if c in ABORT_HELPERS]
     return {
         "ret_imm": ret_imm, "slots": slots, "used_slots": used_slots,
-        "reg_args": sorted(reg_args), "callconv": callconv,
+        # Program (first-seen) order, NOT alphabetical -- see reg_args_order
+        # comment above. Confirmed live 2026-07-25: DATATBLS_TestSkillDescriptionFlag
+        # and GetElemTypeRecord (register_explicit, 3 reg_args) both hit
+        # live_prove_failed[marshal_fault] because the old `sorted(reg_args)`
+        # alphabetical order fed apply_static_abi's positional reg_args[idx]
+        # mapping, assigning parameter 1 to whichever register's NAME happened to
+        # sort first (often EAX) instead of whichever register the disassembly
+        # actually reads first -- the oracle then called the real game function
+        # with arguments in the wrong registers and it SEH-faulted.
+        "reg_args": reg_args_order, "callconv": callconv,
         "calls": real_calls, "abort_helper_calls": helper_calls,
         "data_globals": data_globals,
         "approx": approx, "notes": notes,
@@ -1070,6 +1095,27 @@ def apply_static_abi(layout: dict, input_sets: list, abi: dict) -> tuple:
                 notes.append(f"forced input '{i.get('name')}' register {cur or '(none)'} "
                              f"-> {reg_args[idx]} (disasm: register-explicit, RET 0, no stack)")
                 i["register"] = reg_args[idx]
+        # UNDER-DECLARED register args (2026-07-25): the disasm reads MORE
+        # registers as incoming args than the model declared parameters for
+        # (e.g. model saw only "pListNode" in EAX while the disasm shows THREE
+        # register reads -- ESI, EAX, EDI). Without this, the trailing
+        # registers are simply never mentioned in the oracle spec, so the
+        # oracle calls the ORIGINAL with whatever garbage happens to be
+        # sitting in them -- a guaranteed marshal_fault (confirmed live:
+        # LIST_DetachNode, UnlinkAndClearListNodes). Pad with zero-valued
+        # synthetic params for the remainder, mirroring the stdcall
+        # slot-padding below.
+        if len(reg_args) > len(inputs):
+            n_declared = len(inputs)
+            for k in range(n_declared, len(reg_args)):
+                pad = f"unusedReg{k + 1}"
+                inputs.append({"name": pad, "register": reg_args[k]})
+                for s in (input_sets or []):
+                    s.setdefault(pad, 0)
+            notes.append(
+                f"padded {len(reg_args) - n_declared} unused register arg(s) -> "
+                f"declared all {len(reg_args)} register arg(s) {reg_args} "
+                f"(model only declared {n_declared} param(s); the disasm reads more)")
         # drop any stack-typed extras the model invented (there are no stack args)
         keep = [i for i in inputs if str(i.get("register", "")).upper() in reg_args]
         if keep and len(keep) != len(inputs):
