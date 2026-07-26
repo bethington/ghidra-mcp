@@ -428,9 +428,10 @@
       "method": "POST",
       "category": "program",
       "params": [
-        "name"
+        "name",
+        "save"
       ],
-      "description": "Close an open program by project path or name"
+      "description": "Close an open program by project path or name. Never prompts interactively: unsaved changes are saved first by default (save=true) or silently discarded (save=false) before closing, so this cannot block the caller on a GUI confirmation dialog the way Ghidra's own close normally would."
     },
     {
       "path": "/close_project",

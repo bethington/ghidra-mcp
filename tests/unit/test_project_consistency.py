@@ -103,7 +103,7 @@ class TestVersionConsistency(unittest.TestCase):
 
     def test_user_visible_tool_counts_match_endpoint_catalog(self):
         """Marketing/extension metadata should not drift from endpoints.json."""
-        expected = json.loads(ENDPOINTS_JSON.read_text())["total_endpoints"]
+        expected = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["total_endpoints"]
         checks = {
             "README.md": PROJECT_ROOT / "README.md",
             "CLAUDE.md": PROJECT_ROOT / "CLAUDE.md",
@@ -265,7 +265,7 @@ class TestJavaArchitecture(unittest.TestCase):
         """Hand-registered admin routes should document mode-specific params."""
         catalog = {
             entry["path"]: set(entry.get("params", []))
-            for entry in json.loads(ENDPOINTS_JSON.read_text())["endpoints"]
+            for entry in json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["endpoints"]
         }
 
         expected_params = {

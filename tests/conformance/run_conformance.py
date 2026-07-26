@@ -40,6 +40,10 @@ SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 DEFAULT_PROGRAM = "Benchmark.dll"
 DEFAULT_SECOND_PROGRAM = "BenchmarkDebug.exe"
 
+# Read-before-write when tiers are combined (--tier all, the default) -- see
+# the sort in main() for why this matters.
+_TIER_ORDER = {"read": 0, "write": 1}
+
 
 def probe_facts(transport, program: str, second: str) -> ProgramFacts:
     """Discover live values to feed generated cases.
@@ -148,6 +152,13 @@ def main() -> int:
             cases = [c for c in cases if c.tier == args.tier]
         else:
             cases = [c for c in cases if c.tier != "destructive"]
+            # Corpus files interleave read and write cases in file order, not
+            # tier order -- generated_baseline.yaml's write-tier smoke cases
+            # (e.g. clear_function_comments) would otherwise run before
+            # read_assertions*.yaml's read-tier assertions and leave their
+            # target address mutated out from under them. Stable sort keeps
+            # each tier's relative order, just read-before-write.
+            cases.sort(key=lambda c: _TIER_ORDER.get(c.tier, 99))
         print(f"  {len(cases)} cases loaded from {len(files)} file(s)\n")
 
         runner = ConformanceRunner(

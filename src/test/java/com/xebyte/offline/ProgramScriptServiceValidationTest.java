@@ -23,7 +23,7 @@ public class ProgramScriptServiceValidationTest extends TestCase {
     }
 
     public void testCloseProgramRequiresName() {
-        Response r = scripts.closeProgram("");
+        Response r = scripts.closeProgram("", true);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Program name or path is required"));
     }
