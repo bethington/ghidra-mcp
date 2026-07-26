@@ -11,15 +11,20 @@
 # explicitly. It is never included in the default combined run (see
 # run_conformance.py's tier filter, same treatment as `destructive`).
 #
-# Scope: the 13 debugger_* tools that don't need a dynamic (post-ASLR)
-# address as an argument. set_breakpoint, remove_breakpoint, read_memory,
-# static_to_dynamic, and dynamic_to_static all take an address that only
-# exists once the target is loaded and shifts on every single launch --
-# confirmed live: BenchmarkDebug.exe's static image base 0x00400000 loads at
-# a randomized runtime base (observed 0x00c20000, will differ next launch).
-# This YAML format has no mechanism to feed one case's response into a later
-# case's args, so those 5 tools remain skipped pending that mechanism --
-# tracked in project memory as a follow-up, not silently dropped.
+# Scope: all 18 debugger_* tools, including the 5 that need a dynamic
+# (post-ASLR) runtime address -- set_breakpoint, remove_breakpoint,
+# read_memory, static_to_dynamic, dynamic_to_static. Confirmed live:
+# BenchmarkDebug.exe's static image base 0x00400000 loads at a randomized
+# runtime base (observed 0x00c20000, will differ next launch), so no
+# hardcoded address works for these five. The runner supports response
+# chaining for exactly this: a case can `extract: {name: "json.path"}` a
+# value from its own response, and a later case's arg can reference it as
+# the literal string "${name}", substituted at call time (see
+# ConformanceRunner._substitute_args in runner.py). Here, debugger_
+# registers_2 extracts the live RIP as `runtime_pc`; every dynamic-address
+# case below consumes "${runtime_pc}" instead of a hardcoded address, and
+# they're placed immediately after the register read so no intervening
+# step/resume call has moved RIP out from under them.
 #
 # Sequencing matters here, unusually: cases run in file order (top to
 # bottom), and later cases depend on earlier ones leaving a live session in
@@ -35,12 +40,16 @@
 # subsystem from the in-process TraceRmi surface this corpus drives.
 # EndpointsJsonParityTest's schema disambiguates the collision with a `_2`
 # suffix on the in-process one: status_2, modules_2, registers_2,
-# stack_trace_2, list_breakpoints_2, step_into_2, step_over_2. Tools with no
-# name collision (launch, traces, launch_offers, resume, interrupt,
-# step_out) keep their plain name. Confirmed live: calling the plain name
-# for a colliding tool returns {"error": "Debugger server not running at
-# http://127.0.0.1:8099 ..."} even with a real TraceRmi session active --
-# that error is the signature of having picked the wrong one.
+# stack_trace_2, list_breakpoints_2, step_into_2, step_over_2, plus (added
+# for the dynamic-address tools) set_breakpoint_2, remove_breakpoint_2,
+# read_memory_2 -- the bridge-side proxies of the same bare names take a
+# `ghidra_address` param and talk to the port-8099 server instead. Tools
+# with no name collision (launch, traces, launch_offers, resume, interrupt,
+# step_out, static_to_dynamic, dynamic_to_static) keep their plain name.
+# Confirmed live: calling the plain name for a colliding tool returns
+# {"error": "Debugger server not running at http://127.0.0.1:8099 ..."}
+# even with a real TraceRmi session active -- that error is the signature
+# of having picked the wrong one.
 #
 # python_executable is mandatory here, not cosmetic: the offer's default
 # OPT_PYTHON_EXE is bare "python", which Ghidra's own process PATH resolves
@@ -113,6 +122,62 @@ tool_cases:
     assert:
       no_error: true
       json_keys: ["RIP", "RSP", "RAX"]
+    extract: { runtime_pc: "RIP" }
+
+  # The 5 dynamic-address tools, unblocked by the extract/${} mechanism
+  # above. The first 4 consume the RIP just captured, before any step/resume
+  # call below has a chance to move it. static_to_dynamic uses a fixed
+  # static address instead (not ${runtime_pc}, no ordering dependency on
+  # this RIP capture) -- its own call now retries internally against
+  # DebuggerStaticMappingService's settle window (MAPPING_SETTLE_TIMEOUT_MS
+  # in DebuggerService.java), so it no longer needs to run later in the
+  # sequence than these four.
+  - tool: debugger_dynamic_to_static
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { address: "${runtime_pc}" }
+    assert:
+      no_error: true
+      json_keys: ["dynamic_address", "module", "offset"]
+
+  - tool: debugger_static_to_dynamic
+    name: live
+    tier: debugger
+    snapshot: false
+    timeout: 30
+    args: { address: "0x004016b6", program: "BenchmarkDebug.exe" }
+    assert:
+      no_error: true
+      json_keys: ["static_address", "dynamic_address", "program"]
+
+  - tool: debugger_set_breakpoint_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { address: "${runtime_pc}" }
+    assert:
+      no_error: true
+
+  - tool: debugger_read_memory_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { address: "${runtime_pc}", size: 16 }
+    assert:
+      no_error: true
+      nonempty: true
+
+  # Removes the breakpoint set two cases up -- must happen before the final
+  # resume, or the target would trap right back into itself instead of
+  # running its --seconds 180 timer to completion.
+  - tool: debugger_remove_breakpoint_2
+    name: live
+    tier: debugger
+    snapshot: false
+    args: { address: "${runtime_pc}" }
+    assert:
+      no_error: true
 
   - tool: debugger_stack_trace_2
     name: live

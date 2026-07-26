@@ -232,6 +232,7 @@ def load_cases(path: Path) -> list[Case]:
             tier=raw.get("tier", "read"),
             name=raw.get("name"),
             normalize_extra=[tuple(p) for p in (raw.get("normalize") or [])],
+            extract=raw.get("extract") or {},
         ))
     return out
 
@@ -251,6 +252,7 @@ def dump_cases(cases: list[Case], path: Path, header: str = "") -> None:
                     "assert": c.asserts or None,
                     "snapshot": c.snapshot,
                     "skip": c.skip,
+                    "extract": c.extract or None,
                 }.items() if v not in (None, {}, [])
             }
             for c in cases
