@@ -151,7 +151,7 @@ def run_batch(apply, limit):
         decomp = ""
         for c in dict.fromkeys(callers):
             d = gget("/decompile_function", address="0x" + c)
-            dc = (d.get("decompilation") or "") if isinstance(d, dict) else (d or "")
+            dc = (d.get("decompiled") or "") if isinstance(d, dict) else (d or "")
             decomp += "\n" + dc
         line = process(gname, addr, decomp, apply)
         if "SKIP" in line: skipped += 1
@@ -187,7 +187,7 @@ def main():
     decomp = ""
     for c in dict.fromkeys(callers):
         d = gget("/decompile_function", address="0x" + c)
-        dc = (d.get("decompilation") or "") if isinstance(d, dict) else (d or "")
+        dc = (d.get("decompiled") or "") if isinstance(d, dict) else (d or "")
         decomp += "\n" + dc
 
     votes = recover_stride(decomp, gname)

@@ -4667,11 +4667,10 @@ def get_select_functions(state, program, address, depth=1):
             params={"address": f"0x{address}", "program": program},
         )
         if func_resp:
-            func_text = str(func_resp)
-            import re
-
-            name_match = re.search(r"Function:\s+(\S+)", func_text)
-            func_name = name_match.group(1) if name_match else f"FUN_{address}"
+            # 6.0.0: /get_function_by_address returns a record, not
+            # "Function: <name> at <addr>" prose.
+            func_name = (func_resp.get("name") if isinstance(func_resp, dict) else None) \
+                or f"FUN_{address}"
             prog_name = program.split("/")[-1] if "/" in program else program
             state["functions"][target_key] = {
                 "program": program,
@@ -4710,11 +4709,11 @@ def get_select_functions(state, program, address, depth=1):
         )
         if not func_resp:
             return None
-        func_text = str(func_resp)
-        import re
-
-        name_match = re.search(r"Function:\s+(\S+)", func_text)
-        func_name = name_match.group(1) if name_match else f"FUN_{addr}"
+        # 6.0.0: /get_function_by_address returns a record.
+        func_name = (
+            (func_resp.get("name") if isinstance(func_resp, dict) else None)
+            or f"FUN_{addr}"
+        )
         entry = {
             "program": program,
             "program_name": prog_name,
@@ -12100,11 +12099,11 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         _dis = ghidra_get("/disassemble_function",
                           params={"address": f"0x{address}", "program": program})
         if _dis and not _is_error_response(_dis):
-            _globs = abi_static.resolvable_globals(str(_dis))
+            _globs = abi_static.resolvable_globals(disasm_text(_dis))
             if _globs:
                 prompt += abi_static.global_resolve_prompt_block(_globs)
                 _log("global_resolve_hint_injected", globals=[n for _a, n in _globs])
-            _callees = abi_static.resolvable_callees(str(_dis))
+            _callees = abi_static.resolvable_callees(disasm_text(_dis))
             if _callees:
                 prompt += abi_static.callthrough_prompt_block(_callees)
     except Exception:
@@ -12122,7 +12121,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         _dis = ghidra_get("/disassemble_function",
                           params={"address": f"0x{address}", "program": program})
         if _dis and not _is_error_response(_dis):
-            gt = abi_static.translate_global_table_getter_to_c(func_name, str(_dis))
+            gt = abi_static.translate_global_table_getter_to_c(func_name, disasm_text(_dis))
             if gt.get("ok"):
                 reimpl = gt["code"]
                 layout = {"inputs": [{"name": "idx", "signed": True}],
@@ -13119,11 +13118,11 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         _dis = ghidra_get("/disassemble_function",
                           params={"address": f"0x{address}", "program": program})
         if _dis and not _is_error_response(_dis):
-            _globs = abi_static.resolvable_globals(str(_dis))
+            _globs = abi_static.resolvable_globals(disasm_text(_dis))
             if _globs:
                 prompt += abi_static.global_resolve_prompt_block(_globs)
                 _log("handle_global_hint_injected", globals=[n for _a, n in _globs])
-            _callees = abi_static.resolvable_callees(str(_dis))
+            _callees = abi_static.resolvable_callees(disasm_text(_dis))
             if _callees:
                 prompt += abi_static.callthrough_prompt_block(_callees)
     except Exception:
@@ -13185,16 +13184,16 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         disasm = ghidra_get("/disassemble_function",
                             params={"address": f"0x{address}", "program": program})
         if disasm and not _is_error_response(disasm):
-            mech = abi_static.translate_getter_to_c(func_name, str(disasm))
+            mech = abi_static.translate_getter_to_c(func_name, disasm_text(disasm))
             if not mech.get("ok"):
                 prompt += ("\n\n## GROUND-TRUTH DISASSEMBLY -- translate THIS, not the decompile "
                            "prose (Ghidra renders a single pointer walk as `struct[i].field`, which "
-                           "misleads into bogus struct-size/index math):\n```\n" + str(disasm) + "\n```")
+                           "misleads into bogus struct-size/index math):\n```\n" + disasm_text(disasm) + "\n```")
                 # If the function calls a resolvable D2Common fn, the model must reach it
                 # via D2MOO_Resolve (a direct call = unresolved external = whole-build fail,
                 # observed live: the model drafted GetItemDataRecord(id) directly). Inject
                 # the call-through pattern so a model-drafted delegate can actually build.
-                _callees = abi_static.resolvable_callees(str(disasm))
+                _callees = abi_static.resolvable_callees(disasm_text(disasm))
                 if _callees:
                     prompt += abi_static.callthrough_prompt_block(_callees)
                     _log("callthrough_hint_injected", callees=[n for _a, n in _callees])
@@ -13212,7 +13211,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
     if not (mech and mech.get("ok")) and not abort_class:
         try:
             if disasm and not _is_error_response(disasm):
-                deleg = abi_static.translate_delegate_getter_to_c(func_name, str(disasm))
+                deleg = abi_static.translate_delegate_getter_to_c(func_name, disasm_text(disasm))
                 if deleg.get("ok"):
                     _log("delegate_translated", callee=deleg.get("callee"),
                          arg_off=deleg.get("arg_off"), result_off=deleg.get("result_off"))
@@ -13553,14 +13552,18 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             **extra,
         })
 
-    decompiled = ghidra_get(
+    _dec_resp = ghidra_get(
         "/decompile_function", params={"address": f"0x{address}", "program": program}
     )
-    if not decompiled or _is_error_response(decompiled):
+    if not _dec_resp or _is_error_response(_dec_resp):
         update_function_state(key, {"port_status": "unknown_skip",
                                      "port_last_result": "decompile fetch failed"})
         _log("unknown_skip")
         return "unknown_skip"
+    # 6.0.0: single-mode decompile returns a record. Downstream consumers here
+    # (pp.classify_function, abi_static, the prompt builders) all expect the
+    # pseudocode as text.
+    decompiled = decompiled_text(_dec_resp)
 
     # MECHANICAL ABI + SAFETY facts (abi_static, 2026-07-08): RET n / [ESP+x] /
     # register reads state the callconv + slot count outright -- the model no
@@ -13573,7 +13576,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         disasm = ghidra_get("/disassemble_function",
                             params={"address": f"0x{address}", "program": program})
         if disasm and not _is_error_response(disasm):
-            static_abi = abi_static.derive_abi(str(disasm))
+            static_abi = abi_static.derive_abi(disasm_text(disasm))
             _log("static_abi", abi={k: v for k, v in static_abi.items() if k != "notes"},
                  notes=static_abi.get("notes"))
     except Exception as e:  # derivation is an aid, never a blocker
@@ -13626,7 +13629,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 _dis = ghidra_get("/disassemble_function",
                                   params={"address": f"0x{address}", "program": program})
                 if (_dis and not _is_error_response(_dis)
-                        and abi_static.translate_delegate_getter_to_c(func_name, str(_dis)).get("ok")):
+                        and abi_static.translate_delegate_getter_to_c(func_name, disasm_text(_dis)).get("ok")):
                     _log("delegate_route", classification=classification)
                     return process_handle_leaf_live(
                         program, address, func_name, decompiled,
@@ -13735,7 +13738,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                 _dis = ghidra_get("/disassemble_function",
                                   params={"address": f"0x{address}", "program": program})
                 if _dis and not _is_error_response(_dis) and \
-                        abi_static.resolvable_callees(str(_dis)):
+                        abi_static.resolvable_callees(disasm_text(_dis)):
                     _route_handle = True
             except Exception:
                 pass

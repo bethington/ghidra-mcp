@@ -381,7 +381,7 @@ def function_detail(addr: str, program: str = None) -> dict:
     try:
         dec = _get("/decompile_function", address=addr, program=program)
         if isinstance(dec, dict):
-            dec = dec.get("decompilation") or dec.get("code") or dec.get("result")
+            dec = dec.get("decompiled") or dec.get("result")
         out["decompile"] = dec if isinstance(dec, str) and dec.strip() else None
     except OSError:
         pass
