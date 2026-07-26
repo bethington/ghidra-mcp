@@ -157,7 +157,73 @@ public class ProgramScriptService {
             return;
         }
         program.flushEvents();
-        program.save(reason, ghidra.util.task.TaskMonitor.DUMMY);
+        saveWithRetry(program, () -> program.save(reason, ghidra.util.task.TaskMonitor.DUMMY));
+    }
+
+    @FunctionalInterface
+    private interface ThrowingSave {
+        void run() throws IOException, ghidra.util.exception.CancelledException;
+    }
+
+    /**
+     * Save a program, retrying if the attempt races Ghidra's own
+     * auto-analysis transaction management.
+     *
+     * <p>{@link AutoAnalysisManager} registers its own
+     * {@code DomainObjectListener} on every program and schedules a
+     * background "Auto Analysis" task whenever the program changes (a
+     * rename, a signature edit, a new function) -- entirely independent of
+     * any analysis this class explicitly starts. If that background task's
+     * transaction is still open when a save runs, the save throws
+     * {@code IOException: Unable to lock due to active transaction}.
+     * Confirmed via Ghidra's own application.log: the same stack trace,
+     * through {@code saveCurrentProgram}, recurring since at least
+     * 2026-07-08 -- weeks before any code path here explicitly triggered
+     * analysis, so it is not specific to this class's own analysis calls.</p>
+     *
+     * <p>Waiting for {@link AutoAnalysisManager#waitForAnalysis} to return
+     * first narrows the window but does not close it: Ghidra logs the task
+     * as complete and this save's lock failure in the same instant, meaning
+     * the completion notification and the background task's own transaction
+     * teardown are not perfectly synchronized with each other. A short
+     * backoff-and-retry on that specific message is the pragmatic fix for a
+     * race that waiting alone cannot fully eliminate.</p>
+     */
+    private void saveWithRetry(Program program, ThrowingSave saveAction)
+            throws IOException, ghidra.util.exception.CancelledException {
+        final int maxAttempts = 4;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            awaitAnyPendingAnalysis(program);
+            try {
+                saveAction.run();
+                return;
+            } catch (IOException e) {
+                String msg = e.getMessage();
+                boolean isLockRace = msg != null && msg.contains("Unable to lock due to active transaction");
+                if (!isLockRace || attempt == maxAttempts) {
+                    throw e;
+                }
+                Msg.warn(this, "Save raced Ghidra's own auto-analysis transaction (attempt "
+                        + attempt + "/" + maxAttempts + "), retrying: " + msg);
+                try {
+                    Thread.sleep(150L * attempt);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private void awaitAnyPendingAnalysis(Program program) {
+        try {
+            AutoAnalysisManager.getAnalysisManager(program)
+                    .waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+        } catch (Exception e) {
+            // Best-effort: let the save call itself surface any real failure
+            // rather than mask it with a wait-side error here.
+            Msg.warn(this, "awaitAnyPendingAnalysis failed, proceeding to save anyway: " + e.getMessage());
+        }
     }
 
     // ========================================================================
@@ -860,7 +926,7 @@ public class ProgramScriptService {
                         errorMsg.set("Program has no domain file");
                         return;
                     }
-                    df.save(new ConsoleTaskMonitor());
+                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                     resultData.set(JsonHelper.mapOf(
                         "success", true,
                         "program", program.getName(),
@@ -936,7 +1002,7 @@ public class ProgramScriptService {
                         errors.get().add(info);
                         continue;
                     }
-                    df.save(new ConsoleTaskMonitor());
+                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                     saved.get().add(info);
                 } catch (Throwable e) {
                     info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
@@ -1038,7 +1104,7 @@ public class ProgramScriptService {
                             if (save && program.isChanged()) {
                                 ghidra.framework.model.DomainFile df = program.getDomainFile();
                                 if (df != null && df.isInWritableProject()) {
-                                    df.save(new ConsoleTaskMonitor());
+                                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                                 }
                             }
                             // ignoreChanges=true unconditionally: we have already

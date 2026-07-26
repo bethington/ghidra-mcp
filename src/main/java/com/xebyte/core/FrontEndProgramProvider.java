@@ -15,6 +15,7 @@
  */
 package com.xebyte.core;
 
+import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
@@ -125,7 +126,40 @@ public class FrontEndProgramProvider implements ProgramProvider {
             if (p.isChanged() && p.canSave()) {
                 ghidra.framework.model.DomainFile df = p.getDomainFile();
                 if (df != null) {
-                    df.save(monitor);
+                    // AutoAnalysisManager schedules its own background "Auto
+                    // Analysis" task via a DomainObjectListener whenever the
+                    // program changes, independent of anything this class
+                    // calls. If that task's transaction is still open when
+                    // save() runs, save() throws IOException ("Unable to
+                    // lock due to active transaction") -- confirmed in
+                    // Ghidra's own log, unrelated to any explicit analysis
+                    // call. Waiting narrows the window but Ghidra logs the
+                    // task-complete event and this kind of lock failure in
+                    // the same instant, so the completion notification and
+                    // the task's own transaction teardown aren't perfectly
+                    // synchronized -- a short backoff-and-retry on that
+                    // specific message closes the remaining gap.
+                    final int maxAttempts = 4;
+                    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                        try {
+                            AutoAnalysisManager.getAnalysisManager(p).waitForAnalysis(null, monitor);
+                        } catch (Exception ignored) {
+                            // Best-effort: fall through and let save() surface any real failure.
+                        }
+                        try {
+                            df.save(monitor);
+                            break;
+                        } catch (java.io.IOException e) {
+                            String msg = e.getMessage();
+                            boolean isLockRace = msg != null && msg.contains("Unable to lock due to active transaction");
+                            if (!isLockRace || attempt == maxAttempts) {
+                                throw e;
+                            }
+                            Msg.warn(this, "Save raced Ghidra's own auto-analysis transaction (attempt "
+                                    + attempt + "/" + maxAttempts + "), retrying: " + msg);
+                            Thread.sleep(150L * attempt);
+                        }
+                    }
                     Msg.info(this, "Saved modified program before release: " + key);
                 }
             }
