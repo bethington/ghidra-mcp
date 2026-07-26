@@ -17,7 +17,7 @@ import requests
 
 
 @pytest.mark.requires_program
-def test_list_functions_enhanced_pagination_matches_count(server_url, server_available):
+def test_list_functions_enhanced_pagination_matches_count(server_url, server_available, current_program):
     """Walking list_functions_enhanced in pages must return exactly as many
     functions as get_function_count reports (minus externals).
 
@@ -30,11 +30,7 @@ def test_list_functions_enhanced_pagination_matches_count(server_url, server_ava
         pytest.skip("Ghidra HTTP server not available")
 
     # Find a program to test against
-    try:
-        meta = requests.get(f"{server_url}/get_metadata", timeout=5).json()
-        program = meta.get("program_name") or meta.get("name")
-    except (requests.RequestException, ValueError):
-        program = None
+    program = current_program
     if not program:
         pytest.skip("No program loaded")
 
@@ -88,7 +84,7 @@ def test_list_functions_enhanced_pagination_matches_count(server_url, server_ava
 
 
 @pytest.mark.requires_server
-def test_list_functions_enhanced_default_limit_is_known(server_url, server_available):
+def test_list_functions_enhanced_default_limit_is_known(server_url, server_available, current_program):
     """Document and lock in the default limit behavior so changes are explicit.
 
     /list_functions_enhanced uses limit=10000 by default. This test records
@@ -115,7 +111,7 @@ def test_list_functions_enhanced_default_limit_is_known(server_url, server_avail
 
 
 @pytest.mark.requires_program
-def test_list_functions_offset_beyond_end_returns_empty(server_url, server_available):
+def test_list_functions_offset_beyond_end_returns_empty(server_url, server_available, current_program):
     """list_functions_enhanced with an offset past the end should return an
     empty page, not error. This is the termination condition for paginated
     walks — if the endpoint errors out, callers have to add special-case
@@ -123,11 +119,7 @@ def test_list_functions_offset_beyond_end_returns_empty(server_url, server_avail
     if not server_available:
         pytest.skip("Ghidra HTTP server not available")
 
-    try:
-        meta = requests.get(f"{server_url}/get_metadata", timeout=5).json()
-        program = meta.get("program_name") or meta.get("name")
-    except (requests.RequestException, ValueError):
-        program = None
+    program = current_program
     if not program:
         pytest.skip("No program loaded")
 

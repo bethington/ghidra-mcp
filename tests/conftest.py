@@ -170,6 +170,33 @@ def program_loaded(server_url, server_available):
         return False
 
 
+@pytest.fixture(scope="session")
+def current_program(server_url, server_available):
+    """Path of the program the server currently has focused, or None.
+
+    Resolved from `/list_open_programs` (JSON, has `is_current`). Do NOT use
+    `/get_metadata` for this: it returns plain text, so `.json()` raises and
+    every caller that wrapped it in `except ValueError` silently skipped —
+    which is why the live batch-scoring and listing-consistency regressions
+    never actually ran.
+    """
+    if not server_available:
+        return None
+    try:
+        resp = requests.get(f"{server_url}/list_open_programs", timeout=10)
+        if resp.status_code != 200:
+            return None
+        programs = resp.json().get("programs") or []
+    except (requests.RequestException, ValueError):
+        return None
+    if not programs:
+        return None
+    for p in programs:
+        if p.get("is_current"):
+            return p.get("path") or p.get("name")
+    return programs[0].get("path") or programs[0].get("name")
+
+
 @pytest.fixture
 def sample_function(http_client, program_loaded):
     """Get a sample function name for testing."""

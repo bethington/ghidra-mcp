@@ -179,8 +179,8 @@ endpoint_smoke:
       type: "json"
       contains_keys: ["name"]
 
-  # decompile (per-function covers most)
-  - endpoint: "/batch_decompile"
+  # decompile (per-function covers most); bulk form absorbed batch_decompile in 6.0.0
+  - endpoint: "/decompile_function"
     params: { functions: "0x10001000,0x10001130" }
     assert:
       type: "nonempty"

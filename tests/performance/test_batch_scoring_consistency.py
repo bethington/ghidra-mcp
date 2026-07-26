@@ -30,7 +30,7 @@ def _safe_get(d, *keys, default=None):
 
 @pytest.mark.requires_program
 @pytest.mark.slow
-def test_batch_and_individual_scoring_agree(server_url, server_available):
+def test_batch_and_individual_scoring_agree(server_url, server_available, current_program):
     """Batch scores must equal individual scores for the same addresses.
 
     Fails if:
@@ -42,11 +42,7 @@ def test_batch_and_individual_scoring_agree(server_url, server_available):
     if not server_available:
         pytest.skip("Ghidra HTTP server not available")
 
-    try:
-        meta = requests.get(f"{server_url}/get_metadata", timeout=5).json()
-        program = meta.get("program_name") or meta.get("name")
-    except (requests.RequestException, ValueError):
-        program = None
+    program = current_program
     if not program:
         pytest.skip("No program loaded")
 
@@ -121,7 +117,7 @@ def test_batch_and_individual_scoring_agree(server_url, server_available):
 
 
 @pytest.mark.requires_program
-def test_batch_analyze_empty_addresses_rejected(server_url, server_available):
+def test_batch_analyze_empty_addresses_rejected(server_url, server_available, current_program):
     """Empty address list should be rejected cleanly, not return stale data
     from a previous call or crash the EDT.
 
