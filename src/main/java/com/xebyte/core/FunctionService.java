@@ -146,20 +146,21 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile function at address to pseudocode. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
     public Response decompileFunctionByAddress(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                   description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
+            @Param(value = "functions", defaultValue = "",
+                   description = "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.") String functionsParam,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName,
             @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required");
+        if (functionsParam != null && !functionsParam.trim().isEmpty()) {
+            return batchDecompileFunctions(functionsParam, programName);
+        }
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required (or pass functions= for bulk)");
 
         DecompInterface decomp = null;
         try {
@@ -303,7 +304,7 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-        @McpTool(path = "/batch_decompile", description = "Decompile multiple functions at once. Accepts comma-separated function names or addresses.", category = "function")
+    // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 6.0.0.
     public Response batchDecompileFunctions(
             @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -3962,18 +3963,23 @@ public class FunctionService {
     }
 
     @McpTool(path = "/add_function_tag", method = "POST",
-             description = "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist.",
+             description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and auto-created. Replaces batch_add_function_tags.",
              category = "function")
     public Response addFunctionTag(
-            @Param(value = "function", source = ParamSource.BODY, paramType = "address",
-                   description = "Function address or function name") String functionRef,
-            @Param(value = "tags", source = ParamSource.BODY,
-                   description = "Comma-separated tag names to attach (e.g. \"syscall,lpe-surface\")") String tagsCsv,
+            @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
+                   description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
+            @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
+                   description = "Comma-separated tag names to attach (single mode).") String tagsCsv,
+            @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required");
+        if (assignments != null && !assignments.isEmpty()) {
+            return batchAddFunctionTags(assignments, programName);
+        }
+        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required (or pass assignments[] for bulk)");
         List<String> tagNames = splitTagList(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
@@ -4008,18 +4014,23 @@ public class FunctionService {
     }
 
     @McpTool(path = "/remove_function_tag", method = "POST",
-             description = "Detach one or more tags from a function. Does not delete the program-wide tag definition — use delete_function_tag for that.",
+             description = "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition — use delete_function_tag for that. Replaces batch_remove_function_tags.",
              category = "function")
     public Response removeFunctionTag(
-            @Param(value = "function", source = ParamSource.BODY, paramType = "address",
-                   description = "Function address or function name") String functionRef,
-            @Param(value = "tags", source = ParamSource.BODY,
-                   description = "Comma-separated tag names to detach") String tagsCsv,
+            @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
+                   description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
+            @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
+                   description = "Comma-separated tag names to detach (single mode).") String tagsCsv,
+            @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required");
+        if (assignments != null && !assignments.isEmpty()) {
+            return batchRemoveFunctionTags(assignments, programName);
+        }
+        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required (or pass assignments[] for bulk)");
         List<String> tagNames = splitTagList(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
@@ -4240,9 +4251,8 @@ public class FunctionService {
                 "functions", page));
     }
 
-    @McpTool(path = "/batch_add_function_tags", method = "POST",
-             description = "Attach tags to many functions in one transaction. Body: [{\"function\":\"0x140200ae6\",\"tags\":\"syscall,lpe-surface\"}, ...]. Tags auto-create.",
-             category = "function")
+    // Bulk helper for add_function_tag(assignments=[...]). Merged into add_function_tag in
+    // 6.0.0; no longer a standalone @McpTool.
     public Response batchAddFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
@@ -4310,9 +4320,8 @@ public class FunctionService {
                 "results", results));
     }
 
-    @McpTool(path = "/batch_remove_function_tags", method = "POST",
-             description = "Detach tags from many functions in one transaction. Body shape matches /batch_add_function_tags.",
-             category = "function")
+    // Bulk helper for remove_function_tag(assignments=[...]). Merged into remove_function_tag
+    // in 6.0.0; no longer a standalone @McpTool.
     public Response batchRemoveFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,

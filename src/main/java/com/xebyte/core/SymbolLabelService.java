@@ -166,25 +166,27 @@ public class SymbolLabelService {
     }
 
     public Response createLabel(String addressStr, String labelName) {
-        return createLabel(addressStr, labelName, null);
+        return createLabel(addressStr, labelName, null, null);
     }
 
-    @McpTool(path = "/create_label", method = "POST", description = "Create a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol")
     public Response createLabel(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "name", source = ParamSource.BODY) String labelName,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                   description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Label name (single mode).") String labelName,
+            @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if (labels != null && !labels.isEmpty()) {
+            return batchCreateLabels(labels, programName);
+        }
         if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("Address is required");
+            return Response.err("Address is required (or pass labels[] for bulk)");
         }
         if (labelName == null || labelName.isEmpty()) {
             return Response.err("Label name is required");
@@ -245,7 +247,7 @@ public class SymbolLabelService {
         return batchCreateLabels(labels, null);
     }
 
-    @McpTool(path = "/batch_create_labels", method = "POST", description = "Create multiple labels at once", category = "symbol")
+    // Bulk helper for create_label(labels=[...]). Merged into create_label in 6.0.0.
     public Response batchCreateLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -404,7 +406,7 @@ public class SymbolLabelService {
             } else {
                 // This is a label (code address) — validate snake_case
                 conventions = NamingConventions.validateLabelName(newName);
-                Response result = createLabel(addressStr, newName, programName);
+                Response result = createLabel(addressStr, newName, null, programName);
                 if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
                     @SuppressWarnings("unchecked")
                     java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
@@ -424,22 +426,24 @@ public class SymbolLabelService {
         return deleteLabel(addressStr, labelName, null);
     }
 
-    @McpTool(path = "/delete_label", method = "POST", description = "Delete a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")
     public Response deleteLabel(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "name", source = ParamSource.BODY) String labelName,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                   description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Label name (single mode).") String labelName,
+            @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if (labels != null && !labels.isEmpty()) {
+            return batchDeleteLabels(labels, programName);
+        }
         if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("Address is required");
+            return Response.err("Address is required (or pass labels[] for bulk)");
         }
 
         try {
@@ -508,7 +512,7 @@ public class SymbolLabelService {
         return batchDeleteLabels(labels, null);
     }
 
-    @McpTool(path = "/batch_delete_labels", method = "POST", description = "Delete multiple labels at once", category = "symbol")
+    // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 6.0.0.
     public Response batchDeleteLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
