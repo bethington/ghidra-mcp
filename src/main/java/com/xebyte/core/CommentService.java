@@ -91,80 +91,6 @@ public class CommentService {
         return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
     }
 
-    @McpTool(path = "/set_decompiler_comment", method = "POST", description = "Set decompiler PRE_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
-    public Response setDecompilerComment(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
-    }
-
-    public Response setDecompilerComment(String addressStr, String comment) {
-        return setDecompilerComment(addressStr, comment, null);
-    }
-
-    @McpTool(path = "/set_disassembly_comment", method = "POST", description = "Set disassembly EOL_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
-    public Response setDisassemblyComment(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
-    }
-
-    public Response setDisassemblyComment(String addressStr, String comment) {
-        return setDisassemblyComment(addressStr, comment, null);
-    }
-
-    /**
-     * Get the plate (header) comment for a function.
-     */
-    @McpTool(path = "/get_plate_comment", description = "Get function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
-    public Response getPlateComment(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String address,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (address == null || address.isEmpty()) {
-            return Response.err("address parameter is required");
-        }
-
-        Address addr = ServiceUtils.parseAddress(program, address);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
-        Function func = program.getFunctionManager().getFunctionAt(addr);
-        if (func == null) {
-            func = program.getFunctionManager().getFunctionContaining(addr);
-        }
-        if (func == null) {
-            return Response.err("No function at address: " + address);
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
-        result.put("function_name", func.getName());
-        result.put("comment", func.getComment());
-        return Response.ok(result);
-    }
-
     private static String firstNonEmpty(String... ss) {
         for (String s : ss) {
             if (s != null && !s.trim().isEmpty()) return s;
@@ -177,7 +103,7 @@ public class CommentService {
      * addresses. Unlike get_plate_comment, this does not require a function at the address --
      * so it can read the plate/EOL comment attached to a global/data symbol.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
     public Response getComment(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
@@ -220,7 +146,7 @@ public class CommentService {
      * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
      * comment on a data global via Listing.setComment.
      */
-    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; unlike set_plate_comment this can set a PLATE comment on a data global.", category = "comment")
+    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment")
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
@@ -240,84 +166,6 @@ public class CommentService {
                 return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
         }
         return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", programName);
-    }
-
-    /**
-     * Set function plate (header) comment.
-     */
-    @McpTool(path = "/set_plate_comment", method = "POST", description = "Set function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
-    public Response setPlateComment(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
-            @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddress == null || functionAddress.isEmpty()) {
-            return Response.err("Function address is required");
-        }
-        if (comment == null) {
-            return Response.err("Comment is required");
-        }
-
-        // Resolve address before entering SwingUtilities lambda
-        Address resolvedAddr = ServiceUtils.parseAddress(program, functionAddress);
-        if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Set Plate Comment");
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
-                    if (func == null) {
-                        errorMsg.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    func.setComment(comment);
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error setting plate comment", e);
-                } finally {
-                    program.endTransaction(tx, success.get());
-                }
-            });
-
-            // Force event processing to ensure changes propagate to decompiler cache
-            if (success.get()) {
-                program.flushEvents();
-                try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            }
-        } catch (Exception e) {
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
-        }
-
-        if (success.get()) {
-            List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
-            if (plateWarnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                        "Set plate comment for function at " + functionAddress));
-            } else {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                        "Set plate comment for function at " + functionAddress,
-                        "warnings", plateWarnings));
-            }
-        }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
-    }
-
-    public Response setPlateComment(String functionAddress, String comment) {
-        return setPlateComment(functionAddress, comment, null);
     }
 
     /**

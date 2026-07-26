@@ -1417,22 +1417,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return commentService.setCommentAtAddress(addressStr, comment, commentType, transactionName).toJson();
     }
 
-    private String setDecompilerComment(String addressStr, String comment, String programName) {
-        return commentService.setDecompilerComment(addressStr, comment, programName).toJson();
-    }
-
-    private String setDecompilerComment(String addressStr, String comment) {
-        return commentService.setDecompilerComment(addressStr, comment).toJson();
-    }
-
-    private String setDisassemblyComment(String addressStr, String comment, String programName) {
-        return commentService.setDisassemblyComment(addressStr, comment, programName).toJson();
-    }
-
-    private String setDisassemblyComment(String addressStr, String comment) {
-        return commentService.setDisassemblyComment(addressStr, comment).toJson();
-    }
-
     private String renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
         return functionService.renameFunctionByAddress(functionAddrStr, newName, programName).toJson();
     }
@@ -3019,10 +3003,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     private String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
         return commentService.clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol).toJson();
-    }
-
-    private String setPlateComment(String functionAddress, String comment) {
-        return commentService.setPlateComment(functionAddress, comment).toJson();
     }
 
     /**
