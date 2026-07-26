@@ -3038,7 +3038,7 @@
     {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
-      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag.",
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.",
       "method": "GET",
       "params": [
         {

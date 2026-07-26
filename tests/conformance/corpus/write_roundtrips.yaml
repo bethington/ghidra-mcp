@@ -79,6 +79,9 @@ tool_cases:
     assert:
       no_error: true
 
+  # get_comment distinguishes "cleared" from "never set" by key presence:
+  # cleared kinds read back as "" (this case); a kind never touched at all
+  # comes back null (see read_assertions_2.yaml::get_comment).
   - tool: get_comment
     name: readback_cleared
     tier: write
@@ -86,6 +89,7 @@ tool_cases:
     args: { address: "0x10001000" }
     assert:
       not_contains: ["CONFORMANCE PLATE MARKER", "CONFORMANCE EOL MARKER"]
+      json_equals: { plate: "", eol: "" }
 
   # ---- function tags: add_function_tag absorbed the batch form -------------
   - tool: add_function_tag

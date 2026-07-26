@@ -32,6 +32,10 @@ _VOLATILE = [
     (re.compile(r'"elapsed_ms"\s*:\s*\d+'), '"elapsed_ms":<MS>'),
     (re.compile(r'"duration_ms"\s*:\s*\d+'), '"duration_ms":<MS>'),
     (re.compile(r'"timestamp"\s*:\s*"[^"]*"'), '"timestamp":"<TS>"'),
+    # get_version's build_timestamp/build_number/full_version all embed the
+    # Maven build timestamp (yyyyMMdd-HHmmss), which changes on every rebuild
+    # by design (pom.xml's maven.build.timestamp) -- not a behavioral change.
+    (re.compile(r'\b\d{8}-\d{6}\b'), '<BUILDSTAMP>'),
     (re.compile(r'"uptime[^"]*"\s*:\s*[\d.]+'), '"uptime":<UPTIME>'),
     (re.compile(r'"(?:used|free|total|max)_memory[^"]*"\s*:\s*\d+'), '"memory":<MEM>'),
     (re.compile(r'"pid"\s*:\s*\d+'), '"pid":<PID>'),
