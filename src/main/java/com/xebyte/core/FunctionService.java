@@ -184,7 +184,11 @@ public class FunctionService {
                 return Response.err("Decompiler completed but returned null decompiled function.");
             }
 
-            return Response.text(decompResult.getDecompiledFunction().getC());
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("name", func.getName());
+            out.put("address", func.getEntryPoint().toString(false));
+            out.put("decompiled", decompResult.getDecompiledFunction().getC());
+            return Response.ok(out);
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             return Response.err("Error decompiling function: " + msg);
@@ -502,6 +506,7 @@ public class FunctionService {
             Address start = func.getEntryPoint();
             Address end = func.getBody().getMaxAddress();
 
+            List<Map<String, Object>> instructions_out = new ArrayList<>();
             InstructionIterator instructions = listing.getInstructions(start, true);
             while (instructions.hasNext()) {
                 Instruction instr = instructions.next();
@@ -509,15 +514,17 @@ public class FunctionService {
                     break; // Stop if we've gone past the end of the function
                 }
                 String comment = listing.getComment(CodeUnit.EOL_COMMENT, instr.getAddress());
-                comment = (comment != null) ? "; " + comment : "";
 
-                sb.append(String.format("%s: %s %s\n",
-                    instr.getAddress(),
-                    instr.toString(),
-                    comment));
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("address", instr.getAddress().toString(false));
+                entry.put("instruction", instr.toString());
+                if (comment != null && !comment.isEmpty()) {
+                    entry.put("comment", comment);
+                }
+                instructions_out.add(entry);
             }
 
-            return Response.text(sb.toString());
+            return ServiceUtils.listed("instructions", instructions_out);
         } catch (Exception e) {
             return Response.err("Error disassembling function: " + e.getMessage());
         }
@@ -547,21 +554,24 @@ public class FunctionService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.text("Address or function name is required");
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("Address or function name is required");
+        }
 
         try {
             Function func = ServiceUtils.resolveFunction(program, addressStr);
-            if (func == null) return Response.text("No function found for " + addressStr);
+            if (func == null) return Response.err("No function found for " + addressStr);
 
-            return Response.text(String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
-                func.getName(),
-                func.getEntryPoint(),
-                func.getSignature(),
-                func.getEntryPoint(),
-                func.getBody().getMinAddress(),
-                func.getBody().getMaxAddress()));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("name", func.getName());
+            out.put("address", func.getEntryPoint().toString(false));
+            out.put("signature", func.getSignature().getPrototypeString());
+            out.put("entry_point", func.getEntryPoint().toString(false));
+            out.put("body_start", func.getBody().getMinAddress().toString(false));
+            out.put("body_end", func.getBody().getMaxAddress().toString(false));
+            return Response.ok(out);
         } catch (Exception e) {
-            return Response.text("Error getting function: " + e.getMessage());
+            return Response.err("Error getting function: " + e.getMessage());
         }
     }
 

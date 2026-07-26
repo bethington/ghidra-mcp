@@ -95,7 +95,20 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
 
         Response r = service.getFunctionCallers("target", "", 0, 10, "");
 
-        assertTrue(r instanceof Response.Text);
-        assertTrue(((Response.Text) r).content().contains("caller_func @ 00100000"));
+        // 6.0.0 response contract: list-shaped results are JSON with a named
+        // plural key plus count/total, not a formatted "name @ addr" listing.
+        assertTrue("expected a JSON Ok response, got " + r.getClass().getSimpleName(),
+                   r instanceof Response.Ok);
+        Object data = ((Response.Ok) r).data();
+        assertTrue(data instanceof java.util.Map);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> body = (java.util.Map<String, Object>) data;
+        assertEquals(1, body.get("count"));
+        assertEquals(1, body.get("total"));
+        @SuppressWarnings("unchecked")
+        java.util.List<java.util.Map<String, Object>> callers =
+                (java.util.List<java.util.Map<String, Object>>) body.get("callers");
+        assertEquals(1, callers.size());
+        assertEquals("caller_func", callers.get(0).get("name"));
     }
 }

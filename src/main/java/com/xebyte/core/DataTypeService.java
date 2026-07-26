@@ -236,21 +236,21 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
+        if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
         if (dataType == null) {
-            return Response.text("Data type not found: " + typeName);
+            return Response.err("Data type not found: " + typeName);
         }
 
-        int size = dataType.getLength();
-        return Response.text(String.format("Type: %s\nSize: %d bytes\nAlignment: %d\nPath: %s",
-                            dataType.getName(),
-                            size,
-                            dataType.getAlignment(),
-                            dataType.getPathName()));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("type_name", dataType.getName());
+        out.put("size", dataType.getLength());
+        out.put("alignment", dataType.getAlignment());
+        out.put("path", dataType.getPathName());
+        return Response.ok(out);
     }
 
     // Backward compatibility overload

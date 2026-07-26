@@ -116,8 +116,7 @@ public class ListingService {
             }
             all.add(entry);
         }
-        int end = Math.min(offset + limit, all.size());
-        return Response.ok(offset < all.size() ? all.subList(offset, end) : List.of());
+        return ServiceUtils.paged("imports", all, offset, limit);
     }
 
     @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing")
@@ -322,10 +321,7 @@ public class ListingService {
 
         Collections.sort(matches);
 
-        if (matches.isEmpty()) {
-            return Response.text("No functions matching '" + searchTerm + "'");
-        }
-        return Response.text(ServiceUtils.paginateList(matches, offset, limit));
+        return ServiceUtils.paged("functions", matches, offset, limit);
     }
 
     @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
@@ -680,15 +676,14 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        List<String> entryPoints = new ArrayList<>();
+        List<Map<String, Object>> entryPoints = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
 
         SymbolIterator allSymbols = symbolTable.getAllSymbols(true);
         while (allSymbols.hasNext()) {
             Symbol symbol = allSymbols.next();
             if (symbol.isExternalEntryPoint()) {
-                String entryInfo = formatEntryPoint(symbol) + " [external entry]";
-                entryPoints.add(entryInfo);
+                entryPoints.add(formatEntryPoint(symbol, "external_entry"));
             }
         }
 
@@ -700,9 +695,8 @@ public class ListingService {
             while (symbols.hasNext()) {
                 Symbol symbol = symbols.next();
                 if (symbol.getSymbolType() == SymbolType.FUNCTION || symbol.getSymbolType() == SymbolType.LABEL) {
-                    String entryInfo = formatEntryPoint(symbol) + " [common entry name]";
                     if (!containsAddress(entryPoints, symbol.getAddress())) {
-                        entryPoints.add(entryInfo);
+                        entryPoints.add(formatEntryPoint(symbol, "common_entry_name"));
                     }
                 }
             }
@@ -711,11 +705,15 @@ public class ListingService {
         Address programEntry = program.getImageBase();
         if (programEntry != null) {
             Symbol entrySymbol = symbolTable.getPrimarySymbol(programEntry);
-            String entryInfo;
+            Map<String, Object> entryInfo;
             if (entrySymbol != null) {
-                entryInfo = formatEntryPoint(entrySymbol) + " [program entry]";
+                entryInfo = formatEntryPoint(entrySymbol, "program_entry");
             } else {
-                entryInfo = "entry @ " + programEntry + " [program entry] [FUNCTION]";
+                entryInfo = new LinkedHashMap<>();
+                entryInfo.put("name", "entry");
+                entryInfo.put("address", programEntry.toString(false));
+                entryInfo.put("symbol_type", "FUNCTION");
+                entryInfo.put("kind", "program_entry");
             }
             if (!containsAddress(entryPoints, programEntry)) {
                 entryPoints.add(entryInfo);
@@ -730,7 +728,12 @@ public class ListingService {
                     if (addr != null && program.getMemory().contains(addr)) {
                         Function func = program.getFunctionManager().getFunctionAt(addr);
                         if (func != null) {
-                            entryPoints.add("entry @ " + addr + " (" + func.getName() + ") [potential entry] [FUNCTION]");
+                            Map<String, Object> potential = new LinkedHashMap<>();
+                            potential.put("name", func.getName());
+                            potential.put("address", addr.toString(false));
+                            potential.put("symbol_type", "FUNCTION");
+                            potential.put("kind", "potential_entry");
+                            entryPoints.add(potential);
                         }
                     }
                 } catch (Exception e) {
@@ -739,11 +742,7 @@ public class ListingService {
             }
         }
 
-        if (entryPoints.isEmpty()) {
-            return Response.text("No entry points found in program");
-        }
-
-        return Response.text(String.join("\n", entryPoints));
+        return ServiceUtils.listed("entry_points", entryPoints);
     }
 
     // ========================================================================
@@ -827,26 +826,27 @@ public class ListingService {
         return info.toString();
     }
 
-    private String formatEntryPoint(Symbol symbol) {
-        StringBuilder info = new StringBuilder();
-        info.append(symbol.getName());
-        info.append(" @ ").append(symbol.getAddress());
-        info.append(" [").append(symbol.getSymbolType()).append("]");
+    private Map<String, Object> formatEntryPoint(Symbol symbol, String kind) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("name", symbol.getName());
+        entry.put("address", symbol.getAddress().toString(false));
+        entry.put("symbol_type", symbol.getSymbolType().toString());
+        entry.put("kind", kind);
 
         if (symbol.getSymbolType() == SymbolType.FUNCTION) {
             Function func = (Function) symbol.getObject();
             if (func != null) {
-                info.append(" (").append(func.getParameterCount()).append(" params)");
+                entry.put("param_count", func.getParameterCount());
             }
         }
 
-        return info.toString();
+        return entry;
     }
 
-    private boolean containsAddress(List<String> entryPoints, Address address) {
-        String addrStr = address.toString();
-        for (String entry : entryPoints) {
-            if (entry.contains("@ " + addrStr)) {
+    private boolean containsAddress(List<Map<String, Object>> entryPoints, Address address) {
+        String addrStr = address.toString(false);
+        for (Map<String, Object> entry : entryPoints) {
+            if (addrStr.equals(entry.get("address"))) {
                 return true;
             }
         }
