@@ -1,0 +1,185 @@
+# Curated read-tier assertions, batch 2: listing, symbols, comments, analysis.
+#
+# Same principle as read_assertions.yaml -- assert meaning against known facts
+# about Benchmark.dll, not whatever the server said when a snapshot was taken.
+#
+# These lean on structural facts (envelope keys, known function names, filters
+# actually filtering) rather than exact counts, which drift as the analyzer
+# improves and would make the suite noisy for no gain.
+
+defaults:
+  args:
+    program: "Benchmark.dll"
+  timeout: 60
+
+tool_cases:
+
+  # ---- listing envelopes ---------------------------------------------------
+  - tool: list_functions
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["functions", "count"]
+      contains: ["calc_crc16", "compute_gcd"]
+
+  - tool: list_methods
+    name: curated
+    tier: read
+    snapshot: false
+    args: { limit: 500 }
+    assert:
+      json_keys: ["methods", "count", "offset", "total"]
+      contains: ["calc_crc16"]
+
+  - tool: list_imports
+    name: curated
+    tier: read
+    snapshot: false
+    args: { limit: 50 }
+    assert:
+      json_keys: ["imports", "count", "offset", "total"]
+
+  - tool: list_strings
+    name: curated
+    tier: read
+    snapshot: false
+    args: { limit: 50 }
+    assert:
+      json_keys: ["strings", "count", "offset", "total"]
+
+  - tool: list_data_items
+    name: curated
+    tier: read
+    snapshot: false
+    args: { limit: 20 }
+    assert:
+      json_keys: ["data_items", "count", "offset", "total"]
+
+  # FINDING: `category` is REQUIRED here, so there is no way to list every data
+  # type -- the parameter is a filter and should be optional with an empty
+  # default, as it is on search_data_types. Passing one to keep the case honest.
+  - tool: list_data_types
+    name: curated
+    tier: read
+    snapshot: false
+    args: { limit: 20, category: "int" }
+    assert:
+      json_keys: ["data_types", "count", "offset", "total"]
+
+  - tool: list_calling_conventions
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["calling_conventions", "count"]
+      contains: ["__cdecl", "__stdcall", "__fastcall"]
+
+  # Paging must be real: a limit of 1 returns 1 item but reports the full total.
+  # That distinction is the entire reason the envelope carries `total`, and a
+  # port that returned count == total would look fine to a snapshot.
+  - tool: list_methods
+    name: curated_paging_total_vs_count
+    tier: read
+    snapshot: false
+    args: { limit: 1, offset: 0 }
+    assert:
+      json_equals: { count: 1, offset: 0 }
+      not_contains: ['"total": 1']
+
+  # ---- function detail -----------------------------------------------------
+  # `limit` here was declared String while 36 sibling tools declared int, so
+  # passing a number failed on this tool alone. Pinned at the protocol level.
+  - tool: get_function_variables
+    name: curated_limit_is_numeric
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000", limit: 10 }
+    assert:
+      no_error: true
+      not_contains: ["validation error", "should be a valid string"]
+
+  - tool: get_function_callees
+    name: curated
+    tier: read
+    snapshot: false
+    args: { name: "advance_parser_state" }
+    assert:
+      json_keys: ["callees", "count", "total"]
+
+  - tool: get_function_callers
+    name: curated
+    tier: read
+    snapshot: false
+    args: { name: "calc_crc16" }
+    assert:
+      json_keys: ["callers", "count", "total"]
+
+  - tool: get_function_labels
+    name: curated
+    tier: read
+    snapshot: false
+    args: { name: "0x10001000" }
+    assert:
+      json_keys: ["labels", "count", "total"]
+
+  - tool: get_xrefs_from
+    name: curated
+    tier: read
+    snapshot: false
+    args: { address: "0x10001210" }
+    assert:
+      json_keys: ["references", "count", "total"]
+
+  # FINDING: get_comment does NOT report every kind. Gson drops nulls, so a
+  # comment kind that was never set is absent from the response entirely, while
+  # one explicitly cleared comes back as "". Callers therefore cannot use key
+  # presence to distinguish "no comment" from "empty comment" -- and
+  # MCP_RESPONSE_CONTRACT.md section 2 currently claims they can. Either the
+  # tool should emit all five kinds or the doc should stop promising it; this
+  # case pins today's behavior so the discrepancy stays visible.
+  - tool: get_comment
+    name: curated_kinds_and_convenience_fields
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_keys: ["address", "comment", "has_comment"]
+
+  # ---- analysis ------------------------------------------------------------
+  - tool: analyze_function_completeness
+    name: curated_single_compact
+    tier: read
+    snapshot: false
+    args: { function_address: "0x10001000", compact: true }
+    assert:
+      json_keys: ["function_name", "effective_score", "completeness_score"]
+      json_equals: { function_name: "calc_crc16" }
+
+  - tool: get_language_metadata
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      no_error: true
+      contains: ["x86"]
+
+  - tool: get_address_spaces
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["address_spaces", "count"]
+
+  # ---- error shape on a missing required argument -------------------------
+  - tool: get_function_callees
+    name: curated_missing_target
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      error_contains: ["error"]
