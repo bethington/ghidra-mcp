@@ -261,7 +261,7 @@ def main():
     seen_decomp = ""
     for c in dict.fromkeys(callers):
         d = gget("/decompile_function", address="0x" + c)
-        if isinstance(d, dict): d = d.get("decompilation") or d.get("code") or ""
+        if isinstance(d, dict): d = d.get("decompiled") or ""
         seen_decomp += "\n" + d
         accesses += extract_accesses(d, gname)
     print(f"[arr] {len(accesses)} array-access expression(s) found")
