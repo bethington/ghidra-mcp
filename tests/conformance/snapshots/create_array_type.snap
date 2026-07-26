@@ -1,1 +1,7 @@
-Successfully created array type: int[1] (int[1])
+{
+  "base_type": "int",
+  "length": 1,
+  "message": "Successfully created array type: int[1] (int[1])",
+  "name": "int[1]",
+  "status": "success"
+}

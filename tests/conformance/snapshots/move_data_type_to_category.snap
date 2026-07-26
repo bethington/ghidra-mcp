@@ -1,1 +1,6 @@
-Successfully moved data type 'int' to category '/'
+{
+  "category_path": "/",
+  "message": "Successfully moved data type 'int' to category '/'",
+  "status": "success",
+  "type_name": "int"
+}

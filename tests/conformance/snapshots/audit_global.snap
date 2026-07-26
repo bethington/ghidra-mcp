@@ -4,9 +4,9 @@
   "is_code_address": true,
   "is_function_entry": true,
   "issues": [],
-  "length": 0,
+  "length": 4,
   "name": "calc_crc16",
-  "plate_comment": "__stdcall calc_crc16,8",
-  "type": "",
+  "plate_comment": "",
+  "type": "int",
   "xref_count": 4
 }

@@ -2242,7 +2242,9 @@ public class ProgramScriptService {
             Msg.error(this, "Failed to execute on Swing thread", e);
         }
 
-        return Response.text(resultMsg.toString());
+        return Response.ok(JsonHelper.mapOf(
+                "success", success.get(),
+                "console_output", resultMsg.toString()));
     }
 
     @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
@@ -2344,8 +2346,10 @@ public class ProgramScriptService {
             if (!tempScript.exists()) {
                 // File was never written or was already cleaned up — nothing to do.
             } else {
-                boolean succeeded = responseHolder[0] != null
-                    && responseHolder[0].toJson().contains("SCRIPT COMPLETED SUCCESSFULLY");
+                boolean succeeded = false;
+                if (responseHolder[0] instanceof Response.Ok ok && ok.data() instanceof Map<?, ?> dataMap) {
+                    succeeded = Boolean.TRUE.equals(dataMap.get("success"));
+                }
                 if (succeeded) {
                     // Clean run: remove the source file immediately.
                     if (!tempScript.delete()) tempScript.deleteOnExit();
@@ -2883,9 +2887,17 @@ public class ProgramScriptService {
             Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs, programName);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
-            // Extract output text from the Response
+            // Extract the structured result from runGhidraScript's own response
+            // rather than string-matching its serialized JSON.
+            boolean succeeded = false;
             String output = scriptResponse.toJson();
-            boolean succeeded = output.contains("SCRIPT COMPLETED SUCCESSFULLY");
+            if (scriptResponse instanceof Response.Ok ok && ok.data() instanceof Map<?, ?> dataMap) {
+                succeeded = Boolean.TRUE.equals(dataMap.get("success"));
+                Object consoleOutput = dataMap.get("console_output");
+                if (consoleOutput != null) output = consoleOutput.toString();
+            } else if (scriptResponse instanceof Response.Err err) {
+                output = err.message();
+            }
 
             return Response.ok(JsonHelper.mapOf(
                 "success", succeeded,
@@ -2897,223 +2909,6 @@ public class ProgramScriptService {
 
         } catch (Exception e) {
             return Response.err(e.getMessage());
-        }
-    }
-
-    // ========================================================================
-    // Script Generation
-    // ========================================================================
-
-    /**
-     * Generate script content based on workflow type and parameters.
-     * Dispatches to specific script generators based on workflowType.
-     */
-    public Response generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
-        if (parameters == null) {
-            parameters = new HashMap<>();
-        }
-
-        switch (workflowType) {
-            case "document_functions":
-                return Response.text(generateDocumentFunctionsScript(purpose, parameters));
-            case "fix_ordinals":
-                return Response.text(generateFixOrdinalsScript(purpose, parameters));
-            case "bulk_rename":
-                return Response.text(generateBulkRenameScript(purpose, parameters));
-            case "analyze_structures":
-                return Response.text(generateAnalyzeStructuresScript(purpose, parameters));
-            case "find_patterns":
-                return Response.text(generateFindPatternsScript(purpose, parameters));
-            case "custom":
-            default:
-                return Response.text(generateCustomScript(purpose, parameters));
-        }
-    }
-
-    private String generateDocumentFunctionsScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.listing.Function;\n" +
-               "import ghidra.program.model.listing.FunctionManager;\n\n" +
-               "public class DocumentFunctions extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
-               "        int documentedCount = 0;\n" +
-               "        \n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
-               "            try {\n" +
-               "                // Add custom documentation logic here\n" +
-               "                // Example: setPlateComment(func.getEntryPoint(), \"Documented: \" + func.getName());\n" +
-               "                documentedCount++;\n" +
-               "                \n" +
-               "                if (documentedCount % 100 == 0) {\n" +
-               "                    println(\"Processed \" + documentedCount + \" functions\");\n" +
-               "                }\n" +
-               "            } catch (Exception e) {\n" +
-               "                println(\"Error processing \" + func.getName() + \": \" + e.getMessage());\n" +
-               "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Document functions workflow complete! Processed \" + documentedCount + \" functions.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    private String generateFixOrdinalsScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.symbol.ExternalManager;\n" +
-               "import ghidra.program.model.symbol.ExternalLocation;\n" +
-               "import ghidra.program.model.symbol.ExternalLocationIterator;\n\n" +
-               "public class FixOrdinalImports extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        ExternalManager extMgr = currentProgram.getExternalManager();\n" +
-               "        int fixedCount = 0;\n" +
-               "        \n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        for (String libName : extMgr.getExternalLibraryNames()) {\n" +
-               "            ExternalLocationIterator iter = extMgr.getExternalLocations(libName);\n" +
-               "            while (iter.hasNext()) {\n" +
-               "                ExternalLocation extLoc = iter.next();\n" +
-               "                String label = extLoc.getLabel();\n" +
-               "                \n" +
-               "                // Check if this is an ordinal import (e.g., \"Ordinal_123\")\n" +
-               "                if (label.startsWith(\"Ordinal_\")) {\n" +
-               "                    try {\n" +
-               "                        // Add logic to determine correct function name from ordinal\n" +
-               "                        // Then rename: extLoc.setName(..., correctName, SourceType.USER_DEFINED);\n" +
-               "                        fixedCount++;\n" +
-               "                    } catch (Exception e) {\n" +
-               "                        println(\"Error fixing ordinal \" + label + \": \" + e.getMessage());\n" +
-               "                    }\n" +
-               "                }\n" +
-               "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Fix ordinals workflow complete! Fixed \" + fixedCount + \" ordinal imports.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    private String generateBulkRenameScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.symbol.SymbolTable;\n" +
-               "import ghidra.program.model.symbol.Symbol;\n" +
-               "import ghidra.program.model.symbol.SourceType;\n\n" +
-               "public class BulkRenameSymbols extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        SymbolTable symTable = currentProgram.getSymbolTable();\n" +
-               "        int renamedCount = 0;\n" +
-               "        \n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        for (Symbol symbol : symTable.getAllSymbols(true)) {\n" +
-               "            try {\n" +
-               "                String currentName = symbol.getName();\n" +
-               "                // Add pattern matching logic here\n" +
-               "                // Example: if (currentName.matches(\"var_.*\")) { newName = ... }\n" +
-               "                renamedCount++;\n" +
-               "            } catch (Exception e) {\n" +
-               "                println(\"Error renaming symbol: \" + e.getMessage());\n" +
-               "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Bulk rename workflow complete! Renamed \" + renamedCount + \" symbols.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    private String generateAnalyzeStructuresScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.data.DataType;\n" +
-               "import ghidra.program.model.data.DataTypeManager;\n" +
-               "import ghidra.program.model.data.Structure;\n\n" +
-               "public class AnalyzeStructures extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        DataTypeManager dtMgr = currentProgram.getDataTypeManager();\n" +
-               "        int analyzedCount = 0;\n" +
-               "        \n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        for (DataType dt : dtMgr.getAllDataTypes()) {\n" +
-               "            if (dt instanceof Structure) {\n" +
-               "                try {\n" +
-               "                    Structure struct = (Structure) dt;\n" +
-               "                    // Add analysis logic here\n" +
-               "                    analyzedCount++;\n" +
-               "                } catch (Exception e) {\n" +
-               "                    println(\"Error analyzing \" + dt.getName() + \": \" + e.getMessage());\n" +
-               "                }\n" +
-               "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Analyze structures workflow complete! Analyzed \" + analyzedCount + \" structures.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    private String generateFindPatternsScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.listing.Function;\n" +
-               "import ghidra.program.model.listing.FunctionManager;\n\n" +
-               "public class FindPatterns extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
-               "        int foundCount = 0;\n" +
-               "        \n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
-               "            try {\n" +
-               "                // Add pattern matching logic here\n" +
-               "                // Example: if (matchesPattern(func)) { handleMatch(func); }\n" +
-               "                foundCount++;\n" +
-               "            } catch (Exception e) {\n" +
-               "                println(\"Error processing \" + func.getName() + \": \" + e.getMessage());\n" +
-               "            }\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Find patterns workflow complete! Found \" + foundCount + \" matching patterns.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    private String generateCustomScript(String purpose, Map<String, Object> parameters) {
-        return "import ghidra.app.script.GhidraScript;\n" +
-               "import ghidra.program.model.listing.Function;\n" +
-               "import ghidra.program.model.listing.FunctionManager;\n\n" +
-               "public class CustomAnalysis extends GhidraScript {\n" +
-               "    public void run() throws Exception {\n" +
-               "        // Purpose: " + purpose + "\n" +
-               "        println(\"Custom analysis script started...\");\n" +
-               "        \n" +
-               "        // Add your custom analysis logic here\n" +
-               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
-               "        int count = 0;\n" +
-               "        \n" +
-               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
-               "            // Add logic here\n" +
-               "            count++;\n" +
-               "        }\n" +
-               "        \n" +
-               "        println(\"Custom analysis complete! Processed \" + count + \" items.\");\n" +
-               "    }\n" +
-               "}\n";
-    }
-
-    /**
-     * Generate a script filename based on the workflow type.
-     */
-    public String generateScriptName(String workflowType) {
-        switch (workflowType) {
-            case "document_functions":
-                return "DocumentFunctions.java";
-            case "fix_ordinals":
-                return "FixOrdinalImports.java";
-            case "bulk_rename":
-                return "BulkRenameSymbols.java";
-            case "analyze_structures":
-                return "AnalyzeStructures.java";
-            case "find_patterns":
-                return "FindPatterns.java";
-            default:
-                return "CustomAnalysis.java";
         }
     }
 

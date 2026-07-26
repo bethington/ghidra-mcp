@@ -1,1 +1,6 @@
-Typedef 'calc_crc16' created as alias for 'int'
+{
+  "base_type": "int",
+  "message": "Typedef 'calc_crc16' created as alias for 'int'",
+  "name": "calc_crc16",
+  "status": "success"
+}

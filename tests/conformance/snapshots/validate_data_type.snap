@@ -1,6 +1,17 @@
-Validation for type 'int' at address 0x10001000:
-
-PASS: Memory range available
-   Range: 10001000 - 10001003 (4 bytes)
-PASS: Proper alignment
-PASS: No conflicting data
+{
+  "address": "0x10001000",
+  "aligned": true,
+  "alignment": 4,
+  "existing_data": "int",
+  "memory_available": true,
+  "range": {
+    "end": "10001003",
+    "start": "10001000"
+  },
+  "size": 4,
+  "type_name": "int",
+  "valid": true,
+  "warnings": [
+    "Existing data: int"
+  ]
+}

@@ -4309,7 +4309,7 @@
         },
         {
           "default": "text",
-          "description": "Output format (text or json)",
+          "description": "Deprecated, no-op: every response is JSON regardless of this value (kept only for backward-compatible calls that still pass it).",
           "name": "format",
           "required": false,
           "source": "query",

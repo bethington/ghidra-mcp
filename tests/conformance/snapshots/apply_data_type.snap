@@ -1,2 +1,8 @@
-Successfully applied data type 'int' at 0x10001000 (size: 4 bytes)
-Value: 0x245c8b53
+{
+  "address": "0x10001000",
+  "message": "Successfully applied data type 'int' at 0x10001000 (size: 4 bytes)",
+  "size": 4,
+  "status": "success",
+  "type_name": "int",
+  "value": "0x245c8b53"
+}

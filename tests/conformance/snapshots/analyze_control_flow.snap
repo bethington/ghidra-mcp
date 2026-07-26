@@ -1,9 +1,9 @@
 {
   "basic_block_details": [
     {
-      "address": "10001000",
+      "address": "10001005",
       "is_loop_header": false,
-      "size": 29,
+      "size": 24,
       "successors": 2,
       "type": "conditional"
     },
@@ -45,7 +45,7 @@
     "conditional_branches": 2,
     "cyclomatic_complexity": 3,
     "edges": 6,
-    "instructions": 91,
+    "instructions": 89,
     "loops_detected": 0,
     "returns": 1,
     "unconditional_jumps": 0

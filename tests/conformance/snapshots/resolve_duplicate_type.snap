@@ -1,1 +1,19 @@
-Found 1 type(s) named 'int': /int (4 B); No /Demangler 1-byte stub to resolve.
+{
+  "canonical_types": [
+    {
+      "path": "/int",
+      "size": 4
+    }
+  ],
+  "demangler_stubs": [],
+  "match_count": 1,
+  "matches": [
+    {
+      "path": "/int",
+      "size": 4
+    }
+  ],
+  "message": "No /Demangler 1-byte stub to resolve.",
+  "situation": "no_stub_to_resolve",
+  "type_name": "int"
+}

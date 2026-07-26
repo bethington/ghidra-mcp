@@ -3,8 +3,8 @@
     {
       "address": "10001000",
       "has_custom_name": true,
-      "hash": "764f6833ccbeeeee4024bf424e23a1eba058dbf80a8e61b86531edf5f28e9eac",
-      "instruction_count": 91,
+      "hash": "d0e0ff5b54ac2043d2dbe1e4f1fbc8c790d658088ac13d20cacde25a03a911ac",
+      "instruction_count": 89,
       "name": "calc_crc16"
     },
     {

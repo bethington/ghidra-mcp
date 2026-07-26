@@ -1967,23 +1967,25 @@ public class AnalysisService {
         // Trade-off: slightly more invokeAndWait overhead per address, but
         // GUI stays responsive and internal deadlocks don't happen.
         final int CHUNK_SIZE = 1;
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"results\": [");
-        boolean first = true;
+        List<Object> results = new ArrayList<>();
 
         for (int chunkStart = 0; chunkStart < addresses.size(); chunkStart += CHUNK_SIZE) {
             final int start = chunkStart;
             final int end = Math.min(chunkStart + CHUNK_SIZE, addresses.size());
-            final StringBuilder chunkOut = new StringBuilder();
+            final List<Object> chunkOut = new ArrayList<>();
             final AtomicReference<String> chunkErr = new AtomicReference<>(null);
 
             Runnable chunkWork = () -> {
                 try {
                     for (int i = start; i < end; i++) {
-                        if (i > start) chunkOut.append(", ");
-                        chunkOut.append(
-                            analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson()
-                        );
+                        Response r = analyzeFunctionCompleteness(addresses.get(i), false, programName);
+                        if (r instanceof Response.Ok ok) {
+                            chunkOut.add(ok.data());
+                        } else if (r instanceof Response.Err err) {
+                            chunkOut.add(JsonHelper.mapOf("error", err.message()));
+                        } else {
+                            chunkOut.add(JsonHelper.mapOf("error", "Unexpected response shape"));
+                        }
                     }
                 } catch (Exception e) {
                     chunkErr.set(e.getMessage());
@@ -2016,12 +2018,7 @@ public class AnalysisService {
                 if (chunkErr.get() != null) {
                     // Inline the error as this chunk's placeholder result and
                     // continue with the next chunk rather than aborting
-                    if (!first) sb.append(", ");
-                    sb.append(String.format(
-                        "{\"error\": \"chunk_error: %s\"}",
-                        chunkErr.get().replace("\\", "\\\\").replace("\"", "\\\"")
-                    ));
-                    first = false;
+                    results.add(JsonHelper.mapOf("error", "chunk_error: " + chunkErr.get()));
                     continue;
                 }
             } else {
@@ -2041,12 +2038,7 @@ public class AnalysisService {
                     chunkTimedOut = true;
                 } catch (Exception e) {
                     // Other exception — inline as error and continue
-                    if (!first) sb.append(", ");
-                    sb.append(String.format(
-                        "{\"error\": \"chunk_exception: %s\"}",
-                        String.valueOf(e.getMessage()).replace("\\", "\\\\").replace("\"", "\\\"")
-                    ));
-                    first = false;
+                    results.add(JsonHelper.mapOf("error", "chunk_exception: " + e.getMessage()));
                     continue;
                 }
                 if (chunkTimedOut) {
@@ -2059,29 +2051,18 @@ public class AnalysisService {
                         "analyze_function_completeness: function %s (index %d) exceeded %ds — skipping to next",
                         addr, start, PER_CHUNK_TIMEOUT_SEC
                     ));
-                    if (!first) sb.append(", ");
-                    sb.append(String.format(
-                        "{\"error\": \"chunk_timeout: %s exceeded %ds on EDT\"}",
-                        addr, PER_CHUNK_TIMEOUT_SEC
-                    ));
-                    first = false;
+                    results.add(JsonHelper.mapOf("error",
+                        "chunk_timeout: " + addr + " exceeded " + PER_CHUNK_TIMEOUT_SEC + "s on EDT"));
                     continue;
                 }
                 if (chunkErr.get() != null) {
                     // Inner exception — inline as error and continue
-                    if (!first) sb.append(", ");
-                    sb.append(String.format(
-                        "{\"error\": \"chunk_error: %s\"}",
-                        chunkErr.get().replace("\\", "\\\\").replace("\"", "\\\"")
-                    ));
-                    first = false;
+                    results.add(JsonHelper.mapOf("error", "chunk_error: " + chunkErr.get()));
                     continue;
                 }
             }
 
-            if (!first) sb.append(", ");
-            sb.append(chunkOut);
-            first = false;
+            results.addAll(chunkOut);
 
             // Yield between chunks so the EDT can service queued GUI events
             // (mouse clicks, keyboard input, paint events). Without this pause,
@@ -2096,8 +2077,7 @@ public class AnalysisService {
                 }
             }
         }
-        sb.append("], \"count\": ").append(addresses.size()).append("}");
-        return Response.text(sb.toString());
+        return Response.ok(JsonHelper.mapOf("results", results, "count", addresses.size()));
     }
 
     /**

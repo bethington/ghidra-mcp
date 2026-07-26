@@ -3,6 +3,6 @@
   "applicable": false,
   "name": "calc_crc16",
   "reason": "code_address",
-  "type": "",
+  "type": "int",
   "xref_count": 4
 }

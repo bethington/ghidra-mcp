@@ -200,7 +200,8 @@ public class ListingService {
     public Response listDataItemsByXrefs(
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "format", defaultValue = "text", description = "Output format (text or json)") String format,
+            @Param(value = "format", defaultValue = "text",
+                   description = "Deprecated, no-op: every response is JSON regardless of this value (kept only for backward-compatible calls that still pass it).") String format,
             @Param(value = "filter", defaultValue = "defined",
                    description = "Symbol-naming axis: `all`, `defined` (default — only named symbols, preserves legacy behavior), `undefined` (only DAT_*-style and raw unnamed addresses).") String filter,
             @Param(value = "type_filter", defaultValue = "all",
@@ -283,11 +284,7 @@ public class ListingService {
 
         dataItems.sort((a, b) -> Integer.compare(b.xrefCount, a.xrefCount));
 
-        if ("json".equalsIgnoreCase(format)) {
-            return formatDataItemsAsJson(dataItems, offset, limit);
-        } else {
-            return formatDataItemsAsText(dataItems, offset, limit);
-        }
+        return formatDataItems(dataItems, offset, limit);
     }
 
     /** Backward-compat overload preserving the pre-5.7.x signature (no
@@ -765,37 +762,17 @@ public class ListingService {
         }
     }
 
-    private Response formatDataItemsAsText(List<DataItemInfo> dataItems, int offset, int limit) {
-        List<String> lines = new ArrayList<>();
-
-        int start = Math.min(offset, dataItems.size());
-        int end = Math.min(start + limit, dataItems.size());
-
-        for (int i = start; i < end; i++) {
-            DataItemInfo item = dataItems.get(i);
-
-            StringBuilder line = new StringBuilder();
-            line.append(item.label);
-            line.append(" @ ").append(item.address);
-            line.append(" [").append(item.typeName).append("]");
-
-            String sizeStr = (item.length == 1) ? "1 byte" : item.length + " bytes";
-            line.append(" (").append(sizeStr).append(")");
-            line.append(" - ").append(item.xrefCount).append(" xrefs");
-
-            lines.add(line.toString());
-        }
-
-        return Response.text(String.join("\n", lines));
-    }
-
-    private Response formatDataItemsAsJson(List<DataItemInfo> dataItems, int offset, int limit) {
-        int start = Math.min(offset, dataItems.size());
-        int end = Math.min(start + limit, dataItems.size());
-
+    /**
+     * Every tool returns JSON (see MCP_RESPONSE_CONTRACT.md); the sibling
+     * {@code formatDataItemsAsText} this replaces produced an opaque
+     * newline-joined string, and even the "json" branch was a bare array
+     * with no {@code count}/{@code offset}/{@code limit}/{@code total} --
+     * both were contract violations. {@code format} is accepted for
+     * backward compatibility but no longer changes the response shape.
+     */
+    private Response formatDataItems(List<DataItemInfo> dataItems, int offset, int limit) {
         List<Map<String, Object>> items = new ArrayList<>();
-        for (int i = start; i < end; i++) {
-            DataItemInfo item = dataItems.get(i);
+        for (DataItemInfo item : dataItems) {
             String sizeStr = (item.length == 1) ? "1 byte" : item.length + " bytes";
             items.add(JsonHelper.mapOf(
                     "address", item.address,
@@ -805,8 +782,7 @@ public class ListingService {
                     "xref_count", item.xrefCount
             ));
         }
-
-        return Response.ok(items);
+        return ServiceUtils.paged("data_items", items, offset, limit);
     }
 
     private String formatGlobalSymbol(Symbol symbol) {
@@ -987,6 +963,10 @@ public class ListingService {
     public Response convertNumber(
             @Param(value = "text", description = "Number to convert") String text,
             @Param(value = "size", defaultValue = "4", description = "Size in bytes") int size) {
-        return Response.text(ServiceUtils.convertNumber(text, size));
+        try {
+            return Response.ok(ServiceUtils.convertNumberData(text, size));
+        } catch (IllegalArgumentException e) {
+            return Response.err(e.getMessage());
+        }
     }
 }

@@ -436,9 +436,13 @@ public final class ServiceUtils {
      * @param size The byte size for masking (1, 2, 4, or 8)
      * @return Formatted string with all representations, or an error message
      */
-    public static String convertNumber(String text, int size) {
+    /**
+     * @throws IllegalArgumentException if {@code text} is null/empty or not parseable as a number
+     *     in any supported base -- callers should catch and route to {@code Response.err(...)}.
+     */
+    public static Map<String, Object> convertNumberData(String text, int size) {
         if (text == null || text.isEmpty()) {
-            return "Error: No number provided";
+            throw new IllegalArgumentException("No number provided");
         }
 
         try {
@@ -460,15 +464,15 @@ public final class ServiceUtils {
                 inputType = "decimal";
             }
 
-            StringBuilder result = new StringBuilder();
-            result.append("Input: ").append(text).append(" (").append(inputType).append(")\n");
-            result.append("Size: ").append(size).append(" bytes\n\n");
-
             // Handle different sizes with proper masking
             long mask = (size == 8) ? -1L : (1L << (size * 8)) - 1L;
             long maskedValue = value & mask;
 
-            result.append("Decimal (unsigned): ").append(Long.toUnsignedString(maskedValue)).append("\n");
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("input", text);
+            out.put("input_type", inputType);
+            out.put("size", size);
+            out.put("decimal_unsigned", Long.toUnsignedString(maskedValue));
 
             // Signed representation for appropriate sizes
             if (size <= 8) {
@@ -480,23 +484,20 @@ public final class ServiceUtils {
                         signedValue = maskedValue | (~mask);
                     }
                 }
-                result.append("Decimal (signed): ").append(signedValue).append("\n");
+                out.put("decimal_signed", Long.toString(signedValue));
             }
 
-            result.append("Hexadecimal: 0x").append(Long.toHexString(maskedValue).toUpperCase()).append("\n");
-            result.append("Binary: 0b").append(Long.toBinaryString(maskedValue)).append("\n");
-            result.append("Octal: 0").append(Long.toOctalString(maskedValue)).append("\n");
+            out.put("hexadecimal", "0x" + Long.toHexString(maskedValue).toUpperCase());
+            out.put("binary", "0b" + Long.toBinaryString(maskedValue));
+            out.put("octal", "0" + Long.toOctalString(maskedValue));
 
             // Add size-specific hex representation
             String hexFormat = String.format("%%0%dX", size * 2);
-            result.append("Hex (").append(size).append(" bytes): 0x").append(String.format(hexFormat, maskedValue)).append("\n");
+            out.put("hex_padded", "0x" + String.format(hexFormat, maskedValue));
 
-            return result.toString();
-
+            return out;
         } catch (NumberFormatException e) {
-            return "Error: Invalid number format: " + text;
-        } catch (Exception e) {
-            return "Error converting number: " + e.getMessage();
+            throw new IllegalArgumentException("Invalid number format: " + text, e);
         }
     }
 

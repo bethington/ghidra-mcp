@@ -987,7 +987,7 @@ public class DocumentationHashService {
 
             BinaryComparisonService.FunctionSignature sig =
                 BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
-            return Response.text(sig.toJson());
+            return Response.ok(sig.toMap());
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
