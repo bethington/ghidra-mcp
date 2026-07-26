@@ -97,9 +97,20 @@ Content that is genuinely text (decompiled C, disassembly listings) is a
   `data_types`, `entry_points`.
 - Addresses are lowercase hex **without** an `0x` prefix in output
   (`"10001000"`), matching existing behavior. Input accepts either form.
-- Absent values are omitted rather than emitted as `null`, except where a
-  caller distinguishes "absent" from "empty" (`get_comment` emits every comment
-  kind, using `null` for absent, precisely so callers can tell the difference).
+- Absent values are omitted rather than emitted as `null`.
+
+  **Correction (2026-07-26):** this document previously claimed `get_comment`
+  emits every comment kind, using `null` for absent, so callers could tell
+  "no comment" from "empty comment". It does not. Gson drops nulls, so a kind
+  that was never set is absent from the response entirely, while one explicitly
+  cleared comes back as `""`. Key presence therefore does not carry that
+  distinction. Either `get_comment` should emit all five kinds explicitly or
+  this promise should stay withdrawn; pinned meanwhile by
+  `read_assertions_2.yaml::get_comment::curated_kinds_and_convenience_fields`.
+
+- **Filter parameters must be optional.** `list_data_types` requires
+  `category`, so there is no way to list every data type — the sibling
+  `search_data_types` defaults its filter to empty and should be the model.
 
 ---
 
