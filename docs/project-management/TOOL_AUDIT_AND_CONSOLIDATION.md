@@ -1,6 +1,8 @@
 # Tool Audit, Behavior Testing & Consolidation Proposal
 
-**Status:** proposal — awaiting maintainer approval before any breaking change is built.
+**Status:** implemented — see [§6 Execution status](#6-execution-status). Merges, bug
+fixes, and call-site migration are done and the offline suites are green; live
+verification against a running server is the open item.
 **Date:** 2026-07-25 · **Baseline:** v6.0.0 (272 endpoint-backed tools + 8 bridge static + 22 WinDbg proxy)
 **Target for approved changes:** amended **6.0.0** (see [Versioning](#5-versioning)).
 
@@ -196,9 +198,43 @@ in the interim will see drift from later pullers.
 
 ---
 
-## 6. Remaining execution (tracked)
-- [ ] Maximal testing frontier: stand up headless server (test 5+ lifecycle tools) and a
-      debugger session (test 28 debugger tools). *(In progress — the P2 fixtures above.)*
-- [ ] On approval: implement approved merges (Java `@McpTool` + bridge + `endpoints.json` +
-      regenerate README) as a clean break; port §2b harness + add P0/P1 tests; fix BUG-1/2/NIT.
-- [ ] Re-run offline Java parity + `test_project_consistency` + fun-doc benchmark; re-cut 6.0.0.
+## 6. Execution status
+
+### Done
+- [x] **Merges implemented** — all of Groups 1–3 plus both Tier-3 unifications.
+      Advertised surface **272 → 251**. Java `@McpTool` methods extended/removed,
+      `ManualToolDescriptors` + headless manual-route lists pruned of the deleted
+      routes, `tests/endpoints.json` regenerated, README API reference regenerated.
+- [x] **BUG-1 / BUG-2 / NIT fixed** (bare-name type resolver; struct-field stem
+      fallback; `get_function_labels` accepts an address).
+- [x] **`mcp_health` resolved** — kept, verified not a duplicate of
+      `check_connection` (see the migration contract for the rationale).
+- [x] **Call sites migrated** across fun-doc (workers, prompts, provider tool
+      allowlists, benchmark harness), the Python bridge, `tools/setup` deploy
+      smoke tests, `ghidra_scripts/`, the test suites, and the operator docs.
+      Residual references survive only in history (CHANGELOG, `docs/archive/`,
+      `docs/releases/`) and in survivor descriptions that name what they replaced.
+- [x] **Java-side guidance strings migrated.** `AnalysisService`'s
+      `recommendations` / `actions` payloads named removed tools and shipped
+      `params_template`s with their old parameter names — every one of those was
+      a tool call the model would have made and had 404 or rejected.
+- [x] **Suites green:** offline Java (390 tests), unit (`tests/unit/`), offline
+      Python (`tests/performance/` minus the four live-Ghidra files).
+
+### Remaining
+- [ ] **Live verification** — deploy the JAR, confirm `/mcp/schema` reports 251,
+      then run the integration tiers (`pytest tests/ -m readonly`, `-m safe_write`,
+      the Java `EndpointRegistrationTest`) and the four live-Ghidra performance
+      files. The migrated integration tests have been rewritten against the
+      survivors but not yet executed against a running server.
+- [ ] **fun-doc benchmark** (`--mock --tier fast --compare`) — the prompt and
+      allowlist edits touch documentation quality, so a before/after run belongs
+      with this change.
+- [ ] **P0 — port the §2b harness into `tests/integration/`** as durable
+      round-trip tests (comment family, bookmark/struct/tag/label lifecycles,
+      type-size, validators, rename-by-name-vs-address). This is what would have
+      caught the migration gaps mechanically instead of by grep.
+- [ ] **P1 — analysis-tool smoke/shape tests** (19 zero-coverage tools).
+- [ ] **P2 — environment-gated fixtures:** headless server (5 tools), Ghidra
+      Server (17 tools), debugger session (28 tools). Still the maximal-coverage
+      frontier.

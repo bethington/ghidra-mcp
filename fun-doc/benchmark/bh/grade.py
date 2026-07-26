@@ -137,10 +137,10 @@ class GhidraClient:
                 result["body"] = line.split(":", 1)[1].strip()
         return result
 
-    def get_plate_comment(self, address: str) -> str:
-        out = self._get("/get_plate_comment", address=address)
+    def get_plate(self, address: str) -> str:
+        out = self._get("/get_comment", address=address)
         if isinstance(out, dict):
-            return out.get("plate_comment") or out.get("comment") or ""
+            return out.get("plate") or ""
         return str(out or "")
 
     def get_function_variables(self, address: str) -> list[dict]:
@@ -305,7 +305,7 @@ def grade_entry(client: GhidraClient, entry: dict, weights: dict) -> dict:
 
     try:
         func_info = client.get_function_by_address(addr)
-        plate = client.get_plate_comment(addr)
+        plate = client.get_plate(addr)
         variables = client.get_function_variables(addr)
     except urllib.error.HTTPError as e:
         result["error"] = f"HTTP {e.code} from Ghidra: {e.reason}"

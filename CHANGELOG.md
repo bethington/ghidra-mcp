@@ -14,6 +14,83 @@ Complete version history for the Ghidra MCP Server project.
 > `GHIDRA_MCP_AUTH_TOKEN` to restore cross-origin/remote access. This
 > backward-incompatible default is why this release is a major version bump.
 
+### Tool consolidation (breaking) — 272 → 251 tools
+
+Redundant tools were folded into "one-or-many" survivors. **No capability was
+removed**: every operation the deleted tools performed is reachable through the
+survivor. Because 6.0.0 is the breaking boundary, this is a clean break with no
+backward-compatibility aliases. Full rationale and the behavior evidence behind
+each merge are in
+[`docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md`](docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md);
+the old→new call-site contract is in
+[`docs/project-management/MIGRATION_6.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_6.0.0_TOOL_CONSOLIDATION.md).
+
+**Comments (−4).** `set_plate_comment`, `set_decompiler_comment`,
+`set_disassembly_comment` → `set_comment(address, comment, type=plate|pre|eol|post|repeatable)`;
+`get_plate_comment` → `get_comment` (returns every kind at once). The survivors
+work at **any** address — the removed tools were function-only, so plate
+comments on data globals no longer need the `batch_set_comments` workaround.
+`set_comment(type=plate)` also flushes the decompiler cache and surfaces
+plate-structure warnings, matching the old `set_plate_comment` behavior.
+
+**Single/batch → variadic (−8).** Each survivor now takes one item **or** a
+bulk collection:
+
+| Removed | Survivor | Bulk form |
+| --- | --- | --- |
+| `batch_add_function_tags` | `add_function_tag` | `assignments=[{function,tags}]` |
+| `batch_remove_function_tags` | `remove_function_tag` | `assignments=[{function,tags}]` |
+| `batch_create_labels` | `create_label` | `labels=[{address,name}]` |
+| `batch_delete_labels` | `delete_label` | `labels=[{address,name}]` |
+| `batch_decompile` | `decompile_function` | `functions="a,b,c"` |
+| `batch_analyze_completeness` | `analyze_function_completeness` | `addresses="0x..,0x.."` |
+| `rename_variable` | `rename_variables` | `variable_renames=[...]` |
+| `batch_set_variable_types` | `set_variables` | `variables=[{name,type}]` |
+
+Note the verb change on completeness scoring: the bulk path is now a **GET**
+with a comma-separated `addresses` query parameter (it was a POST with a JSON
+array), which also puts it on the concurrent read path instead of the
+serialized write path.
+
+**True duplicates (−4).** `get_data_type_size` → `get_type_size` (a strict
+superset: adds alignment + path); `validate_data_type_exists` →
+`validate_data_type` with `address` now optional;
+`rename_function_by_address` → `rename_function`, whose `old_name` accepts a
+name **or** an address. `mcp_health` was evaluated and **kept** — it is a
+diagnostics endpoint (pool stats, uptime, memory), not a duplicate of
+`check_connection`'s liveness probe.
+
+**Semantic unifications (−6).** `set_local_variable_type` /
+`set_parameter_type` / `set_decompiler_variable_type` → `set_variable_type`
+(applies at the decompiler high-variable layer, which covers both locals and
+parameters). `rename_data` / `rename_global_variable` / `rename_label` /
+`rename_or_label` / `rename_external_location` → `rename_symbol(target,
+new_name, kind=auto|data|global|label|external)`; `auto` routes an address to
+rename-or-create-label and a name to a global. Pass `kind` explicitly when you
+need a specific symbol kind's validator — e.g. `kind="data"` for the hard
+name-quality rejection that `rename_data` applied.
+
+**Bug fixes shipped with the merges.**
+
+- `validate_data_type_exists` returned a false negative for every bare type
+  name (`int`, `DWORD`, `char *`) because it required a full category path. The
+  survivor reuses `get_type_size`'s resolver.
+- `remove_struct_field` / `modify_struct_field` rejected the field name you
+  passed to `create_struct`, because struct fields are auto-prefixed with
+  Hungarian notation on creation (`b` → `cB`). They now resolve by the original
+  pre-prefix stem as a fallback.
+- `get_function_labels` accepts an address as well as a name, and reports a
+  clear error when the parameter is missing.
+
+**Internal callers migrated.** fun-doc (workers, prompts, provider tool
+allowlists, benchmark harness), the Python bridge's per-endpoint timeout table,
+the deploy smoke tests in `tools/setup`, the bundled `DocumentFunctionWithClaude`
+script, the integration/offline test suites, and the operator docs all now call
+the survivors. A latent bug was fixed on the way: fun-doc's plate writes passed
+`program` in the POST **body**, where it is ignored (`@Param` defaults to
+`ParamSource.QUERY`) — those writes were landing on whichever program was
+focused in the UI and bypassing fun-doc's scope guard.
+
 ### Security (pre-release hardening)
 
 - **Anti-CSRF / DNS-rebinding guard on the HTTP servers.** Loopback binding

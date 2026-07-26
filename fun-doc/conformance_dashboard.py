@@ -225,7 +225,7 @@ _CONTRACT_REQUIRED = [
     ("GET", "/list_bookmarks"),
     ("POST", "/set_bookmark"), ("POST", "/delete_bookmark"),
     ("POST", "/add_function_tag"), ("POST", "/remove_function_tag"),
-    ("POST", "/rename_function_by_address"), ("POST", "/save_program"),
+    ("POST", "/rename_function"), ("POST", "/save_program"),
 ]
 # the property-map/program-option store: expected ABSENT until the ghidra-mcp branch
 # feat/program-options-property-map-tools is merged + deployed

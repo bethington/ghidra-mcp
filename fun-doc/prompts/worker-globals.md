@@ -82,7 +82,7 @@ spinning on the global.
 ### `set_global` is terminal
 
 If `set_global` returned `{"status": "success"}`, the global is fully
-documented. **Stop.** Do not call `apply_data_type`, `rename_or_label`,
+documented. **Stop.** Do not call `apply_data_type`, `rename_symbol`,
 or `batch_set_comments` afterward — those would either no-op or risk
 overwriting `set_global`'s atomic writes. Move on to the next address
 (or end the turn).
@@ -92,8 +92,8 @@ overwriting `set_global`'s atomic writes. Move on to the next address
 | Axis | Tool | Notes |
 |---|---|---|
 | Type | `apply_data_type(program=<full_path>, address=<addr>, type_name=<type>)` | If it fails with `Conflicting data exists`, the address already has a different type applied — try a wider/aligned type, or report blocked. |
-| Name | `rename_or_label(program=<full_path>, address=<addr>, name=<name>)` | Use `g_` + Hungarian + descriptor. |
-| Plate | `batch_set_comments(program=<full_path>, address="0x<hex>", plate_comment="…")` | **Plate comment for data addresses goes through `batch_set_comments`, NOT `set_plate_comment`.** `set_plate_comment` is function-only and will return "No function at address" for data addresses. The `address` parameter is a **single string**, not a list — pass `"0x6fdc1234"`, **NOT** `["0x6fdc1234"]`, **NOT** `"ram:0x6fdc1234"`, **NOT** `["ram:0x6fdc1234"]`. |
+| Name | `rename_symbol(program=<full_path>, target=<addr>, new_name=<name>)` | Use `g_` + Hungarian + descriptor. |
+| Plate | `set_comment(program=<full_path>, address="0x<hex>", type="plate", comment="…")` | Works at ANY address, data globals included (it replaced the function-only `set_plate_comment` in 6.0.0). `batch_set_comments(program=..., address="0x<hex>", plate_comment="…")` also works and is preferable when you are writing several comment kinds at once. The `address` parameter is a **single string**, not a list — pass `"0x6fdc1234"`, **NOT** `["0x6fdc1234"]`, **NOT** `"ram:0x6fdc1234"`, **NOT** `["ram:0x6fdc1234"]`. |
 
 Every cell above includes `program=<full_path>` as the **first** parameter for the same reason as the main flow: omitting it routes the write to the wrong binary.
 
@@ -134,10 +134,8 @@ address:
 
 | Tool | Why it fails | Use instead |
 |---|---|---|
-| `get_plate_comment` | Function-only — returns "No function at address" for data. | The plate is already in the audit's `plate_comment` field. |
 | `force_decompile` | Decompiles functions, not data. Returns "No function found at address". | `analyze_data_region` for data layout; decompile a *caller* if you need usage context. |
 | `decompile_function(global_addr)` | Same — addresses targeting data globals are not function entries. | Decompile one of the global's xref *callers* instead. |
-| `set_plate_comment` | Function-only. Use `batch_set_comments(program=..., address=..., plate_comment=...)` for data. | See fallback writers table above. |
 | `analyze_function_complete` | Function-only scoring. | Globals are scored via `audit_global`. |
 
 If the audit response includes `is_code_address: true` or
@@ -165,8 +163,8 @@ plate comment.** Names are short identifiers, not documentation.
   creating a label `"InitializePerformanceCounters_sets_this"` on the
   global). Secondary labels clutter the listing, get picked up by
   decompilation as alternate names, and confuse downstream tools.
-- Use `batch_create_labels` for documentation purposes — that tool is
-  for multi-target naming, not for adding context.
+- Use `create_label`'s bulk form (`labels=[...]`) for documentation
+  purposes — that shape is for multi-target naming, not for adding context.
 - Stuff documentation into the symbol's name. The name is `g_*` +
   Hungarian + descriptor (≤30 chars typical). Anything longer or more
   prose-like should be in the plate.
@@ -176,7 +174,7 @@ plate comment.** Names are short identifiers, not documentation.
   — sets primary symbol + type + plate atomically. This is the only
   call you should normally need.
 - If `set_global` rejects, fall through to `apply_data_type` (type) +
-  `rename_or_label` (primary symbol — replaces the existing one) +
+  `rename_symbol` (primary symbol — replaces the existing one) +
   `batch_set_comments` (plate). All three are operations on a *single
   symbol* and the plate at the same address. None of them create
   secondary labels.
@@ -262,8 +260,6 @@ than leaving it alone: downstream code and notes reference the old name.
   related globals nearby. Another worker tick will cover them.
 - **No `analyze_function_completeness`.** That's for functions. Scoring
   for globals is done via `audit_global` issues count.
-- **No `set_plate_comment` for data addresses.** That tool requires a
-  function. Use `batch_set_comments` for plate comments on globals.
 - **No `decompile_function` on the target address itself.** Globals
   aren't functions; the call returns an error and burns tool budget.
 - **Skip OS-defined / system labels.** If the global's existing name is

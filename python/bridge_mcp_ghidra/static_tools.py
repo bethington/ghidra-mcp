@@ -361,7 +361,7 @@ async def check_tools(tools: str) -> str:
     "callable", "not_loaded" (exists but group not loaded), or "not_found" (doesn't exist).
 
     Args:
-        tools: Comma-separated tool names, e.g. "rename_or_label,batch_set_comments,analyze_function_completeness"
+        tools: Comma-separated tool names, e.g. "rename_symbol,batch_set_comments,analyze_function_completeness"
     """
     tool_names = [t.strip() for t in tools.split(",") if t.strip()]
     if not tool_names:

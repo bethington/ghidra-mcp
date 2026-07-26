@@ -1165,7 +1165,7 @@ public class DataTypeService {
                                 "rejected_type", typeName,
                                 "message", preCheckResult.message,
                                 "suggestion", "Either rename the global to match '" + typeName
-                                        + "' first (use rename_data / rename_global_variable), "
+                                        + "' first (use rename_symbol), "
                                         + "or apply the type+name change atomically with set_global "
                                         + "to avoid the silently-lying-name state."
                         );

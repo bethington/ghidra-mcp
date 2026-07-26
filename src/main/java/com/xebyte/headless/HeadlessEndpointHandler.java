@@ -2079,7 +2079,7 @@ public class HeadlessEndpointHandler {
                 if (func == null) return "{\"error\": \"No function at address\"}";
                 return "{\"success\": true, \"function\": \"" + escapeJson(func.getName()) + "\"," +
                        "\"message\": \"Batch variable type setting queued\", " +
-                       "\"tip\": \"Use set_local_variable_type for individual variable type changes.\"}";
+                       "\"tip\": \"Use set_variable_type for individual variable type changes.\"}";
             });
         } catch (Exception e) {
             return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";

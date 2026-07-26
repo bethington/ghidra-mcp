@@ -340,7 +340,7 @@ For each approved candidate:
 ```
 1. create_function(address)
 2. decompile_function(address) — quick sanity check
-3. set_plate_comment with triage metadata:
+3. set_comment(type='plate') with triage metadata:
 ```
 
 **Triage plate comment format** (plain text):

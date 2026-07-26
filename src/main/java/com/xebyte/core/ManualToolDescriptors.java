@@ -56,7 +56,6 @@ public final class ManualToolDescriptors {
     private static Map<String, AnnotationScanner.ToolDescriptor> buildAll() {
         Map<String, AnnotationScanner.ToolDescriptor> m = new LinkedHashMap<>();
         add(m, "/batch_apply_documentation", "POST", "analysis", "Apply all documentation to a function in one call", "address", "name", "prototype", "calling_convention", "variable_types", "variable_renames", "plate_comment", "decompiler_comments", "disassembly_comments", "goto", "score", "program");
-        add(m, "/batch_set_variable_types", "POST", "datatype", "Set multiple variable types", "function_address", "variable_types", "program");
         add(m, "/check_connection", "GET", "utility", "Health check endpoint");
         add(m, "/configure_analyzer", "POST", "analysis", "Configure an analysis plugin", "name", "enabled", "program");
         add(m, "/delete_project", "POST", "project", "Delete a Ghidra project", "projectPath");
@@ -64,7 +63,6 @@ public final class ManualToolDescriptors {
         add(m, "/get_current_address", "GET", "getter", "Get cursor address (GUI only)");
         add(m, "/get_current_function", "GET", "getter", "Get function at cursor (GUI only)");
         add(m, "/get_current_selection", "GET", "getter", "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted.");
-        add(m, "/get_data_type_size", "GET", "datatype", "Get data type size in bytes", "type_name", "program");
         add(m, "/get_version", "GET", "utility", "Get plugin version");
         add(m, "/health", "GET", "utility", "Health check endpoint for headless server");
         add(m, "/list_projects", "GET", "project", "List available Ghidra projects", "searchDir");

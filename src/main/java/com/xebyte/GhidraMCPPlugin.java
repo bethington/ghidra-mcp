@@ -337,7 +337,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         options.registerOption(STRICT_NAMING_ENFORCEMENT_OPTION,
             NamingPolicy.defaultStrictNamingEnforcement(), null,
             "Reject function/global names that fail the built-in name-quality checks " +
-            "on rename_function_by_address, rename_data, rename_global_variable, " +
+            "on rename_function, rename_symbol, " +
             "set_global, and related write guards. Also controls struct-field " +
             "Hungarian prefix auto-fixes. Disable when your naming convention " +
             "does not match the built-in heuristic; function/global convention warnings are still returned. " +
@@ -1007,7 +1007,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         //
         // WHY (original problem): HttpServer.setExecutor(null) uses ONE thread
         // for all requests, so any slow request (save_program,
-        // batch_analyze_completeness) blocks every subsequent request strictly
+        // analyze_function_completeness) blocks every subsequent request strictly
         // FIFO — including cheap read-only ones like /mcp/schema which have no
         // EDT dependency. Measured: /mcp/schema (15ms at idle) took 54,000ms
         // while a batch call was in flight. See tests/performance/
@@ -2135,7 +2135,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      *
      * Also measures handler wall time and logs a WARN for anything exceeding
      * SLOW_HANDLER_WARN_MS. This surfaces slow endpoints (save_program,
-     * batch_analyze_completeness, anything that hits a cold decompiler cache)
+     * analyze_function_completeness, anything that hits a cold decompiler cache)
      * in the Ghidra log immediately, so you can correlate dashboard slowness
      * with the actual offending endpoint instead of guessing. Tracks active
      * handler count for /mcp/health.

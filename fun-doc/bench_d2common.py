@@ -150,8 +150,8 @@ def extract(names: list, program: str = None) -> dict:
         m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",
                       dec.replace("\r", ""), re.MULTILINE)
         proto = m.group(1).strip() if m else None
-        plate = fun_doc.ghidra_get("/get_plate_comment", params={"address": addr, "program": prog})
-        plate_txt = plate.get("comment") if isinstance(plate, dict) else str(plate)
+        plate = fun_doc.ghidra_get("/get_comment", params={"address": addr, "program": prog})
+        plate_txt = plate.get("plate") if isinstance(plate, dict) else str(plate)
         entry = {"name": name, "address": addr, "prototype": proto or f"undefined {name}()",
                  "plate": plate_txt or "", "tier": "proven" if name in proven_names else "documented",
                  **_proven_facts(name)}

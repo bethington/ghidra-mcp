@@ -17,8 +17,8 @@ create_and_apply_data_type(address, "PRIMITIVE", '{"type": "dword"}', "dwName", 
 ```python
 # ✅ RELIABLE - Use separate, proven tools
 apply_data_type(address, "dword")           # Step 1: Apply type
-rename_or_label(address, "dwName")          # Step 2: Rename with Hungarian notation
-set_decompiler_comment(address, "comment")  # Step 3: Add documentation
+rename_symbol(address, "dwName")          # Step 2: Rename with Hungarian notation
+set_comment(address, "comment", type='pre')  # Step 3: Add documentation
 ```
 
 ## Complete Workflow Pattern
@@ -32,10 +32,10 @@ set_decompiler_comment(address, "comment")  # Step 3: Add documentation
 apply_data_type(address, type_name)
 
 # 2. Rename with Hungarian notation
-rename_or_label(address, hungarian_name)
+rename_symbol(address, hungarian_name)
 
 # 3. Set documentation (in Step 6)
-set_decompiler_comment(address, documentation)
+set_comment(address, documentation, type='pre')
 ```
 
 ### Supported Type Names for apply_data_type()
@@ -63,7 +63,7 @@ set_decompiler_comment(address, documentation)
 
 ## Hungarian Notation Reference
 
-Always use type prefixes in step 2 (rename_or_label):
+Always use type prefixes in step 2 (rename_symbol):
 
 | Type | Prefix | Examples |
 |------|--------|----------|
@@ -86,7 +86,7 @@ Always use type prefixes in step 2 (rename_or_label):
 ## Documentation Pattern
 
 ```python
-# After apply_data_type() and rename_or_label() succeed:
+# After apply_data_type() and rename_symbol() succeed:
 
 documentation = """================================================================================
                     [TYPE] [Hungarian Name] @ [Address]
@@ -101,7 +101,7 @@ PURPOSE:
 [Additional relevant sections]
 """
 
-set_decompiler_comment(address, documentation)
+set_comment(address, documentation, type='pre')
 ```
 
 ### Documentation Template Sections
@@ -131,11 +131,11 @@ apply_data_type("0x0040bc08", "char[6]")
 # Returns: "Successfully applied data type 'char[6]' at 0x0040bc08 (size: 6 bytes)"
 
 # Step 3b: Rename with Hungarian notation
-rename_or_label("0x0040bc08", "szVideoSection")
+rename_symbol("0x0040bc08", "szVideoSection")
 # Returns: "Success: Renamed defined data at 0x0040bc08 to 'szVideoSection'"
 
 # Step 6: Set documentation
-set_decompiler_comment("0x0040bc08", """================================================================================
+set_comment(type='pre', "0x0040bc08", """================================================================================
                     STRING szVideoSection @ 0x0040BC08
 ================================================================================
 TYPE: char[6] (6 bytes) - Null-terminated ASCII string
@@ -157,39 +157,39 @@ XREF COUNT: 2 references
 
 ### For Primitives (1-8 bytes)
 1. `apply_data_type()` with primitive type name
-2. `rename_or_label()` with `dw`, `w`, `n`, or `b` prefix
-3. `set_decompiler_comment()` with documentation
+2. `rename_symbol()` with `dw`, `w`, `n`, or `b` prefix
+3. `set_comment(type='pre')` with documentation
 
 ### For Strings
 1. `apply_data_type()` with `"char[N]"` or `"wchar_t[N]"`
-2. `rename_or_label()` with `sz` or `wsz` prefix
-3. `set_decompiler_comment()` with documentation
+2. `rename_symbol()` with `sz` or `wsz` prefix
+3. `set_comment(type='pre')` with documentation
 
 ### For Pointers
 1. `apply_data_type()` with `"pointer"`
-2. `rename_or_label()` with `p` or `lp` prefix
-3. `set_decompiler_comment()` with documentation
+2. `rename_symbol()` with `p` or `lp` prefix
+3. `set_comment(type='pre')` with documentation
 
 ### For Arrays
 1. `apply_data_type()` with `"type[count]"` (e.g., `"dword[64]"`)
-2. `rename_or_label()` with type prefix (e.g., `adwValues`)
-3. `set_decompiler_comment()` with documentation
+2. `rename_symbol()` with type prefix (e.g., `adwValues`)
+3. `set_comment(type='pre')` with documentation
 
 ### For Structures
 1. `create_struct()` to define the structure with fields
 2. `apply_data_type()` with structure name
-3. `rename_or_label()` with descriptive instance name
+3. `rename_symbol()` with descriptive instance name
 4. `modify_struct_field()` if fields need renaming/type changes
-5. `set_decompiler_comment()` with documentation
+5. `set_comment(type='pre')` with documentation
 
 ## Error Prevention Checklist
 
 - ✓ Use `apply_data_type()` with string type names (not dicts)
-- ✓ Use `rename_or_label()` for naming (it auto-detects data vs code)
+- ✓ Use `rename_symbol()` for naming (it auto-detects data vs code)
 - ✓ Always include Hungarian notation prefix in names
 - ✓ Use `char[N]` format for strings (not just `char`)
 - ✓ Use hex sizes for padding: `_1[0x158]` not `_1[344]`
-- ✓ Call `set_decompiler_comment()` AFTER type and name are set
+- ✓ Call `set_comment(type='pre')` AFTER type and name are set
 - ✓ Include header banner and all mandatory sections in documentation
 
 ## Related Tools
@@ -205,7 +205,7 @@ XREF COUNT: 2 references
 - `get_bulk_xrefs(addresses)` - Get cross-references
 
 **For validation:**
-- `validate_data_type_exists(type_name)` - Check if type exists
+- `validate_data_type(type_name)` - Check if type exists
 - `can_rename_at_address(address)` - Check what operation is appropriate
 
 ## Per-Program Storage: Options and Property Maps (v5.17.0+)
@@ -254,20 +254,23 @@ type that can't be created over HTTP.
 Omitting it writes to whichever program is active, which is how per-program
 data leaks into the wrong binary during multi-version work.
 
-## Any-Address Comments (v5.17.0+)
+## Comments (any address)
 
-The function-scoped comment tools can't touch data or undefined bytes. These
-two work at any address and cover all five Ghidra comment types
-(`plate`, `pre`, `post`, `eol`, `repeatable`):
+`get_comment` / `set_comment` work at **any** address — data and undefined
+bytes included, not just function entries — and cover all five Ghidra comment
+types (`plate`, `pre`, `post`, `eol`, `repeatable`):
 
 ```text
-get_comment(address, type, program="")
-set_comment(address, type, comment, program="")
+get_comment(address, program="")
+set_comment(address, comment, type="plate|pre|eol|post|repeatable", program="")
 ```
 
-Use these to satisfy the "every documented global carries a comment" rule —
-`set_plate_comment` only reaches functions. Passing an empty `comment` clears
-that comment type at the address.
+`type` also accepts the aliases `decompiler` (= `pre`) and `disassembly`
+(= `eol`). In 6.0.0 this pair absorbed the function-only
+`set_plate_comment` / `set_decompiler_comment` / `set_disassembly_comment` /
+`get_plate_comment` tools, so it is now the only comment reader/writer you
+need — including for the "every documented global carries a comment" rule.
+Passing an empty `comment` clears that comment type at the address.
 
 ## Flow Repair (v5.17.0+)
 
@@ -466,14 +469,14 @@ Two layers:
 - **Tag definitions** (program-wide): `create_function_tag`, `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`.
 - **Per-function attachment**: `add_function_tag`, `remove_function_tag`, `get_function_tags`, `search_functions_by_tag`. Attaching a tag by name auto-creates the definition if it doesn't already exist.
 
-Batch variants: `batch_add_function_tags` / `batch_remove_function_tags` take an array of `{function, tags}` objects and run the whole set in one transaction. Use these when tagging a sweep result — single-call instead of N round-trips.
+Batch variants: `add_function_tag` / `remove_function_tag` take an array of `{function, tags}` objects and run the whole set in one transaction. Use these when tagging a sweep result — single-call instead of N round-trips.
 
 Worked pattern — sweep + curate:
 
 ```python
 # After locating all crypto routines via detect_crypto_constants / search_byte_patterns,
 # tag them with one batch call:
-batch_add_function_tags(assignments=[
+add_function_tag(assignments=[
     {"function": "0x401abc",  "tags": "crypto,aes"},
     {"function": "0x401d40",  "tags": "crypto,sha256"},
     # ...

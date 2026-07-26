@@ -304,7 +304,7 @@ def main():
     # --- name-fix: g_p* single-pointer prefix is wrong for an array ---
     if ok and args.rename and gname and gname.startswith("g_p") and not gname.startswith("g_ap"):
         newn = "g_ap" + gname[3:] if "*" in et else "g_a" + gname[3:]
-        rr = gpost("/rename_or_label", address=addr, name=newn)
+        rr = gpost("/rename_symbol", target=addr, new_name=newn)
         print(f"[arr] rename {gname} -> {newn}: {'OK' if not (isinstance(rr,dict) and rr.get('error')) else rr.get('error')}")
 
 if __name__ == "__main__":

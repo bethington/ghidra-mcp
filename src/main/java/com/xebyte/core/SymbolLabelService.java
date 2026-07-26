@@ -102,7 +102,7 @@ public class SymbolLabelService {
              category = "symbol")
     public Response renameSymbol(
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
-                   aliases = {"address", "name"},
+                   aliases = {"address", "function_address", "old_name"},
                    description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.") String target,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
@@ -682,7 +682,7 @@ public class SymbolLabelService {
         if (!quality.ok) {
             // Append a structural hint nudging the worker toward set_global.
             // Workers that hit name_quality repeatedly are usually mid-chain
-            // (apply_data_type then rename_or_label then batch_set_comments)
+            // (apply_data_type then rename_symbol then batch_set_comments)
             // and would have a higher success rate doing the whole write
             // atomically through set_global instead. quality.suggestion
             // already names the specific fix; this adds the workflow nudge.
@@ -867,7 +867,7 @@ public class SymbolLabelService {
             Symbol symbol = symbols.get(0);
             Address symbolAddr = symbol.getAddress();
             // Idempotent: oldName == newName is a no-op success rather than
-            // a DuplicateNameException. Workers re-running rename_global_variable
+            // a DuplicateNameException. Workers re-running rename_symbol
             // after a successful prior call hit this; treat as already-applied.
             if (newName.equals(symbol.getName())) {
                 success = true;
@@ -1047,7 +1047,7 @@ public class SymbolLabelService {
                         Map<String, Object> map = JsonHelper.mapOf(
                                 "can_rename", true,
                                 "type", "defined_data",
-                                "suggested_operation", "rename_data"
+                                "suggested_operation", "rename_symbol"
                         );
                         Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
                         if (symbol != null) {

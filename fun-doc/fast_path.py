@@ -172,13 +172,14 @@ def _document(addr, name, route, res, program) -> str:
         if d2moo_names.is_offset_name(name):
             c = d2moo_names.canonicalize(name, route["code"])
             if c.get("ok"):
-                fun_doc.ghidra_post("/rename_function_by_address",
-                                    data={"function_address": ah, "new_name": c["proposed_name"]},
+                fun_doc.ghidra_post("/rename_function",
+                                    data={"old_name": ah, "new_name": c["proposed_name"]},
                                     params={"program": Path(program).name})
                 final = c["proposed_name"]
         note = (f"[FAST-PATH PROVEN] {route['cls']} getter, discriminating "
                 f"{route['prover']} proof (allMatch). CONF_LIVE.")
-        fun_doc.ghidra_post("/set_plate_comment", data={"address": ah, "comment": note},
+        fun_doc.ghidra_post("/set_comment",
+                            data={"address": ah, "comment": note, "type": "plate"},
                             params={"program": program})
         fun_doc.ghidra_post("/add_function_tag",
                             data={"function": ah, "tags": "CONF_LIVE"},

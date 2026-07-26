@@ -80,13 +80,13 @@ SMOKE_REQUIRED_TOOLS = {
     "get_function_variables",
     "analyze_function_completeness",
     "batch_set_comments",
-    "set_local_variable_type",
+    "set_variable_type",
     "rename_variables",
     "prompt_policy",
     "save_program",
     "save_all_programs",
     "set_function_prototype",
-    "rename_function_by_address",
+    "rename_function",
     "search_data_types",
     "create_struct",
     "get_struct_layout",
@@ -1190,7 +1190,7 @@ def run_benchmark_read_test(repo_root: Path, mcp_url: str) -> None:
         ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
         ("/get_function_variables", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
         ("/analyze_function_completeness", {"program": DEFAULT_BENCHMARK_PROGRAM, "function_address": address}),
-        ("/get_plate_comment", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/get_comment", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
         ("/save_program", {"program": DEFAULT_BENCHMARK_PROGRAM}),
     ]
     for path, params in read_calls:
@@ -1271,7 +1271,7 @@ def run_benchmark_write_test(repo_root: Path, mcp_url: str) -> None:
             },
         ),
         (
-            "/set_local_variable_type",
+            "/set_variable_type",
             {
                 "function_address": address,
                 "variable_name": variable_name,
@@ -1287,9 +1287,9 @@ def run_benchmark_write_test(repo_root: Path, mcp_url: str) -> None:
             },
         ),
         (
-            "/rename_function_by_address",
+            "/rename_function",
             {
-                "function_address": address,
+                "old_name": address,
                 "new_name": "DeploySmokeCalcCrc16",
             },
         ),
@@ -1339,7 +1339,7 @@ def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/set_local_variable_type",
+        "/set_variable_type",
         params={"program": DEFAULT_BENCHMARK_PROGRAM},
         data={
             "function_address": address,
@@ -1350,7 +1350,7 @@ def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
         timeout=60,
     )
     _expect_mcp_error(
-        "/set_local_variable_type",
+        "/set_variable_type",
         payload,
         ("definitely_missing_local", "available variables"),
     )

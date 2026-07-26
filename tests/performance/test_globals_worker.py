@@ -96,8 +96,8 @@ def test_build_global_prompt_starts_with_program_mandatory_banner():
         f"Banner must explicitly name the program path '{prog_path}'."
     )
     # The banner must enumerate the writers that need program= — set_global,
-    # apply_data_type, rename_or_label at minimum.
-    for tool in ("set_global", "apply_data_type", "rename_or_label", "audit_global"):
+    # apply_data_type, rename_symbol at minimum.
+    for tool in ("set_global", "apply_data_type", "rename_symbol", "audit_global"):
         assert tool in prompt, f"Banner / prompt should mention `{tool}` so the model knows program= applies to it."
 
 
@@ -801,9 +801,8 @@ def test_minimax_allowlist_includes_globals_tools():
     against `_MINIMAX_DOC_TOOL_ALLOWLIST` before exposing them to the
     model. Production hit "Unknown tool: set_global" because the
     globals-specific tools weren't in the allowlist — the model had to
-    fight `apply_data_type` + `rename_or_label` + `batch_set_comments`
-    individually, burning ~10 wasted calls + getting confused by
-    `set_plate_comment` (which is function-only). Locking these in so a
+    fight `apply_data_type` + `rename_symbol` + `batch_set_comments`
+    individually, burning ~10 wasted calls. Locking these in so a
     future allowlist edit can't silently regress globals work."""
     required = {
         "set_global",

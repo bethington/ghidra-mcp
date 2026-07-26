@@ -300,7 +300,7 @@ Functions using UnitAny * :
 For each function:
 
 ```
-set_parameter_type(
+set_variable_type(
     function_address="0x401000",
     parameter_name="pUnit",
     new_type="UnitAny *"
@@ -424,7 +424,7 @@ Expected size: 12 bytes (3 DWORDs)
    - Verify total size is correct
 
 6. APPLY TYPES TO ALL FUNCTIONS
-   - set_parameter_type() for each function and parameter
+   - set_variable_type() for each function and parameter
    - Verify with get_function_variables()
    - get_decompiled_code() with refresh_cache=True
 

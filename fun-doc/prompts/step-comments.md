@@ -36,8 +36,8 @@
 1. **Document globals**: Any DAT_*/s_* references visible in decompiled code — call
    `audit_globals_in_function` once, then one `set_global` call per global with
    `name` + `type_name` + `plate_comment`. **Do not** use the broken-up
-   `apply_data_type` → `rename_or_label` → `batch_set_comments` chain — the v5.7.0
-   validator hard-rejects most names sent through `rename_or_label` (missing `g_`,
+   `apply_data_type` → `rename_symbol` → `batch_set_comments` chain — the v5.7.0
+   validator hard-rejects most names sent through `rename_symbol` (missing `g_`,
    prefix mismatch, short descriptor, auto-gen remnant), and the chain is not
    atomic. See `step-globals.md` for the full naming + plate-comment rules.
 

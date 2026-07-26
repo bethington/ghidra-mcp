@@ -2,7 +2,7 @@
 
 ## Allowed Tools
 - `analyze_for_documentation` (only if not provided inline)
-- `rename_function_by_address` (if boundaries need recreating)
+- `rename_function` (if boundaries need recreating)
 - `create_function` (if function needs to be defined)
 
 ## Instructions

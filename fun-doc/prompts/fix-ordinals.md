@@ -5,7 +5,7 @@
 
 ## Allowed Tools
 - `batch_set_comments`
-- `rename_function_by_address` (if the ordinal function itself needs naming)
+- `rename_function` (if the ordinal function itself needs naming)
 
 ## Recipe
 
@@ -16,7 +16,7 @@
    - If the ordinal's function is already named elsewhere in the program, use that name
 3. **Document via comments**: Add EOL_COMMENT at the call site with the ordinal's purpose
    - Format: `/* Ordinal_10024: LogArchiveError */`
-4. **If the ordinal function itself is unnamed**: `rename_function_by_address` to give it a descriptive name
+4. **If the ordinal function itself is unnamed**: `rename_function` to give it a descriptive name
 5. Scoring is handled externally -- do not call `analyze_function_completeness`.
 
 ## Skip Conditions

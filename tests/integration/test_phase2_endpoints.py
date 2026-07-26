@@ -3,12 +3,12 @@ Phase 2: Productivity Endpoints Tests
 
 Tests for the 11 Phase 2 endpoints:
 - batch_set_comments
-- batch_create_labels
+- create_label (bulk form)
 - search_functions_enhanced
 - analyze_function_complete
 - get_bulk_xrefs
 - list_globals
-- rename_global_variable
+- rename_symbol
 - force_decompile
 - get_entry_points
 - list_calling_conventions
@@ -53,10 +53,10 @@ class TestBatchLabels:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_batch_create_labels(self, http_client, sample_address):
+    def test_create_labels_bulk(self, http_client, sample_address):
         """Test batch creating labels."""
         unique_label = f"TestLabel_{uuid.uuid4().hex[:8]}"
-        response = http_client.post("/batch_create_labels", data={
+        response = http_client.post("/create_label", data={
             "labels": json.dumps([
                 {"address": sample_address, "name": unique_label}
             ])
@@ -66,9 +66,9 @@ class TestBatchLabels:
         assert "labels_created" in text.lower() or "error" in text.lower()
 
     @pytest.mark.requires_program
-    def test_batch_create_labels_invalid_json(self, http_client):
+    def test_create_labels_bulk_invalid_json(self, http_client):
         """Test batch labels with invalid JSON."""
-        response = http_client.post("/batch_create_labels", data={
+        response = http_client.post("/create_label", data={
             "labels": "invalid json"
         })
         assert response.status_code == 200
@@ -269,12 +269,13 @@ class TestGlobalVariables:
 
     @pytest.mark.requires_program
     @pytest.mark.write
-    def test_rename_global_variable(self, http_client):
+    def test_rename_symbol_global(self, http_client):
         """Test renaming a global variable."""
         # This test may fail if no suitable global exists
-        response = http_client.post("/rename_global_variable", data={
-            "old_name": "NonExistentGlobal_" + uuid.uuid4().hex[:8],
-            "new_name": "TestGlobal_" + uuid.uuid4().hex[:8]
+        response = http_client.post("/rename_symbol", data={
+            "target": "NonExistentGlobal_" + uuid.uuid4().hex[:8],
+            "new_name": "TestGlobal_" + uuid.uuid4().hex[:8],
+            "kind": "global"
         })
         # Accept 200 with error, 404, or 500 (global doesn't exist)
         assert response.status_code in [200, 404, 500]

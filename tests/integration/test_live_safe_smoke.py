@@ -173,7 +173,7 @@ class TestLiveServerSmoke:
 class TestSafeRoundTripSmoke:
     def test_plate_comment_round_trip(self, http_client, first_function_address):
         get_response = http_client.get(
-            "/get_plate_comment", params={"address": first_function_address}
+            "/get_comment", params={"address": first_function_address}
         )
         if get_response.status_code != 200:
             pytest.skip("Plate comment endpoint unavailable")
@@ -182,13 +182,14 @@ class TestSafeRoundTripSmoke:
         try:
             payload = json.loads(get_response.text)
             if isinstance(payload, dict):
-                comment = payload.get("comment", "") or ""
+                comment = payload.get("plate", "") or ""
         except json.JSONDecodeError:
             comment = comment.strip('"')
 
         set_response = http_client.post(
-            "/set_plate_comment",
-            data={"address": first_function_address, "comment": comment},
+            "/set_comment",
+            data={"address": first_function_address, "type": "plate",
+                  "comment": comment},
         )
         assert set_response.status_code in [200, 400, 404]
 

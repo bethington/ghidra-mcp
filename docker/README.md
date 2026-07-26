@@ -106,11 +106,11 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 
 ### Modification (POST)
 - `POST /rename_function` - Rename function by name
-- `POST /rename_function_by_address` - Rename function by address
-- `POST /rename_data` - Rename data label
-- `POST /rename_variable` - Rename variable
-- `POST /set_decompiler_comment` - Set PRE_COMMENT
-- `POST /set_disassembly_comment` - Set EOL_COMMENT
+- `POST /rename_function` - Rename function by address
+- `POST /rename_symbol` - Rename data label
+- `POST /rename_variables` - Rename variable
+- `POST /set_comment(type='pre')` - Set PRE_COMMENT
+- `POST /set_comment(type='eol')` - Set EOL_COMMENT
 
 ### Program Management
 - `GET /list_open_programs` - List loaded programs

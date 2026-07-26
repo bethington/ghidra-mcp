@@ -10,7 +10,7 @@ not part of D2MOO's vocabulary (a community/Ghidra name that has a D2 equivalent
 - `get_function_variables`
 - `search_data_types` (find the canonical D2MOO type — filter for `D2` names)
 - `set_variables` (atomic type + rename — **strongly preferred** for ≥2 variables)
-- `set_parameter_type` / `set_local_variable_type` (single fallback)
+- `set_variable_type` (single fallback)
 - `set_function_prototype` (return type)
 
 ## Recipe

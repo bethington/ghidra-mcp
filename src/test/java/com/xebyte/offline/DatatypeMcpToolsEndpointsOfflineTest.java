@@ -22,10 +22,10 @@ public class DatatypeMcpToolsEndpointsOfflineTest extends TestCase {
     static {
         EXPECTED.put("/set_function_this_type",
             new Expected("POST", "function", "function_address", "this_type", "program"));
-        EXPECTED.put("/set_decompiler_variable_type",
+        // set_local_variable_type / set_parameter_type / set_decompiler_variable_type
+        // were unified into set_variable_type in 6.0.0 (Tier-3 consolidation).
+        EXPECTED.put("/set_variable_type",
             new Expected("POST", "function", "function_address", "new_type", "program", "variable_name"));
-        EXPECTED.put("/set_parameter_type",
-            new Expected("POST", "function", "function_address", "new_type", "parameter_name", "program"));
         EXPECTED.put("/resolve_duplicate_type",
             new Expected("POST", "datatype", "delete_demangler_stub", "program", "type_name"));
         EXPECTED.put("/modify_struct_field_type",

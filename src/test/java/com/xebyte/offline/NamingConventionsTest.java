@@ -12,7 +12,7 @@ import java.util.List;
  * Pure-logic tests for the verb-tier specificity rules and token-subset
  * near-duplicate detection added 2026-04-25 via the Q1-Q6 quality conversation.
  *
- * <p>These tests pin the contract that backs the {@code rename_function_by_address}
+ * <p>These tests pin the contract that backs the {@code rename_function}
  * validator gate (Q1 D, Q4 A) and the new scorer deductions (Q6 B). No Ghidra,
  * no HTTP — just the static methods on {@link NamingConventions}.
  */
@@ -268,7 +268,7 @@ public class NamingConventionsTest extends TestCase {
 
     // ---------- checkGlobalNameQuality (v5.7.0 — Q4 design) ----------
     //
-    // Validator backing rename_data / rename_global_variable / set_global.
+    // Validator backing rename_symbol / rename_symbol / set_global.
 
     public void testGlobalNameMissingGPrefixRejected() {
         NamingConventions.GlobalNameResult r =

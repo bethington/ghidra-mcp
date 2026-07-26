@@ -2,7 +2,7 @@
 
 ## Quick Reference
 
-When setting plate comments via `batch_set_comments` or `set_plate_comment`, always **wait 1-2 seconds** before calling `analyze_function_completeness` or retrieving the function's decompiled code.
+When setting plate comments via `batch_set_comments` or `set_comment(type='plate')`, always **wait 1-2 seconds** before calling `analyze_function_completeness` or retrieving the function's decompiled code.
 
 ## The Issue
 

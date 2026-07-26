@@ -27,9 +27,9 @@
    - Pass a real type — `undefined4`/`undefined1`/etc. are rejected.
    - Plate-comment first line must be a meaningful ≥4-word summary.
    - Use `array_length=N` for fixed-size arrays.
-3. **Don't fall back to the broken-up chain** (`apply_data_type` → `rename_or_label` → `batch_set_comments`).
+3. **Don't fall back to the broken-up chain** (`apply_data_type` → `rename_symbol` → `batch_set_comments`).
    `set_global` is atomic in a single transaction; the chain has known partial-application failure modes
-   and the validator on `rename_or_label` hard-rejects most names you'd send through it.
+   and the validator on `rename_symbol` hard-rejects most names you'd send through it.
 4. Scoring is handled externally — do not call `analyze_function_completeness`.
 
 See `step-globals.md` for the full naming convention table, plate-comment format, and the rules each

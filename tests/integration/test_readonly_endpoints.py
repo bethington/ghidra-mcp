@@ -235,16 +235,16 @@ class TestDataTypes:
         response = http_client.get("/get_valid_data_types")
         assert response.status_code == 200
 
-    def test_validate_data_type_exists(self, http_client):
+    def test_validate_data_type_existence_only(self, http_client):
         """Validate a common data type exists."""
         response = http_client.get(
-            "/validate_data_type_exists", params={"type_name": "int"}
+            "/validate_data_type", params={"type_name": "int"}
         )
         assert response.status_code == 200
 
-    def test_get_data_type_size(self, http_client):
+    def test_get_type_size(self, http_client):
         """Get size of a data type."""
-        response = http_client.get("/get_data_type_size", params={"type_name": "int"})
+        response = http_client.get("/get_type_size", params={"type_name": "int"})
         # May be 404 if headless-only endpoint
         assert response.status_code in [200, 404]
 

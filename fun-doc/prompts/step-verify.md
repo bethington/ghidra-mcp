@@ -13,7 +13,7 @@ Before finalizing, verify these alignments:
 5. **Name vs behavior contradiction**: Does the function name describe the ACTUAL behavior? If the name says "Head" but the code inserts at "tail" (or vice versa), rename the function to match the real behavior.
 6. **Magic number coverage**: If the code contains hex constants (flags, type IDs, offsets), verify they have EOL comments at their instruction addresses via `batch_set_comments` with `disassembly_comments`.
 
-If any mismatch is found: fix it via `batch_set_comments` (plate comment update) or `rename_function_by_address` before reporting DONE.
+If any mismatch is found: fix it via `batch_set_comments` (plate comment update) or `rename_function` before reporting DONE.
 
 ## Variable Reconciliation (required before reporting DONE)
 
@@ -27,7 +27,7 @@ address (not its name — names can race against in-flight renames). Check:
    - `n` prefix → must be `int` or `short`
    - `w` prefix → must be `ushort`
    - `sz` prefix → must be `char *`
-   If a mismatch exists, fix the type with `set_local_variable_type()` OR fix the name with `rename_variables()`.
+   If a mismatch exists, fix the type with `set_variable_type()` OR fix the name with `rename_variables()`.
 3. **Plate comment references applied**: If your plate comment's Special Cases or Parameters section names a variable differently from what's in the `get_function_variables(address=...)` response, apply the rename. Do not document names you didn't actually set.
 
 ## Report Format

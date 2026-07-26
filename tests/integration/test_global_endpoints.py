@@ -1,7 +1,7 @@
 """Live integration tests for v5.7.0 global-variable enforcement.
 
 Exercises the new endpoints — `audit_global`, `set_global` — and the
-validator hooks added to `rename_data` and `rename_global_variable`.
+validator hooks reached through `rename_symbol` (kind=data / kind=global).
 Each rejection code from `NamingConventions.checkGlobalNameQuality`
 is hit by sending a deliberately-bad name and asserting the structured
 rejection comes back.
@@ -114,16 +114,17 @@ def test_audit_global_unknown_address_errors_cleanly(http_client):
     assert response.status_code < 500, response.text
 
 
-# ---------- rename_data validator ----------
+# ---------- rename_symbol(kind="data") validator ----------
 
 
-def test_rename_data_rejects_missing_g_prefix(http_client, sample_global_address):
+def test_rename_symbol_data_rejects_missing_g_prefix(http_client, sample_global_address):
     """A name without the g_ prefix is hard-rejected via the validator."""
     response = http_client.post(
-        "/rename_data",
+        "/rename_symbol",
         json_data={
-            "address": sample_global_address,
-            "newName": "dwActiveQuestState",  # missing g_ prefix
+            "target": sample_global_address,
+            "kind": "data",
+            "new_name": "dwActiveQuestState",  # missing g_ prefix
         },
     )
     assert response.status_code == 200, response.text
@@ -137,7 +138,7 @@ def test_rename_data_rejects_missing_g_prefix(http_client, sample_global_address
     assert body.get("suggestion")
 
 
-def test_rename_data_rejects_auto_generated_remnant(http_client, sample_global_address):
+def test_rename_symbol_data_rejects_auto_generated_remnant(http_client, sample_global_address):
     """Names that look like 'rename by stripping the auto-generated prefix'
     (e.g., g_DAT_xxx, g_PTR_xxx) are hard-rejected."""
     for bad in [
@@ -147,8 +148,9 @@ def test_rename_data_rejects_auto_generated_remnant(http_client, sample_global_a
         "g_dw_6fdf64d8",
     ]:
         response = http_client.post(
-            "/rename_data",
-            json_data={"address": sample_global_address, "newName": bad},
+            "/rename_symbol",
+            json_data={"target": sample_global_address, "kind": "data",
+                       "new_name": bad},
         )
         assert response.status_code == 200, response.text
         import json
@@ -157,11 +159,12 @@ def test_rename_data_rejects_auto_generated_remnant(http_client, sample_global_a
         assert body.get("issue") == "auto_generated_remnant", f"{bad}: wrong issue"
 
 
-def test_rename_data_rejects_short_descriptor(http_client, sample_global_address):
+def test_rename_symbol_data_rejects_short_descriptor(http_client, sample_global_address):
     """g_dwX has only a 1-char descriptor — rejected."""
     response = http_client.post(
-        "/rename_data",
-        json_data={"address": sample_global_address, "newName": "g_dwX"},
+        "/rename_symbol",
+        json_data={"target": sample_global_address, "kind": "data",
+                   "new_name": "g_dwX"},
     )
     import json
     body = json.loads(response.text)
@@ -169,12 +172,13 @@ def test_rename_data_rejects_short_descriptor(http_client, sample_global_address
     assert body.get("issue") == "short_descriptor"
 
 
-def test_rename_data_rejects_missing_hungarian(http_client, sample_global_address):
+def test_rename_symbol_data_rejects_missing_hungarian(http_client, sample_global_address):
     """A name with g_ prefix but no Hungarian after it (e.g., g_ActiveState)
     fails the Hungarian-prefix check."""
     response = http_client.post(
-        "/rename_data",
-        json_data={"address": sample_global_address, "newName": "g_ActiveState"},
+        "/rename_symbol",
+        json_data={"target": sample_global_address, "kind": "data",
+                   "new_name": "g_ActiveState"},
     )
     import json
     body = json.loads(response.text)

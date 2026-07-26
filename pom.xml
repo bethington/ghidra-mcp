@@ -138,12 +138,19 @@
             <version>5.23.0</version>
             <scope>test</scope>
         </dependency>
-        <!-- Ghidra DB (test only) — needed so Mockito can instrument Program's type hierarchy -->
+        <!-- Ghidra DB (provided — bundled with Ghidra in Framework/DB/lib/).
+             Needed at compile time because HeadlessProgramProvider touches
+             DomainObjectAdapterDB, which indirectly references db.util.ErrorHandler,
+             and at test time so Mockito can instrument Program's type hierarchy.
+             Must NOT be test-scoped: the IDE (Eclipse JDT) then compiles main
+             sources with an incomplete classpath and writes error-carrying classes
+             into target/classes, which surface as bogus "Unresolved compilation
+             problem" errors on the next `mvn test` that skips recompilation. -->
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>DB</artifactId>
             <version>${ghidra.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         <!-- jdom2 (test only) — ghidra.framework.options.OptionType's static initializer
              builds a CUSTOM_TYPE constant that reaches SaveState -> jdom2. Any offline

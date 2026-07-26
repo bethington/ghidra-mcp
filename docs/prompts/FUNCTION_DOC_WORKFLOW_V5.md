@@ -1,6 +1,6 @@
 # FUNCTION_DOC_WORKFLOW_V5
 
-You are documenting reverse-engineered functions in Ghidra using MCP tools. Apply all changes directly in Ghidra. Do not create or edit filesystem files. Do NOT use `run_script_inline` — use only the native MCP tools (`rename_function_by_address`, `set_function_prototype`, `rename_variables`, `set_local_variable_type`, `batch_set_comments`, etc.). Retry network timeouts up to 3 times, then switch to smaller batches.
+You are documenting reverse-engineered functions in Ghidra using MCP tools. Apply all changes directly in Ghidra. Do not create or edit filesystem files. Do NOT use `run_script_inline` — use only the native MCP tools (`rename_function`, `set_function_prototype`, `rename_variables`, `set_variable_type`, `batch_set_comments`, etc.). Retry network timeouts up to 3 times, then switch to smaller batches.
 
 ## Critical Rules
 
@@ -8,7 +8,7 @@ You are documenting reverse-engineered functions in Ghidra using MCP tools. Appl
 2. **Batching**: Use `rename_variables` (single dict), `batch_set_comments` (plate + PRE + EOL in one call). Never loop individual rename/comment calls.
 3. **Phantoms**: `extraout_*`, `in_*` variables with `undefined` types are decompiler artifacts. Note in plate comment Special Cases — do not retry type-setting.
 4. **Reprocessing**: When re-documenting, always overwrite existing names/comments if analysis produces better results, even if custom values exist.
-5. **Type-first**: NEVER rename a variable with a Hungarian prefix (`dw`, `n`, `b`, `p`, `sz`, `w`, etc.) while its type is still `undefined*`. Always resolve the type first with `set_local_variable_type`, then rename. If you cannot determine the type, use a descriptive name without a type prefix (e.g., `questBits` not `dwQuestBits`).
+5. **Type-first**: NEVER rename a variable with a Hungarian prefix (`dw`, `n`, `b`, `p`, `sz`, `w`, etc.) while its type is still `undefined*`. Always resolve the type first with `set_variable_type`, then rename. If you cannot determine the type, use a descriptive name without a type prefix (e.g., `questBits` not `dwQuestBits`).
 6. **Prefix-type consistency**: After setting a prototype, verify parameter types match Hungarian prefixes. A parameter named `pGame` (pointer prefix) typed as `int` is a violation — fix the type to a pointer.
 7. **Verify-fix loop**: Call `analyze_function_completeness` at the end. If fixable deductions > 10 points, address them and verify again. Do not report DONE with significant fixable deductions remaining.
 
@@ -24,7 +24,7 @@ g_:global prefix (g_dwCount, g_pMain, g_szPath)  pfn:func_ptr (PascalCase, no g_
 Struct pointers: p+StructName (pUnit, pInventory, ppItem for double ptr)
 ```
 
-**Type normalization**: undefined1->byte, undefined2->ushort, undefined4->uint/int/float/ptr (by usage), undefined8->double/longlong. Use Ghidra builtins (dword, byte, ushort) not Windows types (DWORD, BYTE) for `set_local_variable_type`.
+**Type normalization**: undefined1->byte, undefined2->ushort, undefined4->uint/int/float/ptr (by usage), undefined8->double/longlong. Use Ghidra builtins (dword, byte, ushort) not Windows types (DWORD, BYTE) for `set_variable_type`.
 
 ## Step 1: Initialize and Classify (1 turn)
 
@@ -37,7 +37,7 @@ Call `analyze_for_documentation(name)`. From the results:
 
 ## Step 2: Rename Function + Set Prototype (1 turn)
 
-Call `rename_function_by_address` and `set_function_prototype` in **parallel**.
+Call `rename_function` and `set_function_prototype` in **parallel**.
 
 **Naming**: PascalCase, verb-first (e.g., GetPlayerHealth, ProcessInputEvent, ValidateItemSlot). Invalid: `SKILLS_GetLevel`->GetSkillLevel, `processData`->ProcessData.
 
@@ -53,7 +53,7 @@ Call `rename_function_by_address` and `set_function_prototype` in **parallel**.
 
 **Type audit checklist** — walk EVERY parameter and local variable:
 1. Call `get_function_variables` to get the full variable list with storage types
-2. For each variable where type contains `undefined`: call `set_local_variable_type` with the correct type based on usage context. Skip phantoms (`extraout_*`, `in_*`) on first failure.
+2. For each variable where type contains `undefined`: call `set_variable_type` with the correct type based on usage context. Skip phantoms (`extraout_*`, `in_*`) on first failure.
 3. For each parameter where the name has a pointer prefix (`p`, `pp`, `lpsz`) but type is `int` or `uint`: fix the type to a pointer (`void *`, or a specific struct pointer if identifiable)
 4. For `__thiscall` functions with `void *` this pointer: identify the class/struct and set the correct this type via `set_function_prototype`
 5. Call `get_function_variables` again to discover new SSA variables from type changes
@@ -61,16 +61,16 @@ Call `rename_function_by_address` and `set_function_prototype` in **parallel**.
 7. Call `get_function_variables` once more to confirm no `undefined` storage types remain
 
 **Struct access patterns** — for raw pointer+offset access (`*(ptr + 0x10)`, `ptr[4]`, `param_1[0x2C]`):
-- If a matching struct type exists (use `search_data_types`): apply it with `set_local_variable_type`
+- If a matching struct type exists (use `search_data_types`): apply it with `set_variable_type`
 - Otherwise: add EOL comment at each struct access instruction documenting the offset (e.g., `/* +0x10: flags */`). This satisfies the scorer without requiring struct creation.
 
-> **Register/ECX variables:** When `set_local_variable_type()` fails for a register variable, document the type via `PRE_COMMENT`: `set_decompiler_comment(addr, "nIterator: int - loop counter (register-only)")`. The completeness scorer excludes these from penalty scoring.
+> **Register/ECX variables:** When `set_variable_type()` fails for a register variable, document the type via `PRE_COMMENT`: `set_comment(addr, "nIterator: int - loop counter (register-only, type='pre')")`. The completeness scorer excludes these from penalty scoring.
 
 ## Step 4: Comments (1 turn)
 
 **IMPORTANT**: This must be AFTER all naming/prototype/type changes are complete.
 
-First, rename any DAT_*/s_* globals visible in the decompiled code: `apply_data_type` to set type, `rename_or_label` with g_ prefix + Hungarian notation.
+First, rename any DAT_*/s_* globals visible in the decompiled code: `apply_data_type` to set type, `rename_symbol` with g_ prefix + Hungarian notation.
 
 Then use `batch_set_comments` with `plate_comment` parameter to set everything in ONE call:
 

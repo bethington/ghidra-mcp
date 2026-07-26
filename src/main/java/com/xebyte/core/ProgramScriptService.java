@@ -2840,7 +2840,7 @@ public class ProgramScriptService {
                "        for (Function func : funcMgr.getFunctions(true)) {\n" +
                "            try {\n" +
                "                // Add custom documentation logic here\n" +
-               "                // Example: set_plate_comment(func.getEntryPoint(), \"Documented: \" + func.getName());\n" +
+               "                // Example: setPlateComment(func.getEntryPoint(), \"Documented: \" + func.getName());\n" +
                "                documentedCount++;\n" +
                "                \n" +
                "                if (documentedCount % 100 == 0) {\n" +
