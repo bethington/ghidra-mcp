@@ -1072,11 +1072,13 @@ def test_debugger_live_skipped_on_environmental_launch_failure(
 
     monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
     monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
-    # The function's `finally:` block calls _terminate_processes_by_name
-    # which spawns `taskkill` when os.name == "nt". On Linux CI that
-    # binary doesn't exist and the subprocess.run raises FileNotFoundError
-    # *out of the finally*, masking the test's actual outcome. Stub.
+    # The function's `finally:` block calls _terminate_dbgeng_launcher_processes
+    # and _terminate_processes_by_name, both of which spawn `powershell`/
+    # `taskkill` when os.name == "nt". On Linux CI those binaries don't exist
+    # and subprocess.run raises FileNotFoundError *out of the finally*,
+    # masking the test's actual outcome. Stub both.
     monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
+    monkeypatch.setattr(ghidra, "_terminate_dbgeng_launcher_processes", lambda: None)
 
     with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="Debugger backend unavailable"):
         ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
@@ -1100,10 +1102,153 @@ def test_debugger_live_raises_runtime_error_on_real_failure(
     monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
     monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
     monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
+    monkeypatch.setattr(ghidra, "_terminate_dbgeng_launcher_processes", lambda: None)
 
     # Real test failure must NOT be swallowed as a skip.
     with pytest.raises(RuntimeError, match="Unexpected internal state"):
         ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+# ---------------------------------------------------------------------------
+# _terminate_dbgeng_launcher_processes — releases dbgeng's grip on a stuck
+# debuggee by killing the local-dbgeng launcher backend instead of the
+# (un-taskkill-able) debuggee itself. See project memory for the live
+# incident this closes: a stuck BenchmarkDebug.exe locked Benchmark.dll and
+# broke reset_benchmark_fixture's /delete_file with "file is in use".
+# ---------------------------------------------------------------------------
+
+
+def test_terminate_dbgeng_launcher_processes_noop_on_non_windows(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "posix")
+
+    def fail_if_called(*_a, **_kw):
+        raise AssertionError("subprocess.run must not run on non-Windows")
+
+    monkeypatch.setattr(ghidra.subprocess, "run", fail_if_called)
+    ghidra._terminate_dbgeng_launcher_processes()  # must not raise
+
+
+def test_terminate_dbgeng_launcher_processes_kills_matched_pids(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = "111\n222\n"
+
+    monkeypatch.setattr(ghidra.subprocess, "run", lambda *a, **kw: FakeCompleted())
+    killed: list[int] = []
+    monkeypatch.setattr(ghidra, "_terminate_process", lambda pid: killed.append(pid))
+
+    ghidra._terminate_dbgeng_launcher_processes()
+    assert killed == [111, 222]
+
+
+def test_terminate_dbgeng_launcher_processes_no_match_kills_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(ghidra.subprocess, "run", lambda *a, **kw: FakeCompleted())
+
+    def fail_if_called(pid):
+        raise AssertionError("no PID should be terminated when nothing matched")
+
+    monkeypatch.setattr(ghidra, "_terminate_process", fail_if_called)
+    ghidra._terminate_dbgeng_launcher_processes()  # must not raise
+
+
+def test_debugger_live_test_kills_launcher_backend_before_debuggee(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The finally block must release dbgeng's grip on the launcher side
+    before (not instead of) the existing by-name kill of the debuggee --
+    confirmed live that resume-then-terminate-by-name alone can still leave
+    a stuck, un-taskkill-able BenchmarkDebug.exe behind."""
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    benchmark_path = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_path.write_bytes(b"")
+
+    def fake_mcp_request(repo_root, mcp_url, path, **kwargs):
+        return 200, {"error": "Unexpected internal state in trace handler"}
+
+    monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
+    monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+
+    call_order: list[str] = []
+    monkeypatch.setattr(
+        ghidra, "_terminate_dbgeng_launcher_processes",
+        lambda: call_order.append("launcher"),
+    )
+    monkeypatch.setattr(
+        ghidra, "_terminate_processes_by_name",
+        lambda _name: call_order.append("debuggee"),
+    )
+
+    with pytest.raises(RuntimeError):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+    assert call_order == ["launcher", "debuggee"]
+
+
+def test_reset_benchmark_fixture_kills_launcher_before_debuggee_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """reset_benchmark_fixture's own pre-cleanup must release the launcher
+    backend before the by-name kill, for the same reason as the debugger
+    live test's finally block -- otherwise a stuck debug session from a
+    prior run leaves Benchmark.dll locked and /delete_file fails with
+    "file is in use", exactly as observed live."""
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    # Fresh tmp_path with the binaries already present so the build-fixture
+    # branch is skipped.
+    benchmark_dll = tmp_path / ghidra.DEFAULT_BENCHMARK_DLL
+    benchmark_debug_exe = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_dll.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_dll.write_bytes(b"")
+    benchmark_debug_exe.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_debug_exe.write_bytes(b"")
+
+    call_order: list[str] = []
+    monkeypatch.setattr(
+        ghidra, "_terminate_dbgeng_launcher_processes",
+        lambda: call_order.append("launcher"),
+    )
+    monkeypatch.setattr(
+        ghidra, "_terminate_processes_by_name",
+        lambda _name: call_order.append("debuggee"),
+    )
+
+    class _StopHere(Exception):
+        pass
+
+    def fail_after_cleanup(*_a, **_kw):
+        raise _StopHere("stop right after the pre-cleanup calls under test")
+
+    monkeypatch.setattr(ghidra, "_close_and_delete_project_file", fail_after_cleanup)
+
+    with pytest.raises(_StopHere):
+        ghidra.reset_benchmark_fixture(tmp_path, "http://127.0.0.1:8089")
+
+    assert call_order == ["launcher", "debuggee"]
 
 
 # ---------------------------------------------------------------------------

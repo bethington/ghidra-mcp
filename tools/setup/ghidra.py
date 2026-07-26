@@ -687,6 +687,46 @@ def _terminate_processes_by_name(process_name: str) -> None:
     subprocess.run(["pkill", "-f", process_name], check=False)
 
 
+def _terminate_dbgeng_launcher_processes() -> None:
+    """Kill Ghidra's local-dbgeng launcher backend (the ``cmd.exe`` wrapper
+    and the ``python -i ..\\support\\local-dbgeng.py`` process it spawns),
+    not the debuggee itself.
+
+    Confirmed live (2026-07-26): once a dbgeng session has parked the target
+    at a debug event, Windows will not let a plain ``taskkill`` reach the
+    debuggee -- it reports "no running instance of the task" even though
+    ``tasklist`` still sees it, and this holds even after
+    ``/debugger/resume``. The lock on any DLL the debuggee has loaded (e.g.
+    ``Benchmark.dll``, if the debuggee links against it) persists as long as
+    the debuggee lives, and blocks a subsequent ``reset_benchmark_fixture``'s
+    ``/delete_file`` with "file is in use". Killing the launcher backend
+    instead releases dbgeng's own grip -- the debuggee then either exits on
+    its own or becomes immediately killable by a plain ``taskkill``, both
+    confirmed live in the same investigation. This is intentionally separate
+    from ``_terminate_processes_by_name`` (which targets the debuggee by
+    name): call this FIRST, then that.
+    """
+    if os.name != "nt":
+        return
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        (
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.CommandLine -match 'local-dbgeng' } | "
+            "Select-Object -ExpandProperty ProcessId"
+        ),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return
+    for line in completed.stdout.splitlines():
+        pid_text = line.strip()
+        if pid_text.isdigit():
+            _terminate_process(int(pid_text))
+
+
 def _project_state_path_from_gpr(project_path: str) -> Path | None:
     if not project_path:
         return None
@@ -960,6 +1000,23 @@ def _close_and_delete_project_file(repo_root: Path, mcp_url: str, program_path: 
 def reset_benchmark_fixture(repo_root: Path, mcp_url: str) -> None:
     benchmark_dll = repo_root / DEFAULT_BENCHMARK_DLL
     benchmark_debug_exe = repo_root / DEFAULT_BENCHMARK_DEBUG_EXE
+    # A BenchmarkDebug.exe left over from a prior debugger session can be
+    # parked at a debug event under dbgeng, which taskkill-by-name silently
+    # can't touch (see _terminate_dbgeng_launcher_processes) -- confirmed
+    # live: that leaves Benchmark.dll locked and this function's own
+    # /delete_file below fails with "file is in use" a few lines down,
+    # despite this same taskkill call already having "succeeded" (taskkill
+    # against an unreachable dbgeng-held process doesn't raise; it just
+    # doesn't work). Release the launcher backend's grip first so the
+    # by-name kill that follows actually has something killable to act on.
+    # No settle delay here (unlike run_debugger_live_test's own cleanup,
+    # see its finally block for the full explanation): this call is cleaning
+    # up a session from an earlier, already-finished invocation, not one
+    # this function just used, so there's no "just stopped talking to it"
+    # moment to wait out -- and in the normal deploy sequence this runs
+    # before any debugger activity at all, so a blind sleep would be pure
+    # waste on every ordinary fixture reset.
+    _terminate_dbgeng_launcher_processes()
     _terminate_processes_by_name("BenchmarkDebug.exe")
     if not benchmark_dll.is_file() or not benchmark_debug_exe.is_file():
         print("Benchmark binary output missing; building it now.")
@@ -1547,17 +1604,56 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
         # Windows won't let taskkill terminate a process while it's parked at
         # a debug event under dbgeng -- taskkill reports "no running instance
         # of the task" even though tasklist still sees it, and the process
-        # lingers until something resumes or detaches it. There is no
+        # lingers until something releases dbgeng's hold on it. There is no
         # /debugger/detach endpoint on this in-process TraceRmi surface (that
         # name only exists on the separate standalone-server debugger proxy,
-        # which isn't involved here), so resume it instead: BenchmarkDebug.exe
-        # was launched with `--seconds 180` and self-exits once running,
-        # which also releases the debug hold so the terminate below actually
-        # works instead of silently no-op'ing.
+        # which isn't involved here). /debugger/resume alone does NOT
+        # reliably release the hold -- confirmed live (2026-07-26) it can
+        # still leave the target un-taskkill-able afterward, and a stuck
+        # target locks any DLL it has loaded (e.g. Benchmark.dll), which
+        # then fails a later reset_benchmark_fixture's /delete_file with
+        # "file is in use". What actually works: kill the local-dbgeng
+        # launcher backend itself (see _terminate_dbgeng_launcher_processes),
+        # which releases dbgeng's grip from the other end -- the target then
+        # either self-exits or becomes immediately killable. Try resume
+        # first anyway (cheap, sometimes sufficient on its own), then the
+        # launcher-backend kill, then the debuggee, in that order.
+        #
+        # That launcher-backend kill has its own real, separate cost: it
+        # severs the TraceRmi connection abruptly, and Ghidra's own
+        # TraceRmiHandler.dispose() (core Debugger plugin code, not ours --
+        # ghidra.app.plugin.core.debug.service.tracermi.TraceRmiHandler)
+        # unconditionally calls DomainObjectAdapterDB.save() on disconnect
+        # with no check for an already-open transaction. If the trace's own
+        # background sync activity (module/register writes) still has a
+        # transaction open at that instant, Ghidra throws `AssertException:
+        # Can't save during transaction` from a background thread (confirmed
+        # live 2026-07-26, via an actual crash dialog), which appears to
+        # leave the trace's disposal incomplete -- the real explanation for
+        # the previously-mysterious "Benchmark.dll is in use" failures with
+        # no process left holding it. This is a pre-existing Ghidra-core
+        # bug, not something this fix introduced: the identical
+        # "Benchmark.dll is in use" symptom was already documented from the
+        # OLD resume-only approach, before this launcher-kill existed.
+        # Tried a settle delay before severing the connection, on the theory
+        # this was a narrow timing race the same way the analogous
+        # program-save race is (see ProgramScriptService.saveWithRetry) --
+        # measured, live, that it made no difference: the lock reproduced on
+        # literally the first debugger cycle after a completely fresh
+        # deploy, delay or no delay. This is not a rare race to narrow; it
+        # reproduces close to every time. Removed the delay since it bought
+        # nothing. There is no known mitigation from this side of the
+        # boundary -- the actual bug is in Ghidra's own TraceRmiHandler, and
+        # fixing it would mean patching Ghidra core, not this plugin. Once
+        # hit, the lock does not clear within the same Ghidra session; only
+        # a full restart has reliably cleared it in testing. See project
+        # memory for the full writeup and the recommendation to report this
+        # upstream.
         try:
             _mcp_request(repo_root, mcp_url, "/debugger/resume", method="POST", timeout=10)
         except Exception:
             pass
+        _terminate_dbgeng_launcher_processes()
         _terminate_processes_by_name("BenchmarkDebug.exe")
 
 
