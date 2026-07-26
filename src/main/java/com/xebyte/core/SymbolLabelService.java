@@ -37,9 +37,10 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Requires the function name — if you only have an address, call get_function_by_address first to retrieve the name.", category = "symbol")
+    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol")
     public Response getFunctionLabels(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
+                   description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "20") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -47,18 +48,14 @@ public class SymbolLabelService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        StringBuilder sb = new StringBuilder();
-        SymbolTable symbolTable = program.getSymbolTable();
-        FunctionManager functionManager = program.getFunctionManager();
-
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
+        if (functionName == null || functionName.isEmpty()) {
+            return Response.err("name is required (function name or address)");
         }
 
+        StringBuilder sb = new StringBuilder();
+        SymbolTable symbolTable = program.getSymbolTable();
+
+        Function function = ServiceUtils.resolveFunction(program, functionName);
         if (function == null) {
             return Response.text("Function not found: " + functionName);
         }
