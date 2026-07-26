@@ -94,7 +94,13 @@ public class DataTypeService {
      */
     @McpTool(path = "/list_data_types", description = "List all data types with optional category filter", category = "datatype")
     public Response listDataTypes(
-            @Param(value = "category", description = "Category filter") String category,
+            // Optional, as the tool description has always claimed. Without a
+            // default this was REQUIRED, so there was no way to list every data
+            // type. search_data_types defaults its filter to empty and is the
+            // model here; the body already treats empty as "no filter", so only
+            // the declaration was wrong.
+            @Param(value = "category", defaultValue = "",
+                   description = "Category filter; omit to list all types") String category,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
