@@ -53,7 +53,7 @@ def _fetch_non_thunk_addresses(server_url, program, n):
 
 @pytest.mark.slow
 @pytest.mark.requires_program
-def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_available):
+def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_available, current_program):
     """/mcp/schema must stay responsive while a slow request is in flight.
 
     This is the exact symptom that setExecutor(null) produced. If this test
@@ -63,13 +63,8 @@ def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_
     if not server_available:
         pytest.skip("Ghidra HTTP server not available")
 
-    # Pick an arbitrary program the host has available. Fall back to whatever
-    # /list_project_files returns if /get_metadata is busy.
-    try:
-        meta = requests.get(f"{server_url}/get_metadata", timeout=5).json()
-        program = meta.get("program_name") or meta.get("name")
-    except (requests.RequestException, ValueError):
-        program = None
+    # Use whichever program the server currently has focused.
+    program = current_program
 
     if not program:
         pytest.skip("No program loaded — cannot exercise bulk completeness scoring")
@@ -163,7 +158,7 @@ def test_http_thread_pool_keeps_schema_fast_under_contention(server_url, server_
 
 
 @pytest.mark.requires_server
-def test_schema_endpoint_is_cheap(server_url, server_available):
+def test_schema_endpoint_is_cheap(server_url, server_available, current_program):
     """Baseline: /mcp/schema should respond in <200 ms.
 
     This is a smoke test — the endpoint returns a precomputed JSON string and
