@@ -75,6 +75,11 @@ def _parse_schema(raw: dict) -> list[dict]:
                 pdef["source"] = p["source"]
             if p.get("param_type"):
                 pdef["param_type"] = p["param_type"]
+            # Carried through so the dispatch handler knows not to drop an
+            # empty-string argument for this parameter (e.g. clearing a
+            # comment). See registry.handler's filtering.
+            if p.get("allow_empty"):
+                pdef["allow_empty"] = True
             properties[p["name"]] = pdef
             if p.get("required", False):
                 required.append(p["name"])
