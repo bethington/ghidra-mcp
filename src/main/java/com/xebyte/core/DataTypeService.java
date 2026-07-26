@@ -1356,15 +1356,15 @@ public class DataTypeService {
                         result.append("Invalid offset format: ").append(fieldName).append(". Use 'offset:16' or 'offset:0x10'");
                         return null;
                     }
-                } else {
-                    // Find by field name
-                    DataTypeComponent[] components = struct.getDefinedComponents();
-                    for (DataTypeComponent component : components) {
-                        if (fieldName != null && fieldName.equals(component.getFieldName())) {
-                            targetComponent = component;
-                            break;
-                        }
+                } else if (fieldName != null && !fieldName.isEmpty()) {
+                    // Find by field name — exact, else unique Hungarian-stem match (BUG-2).
+                    int ord = resolveFieldOrdinal(struct, fieldName);
+                    if (ord == -2) {
+                        result.append("Field '").append(fieldName).append("' is ambiguous in '").append(structName)
+                              .append("' — multiple fields share that stem; use the exact name from get_struct_layout");
+                        return null;
                     }
+                    if (ord >= 0) targetComponent = struct.getComponent(ord);
                 }
 
                 if (targetComponent == null) {
@@ -1893,7 +1893,35 @@ public class DataTypeService {
     /**
      * Remove a field from an existing structure
      */
-    @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure", category = "datatype")
+    /** Strip a leading Hungarian prefix (lowercase run before the first uppercase): "cB" -> "B",
+     *  "nCount" -> "Count", "dwId" -> "Id". Lets field lookups match the pre-prefix name a caller
+     *  passed to create_struct, which auto-prefixes fields (BUG-2). */
+    static String hungarianStem(String name) {
+        if (name == null) return "";
+        int i = 0;
+        while (i < name.length() && Character.isLowerCase(name.charAt(i))) i++;
+        return (i > 0 && i < name.length() && Character.isUpperCase(name.charAt(i))) ? name.substring(i) : name;
+    }
+
+    /** Resolve a struct field by exact name, else by unique Hungarian-stem match. Returns the
+     *  ordinal, -1 if not found, -2 if the stem is ambiguous. */
+    static int resolveFieldOrdinal(Structure struct, String fieldName) {
+        for (DataTypeComponent c : struct.getDefinedComponents()) {
+            if (fieldName.equals(c.getFieldName())) return c.getOrdinal();
+        }
+        int matches = 0, ord = -1;
+        String wantStem = hungarianStem(fieldName);
+        for (DataTypeComponent c : struct.getDefinedComponents()) {
+            String fn = c.getFieldName();
+            if (fn != null && (hungarianStem(fn).equalsIgnoreCase(fieldName)
+                    || hungarianStem(fn).equalsIgnoreCase(wantStem))) {
+                matches++; ord = c.getOrdinal();
+            }
+        }
+        return matches == 1 ? ord : (matches > 1 ? -2 : -1);
+    }
+
+    @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure (by the name you created it with, even after Hungarian auto-prefixing).", category = "datatype")
     public Response removeStructField(
             @Param(value = "struct_name", source = ParamSource.BODY) String structName,
             @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
@@ -1923,17 +1951,13 @@ public class DataTypeService {
                 }
 
                 Structure struct = (Structure) dataType;
-                DataTypeComponent[] components = struct.getDefinedComponents();
-                int targetOrdinal = -1;
+                int targetOrdinal = resolveFieldOrdinal(struct, fieldName);
 
-                // Find the field to remove
-                for (DataTypeComponent component : components) {
-                    if (fieldName.equals(component.getFieldName())) {
-                        targetOrdinal = component.getOrdinal();
-                        break;
-                    }
+                if (targetOrdinal == -2) {
+                    result.append("Field '").append(fieldName).append("' is ambiguous in '").append(structName)
+                          .append("' — multiple fields share that stem; use the exact name from get_struct_layout");
+                    return null;
                 }
-
                 if (targetOrdinal == -1) {
                     result.append("Field '").append(fieldName).append("' not found in structure '").append(structName).append("'");
                     return null;
