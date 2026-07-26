@@ -388,6 +388,13 @@
     {
       "in_decompiled_code": true,
       "is_phantom": false,
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
       "name": "uVar3",
       "storage": "unique:1000003a:4",
       "type": "uint"
@@ -402,6 +409,13 @@
     {
       "in_decompiled_code": true,
       "is_phantom": false,
+      "name": "param_2",
+      "storage": "Stack[0x8]:4",
+      "type": "uint"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
       "name": "uVar5",
       "storage": "register:00000018:2",
       "type": "ushort"
@@ -411,20 +425,6 @@
       "is_phantom": false,
       "name": "uVar6",
       "storage": "register:0000001c:4",
-      "type": "uint"
-    },
-    {
-      "in_decompiled_code": true,
-      "is_phantom": false,
-      "name": "param_1",
-      "storage": "Stack[0x4]:4",
-      "type": "int"
-    },
-    {
-      "in_decompiled_code": true,
-      "is_phantom": false,
-      "name": "param_2",
-      "storage": "Stack[0x8]:4",
       "type": "uint"
     }
   ],

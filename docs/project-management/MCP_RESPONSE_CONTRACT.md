@@ -69,15 +69,17 @@ In-band errors return HTTP 200 with an `error` key. This is deliberate: many
 tools report "not found" as a normal, expected outcome rather than a transport
 failure. Clients must check for the `error` key, not just the status code.
 
-**Known gap — empty string arguments are unreachable.** An argument passed as
-`""` is dropped before it binds, so Java receives `null`. `set_comment` cannot
-therefore clear a comment: `CommentService` only rejects `comment == null`, but
-`comment: ""` arrives as exactly that and the tool answers
-`{"error": "Comment text is required"}`. Operator docs that describe an empty
-value as "clears the field" are wrong today. Pinned by
-`tests/conformance/corpus/write_roundtrips.yaml`
-(`set_comment::clear_plate_is_rejected`); flip those cases to `no_error` when it
-is fixed.
+**Resolved (2026-07-26) — empty string arguments are now reachable.** An
+argument passed as `""` used to be dropped before it bound, so Java received
+`null` and `set_comment` could not clear a comment: `CommentService` only
+rejected `comment == null`, but `comment: ""` arrived as exactly that and the
+tool answered `{"error": "Comment text is required"}`. Parameters that need
+`""` to be meaningful now declare `@Param(allowEmpty = true)`, and
+`set_comment`'s `comment` parameter does; `set_comment(comment="")` returns
+`{"status": "success", ...}` and actually clears the field. Deployed and
+verified end to end (write → read-back), 26/26 write round-trips pass. Pinned
+by `tests/conformance/corpus/write_roundtrips.yaml` (`clear_plate`,
+`clear_eol`, `readback_cleared`).
 
 ### 1d. Text payloads
 
@@ -99,13 +101,17 @@ Content that is genuinely text (decompiled C, disassembly listings) is a
   (`"10001000"`), matching existing behavior. Input accepts either form.
 - Absent values are omitted rather than emitted as `null`.
 
-  **Correction (2026-07-26):** this document previously claimed `get_comment`
-  emits every comment kind, using `null` for absent, so callers could tell
-  "no comment" from "empty comment". It does not. Gson drops nulls, so a kind
-  that was never set is absent from the response entirely, while one explicitly
-  cleared comes back as `""`. Key presence therefore does not carry that
-  distinction. Either `get_comment` should emit all five kinds explicitly or
-  this promise should stay withdrawn; pinned meanwhile by
+  **Resolved (2026-07-26):** `get_comment` now emits all five comment kinds
+  (`plate`, `pre`, `eol`, `post`, `repeatable`) explicitly on every response --
+  `null` for a kind that was never set, `""` for one explicitly cleared. This
+  needed a kind-specific exception: the shared Gson instance (`JsonHelper`)
+  deliberately drops null map values so every *other* endpoint gets
+  absent-means-null, and changing that globally would have flipped the
+  convention for dozens of tools. `get_comment` instead serializes with a
+  locally-scoped Gson (`serializeNulls()`) and returns it through
+  `Response.text` -- the contract's sanctioned use of that escape hatch for
+  pre-serialized JSON, not a §3 prose-report violation. Deployed and verified
+  live against `Benchmark.dll`. Pinned by
   `read_assertions_2.yaml::get_comment::curated_kinds_and_convenience_fields`.
 
 - **Filter parameters must be optional.** `list_data_types` requires

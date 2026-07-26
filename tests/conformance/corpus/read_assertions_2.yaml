@@ -132,20 +132,20 @@ tool_cases:
     assert:
       json_keys: ["references", "count", "total"]
 
-  # FINDING: get_comment does NOT report every kind. Gson drops nulls, so a
-  # comment kind that was never set is absent from the response entirely, while
-  # one explicitly cleared comes back as "". Callers therefore cannot use key
-  # presence to distinguish "no comment" from "empty comment" -- and
-  # MCP_RESPONSE_CONTRACT.md section 2 currently claims they can. Either the
-  # tool should emit all five kinds or the doc should stop promising it; this
-  # case pins today's behavior so the discrepancy stays visible.
+  # get_comment now emits all five kinds on every response: null for a kind
+  # that was never set, "" for one explicitly cleared. calc_crc16's plate/pre
+  # are Ghidra's own auto-generated demangling comments; eol/post/repeatable
+  # have never been touched on this fixture, so they must come back as
+  # literal null rather than being omitted.
   - tool: get_comment
     name: curated_kinds_and_convenience_fields
     tier: read
     snapshot: false
     args: { address: "0x10001000" }
     assert:
-      json_keys: ["address", "comment", "has_comment"]
+      json_keys: ["address", "plate", "pre", "eol", "post", "repeatable", "comment", "has_comment"]
+      contains: ['"eol":null', '"post":null', '"repeatable":null']
+      no_error: true
 
   # ---- analysis ------------------------------------------------------------
   - tool: analyze_function_completeness

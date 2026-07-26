@@ -1,5 +1,7 @@
 package com.xebyte.core;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.*;
@@ -18,6 +20,16 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @McpToolGroup(value = "comment", description = "Set/get plate, decompiler, disassembly, repeatable comments")
 public class CommentService {
+
+    // get_comment needs `null` to survive serialization (it is the only way to
+    // tell "never set" from "cleared to empty"), which the shared JsonHelper
+    // Gson instance deliberately does not do -- every other endpoint relies on
+    // absent-means-null. Kept local to this one response rather than changed
+    // globally.
+    private static final Gson GSON_WITH_NULLS = new GsonBuilder()
+            .disableHtmlEscaping()
+            .serializeNulls()
+            .create();
 
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
@@ -103,7 +115,7 @@ public class CommentService {
      * addresses. Unlike get_plate_comment, this does not require a function at the address --
      * so it can read the plate/EOL comment attached to a global/data symbol.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
     public Response getComment(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
@@ -131,6 +143,11 @@ public class CommentService {
         String best = firstNonEmpty(plate, pre, eol, post, repeatable);
         Map<String, Object> result = new LinkedHashMap<>();
         result.putAll(ServiceUtils.addressToJson(addr, program));
+        // Explicit nulls for kinds never set, distinct from "" for kinds
+        // explicitly cleared. The shared Gson instance drops null map values
+        // (see JsonHelper), so this response is serialized with a local
+        // Gson configured to keep them, via Response.text -- the sanctioned
+        // pre-serialized-JSON escape hatch, not a prose report.
         result.put("plate", plate);
         result.put("pre", pre);
         result.put("eol", eol);
@@ -138,7 +155,7 @@ public class CommentService {
         result.put("repeatable", repeatable);
         result.put("comment", best);
         result.put("has_comment", best != null && !best.trim().isEmpty());
-        return Response.ok(result);
+        return Response.text(GSON_WITH_NULLS.toJson(result));
     }
 
     /**
