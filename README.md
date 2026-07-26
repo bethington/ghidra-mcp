@@ -20,13 +20,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **272 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **251 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **272 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **251 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -56,7 +56,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **272 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
+- **251 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -619,7 +619,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-272 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+251 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
 ### Program & Session Management
 
@@ -638,7 +638,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 - `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
 - `list_properties` - List (address, value) entries stored in a property map, with pagination
-- `list_property_maps` - List user-defined property maps — typed per-address key→value stores
+- `list_property_maps` - List user-defined property maps â€” typed per-address keyâ†’value stores
 - `open_program` - Open program from project
 - `reanalyze` - Trigger full auto-analysis on a program
 - `remove_program_option` - Remove an option from a program option group
@@ -735,8 +735,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 ### Function Tags, Variables & Attributes
 
 - `add_function_tag` - Attach one or more tags to a function
-- `batch_add_function_tags` - Attach tags to many functions in one transaction
-- `batch_remove_function_tags` - Detach tags from many functions in one transaction
 - `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
 - `create_function_tag` - Create a program-wide function tag definition with an optional comment
 - `delete_function_tag` - Delete a program-wide function tag definition
@@ -745,10 +743,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
 - `search_functions_by_tag` - List all functions that have a specified tag attached
-- `set_decompiler_variable_type` - Set a decompiler (high-level) variable or parameter type by name
 - `set_function_no_return` - Set no-return attribute
 - `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
 - `set_function_this_type` - Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall)
+- `set_variable_type` - Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer
 - `set_variables` - Set types and names for multiple variables atomically
 
 ### Cross-References
@@ -758,16 +756,15 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `get_function_xrefs` - Get function cross-references
 - `get_xrefs_from` - Get references from address
 - `get_xrefs_to` - Get references to address
-- `remove_reference` - Remove memory cross-reference(s) from one address to another — the inverse of add_memory_reference
+- `remove_reference` - Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference
 
 ### Data Types & Structures
 
 - `add_struct_field` - Add struct field
-- `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness
+- `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness
 - `apply_data_type` - Apply data type
 - `audit_global` - Audit a global variable's documentation state
 - `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
-- `batch_set_variable_types` - Set multiple variable types
 - `clone_data_type` - Clone data type
 - `create_array_type` - Create array type
 - `create_data_type_category` - Create data type category
@@ -779,7 +776,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `create_union` - Create union
 - `delete_data_type` - Delete data type
 - `embed_struct_field` - Replace a structure field with an embedded struct type by value (e.g
-- `get_data_type_size` - Get data type size in bytes
 - `get_type_size` - Get data type size and info
 - `import_data_types` - Import data types from GDT
 - `list_data_type_categories` - List data type categories
@@ -794,28 +790,16 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
 - `set_function_prototype` - Set function prototype (return type, param types, calling convention)
 - `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
-- `set_local_variable_type` - Set variable type
-- `set_parameter_type` - Set parameter type
 - `set_variable_storage` - Set variable storage
 - `validate_data_type` - Validate data type syntax
-- `validate_data_type_exists` - Check if data type exists
 - `validate_function_prototype` - Validate function prototype
 
 ### Renaming & Labels
 
-- `batch_create_labels` - Create multiple labels
-- `batch_delete_labels` - Delete multiple labels
 - `batch_rename_function_components` - Batch rename function components
 - `create_label` - Create label
 - `delete_label` - Delete label at address
-- `rename_data` - Rename data symbol
-- `rename_external_location` - Rename external location
 - `rename_function` - Rename function by name
-- `rename_function_by_address` - Rename function by address
-- `rename_global_variable` - Rename global variable
-- `rename_label` - Rename label
-- `rename_or_label` - Rename or create label
-- `rename_variable` - Rename a variable in a function
 - `rename_variables` - Batch rename variables
 
 ### Comments & Bookmarks
@@ -824,12 +808,8 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `clear_function_comments` - Clear all comments for a function
 - `delete_bookmark` - Delete bookmark
 - `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (unlike get_plate_comment which requires a function)
-- `get_plate_comment` - Get plate comment
 - `set_bookmark` - Set bookmark
 - `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
-- `set_decompiler_comment` - Set PRE_COMMENT
-- `set_disassembly_comment` - Set EOL_COMMENT
-- `set_plate_comment` - Set plate comment
 
 ### Analysis
 
@@ -843,9 +823,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_function_completeness` - Analyze documentation completeness
 - `analyze_struct_field_usage` - Analyze struct field usage
 - `apply_data_classification` - Apply data classification
-- `batch_analyze_completeness` - Batch analyze completeness for multiple functions
 - `batch_apply_documentation` - Apply all documentation to a function in one call
-- `batch_decompile` - Decompile multiple functions at once
 - `can_rename_at_address` - Check if address can be renamed
 - `clear_instruction_flow_override` - Clear flow override
 - `configure_analyzer` - Configure an analysis plugin
@@ -956,6 +934,10 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 ### System
 
 - `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling
+
+### Symbol (uncategorized)
+
+- `rename_symbol` - Rename a symbol of any kind
 
 ### Bridge Static Tools
 

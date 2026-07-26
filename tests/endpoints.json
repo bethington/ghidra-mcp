@@ -1,7 +1,7 @@
 {
   "version": "6.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 272,
+  "total_endpoints": 251,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -27,6 +27,7 @@
       "params": [
         "function",
         "tags",
+        "assignments",
         "program"
       ],
       "description": "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist."
@@ -158,6 +159,7 @@
       "params": [
         "function_address",
         "compact",
+        "addresses",
         "program"
       ],
       "description": "Analyze documentation completeness"
@@ -171,7 +173,7 @@
         "compact",
         "program"
       ],
-      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale \u00e2\u20ac\u201d the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -255,7 +257,7 @@
         "output_dir",
         "output_name"
       ],
-      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File \u00e2\u2020\u2019 Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) \u00e2\u20ac\u201d unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
     },
     {
       "path": "/audit_global",
@@ -275,27 +277,7 @@
         "address",
         "program"
       ],
-      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs."
-    },
-    {
-      "path": "/batch_add_function_tags",
-      "method": "POST",
-      "category": "function",
-      "params": [
-        "assignments",
-        "program"
-      ],
-      "description": "Attach tags to many functions in one transaction. Body: [{\"function\":\"0x140200ae6\",\"tags\":\"syscall,lpe-surface\"}, ...]. Tags auto-create."
-    },
-    {
-      "path": "/batch_analyze_completeness",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "addresses",
-        "program"
-      ],
-      "description": "Batch analyze completeness for multiple functions"
+      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool \u00e2\u20ac\u201d start every doc pass with this when the function has global xrefs."
     },
     {
       "path": "/batch_apply_documentation",
@@ -316,46 +298,6 @@
         "program"
       ],
       "description": "Apply all documentation to a function in one call"
-    },
-    {
-      "path": "/batch_create_labels",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "labels",
-        "program"
-      ],
-      "description": "Create multiple labels"
-    },
-    {
-      "path": "/batch_decompile",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "functions",
-        "program"
-      ],
-      "description": "Decompile multiple functions at once. Accepts comma-separated function names or addresses."
-    },
-    {
-      "path": "/batch_delete_labels",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "labels",
-        "program"
-      ],
-      "description": "Delete multiple labels"
-    },
-    {
-      "path": "/batch_remove_function_tags",
-      "method": "POST",
-      "category": "function",
-      "params": [
-        "assignments",
-        "program"
-      ],
-      "description": "Detach tags from many functions in one transaction. Body shape matches /batch_add_function_tags."
     },
     {
       "path": "/batch_rename_function_components",
@@ -383,17 +325,6 @@
         "program"
       ],
       "description": "Set multiple comments"
-    },
-    {
-      "path": "/batch_set_variable_types",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "function_address",
-        "variable_types",
-        "program"
-      ],
-      "description": "Set multiple variable types"
     },
     {
       "path": "/batch_string_anchor_report",
@@ -456,7 +387,7 @@
         "end_address",
         "program"
       ],
-      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call."
+      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable \u00e2\u20ac\u201d a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code \u00e2\u20ac\u201d inspect the before/after observations and resulting disassembly after every call."
     },
     {
       "path": "/clear_function_comments",
@@ -624,6 +555,7 @@
       "params": [
         "address",
         "name",
+        "labels",
         "program"
       ],
       "description": "Create label"
@@ -867,6 +799,7 @@
       "category": "decompile",
       "params": [
         "address",
+        "functions",
         "program",
         "timeout"
       ],
@@ -930,6 +863,7 @@
       "params": [
         "address",
         "name",
+        "labels",
         "program"
       ],
       "description": "Delete label at address"
@@ -1262,16 +1196,6 @@
       "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
     },
     {
-      "path": "/get_data_type_size",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Get data type size in bytes"
-    },
-    {
       "path": "/get_entry_points",
       "method": "GET",
       "category": "getter",
@@ -1503,16 +1427,6 @@
         "program"
       ],
       "description": "Get program metadata"
-    },
-    {
-      "path": "/get_plate_comment",
-      "method": "GET",
-      "category": "comment",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Get plate comment"
     },
     {
       "path": "/get_program_options",
@@ -1876,7 +1790,7 @@
       "params": [
         "program"
       ],
-      "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries."
+      "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key\u00e2\u2020\u2019value settings; use get_program_options to read a group's entries."
     },
     {
       "path": "/list_project_files",
@@ -1917,7 +1831,7 @@
       "params": [
         "program"
       ],
-      "description": "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
+      "description": "List user-defined property maps \u00e2\u20ac\u201d typed per-address key\u00e2\u2020\u2019value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
     },
     {
       "path": "/list_scripts",
@@ -2033,17 +1947,6 @@
       "description": "Move data type to category"
     },
     {
-      "path": "/rename_data_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "old_name",
-        "new_name",
-        "program"
-      ],
-      "description": "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it"
-    },
-    {
       "path": "/move_file",
       "method": "POST",
       "category": "project",
@@ -2143,9 +2046,10 @@
       "params": [
         "function",
         "tags",
+        "assignments",
         "program"
       ],
-      "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition — use delete_function_tag for that."
+      "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition \u00e2\u20ac\u201d use delete_function_tag for that."
     },
     {
       "path": "/remove_program_option",
@@ -2179,7 +2083,7 @@
         "operand_index",
         "program"
       ],
-      "description": "Remove memory cross-reference(s) from one address to another — the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
+      "description": "Remove memory cross-reference(s) from one address to another \u00e2\u20ac\u201d the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
     },
     {
       "path": "/remove_struct_field",
@@ -2193,26 +2097,15 @@
       "description": "Remove struct field"
     },
     {
-      "path": "/rename_data",
+      "path": "/rename_data_type",
       "method": "POST",
-      "category": "rename",
+      "category": "datatype",
       "params": [
-        "address",
+        "old_name",
         "new_name",
         "program"
       ],
-      "description": "Rename data symbol"
-    },
-    {
-      "path": "/rename_external_location",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "new_name",
-        "program"
-      ],
-      "description": "Rename external location"
+      "description": "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it"
     },
     {
       "path": "/rename_function",
@@ -2221,70 +2114,23 @@
       "params": [
         "old_name",
         "new_name",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Rename function by name"
     },
     {
-      "path": "/rename_function_by_address",
+      "path": "/rename_symbol",
       "method": "POST",
-      "category": "rename",
+      "category": "symbol",
       "params": [
-        "function_address",
+        "target",
         "new_name",
-        "program",
-        "strict_mode"
-      ],
-      "description": "Rename function by address"
-    },
-    {
-      "path": "/rename_global_variable",
-      "method": "POST",
-      "category": "rename",
-      "params": [
+        "kind",
         "old_name",
-        "new_name",
-        "program",
-        "strict_mode"
-      ],
-      "description": "Rename global variable"
-    },
-    {
-      "path": "/rename_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "old_name",
-        "new_name",
         "program"
       ],
-      "description": "Rename label"
-    },
-    {
-      "path": "/rename_or_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "name",
-        "program",
-        "strict_mode"
-      ],
-      "description": "Rename or create label"
-    },
-    {
-      "path": "/rename_variable",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "function_name",
-        "function_address",
-        "old_variable_name",
-        "new_variable_name",
-        "program"
-      ],
-      "description": "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames."
+      "description": "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location."
     },
     {
       "path": "/rename_variables",
@@ -2674,40 +2520,6 @@
       "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; unlike set_plate_comment this can set a PLATE comment on a data global."
     },
     {
-      "path": "/set_decompiler_comment",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "address",
-        "comment",
-        "program"
-      ],
-      "description": "Set PRE_COMMENT"
-    },
-    {
-      "path": "/set_decompiler_variable_type",
-      "method": "POST",
-      "category": "function",
-      "params": [
-        "function_address",
-        "variable_name",
-        "new_type",
-        "program"
-      ],
-      "description": "Set a decompiler (high-level) variable or parameter type by name. Same as set_local_variable_type. For __thiscall 'this', prefer set_function_this_type."
-    },
-    {
-      "path": "/set_disassembly_comment",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "address",
-        "comment",
-        "program"
-      ],
-      "description": "Set EOL_COMMENT"
-    },
-    {
       "path": "/set_function_no_return",
       "method": "POST",
       "category": "function",
@@ -2728,7 +2540,7 @@
         "calling_convention",
         "program"
       ],
-      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function — call rename_function_by_address separately if needed."
+      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function \u00e2\u20ac\u201d call rename_function_by_address separately if needed."
     },
     {
       "path": "/set_function_tag_comment",
@@ -2765,7 +2577,7 @@
         "program",
         "strict_mode"
       ],
-      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label)."
+      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type \u00e2\u2020\u2019 rename_data \u00e2\u2020\u2019 batch_set_comments \u00e2\u2020\u2019 create_label)."
     },
     {
       "path": "/set_image_base",
@@ -2776,41 +2588,6 @@
         "program"
       ],
       "description": "Set the base address of the program (rebases all addresses)"
-    },
-    {
-      "path": "/set_local_variable_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "function_address",
-        "variable_name",
-        "new_type",
-        "program"
-      ],
-      "description": "Set variable type"
-    },
-    {
-      "path": "/set_parameter_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "function_address",
-        "parameter_name",
-        "new_type",
-        "program"
-      ],
-      "description": "Set parameter type"
-    },
-    {
-      "path": "/set_plate_comment",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "address",
-        "comment",
-        "program"
-      ],
-      "description": "Set plate comment"
     },
     {
       "path": "/set_program_option",
@@ -2848,6 +2625,18 @@
         "program"
       ],
       "description": "Set variable storage"
+    },
+    {
+      "path": "/set_variable_type",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "variable_name",
+        "new_type",
+        "program"
+      ],
+      "description": "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type."
     },
     {
       "path": "/set_variables",
@@ -2915,16 +2704,6 @@
         "program"
       ],
       "description": "Validate data type syntax"
-    },
-    {
-      "path": "/validate_data_type_exists",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Check if data type exists"
     },
     {
       "path": "/validate_function_prototype",

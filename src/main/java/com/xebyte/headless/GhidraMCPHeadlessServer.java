@@ -468,14 +468,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // --- Program Management --- (registered via HeadlessManagementService)
 
-        // GET_DATA_TYPE_SIZE - Not yet in service layer
-        safeContext("/get_data_type_size", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String typeName = params.get("type_name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getDataTypeSize(typeName, programName));
-        });
-
         // --- Project Lifecycle --- (/create_project registered via HeadlessManagementService)
 
         safeContext("/delete_project", exchange -> {
@@ -614,15 +606,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 parseBooleanOrDefault(params.get("enabled"), true) : null;
             sendResponse(exchange, endpointHandler.configureAnalyzer(
                 params.get("program"), params.get("name"), enabled));
-        });
-
-        // --- Batch Variable Types (headless-specific parsing) ---
-
-        safeContext("/batch_set_variable_types", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            boolean forceIndividual = parseBooleanOrDefault(params.get("forceIndividual"), false);
-            sendResponse(exchange, endpointHandler.batchSetVariableTypes(
-                params.get("functionAddress"), params.get("variableTypes"), forceIndividual, params.get("program")));
         });
 
         // --- Exit ---
