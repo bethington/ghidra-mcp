@@ -61,12 +61,6 @@
     },
     {
       "is_phantom": false,
-      "name": "param_1",
-      "storage": "Stack[0x4]:4",
-      "type": "int"
-    },
-    {
-      "is_phantom": false,
       "name": "uVar3",
       "needs_rename": true,
       "storage": "unique:1000003a:4",
@@ -83,12 +77,6 @@
     },
     {
       "is_phantom": false,
-      "name": "param_2",
-      "storage": "Stack[0x8]:4",
-      "type": "uint"
-    },
-    {
-      "is_phantom": false,
       "name": "uVar5",
       "needs_rename": true,
       "storage": "register:00000018:2",
@@ -101,6 +89,18 @@
       "needs_rename": true,
       "storage": "register:0000001c:4",
       "suggested_prefix": "dw",
+      "type": "uint"
+    },
+    {
+      "is_phantom": false,
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
+    },
+    {
+      "is_phantom": false,
+      "name": "param_2",
+      "storage": "Stack[0x8]:4",
       "type": "uint"
     }
   ],

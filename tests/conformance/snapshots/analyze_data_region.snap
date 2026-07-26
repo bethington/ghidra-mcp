@@ -1,0 +1,25 @@
+{
+  "byte_span": 32,
+  "classification_hint": "ARRAY",
+  "current_name": "calc_crc16",
+  "current_type": "int",
+  "end_address": "1000101f",
+  "is_likely_string": false,
+  "start_address": "10001000",
+  "stride_detected": 1,
+  "unique_xref_addresses": [
+    "Entry Point",
+    "10000134",
+    "1000020c",
+    "100139ac"
+  ],
+  "xref_count": 4,
+  "xref_map": {
+    "10001000": [
+      "10000134",
+      "1000020c",
+      "100139ac",
+      "Entry Point"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "address": "10001000",
+  "confidence": "medium",
+  "detection_method": "xref_analysis",
+  "element_count": 2014,
+  "estimated_size": 2014,
+  "stride": 1
+}
