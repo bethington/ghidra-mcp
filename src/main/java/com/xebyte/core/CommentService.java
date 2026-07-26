@@ -71,6 +71,17 @@ public class CommentService {
         }
 
         if (success.get()) {
+            // Parity with the former set_plate_comment: plate writes propagate to the
+            // decompiler cache and surface structural warnings (Algorithm/Parameters/Returns).
+            if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
+                program.flushEvents();
+                List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
+                if (!plateWarnings.isEmpty()) {
+                    return Response.ok(JsonHelper.mapOf("status", "success",
+                            "message", "Set plate comment at " + addressStr, "warnings", plateWarnings));
+                }
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addressStr));
+            }
             return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addressStr));
         }
         return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
