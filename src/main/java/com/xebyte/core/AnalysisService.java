@@ -1299,19 +1299,21 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    @McpTool(path = "/analyze_function_completeness", description = "Check function documentation completeness. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis")
     public Response analyzeFunctionCompleteness(
-            @Param(value = "function_address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
-            @Param(value = "compact", defaultValue = "false", description = "Compact output") boolean compact,
+            @Param(value = "function_address", paramType = "address", defaultValue = "",
+                   description = "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") String functionAddress,
+            @Param(value = "compact", defaultValue = "false", description = "Compact output (single mode)") boolean compact,
+            @Param(value = "addresses", defaultValue = "",
+                   description = "Bulk mode: comma-separated addresses. When set, function_address/compact are ignored.") String addressesCsv,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        if (addressesCsv != null && !addressesCsv.trim().isEmpty()) {
+            return batchAnalyzeCompleteness(addressesCsv, programName);
+        }
 
         // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
@@ -1923,7 +1925,7 @@ public class AnalysisService {
         return Response.ok(resultData.get());
     }
 
-    @McpTool(path = "/batch_analyze_completeness", method = "POST", description = "Analyze completeness for multiple functions", category = "analysis")
+    // Bulk helper for analyze_function_completeness(addresses=...). Merged in 6.0.0.
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
