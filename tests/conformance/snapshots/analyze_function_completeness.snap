@@ -1,0 +1,223 @@
+{
+  "all_deductions_unfixable": false,
+  "classification": "api_export",
+  "code_line_count": 63,
+  "comment_density": 0.16,
+  "completeness_score": 40.46048629256054,
+  "decompilation_available": true,
+  "deduction_breakdown": [
+    {
+      "category": "plate_comment_stub",
+      "count": 1,
+      "description": "Plate comment is a stub (1 lines, minimum 5)",
+      "fixable": true,
+      "points": 25.0
+    },
+    {
+      "category": "undefined_variables",
+      "count": 2,
+      "description": "Variables with generic names or unresolved types",
+      "fixable": true,
+      "points": 11.453922749783155
+    },
+    {
+      "category": "undefined_variables_structural",
+      "count": 6,
+      "description": "Register-only/thunk-projected variables not fixable via API",
+      "fixable": false,
+      "points": 13.284328118710667
+    },
+    {
+      "category": "undocumented_magic_numbers",
+      "count": 9,
+      "description": "Hex/numeric constants in instructions without EOL comments",
+      "fixable": true,
+      "points": 4.801262838945638
+    },
+    {
+      "category": "low_comment_density",
+      "count": 1,
+      "description": "Inline/disassembly comments are sparse for function complexity",
+      "fixable": true,
+      "points": 5.0
+    }
+  ],
+  "disasm_comment_count": 0,
+  "documentation_profile": "api_export",
+  "effective_score": 53.74481441127121,
+  "fixable_deductions": 46.25518558872879,
+  "function_name": "calc_crc16",
+  "has_calling_convention": true,
+  "has_custom_name": true,
+  "has_plate_comment": true,
+  "has_prototype": true,
+  "has_renameable_variables": false,
+  "hungarian_notation_violations": [],
+  "inline_comment_count": 1,
+  "is_compiler_helper": false,
+  "is_stub": false,
+  "is_thunk": false,
+  "max_achievable_score": 86.71567188128934,
+  "phantom_variables": [],
+  "plate_comment_issues": [
+    "Plate comment has only 1 lines (minimum 10 required)",
+    "Missing Algorithm section",
+    "Missing Parameters section",
+    "Missing Returns section",
+    "Missing Source file reference (e.g., Source: ..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp)"
+  ],
+  "recommendations": [
+    "UNDOCUMENTED MAGIC NUMBERS - Add EOL comments for hex/numeric constants:",
+    "1. Found 9 instruction(s) with undocumented constants: 0xFFFF at 1000100d, 0x1021 at 1000103e, 0x1021 at 10001057, 0x1021 at 10001070, 0x1021 at 10001089",
+    "2. Use batch_set_comments() with EOL_COMMENTs to explain each constant",
+    "3. Common patterns: struct offsets (document field name), enum values, bit masks, array sizes",
+    "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Mandatory Undefined Type Audit' section:",
+    "1. Type Resolution: Apply type normalization before renaming:",
+    "   - undefined1 -> byte (8-bit integer)",
+    "   - undefined2 -> ushort/short (16-bit integer)",
+    "   - undefined4 -> uint/int/float/pointer (32-bit - check usage context)",
+    "   - undefined8 -> double/ulonglong/longlong (64-bit)",
+    "   - undefined1[N] -> byte[N] (byte array for XMM spills, buffers)",
+    "2. Use set_variable_type() with lowercase builtin types (uint, ushort, byte) NOT uppercase Windows types (UINT, USHORT, BYTE)",
+    "3. CRITICAL: Check disassembly with get_disassembly() for assembly-only undefined types:",
+    "   - Stack temporaries: [EBP + local_offset] not in get_function_variables()",
+    "   - XMM register spills: undefined1[16] at stack locations",
+    "   - Intermediate calculation results not appearing in decompiled view",
+    "4. After resolving ALL undefined types, rename variables with Hungarian notation using rename_variables()",
+    "PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Plate Comment Creation' section:",
+    "5. Expand plate comment to minimum 10 lines with comprehensive documentation",
+    "1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)",
+    "3. Add Parameters section documenting all parameters with types and purposes (include IMPLICIT keyword for undocumented register params)",
+    "4. Add Returns section explaining return values, success codes, error conditions, NULL/zero cases",
+    "Use set_comment(type='plate') to create/update plate comment following docs/prompts/PLATE_COMMENT_FORMAT_GUIDE.md",
+    "LOW INLINE COMMENT DENSITY - Add more explanatory comments:",
+    "1. Current density: 0.16 comments per 10 lines (target: 0.67+)",
+    "2. Add inline comments for:",
+    "   - Complex calculations or magic numbers",
+    "   - Non-obvious conditional branches",
+    "   - Ordinal/DLL calls explaining their purpose",
+    "   - Structure field accesses explaining data meaning",
+    "   - Error handling paths explaining expected failures",
+    "3. Use set_comment(type='pre') for individual comments or batch_set_comments() for multiple",
+    "COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V4.md):",
+    "1. Initialize: get_current_selection() + analyze_function_complete() -- gather decompiled code, xrefs, callees, callers, disassembly, variables",
+    "2. Classify: Leaf/Worker/Thunk/Init/Callback/Public API/Internal utility",
+    "3. Mandatory Undefined Type Audit: examine BOTH decompiled code and disassembly for undefined types",
+    "4. Verify Decompiler vs Assembly: loops, type casts, pointer arithmetic, conditionals, early exits",
+    "5. Control Flow + Loop Mapping: return points, loop headers/bounds/stride, error paths",
+    "6. Structure Identification: search_data_types() or create_struct(), memory model docs",
+    "7. Rename + Prototype: rename_function() (PascalCase) + set_function_prototype()",
+    "8. Local Variable Renaming: set_variable_type() then rename_variables() with Hungarian notation",
+    "9. Global Data: rename_symbol() with g_ prefix for DAT_*/s_* references",
+    "10. Plate Comment: set_comment(type='plate') per PLATE_COMMENT_FORMAT_GUIDE.md (Algorithm, Parameters, Returns, Structure Layout, Magic Numbers)",
+    "11. Inline Comments: PRE_COMMENTs + EOL_COMMENTs via batch_set_comments()",
+    "12. Verify: analyze_function_completeness() once -- accept phantom/void* deductions"
+  ],
+  "remediation_actions": [
+    {
+      "estimated_gain": 25,
+      "evidence": [
+        "param_1 (generic name)",
+        "param_2 (generic name)",
+        "uVar1 (generic name)",
+        "uVar2 (generic name)",
+        "uVar3 (generic name)"
+      ],
+      "issue_type": "undefined_variables",
+      "params_template": {
+        "function_address": "10001000",
+        "new_type": "<resolved_type>",
+        "variable_name": "<var>"
+      },
+      "priority": "high",
+      "tool": "set_variable_type"
+    },
+    {
+      "estimated_gain": 20,
+      "evidence": [
+        "Plate comment has only 1 lines (minimum 10 required)",
+        "Missing Algorithm section",
+        "Missing Parameters section",
+        "Missing Returns section",
+        "Missing Source file reference (e.g., Source: ..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp)"
+      ],
+      "issue_type": "plate_comment",
+      "params_template": {
+        "address": "10001000",
+        "comment": "<plate_comment_text>",
+        "type": "plate"
+      },
+      "priority": "medium",
+      "tool": "set_comment"
+    },
+    {
+      "estimated_gain": 10,
+      "evidence": [
+        "0xFFFF at 1000100d",
+        "0x1021 at 1000103e",
+        "0x1021 at 10001057",
+        "0x1021 at 10001070",
+        "0x1021 at 10001089"
+      ],
+      "issue_type": "undocumented_magic_numbers",
+      "params_template": {
+        "eol_comments": [
+          {
+            "address": "<instr_address>",
+            "comment": "<constant_meaning>"
+          }
+        ],
+        "function_address": "10001000"
+      },
+      "priority": "medium",
+      "tool": "batch_set_comments"
+    },
+    {
+      "estimated_gain": 5,
+      "evidence": [
+        "comment_density=0.16"
+      ],
+      "issue_type": "inline_comment_density",
+      "params_template": {
+        "decompiler_comments": [
+          {
+            "address": "<address>",
+            "comment": "<explanation>"
+          }
+        ],
+        "function_address": "10001000"
+      },
+      "priority": "low",
+      "tool": "batch_set_comments"
+    }
+  ],
+  "return_type": "ushort",
+  "return_type_resolved": true,
+  "structural_deductions": 13.284328118710667,
+  "type_quality_issues": [],
+  "undefined_variables": [
+    "param_1 (generic name)",
+    "param_2 (generic name)",
+    "uVar1 (generic name)",
+    "uVar2 (generic name)",
+    "uVar3 (generic name)",
+    "iVar4 (generic name)",
+    "uVar5 (generic name)",
+    "uVar6 (generic name)"
+  ],
+  "undocumented_magic_numbers": [
+    "0xFFFF at 1000100d",
+    "0x1021 at 1000103e",
+    "0x1021 at 10001057",
+    "0x1021 at 10001070",
+    "0x1021 at 10001089",
+    "0x1021 at 100010a2",
+    "0x1021 at 100010bb",
+    "0x1021 at 100010d4",
+    "0x1021 at 100010ed"
+  ],
+  "undocumented_ordinals": [],
+  "unrenamed_globals": [],
+  "unrenamed_labels": [],
+  "unresolved_struct_accesses": []
+}

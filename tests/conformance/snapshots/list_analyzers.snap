@@ -1,0 +1,397 @@
+{
+  "analyzers": [
+    {
+      "enabled": true,
+      "name": "ASCII Strings"
+    },
+    {
+      "enabled": true,
+      "name": "ASCII Strings.Create Strings Containing Existing Strings"
+    },
+    {
+      "enabled": true,
+      "name": "ASCII Strings.Create Strings Containing References"
+    },
+    {
+      "enabled": false,
+      "name": "ASCII Strings.Force Model Reload"
+    },
+    {
+      "enabled": true,
+      "name": "ASCII Strings.Require Null Termination for String"
+    },
+    {
+      "enabled": true,
+      "name": "ASCII Strings.Search Only in Accessible Memory Blocks"
+    },
+    {
+      "enabled": false,
+      "name": "Aggressive Instruction Finder"
+    },
+    {
+      "enabled": true,
+      "name": "Aggressive Instruction Finder.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Apply Data Archives"
+    },
+    {
+      "enabled": true,
+      "name": "Apply Data Archives.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Call Convention ID"
+    },
+    {
+      "enabled": true,
+      "name": "Call-Fixup Installer"
+    },
+    {
+      "enabled": false,
+      "name": "Condense Filler Bytes"
+    },
+    {
+      "enabled": true,
+      "name": "Create Address Tables"
+    },
+    {
+      "enabled": false,
+      "name": "Create Address Tables.Allow Offcut References"
+    },
+    {
+      "enabled": false,
+      "name": "Create Address Tables.Auto Label Table"
+    },
+    {
+      "enabled": true,
+      "name": "Create Address Tables.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Create Address Tables.Relocation Table Guide"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference"
+    },
+    {
+      "enabled": false,
+      "name": "Data Reference.Align End of Strings"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Ascii String References"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Create Address Tables"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.References to Pointers"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Relocation Table Guide"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Respect Execute Flag"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Subroutine References"
+    },
+    {
+      "enabled": false,
+      "name": "Data Reference.Switch Table References"
+    },
+    {
+      "enabled": true,
+      "name": "Data Reference.Unicode String References"
+    },
+    {
+      "enabled": true,
+      "name": "Decompiler Parameter ID"
+    },
+    {
+      "enabled": true,
+      "name": "Decompiler Parameter ID.Commit Data Types"
+    },
+    {
+      "enabled": false,
+      "name": "Decompiler Parameter ID.Commit Void Return Values"
+    },
+    {
+      "enabled": true,
+      "name": "Decompiler Switch Analysis"
+    },
+    {
+      "enabled": true,
+      "name": "Demangler Microsoft"
+    },
+    {
+      "enabled": true,
+      "name": "Disassemble Entry Points"
+    },
+    {
+      "enabled": true,
+      "name": "Disassemble Entry Points.Respect Execute Flag"
+    },
+    {
+      "enabled": true,
+      "name": "Embedded Media"
+    },
+    {
+      "enabled": true,
+      "name": "Embedded Media.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "External Entry References"
+    },
+    {
+      "enabled": true,
+      "name": "Function ID"
+    },
+    {
+      "enabled": false,
+      "name": "Function ID.Always Apply FID Labels"
+    },
+    {
+      "enabled": true,
+      "name": "Function ID.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Function Start Pre Search"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Pre Search.Bookmark Functions"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Pre Search.Search Data Blocks"
+    },
+    {
+      "enabled": true,
+      "name": "Function Start Search"
+    },
+    {
+      "enabled": true,
+      "name": "Function Start Search After Code"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search After Code.Bookmark Functions"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search After Code.Search Data Blocks"
+    },
+    {
+      "enabled": true,
+      "name": "Function Start Search After Data"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search After Data.Bookmark Functions"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search After Data.Search Data Blocks"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search.Bookmark Functions"
+    },
+    {
+      "enabled": false,
+      "name": "Function Start Search.Search Data Blocks"
+    },
+    {
+      "enabled": true,
+      "name": "Non-Returning Functions - Discovered"
+    },
+    {
+      "enabled": true,
+      "name": "Non-Returning Functions - Discovered.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Non-Returning Functions - Discovered.Repair Flow Damage"
+    },
+    {
+      "enabled": true,
+      "name": "Non-Returning Functions - Known"
+    },
+    {
+      "enabled": true,
+      "name": "Non-Returning Functions - Known.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": false,
+      "name": "PDB MSDIA"
+    },
+    {
+      "enabled": false,
+      "name": "PDB MSDIA.Search untrusted symbol servers"
+    },
+    {
+      "enabled": true,
+      "name": "PDB Universal"
+    },
+    {
+      "enabled": true,
+      "name": "PDB Universal.Import Source Line Info"
+    },
+    {
+      "enabled": false,
+      "name": "PDB Universal.Search untrusted symbol servers"
+    },
+    {
+      "enabled": true,
+      "name": "Reference"
+    },
+    {
+      "enabled": false,
+      "name": "Reference.Align End of Strings"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Ascii String References"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Create Address Tables"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.References to Pointers"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Relocation Table Guide"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Respect Execute Flag"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Subroutine References"
+    },
+    {
+      "enabled": false,
+      "name": "Reference.Switch Table References"
+    },
+    {
+      "enabled": true,
+      "name": "Reference.Unicode String References"
+    },
+    {
+      "enabled": true,
+      "name": "Scalar Operand References"
+    },
+    {
+      "enabled": true,
+      "name": "Scalar Operand References.Relocation Table Guide"
+    },
+    {
+      "enabled": true,
+      "name": "Shared Return Calls"
+    },
+    {
+      "enabled": false,
+      "name": "Shared Return Calls.Allow Conditional Jumps"
+    },
+    {
+      "enabled": true,
+      "name": "Shared Return Calls.Assume Contiguous Functions Only"
+    },
+    {
+      "enabled": true,
+      "name": "Stack"
+    },
+    {
+      "enabled": true,
+      "name": "Stack.Create Local Variables"
+    },
+    {
+      "enabled": false,
+      "name": "Stack.Create Param Variables"
+    },
+    {
+      "enabled": true,
+      "name": "Subroutine References"
+    },
+    {
+      "enabled": true,
+      "name": "Subroutine References.Create Thunks Early"
+    },
+    {
+      "enabled": false,
+      "name": "Variadic Function Signature Override"
+    },
+    {
+      "enabled": false,
+      "name": "Variadic Function Signature Override.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "Windows x86 PE Exception Handling"
+    },
+    {
+      "enabled": true,
+      "name": "Windows x86 PE RTTI Analyzer"
+    },
+    {
+      "enabled": true,
+      "name": "Windows x86 Thread Environment Block (TEB) Analyzer"
+    },
+    {
+      "enabled": false,
+      "name": "WindowsPE x86 Propagate External Parameters"
+    },
+    {
+      "enabled": true,
+      "name": "WindowsResourceReference"
+    },
+    {
+      "enabled": true,
+      "name": "WindowsResourceReference.Create Analysis Bookmarks"
+    },
+    {
+      "enabled": true,
+      "name": "X86 Function Callee Purge"
+    },
+    {
+      "enabled": true,
+      "name": "x86 Constant Reference Analyzer"
+    },
+    {
+      "enabled": false,
+      "name": "x86 Constant Reference Analyzer.Create Data from pointer"
+    },
+    {
+      "enabled": true,
+      "name": "x86 Constant Reference Analyzer.Function parameter/return Pointer analysis"
+    },
+    {
+      "enabled": false,
+      "name": "x86 Constant Reference Analyzer.Require pointer param data type"
+    },
+    {
+      "enabled": true,
+      "name": "x86 Constant Reference Analyzer.Stored Value Pointer analysis"
+    },
+    {
+      "enabled": true,
+      "name": "x86 Constant Reference Analyzer.Trust values read from writable memory"
+    }
+  ],
+  "count": 98
+}

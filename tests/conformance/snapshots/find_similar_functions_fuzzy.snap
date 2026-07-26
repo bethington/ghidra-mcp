@@ -1,0 +1,11 @@
+{
+  "matches": [],
+  "source": {
+    "address": "10001000",
+    "name": "calc_crc16",
+    "program": "Benchmark.dll"
+  },
+  "target_program": "BenchmarkDebug.exe",
+  "threshold": 0.7,
+  "total_matches": 0
+}

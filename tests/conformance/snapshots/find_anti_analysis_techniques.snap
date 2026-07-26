@@ -1,0 +1,301 @@
+{
+  "findings": [
+    {
+      "address": "10001abb",
+      "category": "debugger_detection",
+      "function": "FUN_100019e3",
+      "severity": "high",
+      "technique": "IsDebuggerPresent"
+    },
+    {
+      "address": "10005c40",
+      "category": "debugger_detection",
+      "function": "___acrt_call_reportfault",
+      "severity": "high",
+      "technique": "IsDebuggerPresent"
+    },
+    {
+      "address": "1000b62f",
+      "category": "debugger_detection",
+      "function": "FID_conflict:___dcrt_terminate_console_output",
+      "severity": "high",
+      "technique": "CloseHandle"
+    },
+    {
+      "address": "1000b815",
+      "category": "debugger_detection",
+      "function": "FUN_1000b7bf",
+      "severity": "high",
+      "technique": "CloseHandle"
+    },
+    {
+      "address": "10001662",
+      "category": "timing_checks",
+      "function": "FUN_1000162b",
+      "severity": "medium",
+      "technique": "QueryPerformanceCounter"
+    },
+    {
+      "address": "1000163d",
+      "category": "timing_checks",
+      "function": "FUN_1000162b",
+      "severity": "medium",
+      "technique": "GetSystemTimeAsFileTime"
+    },
+    {
+      "address": "10001ad4",
+      "category": "exception_based",
+      "function": "FUN_100019e3",
+      "severity": "high",
+      "technique": "SetUnhandledExceptionFilter"
+    },
+    {
+      "address": "10001ee5",
+      "category": "exception_based",
+      "function": "FUN_10001ee0",
+      "severity": "high",
+      "technique": "SetUnhandledExceptionFilter"
+    },
+    {
+      "address": "10005c4a",
+      "category": "exception_based",
+      "function": "___acrt_call_reportfault",
+      "severity": "high",
+      "technique": "SetUnhandledExceptionFilter"
+    },
+    {
+      "address": "100019fc",
+      "category": "suspicious_instruction",
+      "function": "FUN_100019e3",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "100019fc",
+      "category": "suspicious_instruction",
+      "function": "FUN_100019e3",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "10001bda",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001ba8",
+      "instruction": "CPUID",
+      "severity": "medium",
+      "technique": "CPUID"
+    },
+    {
+      "address": "10001c15",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001ba8",
+      "instruction": "CPUID",
+      "severity": "medium",
+      "technique": "CPUID"
+    },
+    {
+      "address": "10001c81",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001ba8",
+      "instruction": "CPUID",
+      "severity": "medium",
+      "technique": "CPUID"
+    },
+    {
+      "address": "10001cbd",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001ba8",
+      "instruction": "CPUID",
+      "severity": "medium",
+      "technique": "CPUID"
+    },
+    {
+      "address": "10001ce8",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001ba8",
+      "instruction": "CPUID",
+      "severity": "medium",
+      "technique": "CPUID"
+    },
+    {
+      "address": "10001f20",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001f08",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "10001f20",
+      "category": "suspicious_instruction",
+      "function": "FUN_10001f08",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "100021ad",
+      "category": "suspicious_instruction",
+      "function": "__except_handler4",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "100021ad",
+      "category": "suspicious_instruction",
+      "function": "__except_handler4",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "10002713",
+      "category": "suspicious_instruction",
+      "function": "FUN_100026e7",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "10002713",
+      "category": "suspicious_instruction",
+      "function": "FUN_100026e7",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "10004787",
+      "category": "suspicious_instruction",
+      "function": "FUN_100046cf",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "10004787",
+      "category": "suspicious_instruction",
+      "function": "FUN_100046cf",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "100047ba",
+      "category": "suspicious_instruction",
+      "function": "FUN_1000478d",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "100047ba",
+      "category": "suspicious_instruction",
+      "function": "FUN_1000478d",
+      "instruction": "INT3",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "100051d8",
+      "category": "suspicious_instruction",
+      "function": "_abort",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "100051d8",
+      "category": "suspicious_instruction",
+      "function": "_abort",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "10005d63",
+      "category": "suspicious_instruction",
+      "function": "__invoke_watson",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "10005d63",
+      "category": "suspicious_instruction",
+      "function": "__invoke_watson",
+      "instruction": "INT 0x29",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "1000c73b",
+      "category": "suspicious_instruction",
+      "function": "FUN_1000c730",
+      "instruction": "FRNDINT",
+      "severity": "medium",
+      "technique": "INT 3"
+    },
+    {
+      "address": "1000c73b",
+      "category": "suspicious_instruction",
+      "function": "FUN_1000c730",
+      "instruction": "FRNDINT",
+      "severity": "medium",
+      "technique": "INT 0x2d"
+    },
+    {
+      "address": "10001750",
+      "category": "peb_teb_access",
+      "description": "Direct access to PEB/TEB can be used to detect debuggers",
+      "function": "___scrt_acquire_startup_lock",
+      "instruction": "MOV EAX,FS:[0x18]",
+      "severity": "high",
+      "technique": "Direct PEB/TEB access"
+    },
+    {
+      "address": "100026f6",
+      "category": "peb_teb_access",
+      "description": "Direct access to PEB/TEB can be used to detect debuggers",
+      "function": "FUN_100026e7",
+      "instruction": "MOV ECX,dword ptr FS:[0x18]",
+      "severity": "high",
+      "technique": "Direct PEB/TEB access"
+    },
+    {
+      "address": "10005ad3",
+      "category": "peb_teb_access",
+      "description": "Direct access to PEB/TEB can be used to detect debuggers",
+      "function": "FUN_10005ad3",
+      "instruction": "MOV EAX,FS:[0x18]",
+      "severity": "high",
+      "technique": "Direct PEB/TEB access"
+    },
+    {
+      "address": "10005ae5",
+      "category": "peb_teb_access",
+      "description": "Direct access to PEB/TEB can be used to detect debuggers",
+      "function": "FUN_10005ae5",
+      "instruction": "MOV EAX,FS:[0x18]",
+      "severity": "high",
+      "technique": "Direct PEB/TEB access"
+    }
+  ],
+  "summary": {
+    "by_category": {
+      "debugger_detection": 4,
+      "exception_based": 3,
+      "peb_teb_access": 4,
+      "suspicious_instruction": 23,
+      "timing_checks": 2
+    },
+    "by_severity": {
+      "high": 11,
+      "medium": 25
+    }
+  },
+  "total_findings": 36
+}

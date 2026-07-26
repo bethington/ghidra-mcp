@@ -1,0 +1,5 @@
+ExceptionList @ ffdff000 [void *32] (4 bytes) - 70 xrefs
+PTR_guard_check_icall_1000e120 @ 1000e120 [pointer] (4 bytes) - 42 xrefs
+PTR_GetLastError_1000e040 @ 1000e040 [pointer] (4 bytes) - 25 xrefs
+PTR_SetLastError_1000e044 @ 1000e044 [pointer] (4 bytes) - 8 xrefs
+IMAGE_DOS_HEADER_10000000 @ 10000000 [IMAGE_DOS_HEADER] (128 bytes) - 7 xrefs

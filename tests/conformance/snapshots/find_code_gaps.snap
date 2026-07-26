@@ -1,0 +1,62 @@
+{
+  "gaps": [
+    {
+      "after_function": "FUN_10001120",
+      "after_function_address": "10001120",
+      "before_function": "calc_crc16",
+      "before_function_address": "10001000",
+      "end": "1000111f",
+      "has_orphaned_instructions": false,
+      "has_undefined_bytes": true,
+      "size": 6,
+      "start": "1000111a"
+    },
+    {
+      "after_function": "compute_gcd",
+      "after_function_address": "10001130",
+      "before_function": "FUN_10001120",
+      "before_function_address": "10001120",
+      "end": "1000112f",
+      "has_orphaned_instructions": false,
+      "has_undefined_bytes": true,
+      "size": 8,
+      "start": "10001128"
+    },
+    {
+      "after_function": "get_stat_list_flags",
+      "after_function_address": "10001150",
+      "before_function": "compute_gcd",
+      "before_function_address": "10001130",
+      "end": "1000114f",
+      "has_orphaned_instructions": false,
+      "has_undefined_bytes": true,
+      "size": 1,
+      "start": "1000114f"
+    },
+    {
+      "after_function": "get_stat_list_layer",
+      "after_function_address": "10001170",
+      "before_function": "get_stat_list_flags",
+      "before_function_address": "10001150",
+      "end": "1000116f",
+      "has_orphaned_instructions": false,
+      "has_undefined_bytes": true,
+      "size": 5,
+      "start": "1000116b"
+    },
+    {
+      "after_function": "get_stat_list_owner_guid",
+      "after_function_address": "10001180",
+      "before_function": "get_stat_list_layer",
+      "before_function_address": "10001170",
+      "end": "1000117f",
+      "has_orphaned_instructions": false,
+      "has_undefined_bytes": true,
+      "size": 6,
+      "start": "1000117a"
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 177
+}

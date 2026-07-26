@@ -1,0 +1,42 @@
+{
+  "limit": 5,
+  "offset": 0,
+  "results": [
+    {
+      "address": "10001120",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_10001120",
+      "xref_count": 2
+    },
+    {
+      "address": "1000130e",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_1000130e",
+      "xref_count": 1
+    },
+    {
+      "address": "100013f4",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_100013f4",
+      "xref_count": 1
+    },
+    {
+      "address": "10001418",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_10001418",
+      "xref_count": 2
+    },
+    {
+      "address": "100014b4",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_100014b4",
+      "xref_count": 1
+    }
+  ],
+  "total": 281
+}

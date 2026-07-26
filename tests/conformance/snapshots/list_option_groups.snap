@@ -1,0 +1,26 @@
+{
+  "count": 5,
+  "groups": [
+    {
+      "name": "Decompiler",
+      "option_count": 1
+    },
+    {
+      "name": "Specification Extensions",
+      "option_count": 1
+    },
+    {
+      "name": "Analyzers",
+      "option_count": 135
+    },
+    {
+      "name": "Disassembler",
+      "option_count": 3
+    },
+    {
+      "name": "Program Information",
+      "option_count": 15
+    }
+  ],
+  "program": "Benchmark.dll"
+}

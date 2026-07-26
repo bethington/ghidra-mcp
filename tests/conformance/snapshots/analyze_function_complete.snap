@@ -1,0 +1,461 @@
+{
+  "address": "10001000",
+  "callees": [],
+  "callers": [],
+  "classification": "api_export",
+  "decompiled_code": "\r\n/* __stdcall calc_crc16,8 */\r\n\r\nushort calc_crc16(int param_1,uint param_2)\r\n\r\n{\r\n  uint uVar1;\r\n  uint uVar2;\r\n  uint uVar3;\r\n  int iVar4;\r\n  ushort uVar5;\r\n  uint uVar6;\r\n  \r\n                    /* 0x1000  2  _calc_crc16@8 */\r\n  iVar4 = param_1;\r\n  uVar6 = 0;\r\n  param_1 = 0xffff;\r\n  param_1._0_2_ = 0xffff;\r\n  uVar1 = param_1;\r\n  if (param_2 != 0) {\r\n    do {\r\n      param_1 = uVar1;\r\n      uVar5 = (ushort)param_1 ^ (ushort)*(byte *)(uVar6 + iVar4) << 8;\r\n      param_1 = (int)uVar5;\r\n      uVar1 = param_1 * 2 ^ 0x1021;\r\n      if (-1 < (short)uVar5) {\r\n        uVar1 = param_1 * 2;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar6 = uVar6 + 1;\r\n      param_1._0_2_ = (ushort)uVar2;\r\n      uVar1 = uVar2 & 0xffff;\r\n    } while (uVar6 < param_2);\r\n  }\r\n  return (ushort)param_1;\r\n}\r\n\r\n",
+  "disassembly": [
+    {
+      "address": "10001000",
+      "mnemonic": "PUSH"
+    },
+    {
+      "address": "10001001",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001005",
+      "mnemonic": "PUSH"
+    },
+    {
+      "address": "10001006",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "1000100a",
+      "mnemonic": "PUSH"
+    },
+    {
+      "address": "1000100b",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "1000100d",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001015",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "10001017",
+      "mnemonic": "JZ"
+    },
+    {
+      "address": "1000101d",
+      "mnemonic": "PUSH"
+    },
+    {
+      "address": "1000101e",
+      "mnemonic": "NOP"
+    },
+    {
+      "address": "10001020",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001024",
+      "mnemonic": "SHL"
+    },
+    {
+      "address": "10001028",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "1000102d",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "10001030",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001035",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001039",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "1000103c",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "1000103e",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "10001043",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "10001046",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001049",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "1000104c",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "1000104f",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001052",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "10001055",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001057",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "1000105c",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "1000105f",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001062",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001065",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "10001068",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "1000106b",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "1000106e",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001070",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "10001075",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "10001078",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "1000107b",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "1000107e",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "10001081",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001084",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "10001087",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001089",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "1000108e",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "10001091",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001094",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001097",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "1000109a",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "1000109d",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "100010a0",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "100010a2",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "100010a7",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "100010aa",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010ad",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010b0",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "100010b3",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010b6",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "100010b9",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "100010bb",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "100010c0",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "100010c3",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010c6",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010c9",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "100010cc",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010cf",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "100010d2",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "100010d4",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "100010d9",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "100010dc",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010df",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010e2",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "100010e5",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010e8",
+      "mnemonic": "LEA"
+    },
+    {
+      "address": "100010eb",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "100010ed",
+      "mnemonic": "XOR"
+    },
+    {
+      "address": "100010f2",
+      "mnemonic": "TEST"
+    },
+    {
+      "address": "100010f5",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010f8",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "100010fb",
+      "mnemonic": "CMOVNS"
+    },
+    {
+      "address": "100010fe",
+      "mnemonic": "INC"
+    },
+    {
+      "address": "100010ff",
+      "mnemonic": "MOVZX"
+    },
+    {
+      "address": "10001102",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001106",
+      "mnemonic": "CMP"
+    },
+    {
+      "address": "10001108",
+      "mnemonic": "JC"
+    },
+    {
+      "address": "1000110e",
+      "mnemonic": "POP"
+    },
+    {
+      "address": "1000110f",
+      "mnemonic": "MOV"
+    },
+    {
+      "address": "10001114",
+      "mnemonic": "POP"
+    },
+    {
+      "address": "10001115",
+      "mnemonic": "POP"
+    },
+    {
+      "address": "10001116",
+      "mnemonic": "POP"
+    },
+    {
+      "address": "10001117",
+      "mnemonic": "RET"
+    }
+  ],
+  "locals": [
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "uVar1",
+      "storage": "unique:10000016:4",
+      "type": "uint"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "uVar2",
+      "storage": "unique:1000001a:4",
+      "type": "uint"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "uVar3",
+      "storage": "unique:1000003a:4",
+      "type": "uint"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "iVar4",
+      "storage": "unique:1000005f:4",
+      "type": "int"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "uVar5",
+      "storage": "register:00000018:2",
+      "type": "ushort"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "uVar6",
+      "storage": "register:0000001c:4",
+      "type": "uint"
+    },
+    {
+      "in_decompiled_code": true,
+      "is_phantom": false,
+      "name": "param_2",
+      "storage": "Stack[0x8]:4",
+      "type": "uint"
+    }
+  ],
+  "name": "calc_crc16",
+  "parameters": [
+    {
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
+    },
+    {
+      "name": "param_2",
+      "storage": "Stack[0x8]:4",
+      "type": "uint"
+    }
+  ],
+  "return_type_resolved": true,
+  "signature": "ushort __stdcall calc_crc16(int param_1, uint param_2)",
+  "xref_count": 4,
+  "xrefs": [
+    {
+      "from": "10000134"
+    },
+    {
+      "from": "1000020c"
+    },
+    {
+      "from": "100139ac"
+    },
+    {
+      "from": "Entry Point"
+    }
+  ]
+}

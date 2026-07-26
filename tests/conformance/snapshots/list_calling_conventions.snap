@@ -1,0 +1,6 @@
+Available Calling Conventions (4):
+
+- __stdcall
+- __cdecl
+- __fastcall
+- __thiscall

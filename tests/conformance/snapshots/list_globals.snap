@@ -1,0 +1,5 @@
+ExceptionList @ ffdff000 [Label] (void *32) xrefs=70
+StackBase @ ffdff004 [Label] (void *32) xrefs=2
+StackLimit @ ffdff008 [Label] (void *32) xrefs=1
+SubSystemTib @ ffdff00c [Label] (void *32) xrefs=0
+FiberData @ ffdff010 [Label] (void *32) xrefs=0

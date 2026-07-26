@@ -1,0 +1,4 @@
+Error executing tool get_function_variables: 1 validation error for get_function_variablesArguments
+limit
+  Input should be a valid string [type=string_type, input_value=5, input_type=int]
+    For further information visit http<PATH>//errors.pydantic.dev/2.13/v/string_type

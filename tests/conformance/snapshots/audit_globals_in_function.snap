@@ -1,0 +1,13 @@
+{
+  "function": {
+    "address": "10001000",
+    "name": "calc_crc16"
+  },
+  "globals": [],
+  "summary": {
+    "fully_documented": 0,
+    "issue_histogram": {},
+    "total": 0,
+    "with_issues": 0
+  }
+}
