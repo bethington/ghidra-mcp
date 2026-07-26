@@ -4388,9 +4388,10 @@
       "method": "GET",
       "params": [
         {
-          "description": "Category filter",
+          "default": "",
+          "description": "Category filter; omit to list all types",
           "name": "category",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },

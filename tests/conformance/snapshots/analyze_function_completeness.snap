@@ -3,15 +3,15 @@
   "classification": "api_export",
   "code_line_count": 63,
   "comment_density": 0.16,
-  "completeness_score": 30.460486292560546,
+  "completeness_score": 40.46048629256054,
   "decompilation_available": true,
   "deduction_breakdown": [
     {
-      "category": "missing_plate_comment",
+      "category": "plate_comment_stub",
       "count": 1,
-      "description": "Missing plate comment",
+      "description": "Plate comment is a stub (1 lines, minimum 5)",
       "fixable": true,
-      "points": 35.0
+      "points": 25.0
     },
     {
       "category": "undefined_variables",
@@ -44,12 +44,12 @@
   ],
   "disasm_comment_count": 0,
   "documentation_profile": "api_export",
-  "effective_score": 43.74481441127121,
-  "fixable_deductions": 56.25518558872879,
+  "effective_score": 53.74481441127121,
+  "fixable_deductions": 46.25518558872879,
   "function_name": "calc_crc16",
   "has_calling_convention": true,
   "has_custom_name": true,
-  "has_plate_comment": false,
+  "has_plate_comment": true,
   "has_prototype": true,
   "has_renameable_variables": false,
   "hungarian_notation_violations": [],
@@ -59,7 +59,13 @@
   "is_thunk": false,
   "max_achievable_score": 86.71567188128934,
   "phantom_variables": [],
-  "plate_comment_issues": [],
+  "plate_comment_issues": [
+    "Plate comment has only 1 lines (minimum 10 required)",
+    "Missing Algorithm section",
+    "Missing Parameters section",
+    "Missing Returns section",
+    "Missing Source file reference (e.g., Source: ..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp)"
+  ],
   "recommendations": [
     "UNDOCUMENTED MAGIC NUMBERS - Add EOL comments for hex/numeric constants:",
     "1. Found 9 instruction(s) with undocumented constants: 0xFFFF at 1000100d, 0x1021 at 1000103e, 0x1021 at 10001057, 0x1021 at 10001070, 0x1021 at 10001089",
@@ -78,6 +84,12 @@
     "   - XMM register spills: undefined1[16] at stack locations",
     "   - Intermediate calculation results not appearing in decompiled view",
     "4. After resolving ALL undefined types, rename variables with Hungarian notation using rename_variables()",
+    "PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V5.md 'Plate Comment Creation' section:",
+    "5. Expand plate comment to minimum 10 lines with comprehensive documentation",
+    "1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)",
+    "3. Add Parameters section documenting all parameters with types and purposes (include IMPLICIT keyword for undocumented register params)",
+    "4. Add Returns section explaining return values, success codes, error conditions, NULL/zero cases",
+    "Use set_comment(type='plate') to create/update plate comment following docs/PLATE_COMMENT_BEST_PRACTICES.md",
     "LOW INLINE COMMENT DENSITY - Add more explanatory comments:",
     "1. Current density: 0.16 comments per 10 lines (target: 0.67+)",
     "2. Add inline comments for:",
@@ -119,6 +131,24 @@
       },
       "priority": "high",
       "tool": "set_variable_type"
+    },
+    {
+      "estimated_gain": 20,
+      "evidence": [
+        "Plate comment has only 1 lines (minimum 10 required)",
+        "Missing Algorithm section",
+        "Missing Parameters section",
+        "Missing Returns section",
+        "Missing Source file reference (e.g., Source: ..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp)"
+      ],
+      "issue_type": "plate_comment",
+      "params_template": {
+        "address": "10001000",
+        "comment": "<plate_comment_text>",
+        "type": "plate"
+      },
+      "priority": "medium",
+      "tool": "set_comment"
     },
     {
       "estimated_gain": 10,
