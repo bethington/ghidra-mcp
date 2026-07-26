@@ -109,13 +109,41 @@ Content that is genuinely text (decompiled C, disassembly listings) is a
 
 Staged by category, each stage gated by re-running the conformance suite.
 
-| Stage | Scope | Tools |
-| --- | --- | --- |
-| 1 | `list_*` | 13 |
-| 2 | `get_*` | 14 |
-| 3 | remainder (`decompile_function`, `disassemble_function`, `check_connection`, `force_decompile`, `search_data_types`, `validate_data_type`) | 6 |
-| 4 | bare-array outliers brought into the envelope (`list_imports`, `list_external_locations`, `detect_crypto_constants`, `find_dead_code`) | 4 |
+| Stage | Scope | Tools | Status |
+| --- | --- | --- | --- |
+| 1 | `list_*` | 13 | done |
+| 2 | `get_*` | 13 | done |
+| 3 | `decompile_function`, `disassemble_function` | 2 | done |
+| 4 | `list_imports` into the envelope | 1 | done |
+| 5 | datatype write tools + remaining error paths | 35 | **open** |
 
 Callers are migrated with their stage — fun-doc, `tests/`, `tools/setup`, and
 the docs each parse these responses today, so a stage is not complete until its
 callers are updated and the suite is green.
+
+### Stage 5 scope (measured, not estimated)
+
+The first four stages covered the tools that appeared in the read-tier
+conformance snapshot. A source-level sweep for `Response.text` inside
+`@McpTool` bodies found **35 registered tools still returning text**, dominated
+by the datatype write surface:
+
+```
+create_enum (11)  create_struct (8)   resolve_duplicate_type (7)
+apply_data_type (6)  validate_data_type (5)  add_struct_field (4)
+get_enum_values (4)  get_struct_layout (4)   ... and 27 more
+```
+
+Most are success/failure messages from write tools (`"Struct 'Foo' created"`),
+which belong in `{"status": ..., "name": ...}` shapes, plus error paths in
+otherwise-converted read tools. `Response.text` should be deleted outright once
+this stage lands — while it exists, the contract is a convention rather than a
+constraint.
+
+### Callers migrated so far
+
+fun-doc (18 modules, via the `decompiled_text` / `disasm_text` /
+`_envelope_items` helpers in `fun_doc.py`), `tools/setup` (deploy smoke tests +
+the YAML regression runner's "lines" assertion), and the offline test mocks.
+`tests/integration` still asserts pre-6.0.0 text in places and is migrated
+against real post-deploy failures rather than by guesswork.
