@@ -48,13 +48,6 @@ public class FunctionServiceThisTypeTest extends TestCase {
         assertTrue(body.contains("setFunctionThisType"));
     }
 
-    public void testEndpointRegistryWiresSetParameterTypeEndpoint() throws IOException {
-        String src = Files.readString(
-                Paths.get("src/main/java/com/xebyte/core/EndpointRegistry.java"),
-                StandardCharsets.UTF_8);
-        assertTrue(src.contains("setParameterTypeEndpoint("));
-    }
-
     public void testSetFunctionThisTypeUsesClassNamespaceAssociation() throws IOException {
         String src = Files.readString(
                 Paths.get("src/main/java/com/xebyte/core/FunctionService.java"),

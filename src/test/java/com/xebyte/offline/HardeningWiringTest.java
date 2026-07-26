@@ -85,11 +85,12 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("Gate must precede program resolution", gate < resolve);
     }
 
-    /** The dead, ungated /run_script route must stay unregistered. */
+    /** The dead, ungated /run_script route must stay unregistered.
+     *  (The old dead EndpointRegistry router was removed in 6.0.0.) */
     public void testRunScriptRouteNotRegistered() throws IOException {
-        String src = read("core", "EndpointRegistry.java");
-        assertFalse("EndpointRegistry must not register the ungated /run_script route",
-                src.contains("post(\"/run_script\""));
+        String plugin = read("GhidraMCPPlugin.java");
+        assertFalse("GhidraMCPPlugin must not register the ungated /run_script route",
+                plugin.contains("createContext(\"/run_script\""));
     }
 
     /** Request bodies must be bounded on every transport. */

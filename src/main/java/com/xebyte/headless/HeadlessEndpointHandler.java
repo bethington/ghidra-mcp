@@ -316,11 +316,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String setDecompilerComment(String addressStr, String comment, String programName) {
-        return commentService.setDecompilerComment(addressStr, comment, programName).toJson();
+        return commentService.setComment(addressStr, comment, "pre", programName).toJson();
     }
 
     public String setDisassemblyComment(String addressStr, String comment, String programName) {
-        return commentService.setDisassemblyComment(addressStr, comment, programName).toJson();
+        return commentService.setComment(addressStr, comment, "eol", programName).toJson();
     }
 
     // ==========================================================================
@@ -804,20 +804,6 @@ public class HeadlessEndpointHandler {
         } catch (Exception e) {
             return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
         }
-    }
-
-    /**
-     * Get a function's plate (header) comment.
-     */
-    public String getPlateComment(String address, String programName) {
-        return commentService.getPlateComment(address, programName).toJson();
-    }
-
-    /**
-     * Set a function's plate (header) comment.
-     */
-    public String setPlateComment(String functionAddress, String comment, String programName) {
-        return commentService.setPlateComment(functionAddress, comment, programName).toJson();
     }
 
     // ==========================================================================
