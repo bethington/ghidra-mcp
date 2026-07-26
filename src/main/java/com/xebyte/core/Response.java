@@ -40,5 +40,32 @@ public sealed interface Response permits Response.Ok, Response.Err, Response.Tex
     // Factory methods
     static Response ok(Object data) { return new Ok(data); }
     static Response err(String message) { return new Err(message); }
+
+    /**
+     * Success response for a write with no structured payload:
+     * {@code {"status": "success", "message": "..."}}.
+     *
+     * <p>Write tools used to return a bare English sentence, which made a
+     * successful write indistinguishable from an error at the type level and
+     * forced callers to pattern-match prose. See
+     * {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}.
+     */
+    static Response success(String message) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("message", message);
+        return new Ok(out);
+    }
+
+    /**
+     * Raw passthrough. Reserved for content that is <em>already</em> serialized
+     * JSON.
+     *
+     * @deprecated Never use this for human-formatted text -- that violates the
+     *     response contract, and it is the mechanism by which 33 tools drifted
+     *     away from it before 6.0.0. Use {@link #ok}, {@link #success}, or
+     *     {@link #err}.
+     */
+    @Deprecated
     static Response text(String content) { return new Text(content); }
 }

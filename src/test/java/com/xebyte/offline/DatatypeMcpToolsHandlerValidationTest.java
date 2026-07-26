@@ -35,8 +35,8 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
 
     public void testEmbedStructFieldRejectsMissingEmbeddedStruct() {
         Response r = dataTypes.embedStructField("Parent", "field_a", "", "");
-        assertTrue(r instanceof Response.Text);
-        assertTrue(((Response.Text) r).content().contains("embedded_struct is required"));
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("embedded_struct is required"));
     }
 
     public void testModifyStructFieldTypeRequiresProgram() {
@@ -130,14 +130,14 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
 
     public void testRenameDataTypeRejectsEmptyOldName() {
         Response r = dataTypes.renameDataType("", "NewName", "");
-        assertTrue(r instanceof Response.Text);
-        assertTrue(((Response.Text) r).content().contains("Old name is required"));
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("Old name is required"));
     }
 
     public void testRenameDataTypeRejectsEmptyNewName() {
         Response r = dataTypes.renameDataType("OldName", "", "");
-        assertTrue(r instanceof Response.Text);
-        assertTrue(((Response.Text) r).content().contains("New name is required"));
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("New name is required"));
     }
 
     public void testRenameDataTypeRequiresProgram() {
