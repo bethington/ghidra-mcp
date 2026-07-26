@@ -199,6 +199,10 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null, null);
     }
 
+    public Response createLabel(String addressStr, String labelName, String programName) {
+        return createLabel(addressStr, labelName, null, programName);
+    }
+
     @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol")
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
@@ -454,6 +458,10 @@ public class SymbolLabelService {
 
     public Response deleteLabel(String addressStr, String labelName) {
         return deleteLabel(addressStr, labelName, null, null);
+    }
+
+    public Response deleteLabel(String addressStr, String labelName, String programName) {
+        return deleteLabel(addressStr, labelName, null, programName);
     }
 
     @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")

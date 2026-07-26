@@ -31,15 +31,15 @@ public class CommentServiceValidationTest extends TestCase {
     }
 
     public void testSetDecompilerCommentDegradesGracefully() {
-        assertNoProgram(comments.setDecompilerComment("0x401000", "note"));
+        assertNoProgram(comments.setComment("0x401000", "note", "pre", ""));
     }
 
     public void testSetDisassemblyCommentDegradesGracefully() {
-        assertNoProgram(comments.setDisassemblyComment("0x401000", "note"));
+        assertNoProgram(comments.setComment("0x401000", "note", "eol", ""));
     }
 
     public void testSetPlateCommentDegradesGracefully() {
-        assertNoProgram(comments.setPlateComment("0x401000", "Summary of this function's behavior"));
+        assertNoProgram(comments.setComment("0x401000", "Summary of this function's behavior", "plate", ""));
     }
 
     public void testClearFunctionCommentsDegradesGracefully() {
@@ -53,6 +53,6 @@ public class CommentServiceValidationTest extends TestCase {
     }
 
     public void testGetPlateCommentDegradesGracefully() {
-        assertNoProgram(comments.getPlateComment("0x401000", ""));
+        assertNoProgram(comments.getComment("0x401000", ""));
     }
 }
