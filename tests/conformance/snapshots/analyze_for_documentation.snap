@@ -8,18 +8,18 @@
     "classification": "api_export",
     "code_line_count": 63,
     "comment_density": 0.16,
-    "completeness_score": 40.46048629256054,
+    "completeness_score": 30.460486292560546,
     "decompilation_available": true,
     "deduction_count": 5,
     "disasm_comment_count": 0,
     "documentation_profile": "api_export",
-    "effective_score": 53.74481441127121,
-    "fixable_deductions": 46.25518558872879,
+    "effective_score": 43.74481441127121,
+    "fixable_deductions": 56.25518558872879,
     "function_name": "calc_crc16",
     "globals_unrenamed": 0,
     "has_calling_convention": true,
     "has_custom_name": true,
-    "has_plate_comment": true,
+    "has_plate_comment": false,
     "has_prototype": true,
     "has_renameable_variables": false,
     "hungarian_violations": 0,
@@ -32,7 +32,7 @@
     "max_achievable_score": 86.71567188128934,
     "ordinals_undocumented": 0,
     "phantom_count": 0,
-    "plate_issues": 5,
+    "plate_issues": 0,
     "return_type": "ushort",
     "return_type_resolved": true,
     "struct_accesses_unresolved": 0,
@@ -41,7 +41,7 @@
     "undefined_count": 8
   },
   "dat_global_count": 0,
-  "decompiled_code": "\r\n/* __stdcall calc_crc16,8 */\r\n\r\nushort calc_crc16(int param_1,uint param_2)\r\n\r\n{\r\n  uint uVar1;\r\n  uint uVar2;\r\n  uint uVar3;\r\n  int iVar4;\r\n  ushort uVar5;\r\n  uint uVar6;\r\n  \r\n                    /* 0x1000  2  _calc_crc16@8 */\r\n  iVar4 = param_1;\r\n  uVar6 = 0;\r\n  param_1 = 0xffff;\r\n  param_1._0_2_ = 0xffff;\r\n  uVar1 = param_1;\r\n  if (param_2 != 0) {\r\n    do {\r\n      param_1 = uVar1;\r\n      uVar5 = (ushort)param_1 ^ (ushort)*(byte *)(uVar6 + iVar4) << 8;\r\n      param_1 = (int)uVar5;\r\n      uVar1 = param_1 * 2 ^ 0x1021;\r\n      if (-1 < (short)uVar5) {\r\n        uVar1 = param_1 * 2;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar6 = uVar6 + 1;\r\n      param_1._0_2_ = (ushort)uVar2;\r\n      uVar1 = uVar2 & 0xffff;\r\n    } while (uVar6 < param_2);\r\n  }\r\n  return (ushort)param_1;\r\n}\r\n\r\n",
+  "decompiled_code": "\r\n/*  */\r\n\r\nushort calc_crc16(int param_1,uint param_2)\r\n\r\n{\r\n  uint uVar1;\r\n  uint uVar2;\r\n  uint uVar3;\r\n  int iVar4;\r\n  ushort uVar5;\r\n  uint uVar6;\r\n  \r\n                    /* 0x1000  2  _calc_crc16@8 */\r\n  iVar4 = param_1;\r\n  uVar6 = 0;\r\n  param_1 = 0xffff;\r\n  param_1._0_2_ = 0xffff;\r\n  uVar1 = param_1;\r\n  if (param_2 != 0) {\r\n    do {\r\n      param_1 = uVar1;\r\n      uVar5 = (ushort)param_1 ^ (ushort)*(byte *)(uVar6 + iVar4) << 8;\r\n      param_1 = (int)uVar5;\r\n      uVar1 = param_1 * 2 ^ 0x1021;\r\n      if (-1 < (short)uVar5) {\r\n        uVar1 = param_1 * 2;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar3 = (uVar2 & 0xffff) * 2;\r\n      uVar1 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar2) {\r\n        uVar1 = uVar3;\r\n      }\r\n      uVar3 = (uVar1 & 0xffff) * 2;\r\n      uVar2 = uVar3 ^ 0x1021;\r\n      if (-1 < (short)uVar1) {\r\n        uVar2 = uVar3;\r\n      }\r\n      uVar6 = uVar6 + 1;\r\n      param_1._0_2_ = (ushort)uVar2;\r\n      uVar1 = uVar2 & 0xffff;\r\n    } while (uVar6 < param_2);\r\n  }\r\n  return (ushort)param_1;\r\n}\r\n\r\n",
   "locals": [
     {
       "is_phantom": false,
@@ -77,6 +77,12 @@
     },
     {
       "is_phantom": false,
+      "name": "param_1",
+      "storage": "Stack[0x4]:4",
+      "type": "int"
+    },
+    {
+      "is_phantom": false,
       "name": "uVar5",
       "needs_rename": true,
       "storage": "register:00000018:2",
@@ -85,22 +91,16 @@
     },
     {
       "is_phantom": false,
-      "name": "uVar6",
-      "needs_rename": true,
-      "storage": "register:0000001c:4",
-      "suggested_prefix": "dw",
+      "name": "param_2",
+      "storage": "Stack[0x8]:4",
       "type": "uint"
     },
     {
       "is_phantom": false,
-      "name": "param_1",
-      "storage": "Stack[0x4]:4",
-      "type": "int"
-    },
-    {
-      "is_phantom": false,
-      "name": "param_2",
-      "storage": "Stack[0x8]:4",
+      "name": "uVar6",
+      "needs_rename": true,
+      "storage": "register:0000001c:4",
+      "suggested_prefix": "dw",
       "type": "uint"
     }
   ],
