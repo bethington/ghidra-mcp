@@ -95,6 +95,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -2032,7 +2033,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 info.put("trace", trace.getName());
                 info.put("tool", runningTool.getName());
                 try {
-                    traceMgr.saveTrace(trace).get(30, TimeUnit.SECONDS);
+                    saveTraceWithRetry(traceMgr, trace);
                     traceMgr.closeTraceNoConfirm(trace);
                     saved.add(info);
                 } catch (Throwable e) {
@@ -2049,6 +2050,38 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "traces", saved,
             "errors", errors
         );
+    }
+
+    /**
+     * Save a debugger trace, retrying if the attempt races an in-flight
+     * transaction on the trace's own domain object -- the same {@code
+     * IOException: Unable to lock due to active transaction} documented for
+     * program saves in {@code ProgramScriptService.saveWithRetry}, confirmed
+     * live against a debugger trace too (2026-07-26): a trace accumulates its
+     * own transactions from continuous Trace RMI sync writes (module/register
+     * updates), and one can still be open when {@code exit_ghidra} saves on
+     * the way out. A short backoff-and-retry on that specific message is the
+     * same pragmatic fix as the program-save case.
+     */
+    private void saveTraceWithRetry(DebuggerTraceManagerService traceMgr, Trace trace)
+            throws Exception {
+        final int maxAttempts = 4;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                traceMgr.saveTrace(trace).get(30, TimeUnit.SECONDS);
+                return;
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                String msg = cause != null ? cause.getMessage() : e.getMessage();
+                boolean isLockRace = msg != null && msg.contains("Unable to lock due to active transaction");
+                if (!isLockRace || attempt == maxAttempts) {
+                    throw e;
+                }
+                Msg.warn(this, "Trace save raced an active transaction (attempt "
+                        + attempt + "/" + maxAttempts + "), retrying: " + msg);
+                Thread.sleep(150L * attempt);
+            }
+        }
     }
 
     private String listOpenPrograms() {

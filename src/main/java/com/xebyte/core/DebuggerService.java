@@ -448,6 +448,42 @@ public class DebuggerService {
                         offer.getTitle() + "'. Check Ghidra's launcher terminal for backend errors.");
             }
 
+            // launchProgram() opens the trace but does not make it the trace
+            // manager's "current" trace when driven programmatically (that
+            // normally happens via the launch UI's own action handling).
+            // Every other debugger_* tool reads getCurrentTrace(), so without
+            // this, they'd all report "no active debug trace" despite a live
+            // session existing.
+            DebuggerTraceManagerService traceMgr =
+                    tool.getService(DebuggerTraceManagerService.class);
+            if (traceMgr != null) {
+                Trace launchedTrace = result.trace();
+                Runnable activator = () -> traceMgr.activateTrace(launchedTrace);
+                if (SwingUtilities.isEventDispatchThread()) {
+                    activator.run();
+                } else {
+                    SwingUtilities.invokeAndWait(activator);
+                }
+            }
+
+            // The target's module list, current-thread selection, and initial
+            // stack all arrive over Trace RMI asynchronously after
+            // launchProgram() returns -- confirmed live: querying immediately
+            // gives an empty module list, a null current thread, and "no
+            // stack data", but the same calls succeed moments later with no
+            // other change. Poll briefly so a successful launch response
+            // actually means "ready to query", not just "trace object
+            // exists".
+            Trace launchedTrace = result.trace();
+            for (int i = 0; i < 25; i++) {
+                boolean hasModules = !launchedTrace.getModuleManager().getAllModules().isEmpty();
+                boolean hasThread = traceMgr != null && traceMgr.getCurrentThread() != null;
+                if (hasModules && hasThread) {
+                    break;
+                }
+                Thread.sleep(200);
+            }
+
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("status", "launched");
             response.put("offer_title", offer.getTitle());
