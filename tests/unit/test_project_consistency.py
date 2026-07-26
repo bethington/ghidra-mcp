@@ -178,9 +178,10 @@ class TestJavaArchitecture(unittest.TestCase):
     def test_annotation_scanner_exists(self):
         self.assertTrue((CORE_SRC / "AnnotationScanner.java").exists())
 
-    def test_endpoint_registry_exists(self):
-        """EndpointRegistry.java coexists with AnnotationScanner (upstream keeps both)."""
-        self.assertTrue((CORE_SRC / "EndpointRegistry.java").exists())
+    def test_endpoint_registry_removed(self):
+        """EndpointRegistry.java was dead code (never instantiated; routing is 100%
+        AnnotationScanner-driven in both GUI and headless) and was removed in 6.0.0."""
+        self.assertFalse((CORE_SRC / "EndpointRegistry.java").exists())
 
     def test_endpoint_def_exists(self):
         """EndpointDef.java is used by AnnotationScanner for endpoint handling."""
