@@ -196,6 +196,10 @@ public class FunctionService {
     }
 
     // Backward compatible overloads for internal callers
+    public Response decompileFunctionByAddress(String addressStr, String programName, int timeout) {
+        return decompileFunctionByAddress(addressStr, "", programName, timeout);
+    }
+
     public Response decompileFunctionByAddress(String addressStr, String programName) {
         return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
     }

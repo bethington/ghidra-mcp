@@ -1294,6 +1294,10 @@ public class AnalysisService {
         return analyzeFunctionCompleteness(functionAddress, compact, null);
     }
 
+    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
+        return analyzeFunctionCompleteness(functionAddress, compact, "", programName);
+    }
+
     /**
      * Analyze function documentation completeness.
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
