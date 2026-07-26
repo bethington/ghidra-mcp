@@ -27,6 +27,7 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.lang.Language;
 import ghidra.program.model.lang.Register;
 import ghidra.program.model.lang.RegisterValue;
+import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.Trace;
 import ghidra.trace.model.TraceExecutionState;
 import ghidra.trace.model.breakpoint.TraceBreakpointKind;
@@ -70,6 +71,38 @@ public class DebuggerService {
 
     private static final long ACTION_TIMEOUT_MS = 15_000;
     private static final int MAX_MEMORY_READ = 4096;
+    // A step action's Future completes once the RMI command is accepted, but the
+    // trace's own execution-state model catches up to STOPPED asynchronously --
+    // a few ms later. An immediate next step called in that window races
+    // Ghidra's own state check and fails with DebuggeeRunningException even
+    // though the debuggee is, from the caller's perspective, already stopped.
+    // Confirmed live 2026-07-26: back-to-back step_into then step_over.
+    private static final long STEP_SETTLE_TIMEOUT_MS = 3_000;
+    private static final long STEP_SETTLE_POLL_MS = 25;
+    // DebuggerStaticMappingService's automatic static<->dynamic module mapping
+    // settles independently of, and slower than, the module list / thread /
+    // PC settling above. Confirmed live 2026-07-26: a static_to_dynamic call
+    // made immediately after launch (even once RIP has already settled into
+    // the launched image, per STEP_SETTLE above) can 404 with "No mapping
+    // found", while the identical call against the identical address
+    // succeeds several seconds later with no other change -- reproduced
+    // across multiple fresh single-trace sessions, so this is a genuine
+    // settle window, not trace/program bookkeeping left over from a prior
+    // launch. Bounded retry is safe here (unlike the step-action retry
+    // above): this is a pure read/lookup with no execution-state side
+    // effects to risk.
+    private static final long MAPPING_SETTLE_TIMEOUT_MS = 10_000;
+    private static final long MAPPING_SETTLE_POLL_MS = 250;
+    // DebuggerLogicalBreakpointService correlates raw trace breakpoints
+    // (placed synchronously by target.placeBreakpoint(), used by
+    // setBreakpoint()) into "logical" breakpoints asynchronously; removeBreakpoint()
+    // looks addresses up through that service, not the raw trace breakpoint
+    // list. Confirmed live 2026-07-26: a remove_breakpoint call for an
+    // address whose set_breakpoint call just returned success can 404 with
+    // "No breakpoint at ..." because the logical-breakpoint index hasn't
+    // caught up yet. Same settle-and-retry shape as MAPPING_SETTLE above.
+    private static final long BREAKPOINT_INDEX_SETTLE_TIMEOUT_MS = 5_000;
+    private static final long BREAKPOINT_INDEX_SETTLE_POLL_MS = 200;
 
     private final ProgramProvider programProvider;
     private final PluginTool frontEndTool;
@@ -339,6 +372,53 @@ public class DebuggerService {
         action.invokeAsync(false).get(ACTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Poll the current thread's execution state until it settles out of
+     * RUNNING (or the timeout elapses). Call before a step action that
+     * immediately follows another step/resume, to close the async window
+     * described at STEP_SETTLE_TIMEOUT_MS's declaration.
+     */
+    private void waitForNotRunning(TraceContext ctx, Target target) throws InterruptedException {
+        if (target == null || ctx.thread() == null) return;
+        long deadline = System.currentTimeMillis() + STEP_SETTLE_TIMEOUT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            TraceExecutionState state = target.getThreadExecutionState(ctx.thread());
+            if (state != TraceExecutionState.RUNNING) {
+                return;
+            }
+            Thread.sleep(STEP_SETTLE_POLL_MS);
+        }
+    }
+
+    /**
+     * Invoke a step-family action, retrying once after waiting out the
+     * RUNNING->STOPPED settle window if Ghidra's own state check rejects the
+     * first attempt with DebuggeeRunningException.
+     */
+    private void invokeStepAction(TraceContext ctx, Target target, Target.ActionEntry action)
+            throws Exception {
+        waitForNotRunning(ctx, target);
+        try {
+            invokeTargetAction(action);
+        } catch (Exception e) {
+            if (isDebuggeeRunningException(e)) {
+                waitForNotRunning(ctx, target);
+                invokeTargetAction(action);
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    private boolean isDebuggeeRunningException(Throwable e) {
+        for (Throwable cur = e; cur != null; cur = cur.getCause()) {
+            if (cur.getClass().getSimpleName().equals("DebuggeeRunningException")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @McpTool(path = "/debugger/launch", method = "POST",
             description = "Launch an executable through Ghidra's Trace RMI debugger launcher")
     public Response launch(
@@ -474,14 +554,85 @@ public class DebuggerService {
             // other change. Poll briefly so a successful launch response
             // actually means "ready to query", not just "trace object
             // exists".
+            //
+            // "hasModules" alone is not enough: dbgeng's WOW64 initial-
+            // breakpoint stop lands in ntdll (a system DLL whose load address
+            // is randomized once per Windows boot, not per launch -- observed
+            // identical across separate launches in the same session) before
+            // the launcher's own auto-continue-to-entry has run. Confirmed
+            // live 2026-07-26: querying right after "module present" can
+            // still see RIP sitting in ntdll rather than the launched image,
+            // which fails every dynamic-address tool downstream (
+            // dynamic_to_static "not in any loaded module", set_breakpoint/
+            // read_memory operating on a meaningless address). The real
+            // settle condition is "current PC is inside the launched image's
+            // own range", not just "the image's module object exists" --
+            // wait for that, with a longer budget than the plain module/
+            // thread check since the auto-continue is itself async. This is
+            // deliberately passive (never issues our own resume): the
+            // launcher may or may not set a breakpoint at entry, and
+            // resuming blind risks running the target to completion
+            // uncontrolled -- exactly the taskkill-proof zombie failure mode
+            // this project has hit before (see feedback_graceful_ghidra_
+            // lifecycle memory). If the image's own entry is never reached
+            // within the budget, fall through anyway with whatever settled
+            // (module+thread present) -- best effort, not a hard guarantee.
+            String exeBaseName = executablePath.replace('/', '\\');
+            int lastSep = exeBaseName.lastIndexOf('\\');
+            if (lastSep >= 0) {
+                exeBaseName = exeBaseName.substring(lastSep + 1);
+            }
+            String exeBaseNameLower = exeBaseName.toLowerCase(Locale.ROOT);
+
             Trace launchedTrace = result.trace();
-            for (int i = 0; i < 25; i++) {
-                boolean hasModules = !launchedTrace.getModuleManager().getAllModules().isEmpty();
-                boolean hasThread = traceMgr != null && traceMgr.getCurrentThread() != null;
-                if (hasModules && hasThread) {
+            for (int i = 0; i < 75; i++) {
+                long snap = traceMgr != null ? traceMgr.getCurrent().getSnap() : 0;
+                TraceModule targetModule = launchedTrace.getModuleManager().getAllModules().stream()
+                        .filter(m -> m.getName(snap).toLowerCase(Locale.ROOT).endsWith(exeBaseNameLower))
+                        .findFirst().orElse(null);
+                TraceThread curThread = traceMgr != null ? traceMgr.getCurrentThread() : null;
+                boolean hasThread = curThread != null;
+                boolean pcSettled = false;
+                if (targetModule != null && curThread != null) {
+                    AddressRange targetRange = targetModule.getRange(snap);
+                    TraceStack stack = launchedTrace.getStackManager()
+                            .getLatestStack(curThread, snap);
+                    Address pc = (stack != null && stack.getDepth(snap) > 0)
+                            ? stack.getFrame(snap, 0, false).getProgramCounter(snap) : null;
+                    pcSettled = targetRange != null && pc != null && targetRange.contains(pc);
+                }
+                if (pcSettled || (i >= 25 && targetModule != null && hasThread)) {
                     break;
                 }
                 Thread.sleep(200);
+            }
+
+            // static_to_dynamic / dynamic_to_static depend on
+            // DebuggerStaticMappingService already having a static<->dynamic
+            // mapping for this trace. The GUI normally builds one lazily
+            // (auto-map-by-module-identity, or the user's own "Map
+            // Identically" action) on some schedule of its own -- confirmed
+            // live 2026-07-26: querying static_to_dynamic even 10s after a
+            // programmatic launch can still 404 with "No mapping found",
+            // with no further progress no matter how long you wait. Since we
+            // already know exactly which program this trace corresponds to
+            // (the same `program` used to select launch offers above),
+            // establish the identity mapping ourselves rather than wait on
+            // whatever triggers the GUI's own version of this. Best-effort:
+            // a mapping conflict (e.g. a prior mapping already exists from an
+            // earlier launch of the same program) is not fatal to the launch.
+            if (program != null) {
+                DebuggerStaticMappingService launchMappingSvc =
+                        tool.getService(DebuggerStaticMappingService.class);
+                if (launchMappingSvc != null) {
+                    try {
+                        launchMappingSvc.addIdentityMapping(
+                                launchedTrace, program, Lifespan.nowOn(0), true);
+                    } catch (Exception e) {
+                        Msg.warn(this, "Could not establish static<->dynamic identity mapping for "
+                                + program.getName() + ": " + e.getMessage());
+                    }
+                }
             }
 
             Map<String, Object> response = new LinkedHashMap<>();
@@ -654,7 +805,7 @@ public class DebuggerService {
                 return Response.err("Step into not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            invokeTargetAction(action);
+            invokeStepAction(ctx, target, action);
             return Response.ok(Map.of("status", "stepped"));
         } catch (Exception e) {
             return Response.err("Step into failed: " + e.getMessage());
@@ -676,7 +827,7 @@ public class DebuggerService {
                 return Response.err("Step over not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            invokeTargetAction(action);
+            invokeStepAction(ctx, target, action);
             return Response.ok(Map.of("status", "stepped"));
         } catch (Exception e) {
             return Response.err("Step over failed: " + e.getMessage());
@@ -698,7 +849,7 @@ public class DebuggerService {
                 return Response.err("Step out not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            invokeTargetAction(action);
+            invokeStepAction(ctx, target, action);
             return Response.ok(Map.of("status", "stepped_out"));
         } catch (Exception e) {
             return Response.err("Step out failed: " + e.getMessage());
@@ -758,10 +909,17 @@ public class DebuggerService {
         }
 
         try {
-            NavigableMap<Address, Set<ghidra.debug.api.breakpoint.LogicalBreakpoint>> bpMap =
-                    bpSvc.getBreakpoints(ctx.trace);
-            Set<ghidra.debug.api.breakpoint.LogicalBreakpoint> atAddr =
-                    bpMap.getOrDefault(addr, Set.of());
+            Set<ghidra.debug.api.breakpoint.LogicalBreakpoint> atAddr = Set.of();
+            long deadline = System.currentTimeMillis() + BREAKPOINT_INDEX_SETTLE_TIMEOUT_MS;
+            while (true) {
+                NavigableMap<Address, Set<ghidra.debug.api.breakpoint.LogicalBreakpoint>> bpMap =
+                        bpSvc.getBreakpoints(ctx.trace);
+                atAddr = bpMap.getOrDefault(addr, Set.of());
+                if (!atAddr.isEmpty() || System.currentTimeMillis() >= deadline) {
+                    break;
+                }
+                Thread.sleep(BREAKPOINT_INDEX_SETTLE_POLL_MS);
+            }
             if (atAddr.isEmpty()) {
                 return Response.err("No breakpoint at " + addr);
             }
@@ -1060,9 +1218,16 @@ public class DebuggerService {
             ghidra.program.util.ProgramLocation staticLoc =
                     new ghidra.program.util.ProgramLocation(program, staticAddr);
 
-            ghidra.program.util.ProgramLocation dynLoc =
-                    mappingSvc.getDynamicLocationFromStatic(
-                            ctx.trace.getFixedProgramView(ctx.snap), staticLoc);
+            ghidra.program.util.ProgramLocation dynLoc = null;
+            long mappingDeadline = System.currentTimeMillis() + MAPPING_SETTLE_TIMEOUT_MS;
+            while (true) {
+                dynLoc = mappingSvc.getDynamicLocationFromStatic(
+                        ctx.trace.getFixedProgramView(ctx.snap), staticLoc);
+                if (dynLoc != null || System.currentTimeMillis() >= mappingDeadline) {
+                    break;
+                }
+                Thread.sleep(MAPPING_SETTLE_POLL_MS);
+            }
 
             if (dynLoc == null) {
                 return Response.err("No mapping found for " + addressStr +

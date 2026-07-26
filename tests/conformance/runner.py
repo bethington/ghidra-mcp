@@ -83,6 +83,7 @@ class Case:
     tier: str = "read"               # read | write | destructive
     normalize_extra: list[tuple[str, str]] = field(default_factory=list)
     name: str | None = None          # disambiguates multiple cases per tool
+    extract: dict[str, str] = field(default_factory=dict)  # capture_name -> dot.path into response JSON
 
     @property
     def case_id(self) -> str:
@@ -159,6 +160,34 @@ def _check(case: Case, result: ToolResult) -> list[str]:
 # --------------------------------------------------------------------- runner
 
 
+class ExtractError(Exception):
+    """Raised when a case's `extract:` path can't be resolved against its
+    own response, or a later case references a capture that was never set
+    (e.g. its producing case was skipped or failed)."""
+
+
+def _resolve_path(obj: Any, path: str) -> Any:
+    """Walk a dot-separated path into parsed JSON. `foo.bar` is a dict key
+    lookup; a purely-numeric segment (`foo.0.bar`) indexes a list."""
+    cur = obj
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            if part not in cur:
+                raise ExtractError(f"path segment {part!r} not found in response (path={path!r})")
+            cur = cur[part]
+        elif isinstance(cur, list):
+            try:
+                idx = int(part)
+            except ValueError:
+                raise ExtractError(f"expected a list index, got {part!r} (path={path!r})") from None
+            if idx >= len(cur):
+                raise ExtractError(f"index {idx} out of range for list of {len(cur)} (path={path!r})")
+            cur = cur[idx]
+        else:
+            raise ExtractError(f"cannot descend into {type(cur).__name__} at {part!r} (path={path!r})")
+    return cur
+
+
 class ConformanceRunner:
     def __init__(self, transport: McpTransport, snapshot_dir: Path,
                  record: bool = False, update: bool = False):
@@ -167,6 +196,30 @@ class ConformanceRunner:
         self.record = record          # write snapshots for cases that have none
         self.update = update          # overwrite existing snapshots
         self.outcomes: list[CaseOutcome] = []
+        # Values captured from earlier cases' responses via `extract:`, for
+        # substitution into later cases' args via "${name}" placeholders.
+        # Exists because some tools (debugger breakpoint/memory/address-
+        # translation tools) need a value that only exists once a prior case
+        # (e.g. debugger_launch) has run -- a post-ASLR runtime address, a
+        # freshly-created ID, etc. -- and can't be hardcoded in YAML.
+        self.captures: dict[str, Any] = {}
+
+    def _substitute_args(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Replace any string arg value that is exactly "${name}" with the
+        captured value from an earlier case's `extract:`. Values embedded in
+        a larger string (e.g. "prefix-${name}") are intentionally NOT
+        supported -- keep this simple; a case needing that can extract a
+        pre-formatted value instead."""
+        out = dict(args)
+        for key, value in args.items():
+            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                name = value[2:-1]
+                if name not in self.captures:
+                    raise ExtractError(
+                        f"arg {key!r} references capture {name!r}, which was never set "
+                        "(its producing case may have been skipped, failed, or run later)")
+                out[key] = self.captures[name]
+        return out
 
     def _snapshot_path(self, case: Case) -> Path:
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", case.case_id)
@@ -198,13 +251,28 @@ class ConformanceRunner:
             self.outcomes.append(outcome)
             return outcome
         try:
-            result = self.transport.call_tool(case.tool, case.args, timeout=case.timeout)
+            args = self._substitute_args(case.args)
+        except ExtractError as exc:
+            outcome = CaseOutcome(case.case_id, case.tool, "error", f"arg substitution: {exc}")
+            self.outcomes.append(outcome)
+            return outcome
+        try:
+            result = self.transport.call_tool(case.tool, args, timeout=case.timeout)
         except McpError as exc:
             outcome = CaseOutcome(case.case_id, case.tool, "error", str(exc))
             self.outcomes.append(outcome)
             return outcome
 
         fails = _check(case, result)
+
+        if case.extract and not result.is_error:
+            parsed = result.json()
+            for capture_name, path in case.extract.items():
+                try:
+                    self.captures[capture_name] = _resolve_path(parsed, path)
+                except ExtractError as exc:
+                    fails.append(f"extract {capture_name!r}: {exc}")
+
         snap_status, snap_detail = self._handle_snapshot(case, result)
         if snap_detail and snap_status == "drift":
             fails.append(snap_detail)
