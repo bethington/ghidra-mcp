@@ -179,35 +179,27 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        StringBuilder metadata = new StringBuilder();
-        metadata.append("Program Name: ").append(program.getName()).append("\n");
-        metadata.append("Executable Path: ").append(program.getExecutablePath()).append("\n");
-        metadata.append("Architecture: ").append(program.getLanguage().getProcessor().toString()).append("\n");
-        metadata.append("Compiler: ").append(program.getCompilerSpec().getCompilerSpecID()).append("\n");
-        metadata.append("Language: ").append(program.getLanguage().getLanguageID()).append("\n");
-        metadata.append("Endian: ").append(program.getLanguage().isBigEndian() ? "Big" : "Little").append("\n");
-        metadata.append("Address Size: ").append(program.getAddressFactory().getDefaultAddressSpace().getSize()).append(" bits\n");
-        metadata.append("Base Address: ").append(program.getImageBase()).append("\n");
-
-        // Memory information
         long totalSize = 0;
         int blockCount = 0;
         for (MemoryBlock block : program.getMemory().getBlocks()) {
             totalSize += block.getSize();
             blockCount++;
         }
-        metadata.append("Memory Blocks: ").append(blockCount).append("\n");
-        metadata.append("Total Memory Size: ").append(totalSize).append(" bytes\n");
 
-        // Function count
-        int functionCount = program.getFunctionManager().getFunctionCount();
-        metadata.append("Function Count: ").append(functionCount).append("\n");
-
-        // Symbol count
-        int symbolCount = program.getSymbolTable().getNumSymbols();
-        metadata.append("Symbol Count: ").append(symbolCount).append("\n");
-
-        return Response.text(metadata.toString());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("program_name", program.getName());
+        out.put("executable_path", program.getExecutablePath());
+        out.put("architecture", program.getLanguage().getProcessor().toString());
+        out.put("compiler", program.getCompilerSpec().getCompilerSpecID().toString());
+        out.put("language", program.getLanguage().getLanguageID().toString());
+        out.put("endian", program.getLanguage().isBigEndian() ? "big" : "little");
+        out.put("address_size_bits", program.getAddressFactory().getDefaultAddressSpace().getSize());
+        out.put("base_address", program.getImageBase().toString(false));
+        out.put("memory_blocks", blockCount);
+        out.put("total_memory_size", totalSize);
+        out.put("function_count", program.getFunctionManager().getFunctionCount());
+        out.put("symbol_count", program.getSymbolTable().getNumSymbols());
+        return Response.ok(out);
     }
 
     // ========================================================================

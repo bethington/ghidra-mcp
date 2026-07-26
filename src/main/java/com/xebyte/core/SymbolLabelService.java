@@ -9,6 +9,7 @@ import ghidra.util.Msg;
 
 import javax.swing.SwingUtilities;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -52,45 +53,33 @@ public class SymbolLabelService {
             return Response.err("name is required (function name or address)");
         }
 
-        StringBuilder sb = new StringBuilder();
         SymbolTable symbolTable = program.getSymbolTable();
 
         Function function = ServiceUtils.resolveFunction(program, functionName);
         if (function == null) {
-            return Response.text("Function not found: " + functionName);
+            return Response.err("Function not found: " + functionName);
         }
 
         AddressSetView functionBody = function.getBody();
         SymbolIterator symbols = symbolTable.getSymbolIterator();
-        int count = 0;
-        int skipped = 0;
 
-        while (symbols.hasNext() && count < limit) {
+        // Collect the whole set and let the envelope page it, so `total`
+        // reports every label in the function rather than just this page.
+        List<Map<String, Object>> labels = new ArrayList<>();
+        while (symbols.hasNext()) {
             Symbol symbol = symbols.next();
 
             if (symbol.getSymbolType() == SymbolType.LABEL &&
                 functionBody.contains(symbol.getAddress())) {
-
-                if (skipped < offset) {
-                    skipped++;
-                    continue;
-                }
-
-                if (sb.length() > 0) {
-                    sb.append("\n");
-                }
-                sb.append("Address: ").append(symbol.getAddress().toString())
-                  .append(", Name: ").append(symbol.getName())
-                  .append(", Source: ").append(symbol.getSource().toString());
-                count++;
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("address", symbol.getAddress().toString(false));
+                entry.put("name", symbol.getName());
+                entry.put("source", symbol.getSource().toString());
+                labels.add(entry);
             }
         }
 
-        if (sb.length() == 0) {
-            return Response.text("No labels found in function: " + functionName);
-        }
-
-        return Response.text(sb.toString());
+        return ServiceUtils.paged("labels", labels, offset, limit);
     }
 
     public Response renameLabel(String addressStr, String oldName, String newName) {

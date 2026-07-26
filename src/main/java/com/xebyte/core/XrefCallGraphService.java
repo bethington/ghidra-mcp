@@ -53,24 +53,26 @@ public class XrefCallGraphService {
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
 
-            List<String> refs = new ArrayList<>();
+            List<Map<String, Object>> refs = new ArrayList<>();
             while (refIter.hasNext()) {
                 Reference ref = refIter.next();
                 Address fromAddr = ref.getFromAddress();
                 RefType refType = ref.getReferenceType();
 
                 Function fromFunc = program.getFunctionManager().getFunctionContaining(fromAddr);
-                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
 
-                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("from_address", fromAddr.toString(false));
+                entry.put("type", refType.getName());
+                if (fromFunc != null) {
+                    entry.put("from_function", fromFunc.getName());
+                }
+                refs.add(entry);
             }
 
-            // Return meaningful message if no references found
-            if (refs.isEmpty()) {
-                return Response.text("No references found to address: " + addressStr);
-            }
-
-            return Response.text(ServiceUtils.paginateList(refs, offset, limit));
+            // An empty result is a normal outcome, not an error: callers read
+            // count==0 rather than parsing an English sentence.
+            return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
             return Response.err("Error getting references to address: " + e.getMessage());
         }
@@ -123,10 +125,10 @@ public class XrefCallGraphService {
 
             // Return meaningful message if no references found
             if (refs.isEmpty()) {
-                return Response.text("No references found from address: " + addressStr);
+                return ServiceUtils.paged("references", refs, offset, limit);
             }
 
-            return Response.text(ServiceUtils.paginateList(refs, offset, limit));
+            return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
             return Response.err("Error getting references from address: " + e.getMessage());
         }
@@ -320,10 +322,10 @@ public class XrefCallGraphService {
 
         try {
             FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-            if (!resolved.isSuccess()) return Response.text("No references found to function: " + functionName);
+            if (!resolved.isSuccess()) return Response.err("Function not found: " + functionName);
             Function function = resolved.function();
 
-            List<String> refs = new ArrayList<>();
+            List<Map<String, Object>> refs = new ArrayList<>();
             FunctionManager funcManager = program.getFunctionManager();
             Address entryPoint = function.getEntryPoint();
             ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
@@ -334,16 +336,17 @@ public class XrefCallGraphService {
                 RefType refType = ref.getReferenceType();
 
                 Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
 
-                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("from_address", fromAddr.toString(false));
+                entry.put("type", refType.getName());
+                if (fromFunc != null) {
+                    entry.put("from_function", fromFunc.getName());
+                }
+                refs.add(entry);
             }
 
-            if (refs.isEmpty()) {
-                return Response.text("No references found to function: " + functionName);
-            }
-
-            return Response.text(ServiceUtils.paginateList(refs, offset, limit));
+            return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
             return Response.err("Error getting function references: " + e.getMessage());
         }
@@ -377,7 +380,7 @@ public class XrefCallGraphService {
         // Find the function by name or address
         FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
-            return Response.text("Function not found: " + functionName);
+            return Response.err("Function not found: " + functionName);
         }
         Function function = resolved.function();
 
@@ -416,43 +419,25 @@ public class XrefCallGraphService {
         List<Address> sortedTargets = new ArrayList<>(jumpTargets);
         Collections.sort(sortedTargets);
 
-        int count = 0;
-        int skipped = 0;
-
+        // Build the full result set and let the envelope do the paging, so
+        // `total` reports every target rather than just this page.
+        List<Map<String, Object>> targets = new ArrayList<>();
         for (Address target : sortedTargets) {
-            if (count >= limit) break;
-
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-
-            if (sb.length() > 0) {
-                sb.append("\n");
-            }
-
-            // Add context about what's at this address
-            String context = "";
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("address", target.toString(false));
             Function targetFunc = functionManager.getFunctionContaining(target);
             if (targetFunc != null) {
-                context = " (in " + targetFunc.getName() + ")";
+                entry.put("in_function", targetFunc.getName());
             } else {
-                // Check if there's a label at this address
                 Symbol symbol = program.getSymbolTable().getPrimarySymbol(target);
                 if (symbol != null) {
-                    context = " (" + symbol.getName() + ")";
+                    entry.put("label", symbol.getName());
                 }
             }
-
-            sb.append(target.toString()).append(context);
-            count++;
+            targets.add(entry);
         }
 
-        if (sb.length() == 0) {
-            return Response.text("No jump targets found in function: " + functionName);
-        }
-
-        return Response.text(sb.toString());
+        return ServiceUtils.paged("jump_targets", targets, offset, limit);
     }
 
     // -----------------------------------------------------------------------
@@ -479,7 +464,7 @@ public class XrefCallGraphService {
         // Find the function by name or address
         FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
-            return Response.text("Function not found: " + functionName);
+            return Response.err("Function not found: " + functionName);
         }
         Function function = resolved.function();
 
@@ -513,30 +498,15 @@ public class XrefCallGraphService {
         List<Function> sortedCallees = new ArrayList<>(callees);
         sortedCallees.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
 
-        int count = 0;
-        int skipped = 0;
-
+        List<Map<String, Object>> calleeList = new ArrayList<>();
         for (Function callee : sortedCallees) {
-            if (count >= limit) break;
-
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-
-            if (sb.length() > 0) {
-                sb.append("\n");
-            }
-
-            sb.append(String.format("%s @ %s", callee.getName(), callee.getEntryPoint()));
-            count++;
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", callee.getName());
+            entry.put("address", callee.getEntryPoint().toString(false));
+            calleeList.add(entry);
         }
 
-        if (sb.length() == 0) {
-            return Response.text("No callees found for function: " + functionName);
-        }
-
-        return Response.text(sb.toString());
+        return ServiceUtils.paged("callees", calleeList, offset, limit);
     }
 
     /**
@@ -560,7 +530,7 @@ public class XrefCallGraphService {
         Function targetFunction = null;
         FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
-            return Response.text("Function not found: " + functionName);
+            return Response.err("Function not found: " + functionName);
         }
         targetFunction = resolved.function();
 
@@ -579,30 +549,15 @@ public class XrefCallGraphService {
         List<Function> sortedCallers = new ArrayList<>(callers);
         sortedCallers.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
 
-        int count = 0;
-        int skipped = 0;
-
+        List<Map<String, Object>> callerList = new ArrayList<>();
         for (Function caller : sortedCallers) {
-            if (count >= limit) break;
-
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-
-            if (sb.length() > 0) {
-                sb.append("\n");
-            }
-
-            sb.append(String.format("%s @ %s", caller.getName(), caller.getEntryPoint()));
-            count++;
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", caller.getName());
+            entry.put("address", caller.getEntryPoint().toString(false));
+            callerList.add(entry);
         }
 
-        if (sb.length() == 0) {
-            return Response.text("No callers found for function: " + functionName);
-        }
-
-        return Response.text(sb.toString());
+        return ServiceUtils.paged("callers", callerList, offset, limit);
     }
 
     // -----------------------------------------------------------------------
@@ -630,7 +585,7 @@ public class XrefCallGraphService {
         Function rootFunction = null;
         FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
-            return Response.text("Function not found: " + functionName);
+            return Response.err("Function not found: " + functionName);
         }
         rootFunction = resolved.function();
 
@@ -647,22 +602,17 @@ public class XrefCallGraphService {
             buildCallGraphCallers(rootFunction, depth, visited, callGraph, functionManager, program);
         }
 
-        // Format output as edges
+        List<Map<String, Object>> edges = new ArrayList<>();
         for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
-            String caller = entry.getKey();
             for (String callee : entry.getValue()) {
-                if (sb.length() > 0) {
-                    sb.append("\n");
-                }
-                sb.append(caller).append(" -> ").append(callee);
+                Map<String, Object> edge = new LinkedHashMap<>();
+                edge.put("caller", entry.getKey());
+                edge.put("callee", callee);
+                edges.add(edge);
             }
         }
 
-        if (sb.length() == 0) {
-            return Response.text("No call graph relationships found for function: " + functionName);
-        }
-
-        return Response.text(sb.toString());
+        return ServiceUtils.listed("edges", edges);
     }
 
     /**
@@ -887,6 +837,11 @@ public class XrefCallGraphService {
                 }
             }
             sb.append("}");
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("format", "dot");
+            out.put("diagram", sb.toString());
+            out.put("count", callGraph.size());
+            return Response.ok(out);
         } else if ("mermaid".equals(format)) {
             sb.append("graph TD\n");
             for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
@@ -896,31 +851,37 @@ public class XrefCallGraphService {
                     sb.append("  ").append(caller).append(" --> ").append(callee).append("\n");
                 }
             }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("format", "mermaid");
+            out.put("diagram", sb.toString());
+            out.put("count", callGraph.size());
+            return Response.ok(out);
         } else if ("adjacency".equals(format)) {
+            Map<String, Object> adjacency = new LinkedHashMap<>();
             for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
-                if (sb.length() > 0) {
-                    sb.append("\n");
-                }
-                sb.append(entry.getKey()).append(": ");
-                sb.append(String.join(", ", entry.getValue()));
+                adjacency.put(entry.getKey(), new ArrayList<>(entry.getValue()));
             }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("format", "adjacency");
+            out.put("adjacency", adjacency);
+            out.put("count", adjacency.size());
+            return Response.ok(out);
         } else { // Default "edges" format
+            List<Map<String, Object>> edges = new ArrayList<>();
             for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
-                String caller = entry.getKey();
                 for (String callee : entry.getValue()) {
-                    if (sb.length() > 0) {
-                        sb.append("\n");
-                    }
-                    sb.append(caller).append(" -> ").append(callee);
+                    Map<String, Object> edge = new LinkedHashMap<>();
+                    edge.put("caller", entry.getKey());
+                    edge.put("callee", callee);
+                    edges.add(edge);
                 }
             }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("format", "edges");
+            out.put("edges", edges);
+            out.put("count", edges.size());
+            return Response.ok(out);
         }
-
-        if (sb.length() == 0) {
-            return Response.text("No call relationships found in the program");
-        }
-
-        return Response.text(sb.toString());
     }
 
     // -----------------------------------------------------------------------
