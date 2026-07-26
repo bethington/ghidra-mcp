@@ -93,8 +93,8 @@ def main() -> int:
                     help="write golden snapshots for cases that have none")
     ap.add_argument("--update-snapshots", action="store_true",
                     help="overwrite existing snapshots (accept current behavior as correct)")
-    ap.add_argument("--tier", choices=["read", "write", "destructive", "all"], default="all",
-                    help="which tier to run (default: all non-destructive)")
+    ap.add_argument("--tier", choices=["read", "write", "destructive", "debugger", "all"], default="all",
+                    help="which tier to run (default: all non-destructive, non-debugger)")
     ap.add_argument("--program", default=DEFAULT_PROGRAM)
     ap.add_argument("--second-program", default=DEFAULT_SECOND_PROGRAM)
     ap.add_argument("--ghidra-url", default="http://127.0.0.1:8089")
@@ -148,10 +148,18 @@ def main() -> int:
         cases = []
         for f in files:
             cases.extend(load_cases(f))
+        # {REPO_ROOT} is a portable placeholder for cases that need an
+        # absolute filesystem path (e.g. debugger_launch's executable_path) --
+        # it lets a hand-authored corpus stay checkout-independent instead of
+        # baking in one machine's path.
+        for c in cases:
+            for k, v in list(c.args.items()):
+                if isinstance(v, str) and "{REPO_ROOT}" in v:
+                    c.args[k] = v.replace("{REPO_ROOT}", str(REPO_ROOT))
         if args.tier != "all":
             cases = [c for c in cases if c.tier == args.tier]
         else:
-            cases = [c for c in cases if c.tier != "destructive"]
+            cases = [c for c in cases if c.tier not in ("destructive", "debugger")]
             # Corpus files interleave read and write cases in file order, not
             # tier order -- generated_baseline.yaml's write-tier smoke cases
             # (e.g. clear_function_comments) would otherwise run before
