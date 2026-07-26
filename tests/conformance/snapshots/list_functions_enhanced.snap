@@ -1,0 +1,37 @@
+{
+  "count": 5,
+  "functions": [
+    {
+      "address": "10001000",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "calc_crc16"
+    },
+    {
+      "address": "10001120",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "FUN_10001120"
+    },
+    {
+      "address": "10001130",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "compute_gcd"
+    },
+    {
+      "address": "10001150",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "get_stat_list_flags"
+    },
+    {
+      "address": "10001170",
+      "isExternal": false,
+      "isThunk": false,
+      "name": "get_stat_list_layer"
+    }
+  ],
+  "limit": 5,
+  "offset": 0
+}

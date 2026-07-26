@@ -1,0 +1,37 @@
+[
+  {
+    "address": "00013e08",
+    "address_full": "00013e08",
+    "address_space": "ram",
+    "library": "KERNEL32.DLL",
+    "name": "TlsAlloc"
+  },
+  {
+    "address": "00013fc8",
+    "address_full": "00013fc8",
+    "address_space": "ram",
+    "library": "KERNEL32.DLL",
+    "name": "FlsAlloc"
+  },
+  {
+    "address": "00013fe2",
+    "address_full": "00013fe2",
+    "address_space": "ram",
+    "library": "KERNEL32.DLL",
+    "name": "FlsSetValue"
+  },
+  {
+    "address": "00013ff0",
+    "address_full": "00013ff0",
+    "address_space": "ram",
+    "library": "KERNEL32.DLL",
+    "name": "FlsFree"
+  },
+  {
+    "address": "00013ffa",
+    "address_full": "00013ffa",
+    "address_space": "ram",
+    "library": "KERNEL32.DLL",
+    "name": "InitializeCriticalSectionEx"
+  }
+]

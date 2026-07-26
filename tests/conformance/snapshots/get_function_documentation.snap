@@ -1,0 +1,78 @@
+{
+  "calling_convention": "__stdcall",
+  "comments": [
+    {
+      "pre_comment": "0x1000  2  _calc_crc16@8",
+      "relative_offset": 0
+    }
+  ],
+  "completeness_score": 90.0,
+  "function_name": "calc_crc16",
+  "hash": "764f6833ccbeeeee4024bf424e23a1eba058dbf80a8e61b86531edf5f28e9eac",
+  "labels": [
+    {
+      "name": "Ordinal_2",
+      "relative_offset": 0
+    },
+    {
+      "name": "_calc_crc16@8",
+      "relative_offset": 0
+    },
+    {
+      "name": "LAB_10001020",
+      "relative_offset": 32
+    },
+    {
+      "name": "LAB_1000110f",
+      "relative_offset": 271
+    }
+  ],
+  "local_variables": [
+    {
+      "name": "uVar1",
+      "storage": "(unique, 0x10000016, 4)",
+      "type": "uint"
+    },
+    {
+      "name": "uVar2",
+      "storage": "(unique, 0x1000001a, 4)",
+      "type": "uint"
+    },
+    {
+      "name": "uVar3",
+      "storage": "(unique, 0x1000003a, 4)",
+      "type": "uint"
+    },
+    {
+      "name": "iVar4",
+      "storage": "(unique, 0x1000005f, 4)",
+      "type": "int"
+    },
+    {
+      "name": "uVar5",
+      "storage": "(register, 0x18, 2)",
+      "type": "ushort"
+    },
+    {
+      "name": "uVar6",
+      "storage": "(register, 0x1c, 4)",
+      "type": "uint"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "param_1",
+      "ordinal": 0,
+      "type": "int"
+    },
+    {
+      "name": "param_2",
+      "ordinal": 1,
+      "type": "uint"
+    }
+  ],
+  "plate_comment": "__stdcall calc_crc16,8",
+  "return_type": "ushort",
+  "source_address": "10001000",
+  "source_program": "Benchmark.dll"
+}

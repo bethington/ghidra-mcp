@@ -1,0 +1,21 @@
+{
+  "detected_patterns": [
+    {
+      "address": "10006361",
+      "confidence": 0.67,
+      "description": "File enumeration combined with encryption",
+      "function": "FUN_10006361",
+      "matched_apis": [
+        "FindFirstFileExW",
+        "FindNextFileW"
+      ],
+      "pattern_id": "file_encryption",
+      "pattern_name": "Potential Ransomware",
+      "severity": "critical"
+    }
+  ],
+  "severity_summary": {
+    "critical": 1
+  },
+  "total_patterns_detected": 1
+}

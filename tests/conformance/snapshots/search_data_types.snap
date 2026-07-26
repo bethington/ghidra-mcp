@@ -1,0 +1,5 @@
+IMAGE_LOAD_CONFIG_CODE_INTEGRITY | Size: 12 | Path: /PE/IMAGE_LOAD_CONFIG_CODE_INTEGRITY
+_EXCEPTION_POINTERS * | Size: 4 | Path: /Demangler/_EXCEPTION_POINTERS *
+_EXCEPTION_POINTERS | Size: 1 | Path: /Demangler/_EXCEPTION_POINTERS
+__crt_seh_guarded_call<int> | Size: 1 | Path: /Demangler/__crt_seh_guarded_call<int>
+__crt_win32_buffer<wchar_t,__crt_win32_buffer_internal_dynamic_resizing> * | Size: 4 | Path: /Demangler/__crt_win32_buffer<wchar_t,__crt_win32_buffer_internal_dynamic_resizing> *

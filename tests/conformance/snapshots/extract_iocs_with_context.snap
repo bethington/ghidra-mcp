@@ -1,0 +1,22 @@
+{
+  "by_type": {
+    "domain": 2
+  },
+  "iocs": [
+    {
+      "address": "10013a02",
+      "confidence": 0.6,
+      "function_context": "global",
+      "type": "domain",
+      "value": "Benchmark.dll"
+    },
+    {
+      "address": "10013d46",
+      "confidence": 0.5,
+      "function_context": "global",
+      "type": "domain",
+      "value": "KERNEL32.dll"
+    }
+  ],
+  "total_iocs": 2
+}

@@ -1,0 +1,37 @@
+{
+  "limit": 5,
+  "matches": [
+    {
+      "score": 0.7479,
+      "source_address": "10001130",
+      "source_name": "compute_gcd",
+      "target_address": "004135d0",
+      "target_name": "FUN_004135d0"
+    },
+    {
+      "score": 0.7562,
+      "source_address": "10001150",
+      "source_name": "get_stat_list_flags",
+      "target_address": "00401bef",
+      "target_name": "FUN_00401bef"
+    },
+    {
+      "score": 0.7562,
+      "source_address": "10001180",
+      "source_name": "get_stat_list_owner_guid",
+      "target_address": "00401bef",
+      "target_name": "FUN_00401bef"
+    },
+    {
+      "score": 0.7562,
+      "source_address": "100011a0",
+      "source_name": "get_stat_list_prev_link",
+      "target_address": "00401bef",
+      "target_name": "FUN_00401bef"
+    }
+  ],
+  "offset": 0,
+  "source_program": "Benchmark.dll",
+  "target_program": "BenchmarkDebug.exe",
+  "total_source_functions": 370
+}

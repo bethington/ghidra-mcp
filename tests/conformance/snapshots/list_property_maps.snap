@@ -1,0 +1,11 @@
+{
+  "count": 1,
+  "program": "Benchmark.dll",
+  "property_maps": [
+    {
+      "name": "CallFixup",
+      "size": 8,
+      "value_type": "string"
+    }
+  ]
+}

@@ -2942,7 +2942,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     @SuppressWarnings("deprecation")
     private String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, null, programName, null, null).toJson();
+        return functionService.getFunctionVariables(functionName, null, programName, 200, null).toJson();
     }
 
     // Backward compatibility overload

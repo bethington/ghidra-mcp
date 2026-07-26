@@ -1,0 +1,54 @@
+{
+  "basic_block_details": [
+    {
+      "address": "10001000",
+      "is_loop_header": false,
+      "size": 29,
+      "successors": 2,
+      "type": "conditional"
+    },
+    {
+      "address": "1000101d",
+      "is_loop_header": false,
+      "size": 3,
+      "successors": 1,
+      "type": "sequential"
+    },
+    {
+      "address": "10001020",
+      "is_loop_header": false,
+      "size": 238,
+      "successors": 2,
+      "type": "conditional"
+    },
+    {
+      "address": "1000110e",
+      "is_loop_header": false,
+      "size": 1,
+      "successors": 1,
+      "type": "sequential"
+    },
+    {
+      "address": "1000110f",
+      "is_loop_header": false,
+      "size": 11,
+      "successors": 0,
+      "type": "exit"
+    }
+  ],
+  "entry_point": "10001000",
+  "function_name": "calc_crc16",
+  "metrics": {
+    "basic_blocks": 5,
+    "calls": 0,
+    "complexity_rating": "low",
+    "conditional_branches": 2,
+    "cyclomatic_complexity": 3,
+    "edges": 6,
+    "instructions": 91,
+    "loops_detected": 0,
+    "returns": 1,
+    "unconditional_jumps": 0
+  },
+  "size_bytes": 282
+}

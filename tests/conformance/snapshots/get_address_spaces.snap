@@ -1,0 +1,16 @@
+{
+  "address_spaces": [
+    {
+      "address_size_bits": 32,
+      "addressable_unit_size": 1,
+      "end": "ffffffff",
+      "is_default": true,
+      "is_overlay": false,
+      "name": "ram",
+      "size": 4294967296,
+      "size_bytes": 4294967296,
+      "start": "00000000"
+    }
+  ],
+  "count": 1
+}

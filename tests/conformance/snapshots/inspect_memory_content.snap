@@ -1,0 +1,12 @@
+{
+  "address": "0x10001000",
+  "ascii_repr": "S.\\$.U.l$.W3..D$\\n...\\0\\0.....\\0\\0\\0Vf.\\n.../f...f.t$.f3.\\nf.t$..D$...\\0..5!",
+  "bytes_read": 64,
+  "hex_dump": "53 8B 5C 24 0C 55 8B 6C 24 0C 57 33 FF C7 44 24 \\n10 FF FF 00 00 85 DB 0F 84 F2 00 00 00 56 66 90 \\n0F B6 04 2F 66 C1 E0 08 66 8B 74 24 14 66 33 F0 \\n66 89 74 24 14 8B 44 24 14 8D 0C 00 8B C1 35 21",
+  "is_likely_string": false,
+  "max_consecutive_printable": 2,
+  "null_terminator_at": 19,
+  "printable_count": 26,
+  "printable_ratio": 0.41,
+  "string_length": 0
+}

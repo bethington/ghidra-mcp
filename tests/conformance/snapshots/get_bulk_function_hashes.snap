@@ -1,0 +1,44 @@
+{
+  "functions": [
+    {
+      "address": "10001000",
+      "has_custom_name": true,
+      "hash": "764f6833ccbeeeee4024bf424e23a1eba058dbf80a8e61b86531edf5f28e9eac",
+      "instruction_count": 91,
+      "name": "calc_crc16"
+    },
+    {
+      "address": "10001120",
+      "has_custom_name": false,
+      "hash": "8a6a009a9970b8acd5ee7e6b8fc2aa06b15954ee81b7d97a5fe0d46749c9ab72",
+      "instruction_count": 2,
+      "name": "FUN_10001120"
+    },
+    {
+      "address": "10001130",
+      "has_custom_name": true,
+      "hash": "5c92961c9dcc06b6590facbe1c83e1928ad3fe01bb88019232d07e1e9866b120",
+      "instruction_count": 12,
+      "name": "compute_gcd"
+    },
+    {
+      "address": "10001150",
+      "has_custom_name": true,
+      "hash": "f34d3213797b1134f527af665714152b17766339a0f06d6e66aefc06da28499c",
+      "instruction_count": 9,
+      "name": "get_stat_list_flags"
+    },
+    {
+      "address": "10001170",
+      "has_custom_name": true,
+      "hash": "e2a93a2a8ac210c76d09bf8b2bbe81b5fb1044f025d81f69ef5264627cae0006",
+      "instruction_count": 3,
+      "name": "get_stat_list_layer"
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "program": "Benchmark.dll",
+  "returned": 5,
+  "total_matching": 464
+}

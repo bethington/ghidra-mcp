@@ -1,0 +1,7 @@
+[
+  {
+    "algorithm": "Crypto Detection",
+    "note": "This endpoint requires advanced pattern matching against known crypto constants",
+    "status": "Not yet implemented"
+  }
+]

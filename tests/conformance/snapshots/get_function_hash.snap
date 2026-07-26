@@ -1,0 +1,9 @@
+{
+  "address": "10001000",
+  "function_name": "calc_crc16",
+  "has_custom_name": true,
+  "hash": "764f6833ccbeeeee4024bf424e23a1eba058dbf80a8e61b86531edf5f28e9eac",
+  "instruction_count": 91,
+  "program": "Benchmark.dll",
+  "size_bytes": 282
+}

@@ -2157,7 +2157,7 @@ public class FunctionService {
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
             @Param(value = "program", defaultValue = "") String programName,
-            @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") String limitStr,
+            @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") int limit,
             @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2167,7 +2167,6 @@ public class FunctionService {
             return Response.err("Either function_name or address is required");
         }
 
-        final int limit = (limitStr != null && !limitStr.isEmpty()) ? Integer.parseInt(limitStr) : 200;
         final String filterMode = (filter != null && !filter.isEmpty()) ? filter : "all";
 
         final Program finalProgram = program;
@@ -2325,7 +2324,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionVariables(String functionName) {
-        return getFunctionVariables(functionName, null, null, null, null);
+        return getFunctionVariables(functionName, null, null, 200, null);
     }
 
     /** Suggest a concrete type for an undefined Ghidra type based on size. */

@@ -1,0 +1,1589 @@
+# GENERATED baseline -- one smoke case per tool.
+# Generated cases assert only that the call completes without an
+# MCP-level error. Curate them: tighten assertions, add edge cases
+# and write round-trips, then move them into a curated corpus file.
+# Regenerate with: python -m tests.conformance.run_conformance --generate
+tool_cases:
+- tool: add_function_tag
+  tier: write
+  args:
+    function: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: add_memory_reference
+  tier: write
+  args:
+    from_address: '0x10001000'
+    to_address: '0x10001120'
+    source_type: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: add_struct_field
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''field_name'', ''field_type'', ''struct_name'']'
+- tool: analysis_status
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: analyze_api_call_chains
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_call_graph
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''end_function'', ''start_function'']'
+- tool: analyze_control_flow
+  tier: read
+  args:
+    function_name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_data_region
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_dataflow
+  tier: read
+  args:
+    address: '0x10001000'
+    direction: both
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_for_documentation
+  tier: read
+  args:
+    function_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_function_complete
+  tier: read
+  args:
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_function_completeness
+  tier: read
+  args:
+    function_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_global_completeness
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: analyze_struct_field_usage
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''struct_name'']'
+- tool: apply_data_classification
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''classification'', ''type_definition'']'
+- tool: apply_data_type
+  tier: write
+  args:
+    address: '0x10001000'
+    type_name: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: apply_function_documentation
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''json_body'']'
+- tool: archive_ingest_function
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: archive_ingest_program
+  tier: write
+  args:
+    program: Benchmark.dll
+    limit: 5
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: audit_global
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: audit_globals_in_function
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: batch_apply_documentation
+  tier: write
+  args:
+    address: '0x10001000'
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: batch_rename_function_components
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''local_renames'', ''parameter_renames'']'
+- tool: batch_set_comments
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: batch_string_anchor_report
+  tier: read
+  args:
+    pattern: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: bulk_fuzzy_match
+  tier: read
+  args:
+    source_program: Benchmark.dll
+    target_program: BenchmarkDebug.exe
+    offset: 0
+    limit: 5
+    filter: ''
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: can_rename_at_address
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: check_connection
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: clear_flow_and_repair
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: clear_function_comments
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: clear_instruction_flow_override
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: clone_data_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''new_name'']'
+- tool: close_program
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: compare_programs_documentation
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: convert_number
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''text'']'
+- tool: create_array_type
+  tier: write
+  args:
+    base_type: int
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_data_type_category
+  tier: write
+  args:
+    category_path: /
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_enum
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''values'']'
+- tool: create_folder
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: create_function
+  tier: write
+  args:
+    address: '0x10001000'
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_function_signature
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''parameters'', ''return_type'']'
+- tool: create_function_tag
+  tier: write
+  args:
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_label
+  tier: write
+  args:
+    address: '0x10001000'
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_memory_block
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: create_pointer_type
+  tier: write
+  args:
+    base_type: int
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_property_map
+  tier: write
+  args:
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_struct
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''fields'']'
+- tool: create_typedef
+  tier: write
+  args:
+    name: calc_crc16
+    base_type: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: create_union
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''fields'']'
+- tool: debugger_dynamic_to_static
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_interrupt
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_launch
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_launch_offers
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_list_breakpoints
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_modules
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_read_memory
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_registers
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_remove_breakpoint
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_resume
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_set_breakpoint
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_stack_trace
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_static_to_dynamic
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_status
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_step_into
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_step_out
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_step_over
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: debugger_traces
+  tier: read
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: decompile_function
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: delete_bookmark
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: delete_data_type
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: delete_file
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: delete_function
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: delete_function_tag
+  tier: write
+  args:
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: delete_label
+  tier: write
+  args:
+    address: '0x10001000'
+    name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: delete_property_map
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: detect_array_bounds
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: detect_crypto_constants
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: detect_malware_behaviors
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: diff_functions
+  tier: read
+  args:
+    address_a: '0x10001000'
+    address_b: '0x10001120'
+    program_a: Benchmark.dll
+    program_b: BenchmarkDebug.exe
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: disassemble_bytes
+  tier: write
+  args:
+    start_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: disassemble_function
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: embed_struct_field
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''embedded_struct'', ''parent_struct'']'
+- tool: emulate_function
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: emulate_hash_batch
+  tier: write
+  snapshot: false
+  skip: needs a live TraceRmi debug session (Phase 2 fixture)
+- tool: exit_ghidra
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: extract_iocs_with_context
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_anti_analysis_techniques
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_code_gaps
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_dead_code
+  tier: read
+  args:
+    function_name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_next_undefined_function
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''criteria'']'
+- tool: find_similar_functions
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''target_function'']'
+- tool: find_similar_functions_fuzzy
+  tier: read
+  args:
+    address: '0x10001000'
+    source_program: Benchmark.dll
+    target_program: BenchmarkDebug.exe
+    limit: 5
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_undocumented_by_string
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: force_decompile
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_address_spaces
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_assembly_context
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''include_patterns'', ''xref_sources'']'
+- tool: get_bulk_function_hashes
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    filter: ''
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_bulk_xrefs
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''addresses'']'
+- tool: get_comment
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_current_address
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_current_function
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_current_program_info
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: get_current_selection
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_entry_points
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_enum_values
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''enum_name'']'
+- tool: get_external_location
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''dll_name'']'
+- tool: get_field_access_context
+  tier: write
+  args:
+    struct_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_full_call_graph
+  tier: read
+  args:
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_by_address
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_call_graph
+  tier: read
+  args:
+    name: calc_crc16
+    address: '0x10001000'
+    direction: both
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_callees
+  tier: read
+  args:
+    name: calc_crc16
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_callers
+  tier: read
+  args:
+    name: calc_crc16
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_count
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_documentation
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_hash
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_jump_targets
+  tier: read
+  args:
+    name: calc_crc16
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_labels
+  tier: read
+  args:
+    name: calc_crc16
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_pcode
+  tier: read
+  args:
+    function_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_signature
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_tags
+  tier: read
+  args:
+    function: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_variables
+  tier: read
+  args:
+    function_name: calc_crc16
+    address: '0x10001000'
+    program: Benchmark.dll
+    limit: 5
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_function_xrefs
+  tier: read
+  args:
+    name: calc_crc16
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_language_metadata
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_metadata
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_program_options
+  tier: read
+  args:
+    group: function
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_property
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''map'']'
+- tool: get_struct_layout
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''struct_name'']'
+- tool: get_type_size
+  tier: read
+  args:
+    type_name: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_valid_data_types
+  tier: read
+  args:
+    category: ''
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_version
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_xrefs_from
+  tier: read
+  args:
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_xrefs_to
+  tier: read
+  args:
+    address: '0x10001000'
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: import_data_types
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''source'']'
+- tool: import_file
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: inspect_memory_content
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_analyzers
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_bookmarks
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_calling_conventions
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_class_members
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''class_name'']'
+- tool: list_classes
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_data_items
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_data_items_by_xrefs
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_data_type_categories
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_data_types
+  tier: read
+  args:
+    category: ''
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_exports
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_external_locations
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_function_tags
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_functions
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_functions_enhanced
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_globals
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_imports
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_methods
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_namespaces
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_open_programs
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: list_option_groups
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_project_files
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''folder'']'
+- tool: list_properties
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''map'']'
+- tool: list_property_maps
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_scripts
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: list_segments
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: list_strings
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: mcp_health
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: mcp_schema
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: merge_program_documentation
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''source'', ''target'']'
+- tool: modify_struct_field
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''struct_name'']'
+- tool: modify_struct_field_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''field_name'', ''struct_name'']'
+- tool: move_data_type_to_category
+  tier: write
+  args:
+    type_name: int
+    category_path: /
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: open_program
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: open_project
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: project_info
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: prompt_policy
+  tier: write
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: read_memory
+  tier: read
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: reanalyze
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: recreate_struct
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''fields'']'
+- tool: remove_function_tag
+  tier: write
+  args:
+    function: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: remove_program_option
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: remove_property
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''map'']'
+- tool: remove_reference
+  tier: write
+  args:
+    from_address: '0x10001000'
+    to_address: '0x10001120'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: remove_struct_field
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''field_name'', ''struct_name'']'
+- tool: rename_data_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''new_name'', ''old_name'']'
+- tool: rename_function
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''new_name'', ''old_name'']'
+- tool: rename_symbol
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''new_name'', ''target'']'
+- tool: rename_variables
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''variable_renames'']'
+- tool: resize_struct
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''new_size'']'
+- tool: resolve_duplicate_type
+  tier: write
+  args:
+    type_name: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: run_analysis
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: run_ghidra_script
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: run_script_inline
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: save_all_programs
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: save_program
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_byte_patterns
+  tier: read
+  args:
+    pattern: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_data_types
+  tier: read
+  args:
+    pattern: int
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_functions
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_functions_by_tag
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''tag'']'
+- tool: search_functions_enhanced
+  tier: read
+  args:
+    offset: 0
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_instructions
+  tier: read
+  args:
+    function: calc_crc16
+    limit: 5
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: search_strings
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''search_term'']'
+- tool: server_admin_set_permissions
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_admin_terminate_all_checkouts
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_admin_terminate_checkout
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_admin_users
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_authenticate
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_checkouts
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_connect
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_disconnect
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_repositories
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_repository_create
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_repository_file
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_repository_files
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_status
+  tier: read
+  snapshot: false
+  skip: needs the standalone headless server (Phase 2 fixture)
+- tool: server_version_control_add
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_version_control_checkin
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_version_control_checkout
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_version_control_undo_checkout
+  tier: write
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: server_version_history
+  tier: read
+  snapshot: false
+  skip: needs a Ghidra Server instance (Phase 2 fixture)
+- tool: set_bookmark
+  tier: write
+  args:
+    address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: set_comment
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''comment'']'
+- tool: set_function_no_return
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''no_return'']'
+- tool: set_function_prototype
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''prototype'']'
+- tool: set_function_tag_comment
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''comment'']'
+- tool: set_function_this_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''this_type'']'
+- tool: set_global
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''plate_comment'']'
+- tool: set_image_base
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: set_program_option
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''value'']'
+- tool: set_property
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''map'']'
+- tool: set_variable_storage
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''storage'', ''variable_name'']'
+- tool: set_variable_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''variable_name'']'
+- tool: set_variables
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''variables'']'
+- tool: suggest_field_names
+  tier: write
+  args:
+    struct_address: '0x10001000'
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: switch_program
+  tier: destructive
+  snapshot: false
+  skip: 'destructive: covered by the opt-in --destructive tier'
+- tool: tool_goto_address
+  tier: write
+  args:
+    address: '0x10001000'
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: tool_launch_codebrowser
+  tier: write
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: tool_running_tools
+  tier: read
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
+- tool: validate_data_type
+  tier: read
+  args:
+    address: '0x10001000'
+    type_name: int
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: validate_function_prototype
+  tier: read
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''calling_convention'', ''prototype'']'

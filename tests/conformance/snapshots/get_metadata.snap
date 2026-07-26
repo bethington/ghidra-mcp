@@ -1,0 +1,12 @@
+Program Name: Benchmark.dll
+Executable Path: /<PATH>/Benchmark.dll
+Architecture: x86
+Compiler: windows
+Language: x86:LE:32:default
+Endian: Little
+Address Size: 32 bits
+Base Address: 10000000
+Memory Blocks: 7
+Total Memory Size: 91356 bytes
+Function Count: 530
+Symbol Count: 2228

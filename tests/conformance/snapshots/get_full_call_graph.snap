@@ -1,0 +1,5 @@
+FUN_1000130e@1000130e -> __SEH_prolog4@10001b60
+dllmain_crt_dispatch@100012bb -> FUN_10001418@10001418
+dllmain_crt_dispatch@100012bb -> FUN_1000130e@1000130e
+dllmain_crt_dispatch@100012bb -> ___scrt_dllmain_crt_thread_attach@100017b1
+dllmain_crt_dispatch@100012bb -> ___scrt_dllmain_crt_thread_detach@100017d0
