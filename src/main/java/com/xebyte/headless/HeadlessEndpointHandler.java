@@ -278,7 +278,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String renameFunction(String oldName, String newName, String programName) {
-        return functionService.renameFunction(oldName, newName, programName).toJson();
+        return functionService.renameFunctionByAddress(oldName, newName, programName).toJson();
     }
 
     public String renameFunctionByAddress(String addressStr, String newName, String programName) {
@@ -1369,7 +1369,7 @@ public class HeadlessEndpointHandler {
      * Validate if a data type exists
      */
     public String validateDataTypeExists(String typeName, String programName) {
-        return dataTypeService.validateDataTypeExists(typeName, programName).toJson();
+        return dataTypeService.validateDataType("", typeName, programName).toJson();
     }
 
     /**
