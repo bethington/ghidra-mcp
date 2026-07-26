@@ -100,7 +100,40 @@ public class SymbolLabelService {
         return renameLabel(addressStr, oldName, newName, null);
     }
 
-    @McpTool(path = "/rename_label", method = "POST", description = "Rename a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    @McpTool(path = "/rename_symbol", method = "POST",
+             description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
+             category = "symbol")
+    public Response renameSymbol(
+            @Param(value = "target", source = ParamSource.BODY, paramType = "address",
+                   aliases = {"address", "name"},
+                   description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.") String target,
+            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
+                   description = "auto | data | global | label | external") String kind,
+            @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "For kind=label only: the current label name at the address.") String oldName,
+            @Param(value = "program", defaultValue = "") String programName) {
+        String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
+        switch (k) {
+            case "data":     return renameDataAtAddress(target, newName, programName);
+            case "global":   return renameGlobalVariable(target, newName, programName);
+            case "external": return renameExternalLocation(target, newName, programName);
+            case "label":
+                return (oldName == null || oldName.isEmpty())
+                        ? renameOrLabel(target, newName, programName)
+                        : renameLabel(target, oldName, newName, programName);
+            default: { // auto: address -> rename-or-create-label; name -> global variable
+                ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+                if (pe.hasError()) return pe.error();
+                Address addr = ServiceUtils.parseAddress(pe.program(), target);
+                return (addr != null)
+                        ? renameOrLabel(target, newName, programName)
+                        : renameGlobalVariable(target, newName, programName);
+            }
+        }
+    }
+
+    // rename_label merged into rename_symbol(kind=label) in 6.0.0; kept as a helper.
     public Response renameLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -357,7 +390,7 @@ public class SymbolLabelService {
         return renameOrLabel(addressStr, newName, null, null);
     }
 
-    @McpTool(path = "/rename_or_label", method = "POST", description = "Rename or create label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    // rename_or_label merged into rename_symbol (auto mode for address targets) in 6.0.0; kept as a helper.
     public Response renameOrLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -423,7 +456,7 @@ public class SymbolLabelService {
     }
 
     public Response deleteLabel(String addressStr, String labelName) {
-        return deleteLabel(addressStr, labelName, null);
+        return deleteLabel(addressStr, labelName, null, null);
     }
 
     @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")
@@ -612,7 +645,7 @@ public class SymbolLabelService {
         return renameDataAtAddress(addressStr, newName, null);
     }
 
-    @McpTool(path = "/rename_data", method = "POST", description = "Rename data at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    // rename_data merged into rename_symbol(kind=data) in 6.0.0; kept as a helper.
     public Response renameDataAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    aliases = {"function_address"},
@@ -733,7 +766,7 @@ public class SymbolLabelService {
         return renameGlobalVariable(oldName, newName, null, null);
     }
 
-    @McpTool(path = "/rename_global_variable", method = "POST", description = "Rename a global variable", category = "symbol")
+    // rename_global_variable merged into rename_symbol(kind=global) in 6.0.0; kept as a helper.
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
@@ -890,7 +923,7 @@ public class SymbolLabelService {
         return renameExternalLocation(address, newName, null);
     }
 
-    @McpTool(path = "/rename_external_location", method = "POST", description = "Rename external location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    // rename_external_location merged into rename_symbol(kind=external) in 6.0.0; kept as a helper.
     public Response renameExternalLocation(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
