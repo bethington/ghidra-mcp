@@ -152,10 +152,10 @@ def plan_targets(rows: list, *, wire_globals: bool = False) -> dict:
         if name in proven:
             plan["already_proven"].append({"name": name, "addr": addr})
             continue
-        dec = fun_doc.ghidra_get("/decompile_function",
-                                 params={"address": f"0x{addr}", "program": PROGRAM_PATH})
-        dis = fun_doc.ghidra_get("/disassemble_function",
-                                 params={"address": f"0x{addr}", "program": PROGRAM_PATH})
+        dec = fun_doc.decompiled_text(fun_doc.ghidra_get(
+            "/decompile_function", params={"address": f"0x{addr}", "program": PROGRAM_PATH}))
+        dis = fun_doc.disasm_text(fun_doc.ghidra_get(
+            "/disassemble_function", params={"address": f"0x{addr}", "program": PROGRAM_PATH}))
         if not dec or fun_doc._is_error_response(dec):
             plan["fetch_failed"].append({"name": name, "addr": addr})
             continue

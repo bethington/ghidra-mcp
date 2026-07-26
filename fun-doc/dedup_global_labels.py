@@ -11,6 +11,22 @@ Read-only by default. --apply to delete the losing labels.
 import argparse, re, sys
 import requests
 
+
+def _globals_text(resp):
+    """Legacy newline-joined text from a 6.0.0 /list_globals response.
+
+    6.0.0 returns {"globals": [...], "count", "total"}; the entries are still
+    preformatted "name @ addr [kind] (type) xrefs=N" lines, so joining them
+    reproduces the pre-6.0.0 body the patterns below were written against.
+    """
+    if isinstance(resp, dict):
+        items = resp.get("globals")
+        if isinstance(items, list):
+            return chr(10).join(str(x) for x in items)
+        return ""
+    return resp if isinstance(resp, str) else ""
+
+
 GHIDRA = "http://127.0.0.1:8089"
 PROGRAM = "/Mods/PD2-S12/D2Common.dll"
 LINE_RE = re.compile(r"^(?P<name>.+?)\s+@\s+(?P<addr>[0-9a-fA-F]{5,})\b", re.M)
@@ -81,8 +97,8 @@ def main():
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    txt = gget("/list_globals", limit=20000, filter="all", type_filter="all")
-    if isinstance(txt, dict): txt = txt.get("text") or str(txt)
+    txt = _globals_text(
+        gget("/list_globals", limit=20000, filter="all", type_filter="all"))
     by_addr = {}
     for m in LINE_RE.finditer(txt):
         by_addr.setdefault(m["addr"].lower(), []).append(m["name"].strip())

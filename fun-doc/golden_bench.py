@@ -49,7 +49,7 @@ def snapshot(address: str, name: str, *, program: str = PROGRAM_PATH) -> dict:
     addr = address if str(address).startswith("0x") else f"0x{address}"
     plate = fun_doc.ghidra_get("/get_comment",
                                params={"address": addr, "program": program})
-    dec = str(fun_doc.ghidra_get("/decompile_function",
+    dec = fun_doc.decompiled_text(fun_doc.ghidra_get("/decompile_function",
                                  params={"address": addr, "program": program}))
     m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",
                   dec.replace("\r", ""), re.MULTILINE)
@@ -125,7 +125,7 @@ def report(address: str, name: str, snap: dict, run_summary: dict, *,
     _after = fun_doc.ghidra_get("/get_comment",
                                 params={"address": addr, "program": program})
     plate_after = ((_after.get("plate") or "") if isinstance(_after, dict) else str(_after))
-    dec = str(fun_doc.ghidra_get("/decompile_function",
+    dec = fun_doc.decompiled_text(fun_doc.ghidra_get("/decompile_function",
                                  params={"address": addr, "program": program}))
     m = re.search(r"^\s*([\w\s\*]+?\s\*?\s*" + re.escape(name) + r"\s*\([^)]*\))",
                   dec.replace("\r", ""), re.MULTILINE)

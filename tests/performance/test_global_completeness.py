@@ -30,13 +30,21 @@ import fun_doc as fd  # noqa: E402
 # --------------------------------------------------------------------------- #
 # _image_range — dynamic per-program image window (any base address)
 # --------------------------------------------------------------------------- #
-_SEGMENTS = (
-    "Headers: 10000000 - 100003ff\n"
-    ".text: 10001000 - 100ebfff\n"
-    ".rdata: 100ec000 - 1011bdff\n"
-    ".data: 1011c000 - 101254eb\n"
-    ".reloc: 10128000 - 101371ff\n"
-    "tdb:\n"                          # rangeless line — must be ignored
+# 6.0.0: list_segments returns structured records inside the standard envelope.
+def _segments(*blocks):
+    return {"segments": list(blocks), "count": len(blocks),
+            "offset": 0, "total": len(blocks)}
+
+
+_SEGMENTS = _segments(
+    {"name": "Headers", "start": "10000000", "end": "100003ff"},
+    {"name": ".text", "start": "10001000", "end": "100ebfff"},
+    {"name": ".rdata", "start": "100ec000", "end": "1011bdff"},
+    {"name": ".data", "start": "1011c000", "end": "101254eb"},
+    {"name": ".reloc", "start": "10128000", "end": "101371ff"},
+    # A malformed record (no start/end) must be skipped, not crash the parse --
+    # the pre-6.0.0 text form had the same case as a rangeless "tdb:" line.
+    {"name": "tdb"},
 )
 
 
@@ -49,7 +57,8 @@ def test_image_range_from_segments(monkeypatch):
 
 def test_image_range_excludes_os_overlay(monkeypatch):
     # A TIB/PEB overlay block far above the image must not stretch the window.
-    segs = _SEGMENTS + "tib: ffdf0000 - ffdfffff\n"
+    segs = _segments(*_SEGMENTS["segments"],
+                     {"name": "tib", "start": "ffdf0000", "end": "ffdfffff"})
     monkeypatch.setattr(fd, "ghidra_get", lambda path, params=None, timeout=None: segs)
     lo, hi = fd._image_range("/p")
     assert lo == 0x10000000
@@ -114,11 +123,19 @@ def test_sync_global_band_autocreates_map(monkeypatch):
 # --------------------------------------------------------------------------- #
 # run_assess_globals_pass — score -> band -> DOC_DRAFT
 # --------------------------------------------------------------------------- #
-_LIST_GLOBALS = "\n".join([
+# 6.0.0 response contract: list-shaped tools return a named plural key plus
+# count/total. list_globals entries are still preformatted lines.
+_GLOBAL_LINES = [
     "g_dwPlayerCount @ 6fbc9a50 [data] (int) xrefs=10",     # scores 100 -> DOC_DRAFT
     "g_pFooTable @ 6fbc9a54 [data] (FooTable *) xrefs=3",   # scores 85  -> band only
     "DAT_6fbc9a58 @ 6fbc9a58 [data] (undefined4) xrefs=1",  # bare -> short-circuit, no HTTP
-])
+]
+_LIST_GLOBALS = {
+    "globals": _GLOBAL_LINES,
+    "count": len(_GLOBAL_LINES),
+    "offset": 0,
+    "total": len(_GLOBAL_LINES),
+}
 
 _SCORES = {
     "0x6fbc9a50": {"applicable": True, "effective_score": 100.0,

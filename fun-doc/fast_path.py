@@ -81,8 +81,10 @@ def _draft_one(addr, program: str = PROGRAM) -> dict:
     import fun_doc
     import port_live_prove as plp
     ah = _addr_hex(addr)
-    dec = fun_doc.ghidra_get("/decompile_function", params={"address": ah, "program": program})
-    dis = fun_doc.ghidra_get("/disassemble_function", params={"address": ah, "program": program})
+    dec = fun_doc.decompiled_text(
+        fun_doc.ghidra_get("/decompile_function", params={"address": ah, "program": program}))
+    dis = fun_doc.disasm_text(
+        fun_doc.ghidra_get("/disassemble_function", params={"address": ah, "program": program}))
     if not dec or fun_doc._is_error_response(dec) or not dis or fun_doc._is_error_response(dis):
         return {"addr": ah, "result": "fetch_failed"}
     name = _name_of(dec) or f"FUN_{ah[2:]}"
@@ -98,8 +100,10 @@ def prove_one(addr, program: str = PROGRAM, *, build: bool = True) -> dict:
     import fun_doc
     import port_live_prove as plp
     ah = _addr_hex(addr)
-    dec = fun_doc.ghidra_get("/decompile_function", params={"address": ah, "program": program})
-    dis = fun_doc.ghidra_get("/disassemble_function", params={"address": ah, "program": program})
+    dec = fun_doc.decompiled_text(
+        fun_doc.ghidra_get("/decompile_function", params={"address": ah, "program": program}))
+    dis = fun_doc.disasm_text(
+        fun_doc.ghidra_get("/disassemble_function", params={"address": ah, "program": program}))
     if not dec or fun_doc._is_error_response(dec) or not dis or fun_doc._is_error_response(dis):
         return {"addr": ah, "result": "fetch_failed"}
     name = _name_of(dec) or f"FUN_{ah[2:]}"

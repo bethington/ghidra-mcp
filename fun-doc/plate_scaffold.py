@@ -36,6 +36,22 @@ import re
 import urllib.request
 from urllib.parse import quote, urlencode
 
+
+def _globals_text(resp):
+    """Legacy newline-joined text from a 6.0.0 /list_globals response.
+
+    6.0.0 returns {"globals": [...], "count", "total"}; the entries are still
+    preformatted "name @ addr [kind] (type) xrefs=N" lines, so joining them
+    reproduces the pre-6.0.0 body the patterns below were written against.
+    """
+    if isinstance(resp, dict):
+        items = resp.get("globals")
+        if isinstance(items, list):
+            return chr(10).join(str(x) for x in items)
+        return ""
+    return resp if isinstance(resp, str) else ""
+
+
 GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
 
@@ -369,9 +385,9 @@ def _fetch_global(addr: str, program: str):
     """(name, type, size, writers[], readers[]) for a data global from list_globals + xref dirs."""
     a = addr if str(addr).startswith("0x") else "0x" + str(addr)
     bare = a[2:].lower().lstrip("0")
-    txt = _get("/list_globals", program=program, limit=100000)
+    txt = _globals_text(_get("/list_globals", program=program, limit=100000))
     name = gtype = None
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
+    for ln in txt.splitlines():
         m = _GLOB_LINE.match(ln.strip())
         if m and m.group("addr").lower().lstrip("0") == bare:
             name, gtype = m.group("name"), m.group("type").strip()

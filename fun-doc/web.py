@@ -147,6 +147,35 @@ class WorkerManager:
             worker["phase"] = phase
             worker["phase_since"] = datetime.now().isoformat()
 
+    def _reap_zombie_worker(self, worker_id, worker):
+        """Force-finalize a worker whose underlying thread has already exited
+        without ever reaching its own try/finally cleanup (the code path that
+        normally sets status to finished/stopped, releases the per-binary
+        lock, and emits worker_stopped).
+
+        Confirmed live 2026-07-25: worker 3abec5b6 (globals mode) sat in
+        status="stopping" for 8+ hours after a stall-kill fired -- py-spy
+        confirmed its thread was gone entirely, yet nothing ever moved it out
+        of "stopping". A frozen non-terminal status is not cosmetic: MAX_WORKERS
+        and the per-binary lock (_globals_active_binaries/_port_active_binaries)
+        both treat "stopping" as active, so a zombie entry permanently steals a
+        worker slot and can block a real relaunch on that binary until the
+        whole dashboard is restarted. This reaper is a safety net independent
+        of WHY the thread died -- it just notices "no longer alive but not in
+        a terminal status" and cleans up, mirroring what the thread's own
+        finally block does. Caller must hold self._lock."""
+        was_stopped_intentionally = worker["stop_flag"].is_set()
+        worker["status"] = "stopped" if was_stopped_intentionally else "error"
+        if not worker.get("last_error"):
+            worker["last_error"] = "worker thread exited without cleanup (reaped by watchdog)"
+        worker["restore_on_restart"] = False
+        worker["finished_at"] = datetime.now().isoformat()
+        worker["progress"]["current"] = None
+        if worker.get("binary"):
+            self._globals_active_binaries.discard(worker["binary"])
+            self._port_active_binaries.discard(worker["binary"])
+        self._persist_active_workers()
+
     def _watchdog_loop(self):
         from event_log import log_event
 
@@ -154,9 +183,15 @@ class WorkerManager:
             now = datetime.now()
             heartbeats = []
             kill_requests = []
+            zombies = []
             with self._lock:
                 for worker_id, worker in self._workers.items():
                     if worker.get("status") not in ("starting", "running", "stopping", "quota_paused"):
+                        continue
+                    thread = worker.get("thread")
+                    if thread is not None and not thread.is_alive():
+                        self._reap_zombie_worker(worker_id, worker)
+                        zombies.append((worker_id, dict(worker)))
                         continue
                     last_raw = worker.get("last_heartbeat_at") or worker.get("started_at")
                     try:
@@ -205,6 +240,24 @@ class WorkerManager:
             for hb in heartbeats:
                 log_event("worker.heartbeat", **hb)
 
+            for worker_id, worker_snapshot in zombies:
+                log_event(
+                    "worker.reaped_zombie",
+                    worker_id=worker_id,
+                    mode=worker_snapshot.get("mode"),
+                    status=worker_snapshot.get("status"),
+                )
+                self._bus.emit(
+                    "worker_stopped",
+                    {
+                        "worker_id": worker_id,
+                        "reason": worker_snapshot.get("status"),
+                        "mode": worker_snapshot.get("mode"),
+                        "progress": dict(worker_snapshot.get("progress") or {}),
+                    },
+                )
+                self._log_worker_stopped(worker_id, worker_snapshot)
+
             for worker_id, phase, stale_sec in kill_requests:
                 subprocesses_killed = 0
                 try:
@@ -221,7 +274,7 @@ class WorkerManager:
                     subprocesses_killed=subprocesses_killed,
                 )
 
-            if heartbeats or kill_requests:
+            if heartbeats or kill_requests or zombies:
                 self._emit_status()
 
     def _note_session_activity(self, data):
@@ -259,6 +312,14 @@ class WorkerManager:
             "continuous": bool(worker.get("continuous", False)),
             "model": worker.get("model"),
             "binary": worker.get("binary"),
+            # mode/addresses were missing here (found 2026-07-25 while restarting
+            # the dashboard with live globals/port workers running): restore_workers
+            # calls start_worker(**spec) without a mode, which defaults to
+            # "functions" -- a live globals or port worker silently came back as a
+            # FULL-doc worker on the same binary across every dashboard restart,
+            # with no error to signal the switch.
+            "mode": worker.get("mode", "functions"),
+            "addresses": worker.get("addresses"),
         }
 
     def _persist_active_workers(self):
@@ -294,6 +355,8 @@ class WorkerManager:
                         model=spec.get("model"),
                         binary=spec.get("binary"),
                         continuous=bool(spec.get("continuous", False)),
+                        mode=spec.get("mode", "functions"),
+                        addresses=spec.get("addresses"),
                         restored=True,
                     )
                 )
@@ -1305,6 +1368,7 @@ class WorkerManager:
                     "mode": "port",
                     "provider": worker["provider"],
                     "count": worker["count"],
+                    "continuous": worker.get("continuous", False),
                     "binary": worker.get("binary"),
                     "restored": worker.get("restored", False),
                 },
@@ -1361,6 +1425,7 @@ class WorkerManager:
                 provider=worker["provider"],
                 model=worker.get("model"),
                 count=int(worker.get("count") or 1),
+                continuous=bool(worker.get("continuous", False)),
                 stop_flag=worker["stop_flag"],
                 on_progress=_on_progress,
                 on_started=_on_started,
@@ -2432,6 +2497,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                             page_entries.append({
                                 "address": addr if str(addr).startswith("0x") else f"0x{addr}",
                             })
+                    elif isinstance(item, str):
+                        # 6.0.0 list_globals entries are still preformatted
+                        # "name @ addr [kind] (type)" lines inside the envelope.
+                        m = line_re.search(item)
+                        if m:
+                            page_entries.append({"address": f"0x{m.group(1)}"})
             elif isinstance(resp, list):
                 for item in resp:
                     if isinstance(item, dict):

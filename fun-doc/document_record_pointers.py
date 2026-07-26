@@ -19,6 +19,22 @@ Usage:
 import argparse, json, re
 import requests
 
+
+def _globals_text(resp):
+    """Legacy newline-joined text from a 6.0.0 /list_globals response.
+
+    6.0.0 returns {"globals": [...], "count", "total"}; the entries are still
+    preformatted "name @ addr [kind] (type) xrefs=N" lines, so joining them
+    reproduces the pre-6.0.0 body the patterns below were written against.
+    """
+    if isinstance(resp, dict):
+        items = resp.get("globals")
+        if isinstance(items, list):
+            return chr(10).join(str(x) for x in items)
+        return ""
+    return resp if isinstance(resp, str) else ""
+
+
 GHIDRA = "http://127.0.0.1:8089"
 PROGRAM = "/Mods/PD2-S12/D2Common.dll"
 
@@ -121,7 +137,8 @@ def process(gname, addr, decomp, apply):
     return f"  {gname:36} -> {rec_type} *   [{why}]  {'OK' if ok else res.get('error')[:40]}"
 
 def run_batch(apply, limit):
-    txt = gget("/list_globals", limit=20000, filter="all", type_filter="all")
+    txt = _globals_text(
+        gget("/list_globals", limit=20000, filter="all", type_filter="all"))
     cands = []
     for m in re.finditer(r"(g_p[A-Za-z0-9_]+)\s+@\s+([0-9a-fA-F]{5,})\s+\[[^\]]*\]\s+\((void \*|undefined)\)", txt):
         cands.append((m.group(1), "0x" + m.group(2)))
@@ -155,8 +172,8 @@ def main():
 
     addr = args.address
     if args.name and not addr:
-        txt = gget("/list_globals", limit=20000, name_substring=args.name)
-        m = re.search(r"@\s+([0-9a-fA-F]{5,})", txt if isinstance(txt, str) else "")
+        txt = _globals_text(gget("/list_globals", limit=20000, name_substring=args.name))
+        m = re.search(r"@\s+([0-9a-fA-F]{5,})", txt)
         addr = "0x" + m.group(1) if m else None
     if not addr: print("not found"); return
     if not addr.startswith("0x"): addr = "0x" + addr
