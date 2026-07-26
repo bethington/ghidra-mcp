@@ -102,6 +102,17 @@ public class ProgramScriptService {
         return null;
     }
 
+    // AbstractAnalyzer options are keyed by the analyzer's own display name
+    // under Program.ANALYSIS_PROPERTIES. "PDB Universal" logs a warning on
+    // essentially every binary this MCP server analyzes -- synthetic
+    // benchmark fixtures and closed-source game DLLs alike never have a
+    // matching PDB -- and Ghidra's AutoAnalysisPlugin pops an unconditional
+    // "Auto Analysis Summary" dialog (no suppress option exists) whenever the
+    // analysis message log has ANY entries. That dialog blocks the Swing
+    // event thread, and with it every other MCP request, until a human
+    // dismisses it. See runAutoAnalysisAndPersistFlags.
+    private static final String NOISY_PDB_ANALYZER_OPTION = "PDB Universal";
+
     private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
         if (program == null) {
             return false;
@@ -123,11 +134,35 @@ public class ProgramScriptService {
             boolean txOk = false;
             try {
                 ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
-                if (force) {
-                    mgr.reAnalyzeAll(null);
+
+                // Disable the noisy PDB analyzer for just this automated run
+                // (see NOISY_PDB_ANALYZER_OPTION) and restore it afterward,
+                // so interactive/GUI-triggered analysis still gets normal PDB
+                // matching -- this only silences the analysis-summary popup
+                // for the auto_analyze=true API path.
+                Options analysisOptions = program.getOptions(Program.ANALYSIS_PROPERTIES);
+                boolean pdbWasEnabled = false;
+                try {
+                    pdbWasEnabled = analysisOptions.getBoolean(NOISY_PDB_ANALYZER_OPTION, false);
+                    if (pdbWasEnabled) {
+                        analysisOptions.setBoolean(NOISY_PDB_ANALYZER_OPTION, false);
+                    }
+                } catch (Exception ignored) {
+                    // Option not registered on this program/language -- nothing to silence.
+                    pdbWasEnabled = false;
                 }
-                mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+
+                try {
+                    if (force) {
+                        mgr.reAnalyzeAll(null);
+                    }
+                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                    mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+                } finally {
+                    if (pdbWasEnabled) {
+                        analysisOptions.setBoolean(NOISY_PDB_ANALYZER_OPTION, true);
+                    }
+                }
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
@@ -1009,10 +1044,16 @@ public class ProgramScriptService {
     }
 
     @McpTool(path = "/close_program", method = "POST",
-             description = "Close an open program by project path or name", category = "program")
+             description = "Close an open program by project path or name. Never prompts interactively: "
+                         + "unsaved changes are saved first by default (save=true) or silently discarded "
+                         + "(save=false) before closing, so this cannot block the caller on a GUI "
+                         + "confirmation dialog the way Ghidra's own close normally would.", category = "program")
     public Response closeProgram(
             @Param(value = "name", source = ParamSource.BODY,
-                    description = "Program name or project path") String name) {
+                    description = "Program name or project path") String name,
+            @Param(value = "save", source = ParamSource.BODY, defaultValue = "true",
+                    description = "Save unsaved changes before closing (default true). false discards them. "
+                                + "Either way the close proceeds without prompting.") boolean save) {
         if (name == null || name.trim().isEmpty()) {
             return Response.err("Program name or path is required");
         }
@@ -1026,10 +1067,26 @@ public class ProgramScriptService {
                 try {
                     for (ProgramManager pm : findAllProgramManagers()) {
                         for (Program program : pm.getAllOpenPrograms()) {
-                            if (programMatches(program, search)) {
-                                pm.closeProgram(program, false);
-                                closedCount.incrementAndGet();
+                            if (!programMatches(program, search)) {
+                                continue;
                             }
+                            if (save && program.isChanged()) {
+                                ghidra.framework.model.DomainFile df = program.getDomainFile();
+                                if (df != null && df.isInWritableProject()) {
+                                    df.save(new ConsoleTaskMonitor());
+                                }
+                            }
+                            // ignoreChanges=true unconditionally: we have already
+                            // decided the fate of any unsaved edits above (saved,
+                            // or deliberately left to be discarded), so Ghidra must
+                            // never fall back to its own interactive "Save
+                            // changes?" dialog here -- that call blocks the Swing
+                            // event thread (and with it every other MCP request,
+                            // since they all funnel through invokeAndWait) until a
+                            // human clicks it, which is exactly the hang this
+                            // parameter exists to prevent.
+                            pm.closeProgram(program, true);
+                            closedCount.incrementAndGet();
                         }
                     }
                 } catch (Exception e) {
@@ -1428,7 +1485,13 @@ public class ProgramScriptService {
         for (Program prog : programProvider.getAllOpenPrograms()) {
             if (prog.getDomainFile() != null
                     && prog.getDomainFile().getPathname().equalsIgnoreCase(filePath)) {
-                pm.closeProgram(prog, false);
+                // ignoreChanges=true: this only runs to clear the way for
+                // delete_file's delete() call right after, so there is
+                // nothing worth saving. false would risk Ghidra's own
+                // interactive "Save changes?" dialog, which blocks the Swing
+                // event thread -- and with it every other MCP request -- until
+                // a human dismisses it.
+                pm.closeProgram(prog, true);
                 return;
             }
         }

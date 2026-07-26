@@ -119,12 +119,12 @@ class TestEndpointsJson(unittest.TestCase):
 
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_valid_json(self):
-        data = json.loads(ENDPOINTS_JSON.read_text())
+        data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         self.assertIn("endpoints", data)
 
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_no_duplicate_paths(self):
-        data = json.loads(ENDPOINTS_JSON.read_text())
+        data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         paths = [ep["path"] for ep in data.get("endpoints", [])]
         self.assertEqual(
             len(paths), len(set(paths)), "Duplicate paths in endpoints.json"
@@ -132,7 +132,7 @@ class TestEndpointsJson(unittest.TestCase):
 
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_endpoints_have_required_fields(self):
-        data = json.loads(ENDPOINTS_JSON.read_text())
+        data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         for ep in data.get("endpoints", []):
             self.assertIn("path", ep, f"Missing 'path' in endpoint: {ep}")
             self.assertIn("method", ep, f"Missing 'method' in endpoint: {ep}")
@@ -142,7 +142,7 @@ class TestEndpointsJson(unittest.TestCase):
         """The generated endpoint catalog should produce valid exposed MCP names."""
         from bridge_mcp_ghidra import _parse_schema
 
-        data = json.loads(ENDPOINTS_JSON.read_text())
+        data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         raw_schema = {
             "tools": [
                 {

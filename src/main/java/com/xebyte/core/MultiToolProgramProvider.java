@@ -167,7 +167,13 @@ public class MultiToolProgramProvider implements ProgramProvider {
             for (Program prog : pm.getAllOpenPrograms()) {
                 if (prog.getDomainFile() != null
                         && prog.getDomainFile().getPathname().equalsIgnoreCase(path.trim())) {
-                    pm.closeProgram(prog, false);
+                    // ignoreChanges=true: this exists to make way for a delete
+                    // (see callers), so there is nothing to save for. Passing
+                    // false would let Ghidra fall back to its own interactive
+                    // "Save changes?" dialog, which blocks the Swing event
+                    // thread -- and with it every other MCP request -- until a
+                    // human dismisses it.
+                    pm.closeProgram(prog, true);
                     closed = true;
                 }
             }

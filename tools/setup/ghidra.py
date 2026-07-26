@@ -927,7 +927,15 @@ def _close_and_delete_project_file(repo_root: Path, mcp_url: str, program_path: 
                 repo_root,
                 mcp_url,
                 "/close_program",
-                data={"name": program_path},
+                # save=False: this program is about to be deleted and
+                # re-imported from disk right below, so there's nothing
+                # worth saving -- and saving is not the point here anyway.
+                # Before /close_program grew a save/discard choice, closing
+                # a dirty benchmark fixture would fall through to Ghidra's
+                # interactive "Save changes?" dialog, which blocks the Swing
+                # event thread (and every other MCP request with it) until a
+                # human dismisses it.
+                data={"name": program_path, "save": False},
                 method="POST",
                 timeout=30,
             )
@@ -1535,6 +1543,21 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
             _ensure_mcp_ok(path, payload)
         print("Debugger live test passed: launched BenchmarkDebug.exe and read trace state.")
     finally:
+        # The target is left stopped at a breakpoint after the reads above.
+        # Windows won't let taskkill terminate a process while it's parked at
+        # a debug event under dbgeng -- taskkill reports "no running instance
+        # of the task" even though tasklist still sees it, and the process
+        # lingers until something resumes or detaches it. There is no
+        # /debugger/detach endpoint on this in-process TraceRmi surface (that
+        # name only exists on the separate standalone-server debugger proxy,
+        # which isn't involved here), so resume it instead: BenchmarkDebug.exe
+        # was launched with `--seconds 180` and self-exits once running,
+        # which also releases the debug hold so the terminate below actually
+        # works instead of silently no-op'ing.
+        try:
+            _mcp_request(repo_root, mcp_url, "/debugger/resume", method="POST", timeout=10)
+        except Exception:
+            pass
         _terminate_processes_by_name("BenchmarkDebug.exe")
 
 
