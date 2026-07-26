@@ -1221,7 +1221,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Close an open program by project path or name",
+      "description": "Close an open program by project path or name. Never prompts interactively: unsaved changes are saved first by default (save=true) or silently discarded (save=false) before closing, so this cannot block the caller on a GUI confirmation dialog the way Ghidra's own close normally would.",
       "method": "POST",
       "params": [
         {
@@ -1230,6 +1230,14 @@
           "required": true,
           "source": "body",
           "type": "string"
+        },
+        {
+          "default": "true",
+          "description": "Save unsaved changes before closing (default true). false discards them. Either way the close proceeds without prompting.",
+          "name": "save",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
         }
       ],
       "path": "/close_program"

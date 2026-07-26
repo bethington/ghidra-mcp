@@ -1,0 +1,35 @@
+{
+  "examples": [
+    {
+      "access_address": "10000134",
+      "assembly": "",
+      "function_address": "",
+      "function_name": "",
+      "ref_type": "DATA"
+    },
+    {
+      "access_address": "1000020c",
+      "assembly": "",
+      "function_address": "",
+      "function_name": "",
+      "ref_type": "DATA"
+    },
+    {
+      "access_address": "100139ac",
+      "assembly": "",
+      "function_address": "",
+      "function_name": "",
+      "ref_type": "DATA"
+    },
+    {
+      "access_address": "Entry Point",
+      "assembly": "",
+      "function_address": "",
+      "function_name": "",
+      "ref_type": "EXTERNAL"
+    }
+  ],
+  "field_address": "10001000",
+  "field_offset": 0,
+  "struct_address": "0x10001000"
+}
