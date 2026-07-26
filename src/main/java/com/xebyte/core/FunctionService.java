@@ -428,7 +428,7 @@ public class FunctionService {
                             resultMsg.append("- Large NOP sleds or padding\n");
                             resultMsg.append("- External calls to unknown addresses\n");
                             resultMsg.append("- Stack frame issues\n");
-                            resultMsg.append("Consider using get_disassembly() instead for this function.");
+                            resultMsg.append("Consider using disassemble_function() instead for this function.");
                             return null;
                         }
 
@@ -2120,7 +2120,7 @@ public class FunctionService {
                 resultMsg.append("3. Select 'Edit Data Type' or 'Retype Variable'\n");
                 resultMsg.append("4. Manually adjust the storage location\n\n");
                 resultMsg.append("Alternative approach:\n");
-                resultMsg.append("- Use run_script() to execute a custom Ghidra script\n");
+                resultMsg.append("- Use run_ghidra_script() to execute a custom Ghidra script\n");
                 resultMsg.append("- The script can use high-level Pcode/HighVariable API\n");
                 resultMsg.append("- See FixEBPRegisterReuse.java for an example\n");
 

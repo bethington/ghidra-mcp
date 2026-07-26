@@ -3030,7 +3030,7 @@ public class AnalysisService {
             recommendations.add("2. Use rename_symbol() to give meaningful names to each global");
             recommendations.add("3. Apply Hungarian notation with g_ prefix: g_dwPlayerCount, g_pCurrentGame, g_abEncryptionKey");
             recommendations.add("4. If global is a structure, apply type with apply_data_type() first, then rename");
-            recommendations.add("5. Consult KNOWN_ORDINALS.md and existing codebase for naming conventions");
+            recommendations.add("5. Match naming to how existing renamed globals in this program are named");
         }
 
         // UNRENAMED LAB_* LABELS (auto-generated goto targets)
@@ -3045,7 +3045,7 @@ public class AnalysisService {
         if (!undocumentedOrdinals.isEmpty()) {
             recommendations.add("UNDOCUMENTED ORDINAL CALLS - Add inline comments for each:");
             recommendations.add("1. Found " + undocumentedOrdinals.size() + " Ordinal call(s) without comments: " + String.join(", ", undocumentedOrdinals.subList(0, Math.min(5, undocumentedOrdinals.size()))));
-            recommendations.add("2. Consult docs/KNOWN_ORDINALS.md for Ordinal mappings (Storm.dll, Fog.dll ordinals documented)");
+            recommendations.add("2. Resolve the Ordinal via get_external_location() or list_external_locations() on the importing module");
             recommendations.add("3. Use set_comment(type='pre') or batch_set_comments() to add inline comment explaining the call");
             recommendations.add("4. Format: /* Ordinal_123 = StorageFunctionName - brief description */");
         }
@@ -3069,9 +3069,9 @@ public class AnalysisService {
             recommendations.add("4. Apply struct type to variables with set_variable_type() or set_function_prototype()");
         }
 
-        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V4.md Mandatory Undefined Type Audit)
+        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V5.md Mandatory Undefined Type Audit)
         if (!undefinedVars.isEmpty()) {
-            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Mandatory Undefined Type Audit' section:");
+            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V5.md 'Mandatory Undefined Type Audit' section:");
             recommendations.add("1. Type Resolution: Apply type normalization before renaming:");
             recommendations.add("   - undefined1 -> byte (8-bit integer)");
             recommendations.add("   - undefined2 -> ushort/short (16-bit integer)");
@@ -3079,7 +3079,7 @@ public class AnalysisService {
             recommendations.add("   - undefined8 -> double/ulonglong/longlong (64-bit)");
             recommendations.add("   - undefined1[N] -> byte[N] (byte array for XMM spills, buffers)");
             recommendations.add("2. Use set_variable_type() with lowercase builtin types (uint, ushort, byte) NOT uppercase Windows types (UINT, USHORT, BYTE)");
-            recommendations.add("3. CRITICAL: Check disassembly with get_disassembly() for assembly-only undefined types:");
+            recommendations.add("3. CRITICAL: Check disassembly with disassemble_function() for assembly-only undefined types:");
             recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_function_variables()");
             recommendations.add("   - XMM register spills: undefined1[16] at stack locations");
             recommendations.add("   - Intermediate calculation results not appearing in decompiled view");
@@ -3088,7 +3088,7 @@ public class AnalysisService {
 
         // Plate Comment Issues
         if (!plateCommentIssues.isEmpty()) {
-            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Plate Comment Creation' section:");
+            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V5.md 'Plate Comment Creation' section:");
             for (String issue : plateCommentIssues) {
                 if (issue.contains("Missing Algorithm section")) {
                     recommendations.add("1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)");
@@ -3102,7 +3102,7 @@ public class AnalysisService {
                     recommendations.add("5. Expand plate comment to minimum 10 lines with comprehensive documentation");
                 }
             }
-            recommendations.add("Use set_comment(type='plate') to create/update plate comment following docs/prompts/PLATE_COMMENT_FORMAT_GUIDE.md");
+            recommendations.add("Use set_comment(type='plate') to create/update plate comment following docs/PLATE_COMMENT_BEST_PRACTICES.md");
         }
 
         // Hungarian Notation Violations
@@ -3117,7 +3117,7 @@ public class AnalysisService {
                 }
                 recommendations.add("FIX THE TYPE, NOT THE NAME. The human-assigned name is correct; the decompiler-inferred type is wrong.");
             }
-            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Local Variable Renaming' section and docs/HUNGARIAN_NOTATION.md:");
+            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V5.md 'Local Variable Renaming' section and docs/HUNGARIAN_NOTATION.md:");
             recommendations.add("1. Verify type-to-prefix mapping matches Ghidra type:");
             recommendations.add("   - byte -> b/by | char -> c/ch | bool -> f | short -> n/s | ushort -> w");
             recommendations.add("   - int -> n/i | uint -> dw | long -> l | ulong -> dw");
@@ -3132,7 +3132,7 @@ public class AnalysisService {
 
         // Type Quality Issues
         if (!typeQualityIssues.isEmpty()) {
-            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md 'Structure Identification' section:");
+            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V5.md 'Structure Identification' section:");
             for (String issue : typeQualityIssues) {
                 if (issue.contains("Unresolved this pointer")) {
                     recommendations.add("UNRESOLVED THIS POINTER - __thiscall function has void* this:");
@@ -3215,7 +3215,7 @@ public class AnalysisService {
                 recommendations.add("3. Add concise plate comment with Purpose/Origin/Parameters/Returns.");
                 recommendations.add("4. Re-score and stop when only structural deductions remain.");
             } else {
-                recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V4.md):");
+                recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V5.md):");
                 recommendations.add("1. Initialize: get_current_selection() + analyze_function_complete() -- gather decompiled code, xrefs, callees, callers, disassembly, variables");
                 recommendations.add("2. Classify: Leaf/Worker/Thunk/Init/Callback/Public API/Internal utility");
                 recommendations.add("3. Mandatory Undefined Type Audit: examine BOTH decompiled code and disassembly for undefined types");
@@ -3225,7 +3225,7 @@ public class AnalysisService {
                 recommendations.add("7. Rename + Prototype: rename_function() (PascalCase) + set_function_prototype()");
                 recommendations.add("8. Local Variable Renaming: set_variable_type() then rename_variables() with Hungarian notation");
                 recommendations.add("9. Global Data: rename_symbol() with g_ prefix for DAT_*/s_* references");
-                recommendations.add("10. Plate Comment: set_comment(type='plate') per PLATE_COMMENT_FORMAT_GUIDE.md (Algorithm, Parameters, Returns, Structure Layout, Magic Numbers)");
+                recommendations.add("10. Plate Comment: set_comment(type='plate') per docs/PLATE_COMMENT_BEST_PRACTICES.md (Algorithm, Parameters, Returns, Structure Layout, Magic Numbers)");
                 recommendations.add("11. Inline Comments: PRE_COMMENTs + EOL_COMMENTs via batch_set_comments()");
                 recommendations.add("12. Verify: analyze_function_completeness() once -- accept phantom/void* deductions");
             }
