@@ -30,24 +30,26 @@ public class ListingServiceValidationTest extends TestCase {
 
     // --- convert_number: pure utility, works with no program ---
 
+    @SuppressWarnings("unchecked")
     public void testConvertNumberDecimalProducesHex() {
         Response r = listing.convertNumber("255", 4);
-        assertTrue(r instanceof Response.Text);
-        String out = ((Response.Text) r).content().toLowerCase();
-        assertTrue("expected hex ff in conversion of 255, got: " + out, out.contains("ff"));
+        assertTrue(r instanceof Response.Ok);
+        Map<String, Object> data = (Map<String, Object>) ((Response.Ok) r).data();
+        assertEquals("0xFF", data.get("hexadecimal"));
     }
 
+    @SuppressWarnings("unchecked")
     public void testConvertNumberHexInputAccepted() {
         Response r = listing.convertNumber("0x10", 4);
-        assertTrue(r instanceof Response.Text);
-        String out = ((Response.Text) r).content();
-        assertTrue("expected decimal 16 in conversion of 0x10, got: " + out, out.contains("16"));
+        assertTrue(r instanceof Response.Ok);
+        Map<String, Object> data = (Map<String, Object>) ((Response.Ok) r).data();
+        assertEquals("16", data.get("decimal_unsigned"));
     }
 
     public void testConvertNumberEmptyReports() {
         Response r = listing.convertNumber("", 4);
-        assertTrue(r instanceof Response.Text);
-        assertTrue(((Response.Text) r).content().contains("No number provided"));
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("No number provided"));
     }
 
     // --- program-scoped listers degrade gracefully with no program ---

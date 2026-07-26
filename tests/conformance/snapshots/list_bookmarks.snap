@@ -1,5 +1,12 @@
 {
-  "bookmarks": [],
-  "count": 0,
+  "bookmarks": [
+    {
+      "address": "10001000",
+      "category": "Note",
+      "comment": "",
+      "type": "Note"
+    }
+  ],
+  "count": 1,
   "success": true
 }

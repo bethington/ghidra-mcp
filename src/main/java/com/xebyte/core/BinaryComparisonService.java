@@ -94,8 +94,8 @@ public class BinaryComparisonService {
         public boolean hasPrologueStripped;
         public boolean hasEpilogueStripped;
 
-        public String toJson() {
-            return JsonHelper.toJson(JsonHelper.mapOf(
+        public Map<String, Object> toMap() {
+            return JsonHelper.mapOf(
                 "function_name", functionName,
                 "address", address,
                 "program", programName,
@@ -112,7 +112,11 @@ public class BinaryComparisonService {
                 "string_constants", stringConstants,
                 "immediate_values", immediateValues,
                 "basic_block_hashes", basicBlockHashes
-            ));
+            );
+        }
+
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
         }
     }
 

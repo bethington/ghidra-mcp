@@ -1,5 +1,43 @@
-ExceptionList @ ffdff000 [void *32] (4 bytes) - 70 xrefs
-PTR_guard_check_icall_1000e120 @ 1000e120 [pointer] (4 bytes) - 42 xrefs
-PTR_GetLastError_1000e040 @ 1000e040 [pointer] (4 bytes) - 25 xrefs
-PTR_SetLastError_1000e044 @ 1000e044 [pointer] (4 bytes) - 8 xrefs
-IMAGE_DOS_HEADER_10000000 @ 10000000 [IMAGE_DOS_HEADER] (128 bytes) - 7 xrefs
+{
+  "count": 5,
+  "data_items": [
+    {
+      "address": "ffdff000",
+      "name": "ExceptionList",
+      "size": "4 bytes",
+      "type": "void *32",
+      "xref_count": 70
+    },
+    {
+      "address": "1000e120",
+      "name": "PTR_guard_check_icall_1000e120",
+      "size": "4 bytes",
+      "type": "pointer",
+      "xref_count": 42
+    },
+    {
+      "address": "1000e040",
+      "name": "PTR_GetLastError_1000e040",
+      "size": "4 bytes",
+      "type": "pointer",
+      "xref_count": 25
+    },
+    {
+      "address": "1000e044",
+      "name": "PTR_SetLastError_1000e044",
+      "size": "4 bytes",
+      "type": "pointer",
+      "xref_count": 8
+    },
+    {
+      "address": "10000000",
+      "name": "IMAGE_DOS_HEADER_10000000",
+      "size": "128 bytes",
+      "type": "IMAGE_DOS_HEADER",
+      "xref_count": 7
+    }
+  ],
+  "limit": 5,
+  "offset": 0,
+  "total": 205
+}

@@ -78,10 +78,10 @@ public class HeadlessManagementService {
         if (program != null) {
             String langOut = program.getLanguageID() != null
                 ? program.getLanguageID().getIdAsString() : "";
-            return Response.text(JsonHelper.toJson(JsonHelper.mapOf(
+            return Response.ok(JsonHelper.mapOf(
                 "success", true,
                 "program", program.getName(),
-                "language", langOut)));
+                "language", langOut));
         }
         if (hasLanguage) {
             return Response.err("Failed to load program with language '" + normalizedLanguageId
@@ -130,8 +130,10 @@ public class HeadlessManagementService {
         try {
             boolean ok = programProvider.createProject(parentDir, name);
             if (ok) {
-                return Response.text("{\"success\": true, \"name\": \"" + ServiceUtils.escapeJson(name)
-                    + "\", \"path\": \"" + ServiceUtils.escapeJson(parentDir + "/" + name) + "\"}");
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "name", name,
+                    "path", parentDir + "/" + name));
             }
             return Response.err("Failed to create project");
         } catch (Exception e) {
@@ -147,7 +149,7 @@ public class HeadlessManagementService {
         }
         boolean success = programProvider.openProject(projectPath);
         if (success) {
-            return Response.text("{\"success\": true, \"project\": \"" + ServiceUtils.escapeJson(programProvider.getProjectName()) + "\"}");
+            return Response.ok(JsonHelper.mapOf("success", true, "project", programProvider.getProjectName()));
         }
         return Response.err("Failed to open project: " + projectPath);
     }
@@ -159,7 +161,7 @@ public class HeadlessManagementService {
         }
         String projectName = programProvider.getProjectName();
         programProvider.closeProject();
-        return Response.text("{\"success\": true, \"closed\": \"" + ServiceUtils.escapeJson(projectName) + "\"}");
+        return Response.ok(JsonHelper.mapOf("success", true, "closed", projectName));
     }
 
     @McpTool(path = "/load_program_from_project", method = "POST", description = "Load a program from the open project. Returns structured diagnostics on failure (available paths, server-binding state) so the operator can tell server-side-checkout-but-not-shared from path-typo from server-unreachable. See discussion #119.", category = "headless")
@@ -227,7 +229,7 @@ public class HeadlessManagementService {
     @McpTool(path = "/get_project_info", description = "Get info about the currently open project, including server-binding state. A shared (server-bound) project is required for /server/version_control/checkout to deliver content the headless can open; if `project_server_bound` is false, the open project is local-only.", category = "headless")
     public Response getProjectInfo() {
         if (!programProvider.hasProject()) {
-            return Response.text("{\"has_project\": false}");
+            return Response.ok(JsonHelper.mapOf("has_project", false));
         }
         List<HeadlessProgramProvider.ProjectFileInfo> files = programProvider.listProjectFiles();
         int programCount = (int) files.stream().filter(f -> "Program".equals(f.contentType)).count();

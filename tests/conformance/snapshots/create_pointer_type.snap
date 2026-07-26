@@ -1,1 +1,6 @@
-Successfully created pointer type: int * (int*)
+{
+  "base_type": "int",
+  "message": "Successfully created pointer type: int * (int*)",
+  "name": "int *",
+  "status": "success"
+}

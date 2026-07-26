@@ -2,7 +2,7 @@
   "address": "10001000",
   "basic_block_count": 5,
   "basic_block_hashes": [
-    "06c3f5b9110bd7fbf2150958df6cddb3b1b1a17df6a545f6eff1d80c6a1542f8",
+    "25b4df9e54726467fa856e3a478e3c08702989cb3761f8460a8be8b973875064",
     "dc20ebe72a1260eb3a7adaf18220226c5d639a60d4d86b038ad427beac3411cd",
     "90792f52937110939090cb90a165c0551d60547ea6ce1be8f5df9de01bfbc3dc",
     "f626c53c4ad81d2cb5ee0fbfe7b4d650aba399a5d2a066352e66c568ed2d30b0",
@@ -19,7 +19,7 @@
     8,
     65535
   ],
-  "instruction_count": 91,
+  "instruction_count": 89,
   "param_count": 2,
   "program": "Benchmark.dll",
   "prologue_stripped": false,

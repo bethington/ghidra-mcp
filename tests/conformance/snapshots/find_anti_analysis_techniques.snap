@@ -168,38 +168,6 @@
       "technique": "INT 0x2d"
     },
     {
-      "address": "10004787",
-      "category": "suspicious_instruction",
-      "function": "FUN_100046cf",
-      "instruction": "INT3",
-      "severity": "medium",
-      "technique": "INT 3"
-    },
-    {
-      "address": "10004787",
-      "category": "suspicious_instruction",
-      "function": "FUN_100046cf",
-      "instruction": "INT3",
-      "severity": "medium",
-      "technique": "INT 0x2d"
-    },
-    {
-      "address": "100047ba",
-      "category": "suspicious_instruction",
-      "function": "FUN_1000478d",
-      "instruction": "INT3",
-      "severity": "medium",
-      "technique": "INT 3"
-    },
-    {
-      "address": "100047ba",
-      "category": "suspicious_instruction",
-      "function": "FUN_1000478d",
-      "instruction": "INT3",
-      "severity": "medium",
-      "technique": "INT 0x2d"
-    },
-    {
       "address": "100051d8",
       "category": "suspicious_instruction",
       "function": "_abort",
@@ -289,13 +257,13 @@
       "debugger_detection": 4,
       "exception_based": 3,
       "peb_teb_access": 4,
-      "suspicious_instruction": 23,
+      "suspicious_instruction": 19,
       "timing_checks": 2
     },
     "by_severity": {
       "high": 11,
-      "medium": 25
+      "medium": 21
     }
   },
-  "total_findings": 36
+  "total_findings": 32
 }

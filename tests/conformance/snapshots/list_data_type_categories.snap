@@ -1,13 +1,13 @@
 {
   "categories": [
-    "WinDef.h",
-    "PE",
-    "mbstring.h",
-    "ehdata.h",
-    "ehdata.h/functions"
+    "winnls.h",
+    "winbase.h",
+    "winbase.h/functions",
+    "excpt.h",
+    "mbstring.h"
   ],
   "count": 5,
   "limit": 5,
   "offset": 0,
-  "total": 13
+  "total": 18
 }

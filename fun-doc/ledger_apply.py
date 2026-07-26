@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -73,13 +72,31 @@ def consolidate(rows: list) -> dict:
     return out
 
 
-def _parse_layout(text: str) -> dict:
-    """/get_struct_layout text -> {offset: {'type':.., 'name':.., 'size':..}}."""
+def _parse_layout(response) -> dict:
+    """/get_struct_layout JSON ({"fields": [{"offset","size","type","name"}]})
+    -> {offset: {'type':.., 'name':.., 'size':..}}.
+
+    6.0.0's response-contract migration replaced the old pipe-delimited ASCII
+    table this used to regex-parse with a real JSON `fields` array -- see
+    docs/project-management/MCP_RESPONSE_CONTRACT.md Stage 6. A field with no
+    name comes back as `"name": null` (unnamed/padding); normalize to "" so
+    downstream `reconcile()`/`name` string handling doesn't have to special-case
+    None.
+    """
+    if not isinstance(response, dict):
+        return {}
     out = {}
-    for m in re.finditer(r"^\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*(\S.*?)\s*$",
-                         text, re.MULTILINE):
-        out[int(m.group(1))] = {"size": int(m.group(2)),
-                                "type": m.group(3).strip(), "name": m.group(4).strip()}
+    for field in response.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        offset = field.get("offset")
+        if offset is None:
+            continue
+        out[int(offset)] = {
+            "size": field.get("size"),
+            "type": field.get("type"),
+            "name": field.get("name") or "",
+        }
     return out
 
 
@@ -130,13 +147,13 @@ def apply_struct(struct_key: str, ghidra_struct: str = None, *, program: str = P
     if not rows:
         return {"struct": struct_key, "error": "no ledger rows"}
     proven = consolidate(rows)
-    layout_raw = str(fun_doc.ghidra_get("/get_struct_layout",
-                                        params={"struct_name": gstruct, "program": program}))
-    if "error" in layout_raw[:60].lower() or "not found" in layout_raw.lower():
+    layout_response = fun_doc.ghidra_get("/get_struct_layout",
+                                          params={"struct_name": gstruct, "program": program})
+    if isinstance(layout_response, dict) and layout_response.get("error"):
         return {"struct": struct_key, "ghidra_struct": gstruct,
-                "error": f"struct not found in Ghidra: {layout_raw[:80]}",
+                "error": f"struct not found in Ghidra: {layout_response['error'][:80]}",
                 "reconcile": reconcile(proven, {})}
-    layout = _parse_layout(layout_raw)
+    layout = _parse_layout(layout_response)
     actions = reconcile(proven, layout)
     applied = []
     if not dry_run:
@@ -181,11 +198,13 @@ def _selftest() -> int:
     assert c[0x44]["type"] == "byte"
     assert c[0x50]["status"] == "conflict", c[0x50]
 
-    layout = _parse_layout(
-        "Offset | Size | Type | Name\n"
-        "-------|------|------|-----\n"
-        "    50 |    2 | ushort | wField32\n"
-        "    68 |    4 | uint   | dwField44\n")   # 0x44=68: ghidra has uint, proof says byte
+    layout = _parse_layout({
+        "name": "TestStruct", "size": 72, "alignment": 4,
+        "fields": [
+            {"offset": 50, "size": 2, "type": "ushort", "name": "wField32"},
+            {"offset": 68, "size": 4, "type": "uint", "name": "dwField44"},  # 0x44=68: ghidra has uint, proof says byte
+        ],
+    })
     assert layout[50]["name"] == "wField32" and layout[68]["type"] == "uint"
 
     acts = {a["off"]: a for a in reconcile(c, layout)}

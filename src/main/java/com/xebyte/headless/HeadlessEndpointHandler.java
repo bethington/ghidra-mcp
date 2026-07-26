@@ -1826,10 +1826,6 @@ public class HeadlessEndpointHandler {
         return "{\"success\": true, \"message\": \"Server shutting down\"}";
     }
 
-    public String convertNumber(String value, int size) {
-        return com.xebyte.core.ServiceUtils.convertNumber(value, size);
-    }
-
     public String readMemory(String addressStr, int length, String programName) {
         return programScriptService.readMemory(addressStr, length, programName).toJson();
     }

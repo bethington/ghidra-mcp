@@ -124,7 +124,11 @@ public class FunctionService {
                     DecompileResults result =
                         decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                     if (result != null && result.decompileCompleted()) {
-                        return Response.text(result.getDecompiledFunction().getC());
+                        Map<String, Object> out = new LinkedHashMap<>();
+                        out.put("name", func.getName());
+                        out.put("address", func.getEntryPoint().toString(false));
+                        out.put("decompiled", result.getDecompiledFunction().getC());
+                        return Response.ok(out);
                     } else {
                         return Response.err("Decompilation failed");
                     }
@@ -391,8 +395,10 @@ public class FunctionService {
             return Response.err("Function address is required");
         }
 
-        final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<String> errorMessage = new AtomicReference<>();
+        final AtomicReference<String> functionName = new AtomicReference<>();
+        final AtomicReference<String> decompiledCode = new AtomicReference<>();
 
         // Resolve address before entering threading lambda
         Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
@@ -403,7 +409,7 @@ public class FunctionService {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
-                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        errorMessage.set("No function found at address " + functionAddrStr);
                         return null;
                     }
 
@@ -417,31 +423,27 @@ public class FunctionService {
 
                         if (results == null || !results.decompileCompleted()) {
                             String errorMsg = results != null ? results.getErrorMessage() : "Unknown error";
-                            resultMsg.append("Error: Decompilation did not complete for function ").append(func.getName());
+                            String message = "Decompilation did not complete for function " + func.getName();
                             if (errorMsg != null && !errorMsg.isEmpty()) {
-                                resultMsg.append(". Reason: ").append(errorMsg);
+                                message += ". Reason: " + errorMsg;
                             }
+                            errorMessage.set(message);
                             return null;
                         }
 
                         // Check if decompiled function is null (can happen even when decompileCompleted returns true)
                         if (results.getDecompiledFunction() == null) {
-                            resultMsg.append("Error: Decompiler completed but returned null decompiled function for ").append(func.getName()).append(".\n");
-                            resultMsg.append("This can happen with functions that have:\n");
-                            resultMsg.append("- Invalid control flow or unreachable code\n");
-                            resultMsg.append("- Large NOP sleds or padding\n");
-                            resultMsg.append("- External calls to unknown addresses\n");
-                            resultMsg.append("- Stack frame issues\n");
-                            resultMsg.append("Consider using disassemble_function() instead for this function.");
+                            errorMessage.set("Decompiler completed but returned null decompiled function for "
+                                    + func.getName() + ". This can happen with functions that have: "
+                                    + "invalid control flow or unreachable code; large NOP sleds or padding; "
+                                    + "external calls to unknown addresses; stack frame issues. "
+                                    + "Consider using disassemble_function() instead for this function.");
                             return null;
                         }
 
-                        // Get the decompiled C code
-                        String decompiledCode = results.getDecompiledFunction().getC();
-
+                        functionName.set(func.getName());
+                        decompiledCode.set(results.getDecompiledFunction().getC());
                         success.set(true);
-                        resultMsg.append("Success: Forced redecompilation of ").append(func.getName()).append("\n\n");
-                        resultMsg.append(decompiledCode);
 
                         Msg.info(this, "Forced decompilation for function: " + func.getName());
 
@@ -451,22 +453,26 @@ public class FunctionService {
 
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    resultMsg.append("Error: ").append(msg);
+                    errorMessage.set(msg);
                     Msg.error(this, "Error forcing decompilation", e);
                 }
                 return null;
             });
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(msg);
+            errorMessage.set("Failed to execute on Swing thread: " + msg);
             Msg.error(this, "Failed to execute force decompile on Swing thread", e);
         }
 
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (text.startsWith("Error:")) {
-            return Response.err(text.substring(7).trim());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
         }
-        return Response.text(text);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("address", functionAddrStr);
+        out.put("name", functionName.get());
+        out.put("decompiled", decompiledCode.get());
+        return Response.ok(out);
     }
 
     public Response forceDecompile(String functionAddrStr) {
@@ -1000,22 +1006,31 @@ public class FunctionService {
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
         if (result.isSuccess()) {
-            String msg = "Successfully set prototype for function at " + functionAddress;
-            if (callingConvention != null && !callingConvention.isEmpty()) {
-                msg += " with " + callingConvention + " calling convention";
-            }
+            List<String> warnings = new ArrayList<>();
             // Warn about __thiscall ECX auto-param limitation
             String cc = callingConvention != null ? callingConvention : "";
             boolean protoHasThiscall = prototype != null && (prototype.contains("__thiscall") || cc.contains("__thiscall"));
             if (protoHasThiscall && prototype != null && !prototype.contains("void *this") && !prototype.contains("void * this")) {
-                msg += "\n\nNOTE: For __thiscall/__fastcall member functions, also call set_function_this_type "
+                warnings.add("For __thiscall/__fastcall member functions, also call set_function_this_type "
                      + "with the concrete struct/class pointer (e.g. MyWidget *) so the decompiler "
-                     + "uses typed 'this' field access instead of void*.";
+                     + "uses typed 'this' field access instead of void*.");
             }
             if (!result.getErrorMessage().isEmpty()) {
-                msg += "\n\nWarnings/Debug Info:\n" + result.getErrorMessage();
+                for (String line : result.getErrorMessage().split("\n")) {
+                    if (!line.isBlank()) warnings.add(line.trim());
+                }
             }
-            return Response.text(msg);
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("status", "success");
+            out.put("message", "Successfully set prototype for function at " + functionAddress);
+            out.put("address", functionAddress);
+            out.put("prototype", prototype);
+            if (callingConvention != null && !callingConvention.isEmpty()) {
+                out.put("calling_convention", callingConvention);
+            }
+            if (!warnings.isEmpty()) out.put("warnings", warnings);
+            return Response.ok(out);
         } else {
             return Response.err("Failed to set function prototype: " + result.getErrorMessage());
         }
@@ -2088,15 +2103,17 @@ public class FunctionService {
         Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<String> errorMessage = new AtomicReference<>();
+        final AtomicReference<String> functionName = new AtomicReference<>();
+        final AtomicReference<String> oldStorageRef = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Set variable storage", () -> {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                    errorMessage.set("No function found at address " + functionAddrStr);
                     return null;
                 }
 
@@ -2110,45 +2127,43 @@ public class FunctionService {
                 }
 
                 if (targetVar == null) {
-                    resultMsg.append("Error: Variable '").append(variableName).append("' not found in function ").append(func.getName());
+                    errorMessage.set("Variable '" + variableName + "' not found in function " + func.getName());
                     return null;
                 }
 
                 String oldStorage = targetVar.getVariableStorage().toString();
+                functionName.set(func.getName());
+                oldStorageRef.set(oldStorage);
 
-                // Ghidra's variable storage API has limited programmatic access
-                // The proper way to change variable storage is through the decompiler UI
-                resultMsg.append("Note: Programmatic variable storage control is limited in Ghidra.\n\n");
-                resultMsg.append("Current variable information:\n");
-                resultMsg.append("  Variable: ").append(variableName).append("\n");
-                resultMsg.append("  Function: ").append(func.getName()).append(" @ ").append(functionAddrStr).append("\n");
-                resultMsg.append("  Current storage: ").append(oldStorage).append("\n");
-                resultMsg.append("  Requested storage: ").append(storageSpec).append("\n\n");
-                resultMsg.append("To change variable storage:\n");
-                resultMsg.append("1. Open the function in Ghidra's Decompiler window\n");
-                resultMsg.append("2. Right-click on the variable '").append(variableName).append("'\n");
-                resultMsg.append("3. Select 'Edit Data Type' or 'Retype Variable'\n");
-                resultMsg.append("4. Manually adjust the storage location\n\n");
-                resultMsg.append("Alternative approach:\n");
-                resultMsg.append("- Use run_ghidra_script() to execute a custom Ghidra script\n");
-                resultMsg.append("- The script can use high-level Pcode/HighVariable API\n");
-                resultMsg.append("- See FixEBPRegisterReuse.java for an example\n");
-
+                // Ghidra's variable storage API has limited programmatic access;
+                // this call reports the current/requested storage rather than
+                // actually changing it -- see the manual workaround in the
+                // response's "message"/"see_also" fields.
                 success.set(true);
                 Msg.info(this, "Variable storage query for: " + variableName + " in " + func.getName() +
                          " (current: " + oldStorage + ", requested: " + storageSpec + ")");
                 return null;
             });
         } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
+            errorMessage.set("Failed to execute on Swing thread: " + e.getMessage());
             Msg.error(this, "Failed to execute set variable storage on Swing thread", e);
         }
 
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
-            return Response.text(text);
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "unsupported");
+        out.put("variable", variableName);
+        out.put("function", functionName.get());
+        out.put("address", functionAddrStr);
+        out.put("current_storage", oldStorageRef.get());
+        out.put("requested_storage", storageSpec);
+        out.put("message", "Programmatic variable storage control is limited in Ghidra; use the Decompiler UI "
+                + "(right-click the variable > Edit Data Type/Retype Variable) or run_ghidra_script with the "
+                + "high-level Pcode/HighVariable API.");
+        out.put("see_also", "FixEBPRegisterReuse.java");
+        return Response.ok(out);
     }
 
     public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
@@ -3252,7 +3267,7 @@ public class FunctionService {
         final List<String> errors = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
         final AtomicReference<Function> funcRef = new AtomicReference<>(null);
-        final AtomicReference<String> fallbackResult = new AtomicReference<>(null);
+        final AtomicReference<Response> fallbackResult = new AtomicReference<>(null);
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
@@ -3386,7 +3401,7 @@ public class FunctionService {
                     try {
                         // Try individual operations (transactions will be closed in finally)
                         Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
-                        fallbackResult.set(individualResult.toJson());
+                        fallbackResult.set(individualResult);
                     } catch (Exception fallbackE) {
                         errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
                         Msg.error(this, "Both batch and individual rename operations failed", e);
@@ -3420,7 +3435,7 @@ public class FunctionService {
 
             // Return fallback result if used
             if (fallbackResult.get() != null) {
-                return Response.text(fallbackResult.get());
+                return fallbackResult.get();
             }
 
             if (errorRef.get() != null) {

@@ -2534,13 +2534,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * Convert a number to different representations
-     */
-    private String convertNumber(String text, int size) {
-        return com.xebyte.core.ServiceUtils.convertNumber(text, size);
-    }
-
-    /**
      * List global variables/symbols with optional filtering
      */
     private String listGlobals(int offset, int limit, String filter, String programName) {
@@ -3404,14 +3397,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     private String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
         return functionService.createFunctionAtAddress(addressStr, name, disassembleFirst).toJson();
-    }
-
-    private String generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
-        return programScriptService.generateScriptContent(purpose, workflowType, parameters).toJson();
-    }
-
-    private String generateScriptName(String workflowType) {
-        return programScriptService.generateScriptName(workflowType);
     }
 
     /**

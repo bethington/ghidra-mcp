@@ -1,5 +1,5 @@
 {
-  "count": 5,
+  "count": 4,
   "groups": [
     {
       "name": "Decompiler",
@@ -12,10 +12,6 @@
     {
       "name": "Analyzers",
       "option_count": 135
-    },
-    {
-      "name": "Disassembler",
-      "option_count": 3
     },
     {
       "name": "Program Information",

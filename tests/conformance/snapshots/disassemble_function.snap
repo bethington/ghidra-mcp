@@ -1,14 +1,6 @@
 {
-  "count": 91,
+  "count": 89,
   "instructions": [
-    {
-      "address": "10001000",
-      "instruction": "PUSH EBX"
-    },
-    {
-      "address": "10001001",
-      "instruction": "MOV EBX,dword ptr [ESP + 0xc]"
-    },
     {
       "address": "10001005",
       "instruction": "PUSH EBP"

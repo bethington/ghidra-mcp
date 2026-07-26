@@ -21,6 +21,7 @@ import javax.swing.SwingUtilities;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -224,7 +225,7 @@ public class DataTypeService {
         }
 
         Collections.sort(matches);
-        return Response.text(ServiceUtils.paginateList(matches, offset, limit));
+        return ServiceUtils.paged("matches", matches, offset, limit);
     }
 
     // Backward compatibility overload
@@ -288,24 +289,22 @@ public class DataTypeService {
         }
 
         Structure struct = (Structure) dataType;
-        StringBuilder result = new StringBuilder();
-
-        result.append("Structure: ").append(struct.getName()).append("\n");
-        result.append("Size: ").append(struct.getLength()).append(" bytes\n");
-        result.append("Alignment: ").append(struct.getAlignment()).append("\n\n");
-        result.append("Layout:\n");
-        result.append("Offset | Size | Type | Name\n");
-        result.append("-------|------|------|-----\n");
-
+        List<Map<String, Object>> fields = new ArrayList<>();
         for (DataTypeComponent component : struct.getDefinedComponents()) {
-            result.append(String.format("%6d | %4d | %-20s | %s\n",
-                component.getOffset(),
-                component.getLength(),
-                component.getDataType().getName(),
-                component.getFieldName() != null ? component.getFieldName() : "(unnamed)"));
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("offset", component.getOffset());
+            field.put("size", component.getLength());
+            field.put("type", component.getDataType().getName());
+            field.put("name", component.getFieldName());
+            fields.add(field);
         }
 
-        return Response.text(result.toString());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("name", struct.getName());
+        out.put("size", struct.getLength());
+        out.put("alignment", struct.getAlignment());
+        out.put("fields", fields);
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -337,21 +336,20 @@ public class DataTypeService {
         }
 
         ghidra.program.model.data.Enum enumType = (ghidra.program.model.data.Enum) dataType;
-        StringBuilder result = new StringBuilder();
-
-        result.append("Enumeration: ").append(enumType.getName()).append("\n");
-        result.append("Size: ").append(enumType.getLength()).append(" bytes\n\n");
-        result.append("Values:\n");
-        result.append("Name | Value\n");
-        result.append("-----|------\n");
-
-        String[] names = enumType.getNames();
-        for (String valueName : names) {
+        List<Map<String, Object>> values = new ArrayList<>();
+        for (String valueName : enumType.getNames()) {
             long value = enumType.getValue(valueName);
-            result.append(String.format("%-20s | %d (0x%X)\n", valueName, value, value));
+            values.add(JsonHelper.mapOf(
+                    "name", valueName,
+                    "value", value,
+                    "hex", String.format("0x%X", value)));
         }
 
-        return Response.text(result.toString());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("name", enumType.getName());
+        out.put("size", enumType.getLength());
+        out.put("values", values);
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -437,7 +435,7 @@ public class DataTypeService {
         }
 
         if (fieldsJson == null || fieldsJson.isEmpty()) {
-            return Response.text(badFieldsFormatHint("Fields JSON is required"));
+            return Response.err(badFieldsFormatHint("Fields JSON is required"));
         }
 
         // Cheap up-front shape check (issue #167): give the model a clear
@@ -446,7 +444,7 @@ public class DataTypeService {
         // concrete fix instead of a generic "No valid fields provided".
         String fieldsTrimmed = fieldsJson.trim();
         if (!fieldsTrimmed.startsWith("[") || !fieldsTrimmed.endsWith("]")) {
-            return Response.text(badFieldsFormatHint(
+            return Response.err(badFieldsFormatHint(
                     "fields parameter must be a JSON array (got: "
                             + fieldsTrimmed.substring(0, Math.min(60, fieldsTrimmed.length()))
                             + "...)"));
@@ -456,8 +454,9 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean successFlag = new AtomicBoolean(false);
+        final AtomicInteger createdSize = new AtomicInteger(0);
+        final AtomicInteger fieldCount = new AtomicInteger(0);
 
         try {
             // Parse the fields JSON (simplified parsing for basic structure)
@@ -465,9 +464,10 @@ public class DataTypeService {
             List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
 
             if (fields.isEmpty()) {
-                return Response.text(badFieldsFormatHint(
+                return Response.err(badFieldsFormatHint(
                         "No valid fields parsed — every field must have name and type"));
             }
+            fieldCount.set(fields.size());
 
             DataTypeManager dtm = program.getDataTypeManager();
 
@@ -538,9 +538,7 @@ public class DataTypeService {
                     DataType createdStruct = dtm.addDataType(struct, null);
 
                     successFlag.set(true);
-                    resultMsg.append("Successfully created structure '").append(name).append("' with ")
-                            .append(fields.size()).append(" fields, total size: ")
-                            .append(createdStruct.getLength()).append(" bytes");
+                    createdSize.set(createdStruct.getLength());
                     return null;
                 });
             } catch (Exception e) {
@@ -563,7 +561,17 @@ public class DataTypeService {
             return Response.err(msg);
         }
 
-        return resultMsg.length() > 0 ? Response.text(resultMsg.toString()) : Response.err("Unknown failure");
+        if (!successFlag.get()) {
+            return Response.err("Unknown failure");
+        }
+        Map<String, Object> resultMap = new LinkedHashMap<>();
+        resultMap.put("status", "success");
+        resultMap.put("message", "Successfully created structure '" + name + "' with "
+                + fieldCount.get() + " fields, total size: " + createdSize.get() + " bytes");
+        resultMap.put("name", name);
+        resultMap.put("field_count", fieldCount.get());
+        resultMap.put("size", createdSize.get());
+        return Response.ok(resultMap);
     }
 
     // Backward compatibility overload
@@ -664,80 +672,6 @@ public class DataTypeService {
     }
 
     /**
-     * Create a union data type with simplified approach for testing
-     */
-    public Response createUnionSimple(String name, Object fieldsObj) {
-        // Even simpler test - don't access any Ghidra APIs
-        if (name == null || name.isEmpty()) return Response.err("Union name is required");
-        if (fieldsObj == null) return Response.err("Fields are required");
-
-        return Response.success("Union endpoint test successful - name: " + name);
-    }
-
-    /**
-     * Create a union data type directly from fields object
-     */
-    @SuppressWarnings("unchecked")
-    public Response createUnionDirect(String name, Object fieldsObj, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.err("Union name is required");
-        if (fieldsObj == null) return Response.err("Fields are required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
-
-        try {
-            threadingStrategy.executeWrite(program, "Create union", () -> {
-                DataTypeManager dtm = program.getDataTypeManager();
-                UnionDataType union = new UnionDataType(name);
-
-                // Handle fields object directly (should be a List of Maps)
-                if (fieldsObj instanceof java.util.List) {
-                    java.util.List<Object> fieldsList = (java.util.List<Object>) fieldsObj;
-
-                    for (Object fieldObj : fieldsList) {
-                        if (fieldObj instanceof java.util.Map) {
-                            java.util.Map<String, Object> fieldMap = (java.util.Map<String, Object>) fieldObj;
-
-                            String fieldName = (String) fieldMap.get("name");
-                            String fieldType = (String) fieldMap.get("type");
-
-                            if (fieldName != null && fieldType != null) {
-                                DataType dt = ServiceUtils.findDataTypeByNameInAllCategories(dtm, fieldType);
-                                if (dt != null) {
-                                    union.add(dt, fieldName, null);
-                                    result.append("Added field: ").append(fieldName).append(" (").append(fieldType).append(")\n");
-                                } else {
-                                    result.append("Warning: Data type not found for field ").append(fieldName).append(": ").append(fieldType).append("\n");
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    result.append("Invalid fields format - expected list of field objects");
-                    return null;
-                }
-
-                dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
-                result.append("Union '").append(name).append("' created successfully with ").append(union.getNumComponents()).append(" fields");
-                success.set(true);
-                return null;
-            });
-        } catch (Exception e) {
-            result.append("Error creating union: ").append(e.getMessage());
-        }
-
-        return Response.text(result.toString());
-    }
-
-    // Backward compatibility overload
-    public Response createUnionDirect(String name, Object fieldsObj) {
-        return createUnionDirect(name, fieldsObj, null);
-    }
-
-    /**
      * Create a union data type (legacy method)
      */
     @McpTool(path = "/create_union", method = "POST", description = "Create a union data type", category = "datatype")
@@ -752,7 +686,10 @@ public class DataTypeService {
         if (fieldsJson == null || fieldsJson.isEmpty()) return Response.err("Fields JSON is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
+        AtomicInteger componentCount = new AtomicInteger(0);
+        List<Map<String, Object>> fieldsAdded = new ArrayList<>();
+        List<Map<String, Object>> fieldsSkipped = new ArrayList<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create union", () -> {
@@ -763,7 +700,7 @@ public class DataTypeService {
                 List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
 
                 if (fields.isEmpty()) {
-                    result.append(badFieldsFormatHint(
+                    errorMessage.set(badFieldsFormatHint(
                             "No valid fields parsed — every field must have name and type"));
                     return null;
                 }
@@ -773,22 +710,33 @@ public class DataTypeService {
                     DataType dt = ServiceUtils.resolveDataType(dtm, field.type);
                     if (dt != null) {
                         union.add(dt, field.name, null);
-                        result.append("Added field: ").append(field.name).append(" (").append(field.type).append(")\n");
+                        fieldsAdded.add(JsonHelper.mapOf("name", field.name, "type", field.type));
                     } else {
-                        result.append("Warning: Data type not found for field ").append(field.name).append(": ").append(field.type).append("\n");
+                        fieldsSkipped.add(JsonHelper.mapOf("name", field.name, "type", field.type,
+                                "reason", "Data type not found"));
                     }
                 }
 
                 dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
-                result.append("Union '").append(name).append("' created successfully with ").append(union.getNumComponents()).append(" fields");
+                componentCount.set(union.getNumComponents());
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error creating union: ").append(e.getMessage());
+            errorMessage.set("Error creating union: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("message", "Union '" + name + "' created successfully with " + componentCount.get() + " fields");
+        out.put("name", name);
+        out.put("fields_added", fieldsAdded);
+        if (!fieldsSkipped.isEmpty()) out.put("fields_skipped", fieldsSkipped);
+        out.put("field_count", componentCount.get());
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -811,7 +759,7 @@ public class DataTypeService {
         if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create typedef", () -> {
@@ -822,22 +770,28 @@ public class DataTypeService {
                 // arrays (type[N]), well-known C types, and DTM lookups recursively.
                 base = ServiceUtils.resolveDataType(dtm, baseType);
                 if (base == null) {
-                    result.append("Could not resolve base type: ").append(baseType);
+                    errorMessage.set("Could not resolve base type: " + baseType);
                     return null;
                 }
 
                 TypedefDataType typedef = new TypedefDataType(name, base);
                 dtm.addDataType(typedef, DataTypeConflictHandler.REPLACE_HANDLER);
 
-                result.append("Typedef '").append(name).append("' created as alias for '").append(baseType).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error creating typedef: ").append(e.getMessage());
+            errorMessage.set("Error creating typedef: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Typedef '" + name + "' created as alias for '" + baseType + "'",
+                "name", name,
+                "base_type", baseType));
     }
 
     // Backward compatibility overload
@@ -860,7 +814,7 @@ public class DataTypeService {
         if (newName == null || newName.isEmpty()) return Response.err("New name is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Clone data type", () -> {
@@ -868,7 +822,7 @@ public class DataTypeService {
                 DataType source = ServiceUtils.findDataTypeByNameInAllCategories(dtm, sourceType);
 
                 if (source == null) {
-                    result.append("Source type not found: ").append(sourceType);
+                    errorMessage.set("Source type not found: " + sourceType);
                     return null;
                 }
 
@@ -876,15 +830,21 @@ public class DataTypeService {
                 cloned.setName(newName);
 
                 dtm.addDataType(cloned, DataTypeConflictHandler.REPLACE_HANDLER);
-                result.append("Data type '").append(sourceType).append("' cloned as '").append(newName).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error cloning data type: ").append(e.getMessage());
+            errorMessage.set("Error cloning data type: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Data type '" + sourceType + "' cloned as '" + newName + "'",
+                "source_type", sourceType,
+                "new_name", newName));
     }
 
     // Backward compatibility overload
@@ -908,7 +868,8 @@ public class DataTypeService {
         if (length <= 0) return Response.err("Array length must be positive");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
+        AtomicReference<String> createdName = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create array type", () -> {
@@ -916,7 +877,7 @@ public class DataTypeService {
                 DataType baseDataType = ServiceUtils.resolveDataType(dtm, baseType);
 
                 if (baseDataType == null) {
-                    result.append("Base data type not found: ").append(baseType);
+                    errorMessage.set("Base data type not found: " + baseType);
                     return null;
                 }
 
@@ -927,17 +888,24 @@ public class DataTypeService {
                 }
 
                 DataType addedType = dtm.addDataType(arrayType, DataTypeConflictHandler.REPLACE_HANDLER);
-
-                result.append("Successfully created array type: ").append(addedType.getName())
-                      .append(" (").append(baseType).append("[").append(length).append("])");
+                createdName.set(addedType.getName());
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error creating array type: ").append(e.getMessage());
+            errorMessage.set("Error creating array type: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Successfully created array type: " + createdName.get()
+                        + " (" + baseType + "[" + length + "])",
+                "name", createdName.get(),
+                "base_type", baseType,
+                "length", length));
     }
 
     // Backward compatibility overload
@@ -959,7 +927,8 @@ public class DataTypeService {
         if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
+        AtomicReference<String> createdName = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create pointer type", () -> {
@@ -976,7 +945,7 @@ public class DataTypeService {
                 }
 
                 if (baseDataType == null) {
-                    result.append("Base data type not found: ").append(baseType);
+                    errorMessage.set("Base data type not found: " + baseType);
                     return null;
                 }
 
@@ -987,17 +956,22 @@ public class DataTypeService {
                 }
 
                 DataType addedType = dtm.addDataType(pointerType, DataTypeConflictHandler.REPLACE_HANDLER);
-
-                result.append("Successfully created pointer type: ").append(addedType.getName())
-                      .append(" (").append(baseType).append("*)");
+                createdName.set(addedType.getName());
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error creating pointer type: ").append(e.getMessage());
+            errorMessage.set("Error creating pointer type: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Successfully created pointer type: " + createdName.get() + " (" + baseType + "*)",
+                "name", createdName.get(),
+                "base_type", baseType));
     }
 
     // Backward compatibility overload
@@ -1021,7 +995,10 @@ public class DataTypeService {
         if (returnType == null || returnType.isEmpty()) return Response.err("Return type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
+        AtomicReference<String> createdName = new AtomicReference<>();
+        AtomicInteger paramCount = new AtomicInteger(0);
+        List<String> warnings = new ArrayList<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create function signature", () -> {
@@ -1030,7 +1007,7 @@ public class DataTypeService {
                 // Resolve return type
                 DataType returnDataType = ServiceUtils.resolveDataType(dtm, returnType);
                 if (returnDataType == null) {
-                    result.append("Return type not found: ").append(returnType);
+                    errorMessage.set("Return type not found: " + returnType);
                     return null;
                 }
 
@@ -1062,23 +1039,33 @@ public class DataTypeService {
                         if (!params.isEmpty()) {
                             funcDef.setArguments(params.toArray(new ParameterDefinition[0]));
                         }
+                        paramCount.set(params.size());
                     } catch (Exception e) {
                         // If JSON parsing fails, continue without parameters
-                        result.append("Warning: Could not parse parameters, continuing without them. ");
+                        warnings.add("Could not parse parameters, continuing without them");
                     }
                 }
 
                 DataType addedFuncDef = dtm.addDataType(funcDef, DataTypeConflictHandler.REPLACE_HANDLER);
-
-                result.append("Successfully created function signature: ").append(addedFuncDef.getName());
+                createdName.set(addedFuncDef.getName());
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error creating function signature: ").append(e.getMessage());
+            errorMessage.set("Error creating function signature: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("message", "Successfully created function signature: " + createdName.get());
+        out.put("name", createdName.get());
+        out.put("return_type", returnType);
+        out.put("parameter_count", paramCount.get());
+        if (!warnings.isEmpty()) out.put("warnings", warnings);
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -1122,7 +1109,7 @@ public class DataTypeService {
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.text(ServiceUtils.getLastParseError());
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             DataTypeManager dtm = program.getDataTypeManager();
@@ -1206,18 +1193,23 @@ public class DataTypeService {
                                                      expectedSize, actualSize, addressStr));
                     }
 
-                    String resultText = "Successfully applied data type '" + typeName + "' at " +
-                                   addressStr + " (size: " + actualSize + " bytes)";
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("status", "success");
+                    out.put("message", "Successfully applied data type '" + typeName + "' at "
+                            + addressStr + " (size: " + actualSize + " bytes)");
+                    out.put("type_name", typeName);
+                    out.put("address", addressStr);
+                    out.put("size", actualSize);
 
                     // Add value information if available
                     if (data != null && data.getValue() != null) {
-                        resultText += "\nValue: " + data.getValue().toString();
+                        out.put("value", data.getValue().toString());
                     }
-                    for (String warning : enforcementWarnings) {
-                        resultText += "\nWarning: " + warning;
+                    if (!enforcementWarnings.isEmpty()) {
+                        out.put("warnings", enforcementWarnings);
                     }
 
-                    return Response.text(resultText);
+                    return Response.ok(out);
                 });
             } catch (Exception e) {
                 return Response.err("Error applying data type: " + e.getMessage());
@@ -1257,7 +1249,7 @@ public class DataTypeService {
         Program program = pe.program();
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Delete data type", () -> {
@@ -1265,7 +1257,7 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
                 if (dataType == null) {
-                    result.append("Data type not found: ").append(typeName);
+                    errorMessage.set("Data type not found: " + typeName);
                     return null;
                 }
 
@@ -1274,24 +1266,34 @@ public class DataTypeService {
 
                 boolean deleted = dtm.remove(dataType, null);
                 if (deleted) {
-                    result.append("Data type '").append(typeName).append("' deleted successfully");
                     success.set(true);
                 } else {
-                    result.append("Failed to delete data type '").append(typeName)
-                            .append("' (may be in use). Try resolve_duplicate_type if a /Demangler 1-byte stub blocks a full struct.");
+                    errorMessage.set("Failed to delete data type '" + typeName
+                            + "' (may be in use). Try resolve_duplicate_type if a /Demangler 1-byte stub blocks a full struct.");
                 }
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error deleting data type: ").append(e.getMessage());
+            errorMessage.set("Error deleting data type: " + e.getMessage());
         }
 
         if (!success.get() && resolveDemanglerDuplicate) {
-            Response resolved = resolveDuplicateType(typeName, true, programName);
-            return Response.text(result.toString() + "\n" + resolved.toJson());
+            Map<String, Object> resolved = resolveDuplicateTypeData(typeName, true, programName);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("status", "error");
+            out.put("type_name", typeName);
+            out.put("message", errorMessage.get());
+            out.put("resolve_duplicate_attempt", resolved);
+            return Response.ok(out);
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Data type '" + typeName + "' deleted successfully",
+                "type_name", typeName));
     }
 
     // Backward compatibility overload
@@ -1323,7 +1325,7 @@ public class DataTypeService {
         }
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Modify struct field", () -> {
@@ -1331,12 +1333,12 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
 
                 if (dataType == null) {
-                    result.append("Structure not found: ").append(structName);
+                    errorMessage.set("Structure not found: " + structName);
                     return null;
                 }
 
                 if (!(dataType instanceof Structure)) {
-                    result.append("Data type '").append(structName).append("' is not a structure");
+                    errorMessage.set("Data type '" + structName + "' is not a structure");
                     return null;
                 }
 
@@ -1352,27 +1354,27 @@ public class DataTypeService {
                                 : Integer.parseInt(offsetStr);
                         targetComponent = struct.getComponentAt(targetOffset);
                         if (targetComponent == null) {
-                            result.append("No field at offset ").append(targetOffset).append(" in structure '").append(structName).append("'");
+                            errorMessage.set("No field at offset " + targetOffset + " in structure '" + structName + "'");
                             return null;
                         }
                     } catch (NumberFormatException e) {
-                        result.append("Invalid offset format: ").append(fieldName).append(". Use 'offset:16' or 'offset:0x10'");
+                        errorMessage.set("Invalid offset format: " + fieldName + ". Use 'offset:16' or 'offset:0x10'");
                         return null;
                     }
                 } else if (fieldName != null && !fieldName.isEmpty()) {
                     // Find by field name — exact, else unique Hungarian-stem match (BUG-2).
                     int ord = resolveFieldOrdinal(struct, fieldName);
                     if (ord == -2) {
-                        result.append("Field '").append(fieldName).append("' is ambiguous in '").append(structName)
-                              .append("' — multiple fields share that stem; use the exact name from get_struct_layout");
+                        errorMessage.set("Field '" + fieldName + "' is ambiguous in '" + structName
+                              + "' — multiple fields share that stem; use the exact name from get_struct_layout");
                         return null;
                     }
                     if (ord >= 0) targetComponent = struct.getComponent(ord);
                 }
 
                 if (targetComponent == null) {
-                    result.append("Field '").append(fieldName).append("' not found in structure '").append(structName)
-                            .append("'. For unnamed fields, use 'offset:N' (e.g., 'offset:16' or 'offset:0x10')");
+                    errorMessage.set("Field '" + fieldName + "' not found in structure '" + structName
+                            + "'. For unnamed fields, use 'offset:N' (e.g., 'offset:16' or 'offset:0x10')");
                     return null;
                 }
 
@@ -1380,7 +1382,7 @@ public class DataTypeService {
                 if (newType != null && !newType.isEmpty()) {
                     DataType newDataType = ServiceUtils.resolveDataType(dtm, newType);
                     if (newDataType == null) {
-                        result.append("New data type not found: ").append(newType);
+                        errorMessage.set("New data type not found: " + newType);
                         return null;
                     }
                     struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
@@ -1394,15 +1396,24 @@ public class DataTypeService {
                     targetComponent.setFieldName(fixedName);
                 }
 
-                result.append("Successfully modified field '").append(fieldName).append("' in structure '").append(structName).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error modifying struct field: ").append(e.getMessage());
+            errorMessage.set("Error modifying struct field: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("message", "Successfully modified field '" + fieldName + "' in structure '" + structName + "'");
+        out.put("struct_name", structName);
+        out.put("field_name", fieldName);
+        if (newType != null && !newType.isEmpty()) out.put("new_type", newType);
+        if (newName != null && !newName.isEmpty()) out.put("new_name", newName);
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -1662,12 +1673,40 @@ public class DataTypeService {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
+
+        Map<String, Object> data = resolveDuplicateTypeData(typeName, deleteDemanglerStub, programName);
+        if ("not_found".equals(data.get("situation"))) {
+            return Response.err("No data type named '" + typeName + "'");
+        }
+        return Response.ok(data);
+    }
+
+    /**
+     * Core logic behind {@code /resolve_duplicate_type}, factored out so
+     * {@code delete_data_type}'s demangler-retry branch can embed this as a
+     * real nested object instead of string-concatenating a second
+     * serialized response onto its own (the bug that motivated this split).
+     *
+     * <p>Always returns a populated map; never throws for "nothing to do"
+     * situations -- callers branch on the {@code situation} field, which is
+     * one of {@code not_found | no_stub_to_resolve | multiple_canonical |
+     * stub_only_no_canonical | stub_present_flag_required | resolved |
+     * deletion_failed}.</p>
+     */
+    private Map<String, Object> resolveDuplicateTypeData(String typeName, boolean deleteDemanglerStub,
+                                                          String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) {
+            return JsonHelper.mapOf("type_name", typeName, "situation", "not_found",
+                    "message", "No data type named '" + typeName + "'");
+        }
         Program program = pe.program();
 
         DataTypeManager dtm = program.getDataTypeManager();
         List<DataType> matches = findAllTypesBySimpleName(dtm, typeName);
         if (matches.isEmpty()) {
-            return Response.err("No data type named '" + typeName + "'");
+            return JsonHelper.mapOf("type_name", typeName, "situation", "not_found",
+                    "message", "No data type named '" + typeName + "'");
         }
 
         List<DataType> demanglerStubs = new ArrayList<>();
@@ -1680,51 +1719,69 @@ public class DataTypeService {
             }
         }
 
-        StringBuilder report = new StringBuilder();
-        report.append("Found ").append(matches.size()).append(" type(s) named '").append(typeName).append("': ");
-        for (DataType dt : matches) {
-            report.append(dt.getPathName()).append(" (").append(dt.getLength()).append(" B); ");
-        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("type_name", typeName);
+        out.put("matches", matches.stream()
+                .map(dt -> JsonHelper.mapOf("path", dt.getPathName(), "size", dt.getLength()))
+                .collect(java.util.stream.Collectors.toList()));
+        out.put("match_count", matches.size());
+        out.put("canonical_types", canonical.stream()
+                .map(dt -> JsonHelper.mapOf("path", dt.getPathName(), "size", dt.getLength()))
+                .collect(java.util.stream.Collectors.toList()));
+        out.put("demangler_stubs", demanglerStubs.stream()
+                .map(dt -> JsonHelper.mapOf("path", dt.getPathName(), "size", dt.getLength()))
+                .collect(java.util.stream.Collectors.toList()));
 
         if (demanglerStubs.isEmpty()) {
             if (canonical.size() <= 1) {
-                return Response.text(report + "No /Demangler 1-byte stub to resolve.");
+                out.put("situation", "no_stub_to_resolve");
+                out.put("message", "No /Demangler 1-byte stub to resolve.");
+            } else {
+                out.put("situation", "multiple_canonical");
+                out.put("message", "Multiple canonical types — pick one manually or delete orphans with delete_data_type.");
             }
-            return Response.text(report + "Multiple canonical types — pick one manually or delete orphans with delete_data_type.");
+            return out;
         }
 
         if (canonical.isEmpty()) {
-            return Response.text(report + "Only demangler stub(s) present — use delete_data_type or create_struct with replace_placeholder=true.");
+            out.put("situation", "stub_only_no_canonical");
+            out.put("message", "Only demangler stub(s) present — use delete_data_type or create_struct with replace_placeholder=true.");
+            return out;
         }
 
         if (!deleteDemanglerStub) {
-            return Response.text(report + "Demangler stub(s) present; set delete_demangler_stub=true to remove.");
+            out.put("situation", "stub_present_flag_required");
+            out.put("message", "Demangler stub(s) present; set delete_demangler_stub=true to remove.");
+            return out;
         }
 
-        int removed = 0;
+        List<String> deletedStubs = new ArrayList<>();
+        List<Map<String, Object>> failedStubs = new ArrayList<>();
         for (DataType stub : demanglerStubs) {
             StringBuilder stubMsg = new StringBuilder();
             if (deletePlaceholderType(program, stub, typeName, stubMsg)) {
-                removed++;
-                report.append("Deleted ").append(stub.getPathName()).append(". ");
+                deletedStubs.add(stub.getPathName());
             } else {
-                report.append("Could not delete ").append(stub.getPathName()).append(": ")
-                        .append(stubMsg).append(" ");
+                failedStubs.add(JsonHelper.mapOf("path", stub.getPathName(), "error", stubMsg.toString()));
             }
         }
 
         DataType best = canonical.stream().max(Comparator.comparingInt(DataType::getLength)).orElse(canonical.get(0));
-        report.append("Prefer canonical type ").append(best.getPathName())
-                .append(" (").append(best.getLength()).append(" B).");
+        out.put("canonical_path", best.getPathName());
+        out.put("removed", deletedStubs.size());
+        if (!deletedStubs.isEmpty()) out.put("deleted_stubs", deletedStubs);
+        if (!failedStubs.isEmpty()) out.put("failed_stubs", failedStubs);
 
-        if (removed > 0) {
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "removed", removed,
-                    "message", report.toString(),
-                    "canonical_path", best.getPathName()));
+        if (!deletedStubs.isEmpty()) {
+            out.put("situation", "resolved");
+            out.put("message", "Deleted " + String.join(", ", deletedStubs) + ". Prefer canonical type "
+                    + best.getPathName() + " (" + best.getLength() + " B).");
+        } else {
+            out.put("situation", "deletion_failed");
+            out.put("message", "Could not delete any demangler stub. Prefer canonical type "
+                    + best.getPathName() + " (" + best.getLength() + " B).");
         }
-        return Response.text(report.toString());
+        return out;
     }
 
     static List<DataType> findAllTypesBySimpleName(DataTypeManager dtm, String typeName) {
@@ -1835,7 +1892,7 @@ public class DataTypeService {
         fieldName = NamingConventions.applyStructFieldNamingPolicy(fieldName, fieldType);
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
         final String finalFieldName = fieldName;
 
         try {
@@ -1844,19 +1901,19 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
 
                 if (dataType == null) {
-                    result.append("Structure not found: ").append(structName);
+                    errorMessage.set("Structure not found: " + structName);
                     return null;
                 }
 
                 if (!(dataType instanceof Structure)) {
-                    result.append("Data type '").append(structName).append("' is not a structure");
+                    errorMessage.set("Data type '" + structName + "' is not a structure");
                     return null;
                 }
 
                 Structure struct = (Structure) dataType;
                 DataType newFieldType = ServiceUtils.resolveDataType(dtm, fieldType);
                 if (newFieldType == null) {
-                    result.append("Field data type not found: ").append(fieldType);
+                    errorMessage.set("Field data type not found: " + fieldType);
                     return null;
                 }
 
@@ -1877,15 +1934,24 @@ public class DataTypeService {
                     struct.add(newFieldType, finalFieldName, null);
                 }
 
-                result.append("Successfully added field '").append(finalFieldName).append("' to structure '").append(structName).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error adding struct field: ").append(e.getMessage());
+            errorMessage.set("Error adding struct field: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("message", "Successfully added field '" + finalFieldName + "' to structure '" + structName + "'");
+        out.put("struct_name", structName);
+        out.put("field_name", finalFieldName);
+        out.put("field_type", fieldType);
+        if (offset >= 0) out.put("offset", offset);
+        return Response.ok(out);
     }
 
     // Backward compatibility overload
@@ -1936,7 +2002,7 @@ public class DataTypeService {
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Remove struct field", () -> {
@@ -1944,12 +2010,12 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
 
                 if (dataType == null) {
-                    result.append("Structure not found: ").append(structName);
+                    errorMessage.set("Structure not found: " + structName);
                     return null;
                 }
 
                 if (!(dataType instanceof Structure)) {
-                    result.append("Data type '").append(structName).append("' is not a structure");
+                    errorMessage.set("Data type '" + structName + "' is not a structure");
                     return null;
                 }
 
@@ -1957,25 +2023,31 @@ public class DataTypeService {
                 int targetOrdinal = resolveFieldOrdinal(struct, fieldName);
 
                 if (targetOrdinal == -2) {
-                    result.append("Field '").append(fieldName).append("' is ambiguous in '").append(structName)
-                          .append("' — multiple fields share that stem; use the exact name from get_struct_layout");
+                    errorMessage.set("Field '" + fieldName + "' is ambiguous in '" + structName
+                          + "' — multiple fields share that stem; use the exact name from get_struct_layout");
                     return null;
                 }
                 if (targetOrdinal == -1) {
-                    result.append("Field '").append(fieldName).append("' not found in structure '").append(structName).append("'");
+                    errorMessage.set("Field '" + fieldName + "' not found in structure '" + structName + "'");
                     return null;
                 }
 
                 struct.delete(targetOrdinal);
-                result.append("Successfully removed field '").append(fieldName).append("' from structure '").append(structName).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error removing struct field: ").append(e.getMessage());
+            errorMessage.set("Error removing struct field: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Successfully removed field '" + fieldName + "' from structure '" + structName + "'",
+                "struct_name", structName,
+                "field_name", fieldName));
     }
 
     // Backward compatibility overload
@@ -1998,7 +2070,7 @@ public class DataTypeService {
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Move data type to category", () -> {
@@ -2006,26 +2078,31 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
                 if (dataType == null) {
-                    result.append("Data type not found: ").append(typeName);
+                    errorMessage.set("Data type not found: " + typeName);
                     return null;
                 }
 
                 CategoryPath catPath = new CategoryPath(categoryPath);
-                Category category = dtm.createCategory(catPath);
+                dtm.createCategory(catPath);
 
                 // Move the data type
                 dataType.setCategoryPath(catPath);
 
-                result.append("Successfully moved data type '").append(typeName)
-                      .append("' to category '").append(categoryPath).append("'");
                 success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error moving data type: ").append(e.getMessage());
+            errorMessage.set("Error moving data type: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Successfully moved data type '" + typeName + "' to category '" + categoryPath + "'",
+                "type_name", typeName,
+                "category_path", categoryPath));
     }
 
     // Backward compatibility overload
@@ -2059,7 +2136,8 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        StringBuilder result = new StringBuilder();
+        AtomicBoolean success = new AtomicBoolean(false);
+        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Rename data type", () -> {
@@ -2067,7 +2145,7 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, oldName);
 
                 if (dataType == null) {
-                    result.append("Data type not found: ").append(oldName);
+                    errorMessage.set("Data type not found: " + oldName);
                     return null;
                 }
 
@@ -2075,12 +2153,12 @@ public class DataTypeService {
                 // manager, not the program; setName would either fail or
                 // corrupt the shared archive.
                 if (dataType instanceof BuiltInDataType) {
-                    result.append("Cannot rename built-in data type: ").append(oldName);
+                    errorMessage.set("Cannot rename built-in data type: " + oldName);
                     return null;
                 }
 
                 if (newName.equals(dataType.getName())) {
-                    result.append("Data type '").append(oldName).append("' already has that name");
+                    errorMessage.set("Data type '" + oldName + "' already has that name");
                     return null;
                 }
 
@@ -2089,28 +2167,34 @@ public class DataTypeService {
                 // auto-uniquify to Foo.conflict.
                 Category category = dtm.getCategory(dataType.getCategoryPath());
                 if (category != null && category.getDataType(newName) != null) {
-                    result.append("A data type named '").append(newName)
-                          .append("' already exists in category '")
-                          .append(dataType.getCategoryPath().getPath()).append("'");
+                    errorMessage.set("A data type named '" + newName
+                          + "' already exists in category '"
+                          + dataType.getCategoryPath().getPath() + "'");
                     return null;
                 }
 
                 try {
                     dataType.setName(newName);
                 } catch (InvalidNameException | DuplicateNameException e) {
-                    result.append("Error renaming data type: ").append(e.getMessage());
+                    errorMessage.set("Error renaming data type: " + e.getMessage());
                     return null;
                 }
 
-                result.append("Successfully renamed data type '").append(oldName)
-                      .append("' to '").append(newName).append("'");
+                success.set(true);
                 return null;
             });
         } catch (Exception e) {
-            result.append("Error renaming data type: ").append(e.getMessage());
+            errorMessage.set("Error renaming data type: " + e.getMessage());
         }
 
-        return Response.text(result.toString());
+        if (!success.get()) {
+            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "message", "Successfully renamed data type '" + oldName + "' to '" + newName + "'",
+                "old_name", oldName,
+                "new_name", newName));
     }
 
     // -----------------------------------------------------------------------
@@ -2151,46 +2235,57 @@ public class DataTypeService {
 
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.text(ServiceUtils.getLastParseError());
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
             if (dataType == null) {
                 return Response.err("Data type not found: " + typeName);
             }
-
-            StringBuilder result = new StringBuilder();
-            result.append("Validation for type '").append(typeName).append("' at address ").append(addressStr).append(":\n\n");
 
             // Check if memory is available
             Memory memory = program.getMemory();
             int typeSize = dataType.getLength();
             Address endAddr = addr.add(typeSize - 1);
 
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("type_name", typeName);
+            out.put("address", addressStr);
+            out.put("size", typeSize);
+
+            List<String> warnings = new ArrayList<>();
+
             if (!memory.contains(addr) || !memory.contains(endAddr)) {
-                result.append("FAIL: Memory range not available\n");
-                result.append("   Required: ").append(addr).append(" - ").append(endAddr).append("\n");
-                return Response.text(result.toString());
+                out.put("memory_available", false);
+                out.put("range", JsonHelper.mapOf("start", addr.toString(), "end", endAddr.toString()));
+                out.put("valid", false);
+                warnings.add("Memory range not available");
+                out.put("warnings", warnings);
+                return Response.ok(out);
             }
 
-            result.append("PASS: Memory range available\n");
-            result.append("   Range: ").append(addr).append(" - ").append(endAddr).append(" (").append(typeSize).append(" bytes)\n");
+            out.put("memory_available", true);
+            out.put("range", JsonHelper.mapOf("start", addr.toString(), "end", endAddr.toString()));
 
             // Check alignment
             long alignment = dataType.getAlignment();
-            if (alignment > 1 && addr.getOffset() % alignment != 0) {
-                result.append("WARN: Alignment warning: Address not aligned to ").append(alignment).append("-byte boundary\n");
-            } else {
-                result.append("PASS: Proper alignment\n");
+            boolean aligned = alignment <= 1 || addr.getOffset() % alignment == 0;
+            out.put("aligned", aligned);
+            out.put("alignment", alignment);
+            if (!aligned) {
+                warnings.add("Alignment warning: address not aligned to " + alignment + "-byte boundary");
             }
 
             // Check if there's existing data
             Data existingData = program.getListing().getDefinedDataAt(addr);
             if (existingData != null) {
-                result.append("WARN: Existing data: ").append(existingData.getDataType().getName()).append("\n");
+                out.put("existing_data", existingData.getDataType().getName());
+                warnings.add("Existing data: " + existingData.getDataType().getName());
             } else {
-                result.append("PASS: No conflicting data\n");
+                out.put("existing_data", null);
             }
 
-            return Response.text(result.toString());
+            out.put("valid", true);
+            out.put("warnings", warnings);
+            return Response.ok(out);
         } catch (Exception e) {
             return Response.err("Error validating data type: " + e.getMessage());
         }
