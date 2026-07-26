@@ -43,7 +43,7 @@ public class ListingService {
         for (Function f : program.getFunctionManager().getFunctions(true)) {
             names.add(f.getName());
         }
-        return Response.text(ServiceUtils.paginateList(names, offset, limit));
+        return ServiceUtils.paged("methods", names, offset, limit);
     }
 
     @McpTool(path = "/list_classes", description = "List class and namespace names with pagination", category = "listing")
@@ -64,7 +64,7 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(classNames);
         Collections.sort(sorted);
-        return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
+        return ServiceUtils.paged("classes", sorted, offset, limit);
     }
 
     @McpTool(path = "/list_segments", description = "List memory blocks/segments", category = "listing")
@@ -76,11 +76,20 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        List<String> lines = new ArrayList<>();
+        List<Map<String, Object>> segments = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
-            lines.add(String.format("%s: %s - %s", block.getName(), block.getStart(), block.getEnd()));
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", block.getName());
+            entry.put("start", block.getStart().toString(false));
+            entry.put("end", block.getEnd().toString(false));
+            entry.put("size", block.getSize());
+            entry.put("readable", block.isRead());
+            entry.put("writable", block.isWrite());
+            entry.put("executable", block.isExecute());
+            entry.put("initialized", block.isInitialized());
+            segments.add(entry);
         }
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
+        return ServiceUtils.paged("segments", segments, offset, limit);
     }
 
     @McpTool(path = "/list_imports", description = "List external/imported symbols", category = "listing")
@@ -123,14 +132,17 @@ public class ListingService {
         SymbolTable table = program.getSymbolTable();
         SymbolIterator it = table.getAllSymbols(true);
 
-        List<String> lines = new ArrayList<>();
+        List<Map<String, Object>> exports = new ArrayList<>();
         while (it.hasNext()) {
             Symbol s = it.next();
             if (s.isExternalEntryPoint()) {
-                lines.add(s.getName() + " -> " + s.getAddress());
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", s.getName());
+                entry.put("address", s.getAddress().toString(false));
+                exports.add(entry);
             }
         }
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
+        return ServiceUtils.paged("exports", exports, offset, limit);
     }
 
     @McpTool(path = "/list_namespaces", description = "List namespace hierarchy", category = "listing")
@@ -151,7 +163,7 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(namespaces);
         Collections.sort(sorted);
-        return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
+        return ServiceUtils.paged("namespaces", sorted, offset, limit);
     }
 
     @McpTool(path = "/list_data_items", description = "List defined data items", category = "listing")
@@ -163,30 +175,26 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        List<String> lines = new ArrayList<>();
+        List<Map<String, Object>> items = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
             DataIterator it = program.getListing().getDefinedData(block.getStart(), true);
             while (it.hasNext()) {
                 Data data = it.next();
                 if (block.contains(data.getAddress())) {
-                    StringBuilder info = new StringBuilder();
-                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString(false);
-                    info.append(label);
-                    info.append(" @ ").append(data.getAddress().toString(false));
-
                     DataType dt = data.getDataType();
-                    String typeName = (dt != null) ? dt.getName() : "undefined";
-                    info.append(" [").append(typeName).append("]");
-
-                    int length = data.getLength();
-                    String sizeStr = (length == 1) ? "1 byte" : length + " bytes";
-                    info.append(" (").append(sizeStr).append(")");
-
-                    lines.add(info.toString());
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("label", data.getLabel() != null
+                            ? data.getLabel()
+                            : "DAT_" + data.getAddress().toString(false));
+                    entry.put("address", data.getAddress().toString(false));
+                    entry.put("type", (dt != null) ? dt.getName() : "undefined");
+                    entry.put("size", data.getLength());
+                    entry.put("block", block.getName());
+                    items.add(entry);
                 }
             }
         }
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
+        return ServiceUtils.paged("data_items", items, offset, limit);
     }
 
     @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.", category = "listing")
@@ -327,14 +335,14 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        StringBuilder result = new StringBuilder();
+        List<Map<String, Object>> functions = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
-            result.append(String.format("%s at %s\n",
-                func.getName(),
-                func.getEntryPoint()));
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", func.getName());
+            entry.put("address", func.getEntryPoint().toString(false));
+            functions.add(entry);
         }
-
-        return Response.text(result.toString());
+        return ServiceUtils.listed("functions", functions);
     }
 
     @McpTool(path = "/list_functions_enhanced", description = "List functions with thunk/external flags as JSON", category = "listing")
@@ -385,14 +393,11 @@ public class ListingService {
             ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
             ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
 
-            StringBuilder result = new StringBuilder();
-            result.append("Available Calling Conventions (").append(available.length).append("):\n\n");
-
+            List<String> names = new ArrayList<>();
             for (ghidra.program.model.lang.PrototypeModel model : available) {
-                result.append("- ").append(model.getName()).append("\n");
+                names.add(model.getName());
             }
-
-            return Response.text(result.toString());
+            return ServiceUtils.listed("calling_conventions", names);
         } catch (Exception e) {
             return Response.err("Error listing calling conventions: " + e.getMessage());
         }
@@ -408,7 +413,7 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        List<String> lines = new ArrayList<>();
+        List<Map<String, Object>> strings = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
 
         while (dataIt.hasNext()) {
@@ -422,17 +427,18 @@ public class ListingService {
                 }
 
                 if (filter == null || value.toLowerCase().contains(filter.toLowerCase())) {
-                    String escapedValue = ServiceUtils.escapeString(value);
-                    lines.add(String.format("%s: \"%s\"", data.getAddress(), escapedValue));
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("address", data.getAddress().toString(false));
+                    entry.put("value", value);
+                    entry.put("length", value.length());
+                    strings.add(entry);
                 }
             }
         }
-
-        if (lines.isEmpty()) {
-            return Response.text("No quality strings found (minimum 4 characters, 80% printable)");
-        }
-
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
+        // An empty result is a normal outcome, not an error: quality filtering
+        // (>=4 chars, 80% printable) legitimately rejects everything in some
+        // programs. Callers read count==0 rather than parsing a prose message.
+        return ServiceUtils.paged("strings", strings, offset, limit);
     }
 
     @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing")
@@ -628,7 +634,11 @@ public class ListingService {
             }
         }
 
-        return Response.text(ServiceUtils.paginateList(globals, offset, limit));
+        // TODO(response-contract): entries are still preformatted strings; they are
+        // built in two branches above and want structuring into records
+        // ({address, name, type, xrefs}) in a follow-up. The envelope is
+        // contract-correct today.
+        return ServiceUtils.paged("globals", globals, offset, limit);
     }
 
     /** Backward-compat overload preserving the pre-5.7.x signature
