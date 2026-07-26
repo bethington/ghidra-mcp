@@ -667,7 +667,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // bridge's dynamic tool discovery -- even though a caller who knew the raw
         // path could reach them. Found via a live-schema-vs-catalog diff (v6.0.0).
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
-            "/batch_apply_documentation", "/batch_set_variable_types", "/check_connection",
+            "/batch_apply_documentation", "/check_connection",
             "/exit_ghidra", "/get_current_address", "/get_current_function",
             "/get_current_selection", "/get_version",
             "/mcp/health", "/mcp/schema", "/open_project", "/project/info",
@@ -811,40 +811,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 || Boolean.parseBoolean(String.valueOf(params.get("headless")));
             String programToLaunch = params.get("program") != null ? params.get("program").toString() : null;
             sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
-        }));
-
-        // BATCH_SET_VARIABLE_TYPES - Set types for multiple variables (uses local optimized method)
-        server.createContext("/batch_set_variable_types", safeHandler(exchange -> {
-            try {
-                Map<String, Object> params = parseJsonParams(exchange);
-                String functionAddress = (String) params.get("function_address");
-
-                // Handle variable_types as either Map or String (JSON parsing variation)
-                Object vtObj = params.get("variable_types");
-                Map<String, String> variableTypes;
-                if (vtObj instanceof Map) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, String> vtMap = (Map<String, String>) vtObj;
-                    variableTypes = vtMap;
-                } else if (vtObj instanceof String vtStr) {
-                    variableTypes = new HashMap<>();
-                    Map<String, Object> parsed = JsonHelper.parseJson(vtStr);
-                    for (var e : parsed.entrySet()) {
-                        variableTypes.put(e.getKey(), e.getValue() != null ? String.valueOf(e.getValue()) : null);
-                    }
-                } else {
-                    variableTypes = new HashMap<>();
-                }
-
-                // Use optimized method
-                String result = batchSetVariableTypesOptimized(functionAddress, variableTypes);
-                sendResponse(exchange, result);
-            } catch (Exception e) {
-                // Catch any exceptions to prevent connection aborts
-                String errorMsg = "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\", \"method\": \"optimized\"}";
-                sendResponse(exchange, errorMsg);
-                Msg.error(this, "Error in batch_set_variable_types endpoint", e);
-            }
         }));
 
         server.createContext("/exit_ghidra", safeHandler(exchange -> {
