@@ -1,0 +1,212 @@
+# Curated read-tier assertions against Benchmark.dll.
+#
+# The generated baseline asserts only `is_error: false` -- it proves a tool
+# RESPONDS, not that it responds CORRECTLY. A reimplementation that returned
+# {"segments": [], "count": 0} for every program would pass every generated
+# case and every snapshot recorded from it.
+#
+# These assert MEANING against ground truth: Benchmark.dll is built from
+# fun-doc/benchmark/src by build.py, so its archetype functions, their
+# signatures, and its section layout are known facts rather than whatever the
+# server happened to say when the snapshot was taken.
+#
+# Ground truth used here (fun-doc/benchmark/src, and the per-function block in
+# fun-doc/benchmark/regression/Benchmark.dll.yaml):
+#   calc_crc16           @ 0x10001000  ushort, 2 params, CRC-16/CCITT (0x1021)
+#   compute_gcd          @ 0x10001130  2 params, Euclidean modulo
+#   compute_str_len      @ 0x100012a0  1 param, null-terminator scan
+#   sections: Headers .text .rdata .data .fptable .reloc
+
+defaults:
+  args:
+    program: "Benchmark.dll"
+  timeout: 60
+
+tool_cases:
+
+  # ---- program shape -------------------------------------------------------
+  - tool: get_metadata
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_equals:
+        architecture: "x86"
+        language: "x86:LE:32:default"
+        compiler: "windows"
+        endian: "little"
+        address_size_bits: 32
+
+  - tool: list_segments
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["segments", "count", "total"]
+      contains: [".text", ".rdata", ".data", "Headers"]
+      # Executability is a real property the pre-6.0.0 text form never carried.
+      not_contains: ['"executable":true,"initialized":false']
+
+  - tool: get_function_count
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["function_count", "program"]
+      json_equals: { program: "Benchmark.dll" }
+
+  # ---- a known function, end to end ---------------------------------------
+  - tool: get_function_by_address
+    name: curated_calc_crc16
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_equals:
+        name: "calc_crc16"
+        address: "10001000"
+        entry_point: "10001000"
+      contains: ["ushort"]          # return type, from the C source
+
+  - tool: get_function_signature
+    name: curated_calc_crc16
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_equals:
+        function_name: "calc_crc16"
+        param_count: 2
+        basic_block_count: 5
+        cyclomatic_complexity: 3
+
+  - tool: decompile_function
+    name: curated_calc_crc16
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_keys: ["name", "address", "decompiled"]
+      json_equals: { name: "calc_crc16" }
+      # The CRC-16/CCITT polynomial must survive decompilation.
+      contains: ["0x1021"]
+
+  - tool: disassemble_function
+    name: curated_calc_crc16
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_keys: ["instructions", "count"]
+      contains: ["10001000"]
+
+  # ---- bulk mode must agree with single mode ------------------------------
+  - tool: decompile_function
+    name: curated_bulk_two
+    tier: read
+    snapshot: false
+    args: { functions: "calc_crc16,compute_gcd" }
+    assert:
+      contains: ["calc_crc16", "compute_gcd"]
+
+  - tool: analyze_function_completeness
+    name: curated_bulk
+    tier: read
+    snapshot: false
+    args: { addresses: "0x10001000,0x10001130" }
+    assert:
+      json_keys: ["results", "count"]
+      json_equals: { count: 2 }
+      contains: ["calc_crc16", "compute_gcd"]
+
+  # ---- types ---------------------------------------------------------------
+  - tool: get_type_size
+    name: curated_dword
+    tier: read
+    snapshot: false
+    args: { type_name: "DWORD" }
+    assert:
+      json_equals: { type_name: "DWORD", size: 4, alignment: 4 }
+
+  # Bare-name resolution: this returned a false negative before the audit's
+  # BUG-1 fix, for every natural input an LLM would use.
+  - tool: validate_data_type
+    name: curated_bare_int
+    tier: read
+    snapshot: false
+    args: { type_name: "int" }
+    assert:
+      json_equals: { exists: true, size: 4 }
+
+  - tool: validate_data_type
+    name: curated_bare_pointer
+    tier: read
+    snapshot: false
+    args: { type_name: "char *" }
+    assert:
+      json_equals: { exists: true }
+
+  - tool: validate_data_type
+    name: curated_nonexistent
+    tier: read
+    snapshot: false
+    args: { type_name: "NoSuchTypeConformanceProbe" }
+    assert:
+      json_equals: { exists: false }
+
+  # ---- symbols and xrefs ---------------------------------------------------
+  - tool: list_exports
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["exports", "count", "total"]
+      contains: ["calc_crc16", "compute_gcd", "compute_str_len"]
+
+  - tool: get_entry_points
+    name: curated
+    tier: read
+    snapshot: false
+    args: {}
+    assert:
+      json_keys: ["entry_points", "count"]
+      contains: ["calc_crc16"]
+
+  - tool: get_xrefs_to
+    name: curated_calc_crc16
+    tier: read
+    snapshot: false
+    args: { address: "0x10001000" }
+    assert:
+      json_keys: ["references", "count", "total"]
+
+  - tool: search_functions
+    name: curated_compute
+    tier: read
+    snapshot: false
+    args: { name_pattern: "compute" }
+    assert:
+      json_keys: ["functions", "count", "total"]
+      contains: ["compute_gcd", "compute_str_len"]
+      not_contains: ["calc_crc16"]   # the filter must actually filter
+
+  # ---- error shapes are part of the contract ------------------------------
+  - tool: get_function_by_address
+    name: curated_bad_address
+    tier: read
+    snapshot: false
+    args: { address: "0xdeadbeef" }
+    assert:
+      error_contains: ["error"]
+
+  - tool: get_type_size
+    name: curated_unknown_type
+    tier: read
+    snapshot: false
+    args: { type_name: "NoSuchTypeConformanceProbe" }
+    assert:
+      error_contains: ["not found"]
