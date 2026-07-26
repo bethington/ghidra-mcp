@@ -126,7 +126,7 @@ public class FunctionService {
                     if (result != null && result.decompileCompleted()) {
                         return Response.text(result.getDecompiledFunction().getC());
                     } else {
-                        return Response.text("Decompilation failed");
+                        return Response.err("Decompilation failed");
                     }
                 }
             }
@@ -135,7 +135,7 @@ public class FunctionService {
                 try { decomp.dispose(); } catch (Exception ignored) {}
             }
         }
-        return Response.text("Function not found");
+        return Response.err("Function not found");
     }
 
     public Response decompileFunctionByName(String name) {
@@ -672,7 +672,7 @@ public class FunctionService {
                 if (hungarianWarning != null) {
                     return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
                 }
-                return Response.text("Variable renamed");
+                return Response.success("Variable renamed");
             }
         } catch (Exception e) {
             String errorMsg = "Failed to execute rename on Swing thread: " + e.getMessage();
@@ -681,7 +681,7 @@ public class FunctionService {
         } finally {
             decomp.dispose();
         }
-        return Response.text("Failed to rename variable");
+        return Response.err("Failed to rename variable");
     }
 
     public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
@@ -1017,7 +1017,7 @@ public class FunctionService {
             }
             return Response.text(msg);
         } else {
-            return Response.text("Failed to set function prototype: " + result.getErrorMessage());
+            return Response.err("Failed to set function prototype: " + result.getErrorMessage());
         }
     }
 

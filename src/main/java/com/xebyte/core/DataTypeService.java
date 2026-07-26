@@ -199,7 +199,7 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (pattern == null || pattern.isEmpty()) return Response.text("Search pattern is required");
+        if (pattern == null || pattern.isEmpty()) return Response.err("Search pattern is required");
 
         List<String> matches = new ArrayList<>();
         DataTypeManager dtm = program.getDataTypeManager();
@@ -268,17 +268,17 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (structName == null || structName.isEmpty()) return Response.text("Struct name is required");
+        if (structName == null || structName.isEmpty()) return Response.err("Struct name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
 
         if (dataType == null) {
-            return Response.text("Structure not found: " + structName);
+            return Response.err("Structure not found: " + structName);
         }
 
         if (!(dataType instanceof Structure)) {
-            return Response.text("Data type is not a structure: " + structName);
+            return Response.err("Data type is not a structure: " + structName);
         }
 
         Structure struct = (Structure) dataType;
@@ -317,17 +317,17 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (enumName == null || enumName.isEmpty()) return Response.text("Enum name is required");
+        if (enumName == null || enumName.isEmpty()) return Response.err("Enum name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, enumName);
 
         if (dataType == null) {
-            return Response.text("Enumeration not found: " + enumName);
+            return Response.err("Enumeration not found: " + enumName);
         }
 
         if (!(dataType instanceof ghidra.program.model.data.Enum)) {
-            return Response.text("Data type is not an enumeration: " + enumName);
+            return Response.err("Data type is not an enumeration: " + enumName);
         }
 
         ghidra.program.model.data.Enum enumType = (ghidra.program.model.data.Enum) dataType;
@@ -427,7 +427,7 @@ public class DataTypeService {
                    description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (name == null || name.isEmpty()) {
-            return Response.text("Structure name is required");
+            return Response.err("Structure name is required");
         }
 
         if (fieldsJson == null || fieldsJson.isEmpty()) {
@@ -470,11 +470,10 @@ public class DataTypeService {
             if (existingType != null) {
                 if (replacePlaceholder && existingType.getLength() <= 1) {
                     if (!deletePlaceholderType(program, existingType, name, new StringBuilder())) {
-                        return Response.text("Failed to remove 1-byte placeholder '"
-                                + existingType.getPathName() + "' before create_struct");
+                        return Response.err("Failed to remove 1-byte placeholder '" + existingType.getPathName() + "' before create_struct");
                     }
                 } else {
-                    return Response.text("Structure with name '" + name + "' already exists"
+                    return Response.err("Structure with name '" + name + "' already exists"
                             + " (" + existingType.getPathName() + ", " + existingType.getLength()
                             + " bytes). Use replace_placeholder=true for 1-byte stubs, or resolve_duplicate_type.");
                 }
@@ -485,7 +484,7 @@ public class DataTypeService {
             for (FieldDefinition field : fields) {
                 DataType fieldType = ServiceUtils.resolveDataType(dtm, field.type);
                 if (fieldType == null) {
-                    return Response.text("Unknown field type: " + field.type);
+                    return Response.err("Unknown field type: " + field.type);
                 }
                 resolvedTypes.put(field, fieldType);
             }
@@ -584,16 +583,16 @@ public class DataTypeService {
         Program program = pe.program();
 
         if (name == null || name.isEmpty()) {
-            return Response.text("Enumeration name is required");
+            return Response.err("Enumeration name is required");
         }
 
         if (valuesJson == null || valuesJson.isEmpty()) {
-            return Response.text("Values JSON is required. " +
+            return Response.err("Values JSON is required. " +
                 "Expected format: {\"NAME\": 0, \"NAME2\": 1} or {\"NAME\": \"0\", \"NAME2\": \"1\"}");
         }
 
         if (size != 1 && size != 2 && size != 4 && size != 8) {
-            return Response.text("Invalid size. Must be 1, 2, 4, or 8 bytes");
+            return Response.err("Invalid size. Must be 1, 2, 4, or 8 bytes");
         }
 
         try {
@@ -601,7 +600,7 @@ public class DataTypeService {
             Map<String, Long> values = parseValuesJson(valuesJson);
 
             if (values.isEmpty()) {
-                return Response.text("No valid enum values could be parsed from: " + valuesJson +
+                return Response.err("No valid enum values could be parsed from: " + valuesJson +
                     ". Expected format: {\"NAME\": 0, \"NAME2\": 1} or {\"NAME\": \"0\", \"NAME2\": \"1\"} " +
                     "or {\"NAME\": \"0xFF\"}. Values must be integers (not floats or arbitrary strings).");
             }
@@ -611,7 +610,7 @@ public class DataTypeService {
             // Check if enum already exists
             DataType existingType = dtm.getDataType("/" + name);
             if (existingType != null) {
-                return Response.text("Enumeration with name '" + name + "' already exists");
+                return Response.err("Enumeration with name '" + name + "' already exists");
             }
 
             // Create the enumeration under the injected threading strategy so the
@@ -663,10 +662,10 @@ public class DataTypeService {
      */
     public Response createUnionSimple(String name, Object fieldsObj) {
         // Even simpler test - don't access any Ghidra APIs
-        if (name == null || name.isEmpty()) return Response.text("Union name is required");
-        if (fieldsObj == null) return Response.text("Fields are required");
+        if (name == null || name.isEmpty()) return Response.err("Union name is required");
+        if (fieldsObj == null) return Response.err("Fields are required");
 
-        return Response.text("Union endpoint test successful - name: " + name);
+        return Response.success("Union endpoint test successful - name: " + name);
     }
 
     /**
@@ -677,8 +676,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.text("Union name is required");
-        if (fieldsObj == null) return Response.text("Fields are required");
+        if (name == null || name.isEmpty()) return Response.err("Union name is required");
+        if (fieldsObj == null) return Response.err("Fields are required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -743,8 +742,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.text("Union name is required");
-        if (fieldsJson == null || fieldsJson.isEmpty()) return Response.text("Fields JSON is required");
+        if (name == null || name.isEmpty()) return Response.err("Union name is required");
+        if (fieldsJson == null || fieldsJson.isEmpty()) return Response.err("Fields JSON is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -802,8 +801,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.text("Typedef name is required");
-        if (baseType == null || baseType.isEmpty()) return Response.text("Base type is required");
+        if (name == null || name.isEmpty()) return Response.err("Typedef name is required");
+        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -851,8 +850,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (sourceType == null || sourceType.isEmpty()) return Response.text("Source type is required");
-        if (newName == null || newName.isEmpty()) return Response.text("New name is required");
+        if (sourceType == null || sourceType.isEmpty()) return Response.err("Source type is required");
+        if (newName == null || newName.isEmpty()) return Response.err("New name is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -899,8 +898,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (baseType == null || baseType.isEmpty()) return Response.text("Base type is required");
-        if (length <= 0) return Response.text("Array length must be positive");
+        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
+        if (length <= 0) return Response.err("Array length must be positive");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -951,7 +950,7 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (baseType == null || baseType.isEmpty()) return Response.text("Base type is required");
+        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -1012,8 +1011,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.text("Function name is required");
-        if (returnType == null || returnType.isEmpty()) return Response.text("Return type is required");
+        if (name == null || name.isEmpty()) return Response.err("Function name is required");
+        if (returnType == null || returnType.isEmpty()) return Response.err("Return type is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -1107,11 +1106,11 @@ public class DataTypeService {
         Program program = pe.program();
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return Response.text("Address is required");
+            return Response.err("Address is required");
         }
 
         if (typeName == null || typeName.isEmpty()) {
-            return Response.text("Data type name is required");
+            return Response.err("Data type name is required");
         }
 
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
@@ -1124,7 +1123,7 @@ public class DataTypeService {
             DataType dataType = ServiceUtils.resolveDataType(dtm, typeName);
 
             if (dataType == null) {
-                return Response.text("ERROR: Unknown data type: " + typeName + ". " +
+                return Response.err("ERROR: Unknown data type: " + typeName + ". " +
                        "For arrays, use syntax 'basetype[count]' (e.g., 'dword[10]'). " +
                        "Or create the type first using create_struct, create_enum, or mcp_ghidra_create_array_type.");
             }
@@ -1134,7 +1133,7 @@ public class DataTypeService {
 
             // Check if address is in a valid memory block
             if (!program.getMemory().contains(address)) {
-                return Response.text("Address is not in program memory: " + addressStr);
+                return Response.err("Address is not in program memory: " + addressStr);
             }
 
             // Hungarian-vs-name cross-check (option A enforcement gate).
@@ -1245,7 +1244,7 @@ public class DataTypeService {
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
+        if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1312,9 +1311,9 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (structName == null || structName.isEmpty()) return Response.text("Structure name is required");
+        if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if ((fieldName == null || fieldName.isEmpty()) && (newName == null || newName.isEmpty())) {
-            return Response.text("Field name or offset is required");
+            return Response.err("Field name or offset is required");
         }
 
         AtomicBoolean success = new AtomicBoolean(false);
@@ -1434,7 +1433,7 @@ public class DataTypeService {
                    description = "Existing structure type to embed by value.") String embeddedStruct,
             @Param(value = "program", defaultValue = "") String programName) {
         if (embeddedStruct == null || embeddedStruct.isEmpty()) {
-            return Response.text("embedded_struct is required");
+            return Response.err("embedded_struct is required");
         }
         return modifyStructField(parentStruct, fieldName, embeddedStruct, "", programName);
     }
@@ -1652,7 +1651,7 @@ public class DataTypeService {
             @Param(value = "program", defaultValue = "") String programName) {
 
         if (typeName == null || typeName.isEmpty()) {
-            return Response.text("type_name is required");
+            return Response.err("type_name is required");
         }
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1662,7 +1661,7 @@ public class DataTypeService {
         DataTypeManager dtm = program.getDataTypeManager();
         List<DataType> matches = findAllTypesBySimpleName(dtm, typeName);
         if (matches.isEmpty()) {
-            return Response.text("No data type named '" + typeName + "'");
+            return Response.err("No data type named '" + typeName + "'");
         }
 
         List<DataType> demanglerStubs = new ArrayList<>();
@@ -1822,9 +1821,9 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (structName == null || structName.isEmpty()) return Response.text("Structure name is required");
-        if (fieldName == null || fieldName.isEmpty()) return Response.text("Field name is required");
-        if (fieldType == null || fieldType.isEmpty()) return Response.text("Field type is required");
+        if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
+        if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
+        if (fieldType == null || fieldType.isEmpty()) return Response.err("Field type is required");
 
         // Apply configured struct-field naming policy.
         fieldName = NamingConventions.applyStructFieldNamingPolicy(fieldName, fieldType);
@@ -1927,8 +1926,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (structName == null || structName.isEmpty()) return Response.text("Structure name is required");
-        if (fieldName == null || fieldName.isEmpty()) return Response.text("Field name is required");
+        if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
+        if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -1989,8 +1988,8 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
-        if (categoryPath == null || categoryPath.isEmpty()) return Response.text("Category path is required");
+        if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
+        if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -2047,8 +2046,8 @@ public class DataTypeService {
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         // Argument guards run before the program lookup so a malformed call
         // reports the actual problem instead of "No program loaded".
-        if (oldName == null || oldName.isEmpty()) return Response.text("Old name is required");
-        if (newName == null || newName.isEmpty()) return Response.text("New name is required");
+        if (oldName == null || oldName.isEmpty()) return Response.err("Old name is required");
+        if (newName == null || newName.isEmpty()) return Response.err("New name is required");
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2126,7 +2125,7 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
+        if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
@@ -2149,7 +2148,7 @@ public class DataTypeService {
             if (addr == null) return Response.text(ServiceUtils.getLastParseError());
 
             if (dataType == null) {
-                return Response.text("Data type not found: " + typeName);
+                return Response.err("Data type not found: " + typeName);
             }
 
             StringBuilder result = new StringBuilder();
@@ -2369,7 +2368,7 @@ public class DataTypeService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (categoryPath == null || categoryPath.isEmpty()) return Response.text("Category path is required");
+        if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
         try {
             return threadingStrategy.executeWrite(program, "Create category " + categoryPath, () -> {
