@@ -1,13 +1,6 @@
 {
   "limit": 5,
   "offset": 0,
-  "tags": [
-    {
-      "comment": "",
-      "id": 0,
-      "name": "CONFORMANCE_TAG",
-      "use_count": 0
-    }
-  ],
-  "total": 1
+  "tags": [],
+  "total": 0
 }

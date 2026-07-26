@@ -1,7 +1,7 @@
 Success: Forced redecompilation of calc_crc16
 
 
-/*  */
+/* __stdcall calc_crc16,8 */
 
 ushort calc_crc16(int param_1,uint param_2)
 

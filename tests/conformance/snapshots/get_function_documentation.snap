@@ -2,7 +2,6 @@
   "calling_convention": "__stdcall",
   "comments": [
     {
-      "eol_comment": "",
       "pre_comment": "0x1000  2  _calc_crc16@8",
       "relative_offset": 0
     }
@@ -72,7 +71,7 @@
       "type": "uint"
     }
   ],
-  "plate_comment": "",
+  "plate_comment": "__stdcall calc_crc16,8",
   "return_type": "ushort",
   "source_address": "10001000",
   "source_program": "Benchmark.dll"
