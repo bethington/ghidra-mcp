@@ -34,7 +34,7 @@ public final class ManualToolDescriptors {
     private ManualToolDescriptors() {}
 
     private static AnnotationScanner.ParamDescriptor p(String name, String source) {
-        return new AnnotationScanner.ParamDescriptor(name, "string", source, true, null, "", "");
+        return new AnnotationScanner.ParamDescriptor(name, "string", source, true, null, "", "", false);
     }
 
     private static List<AnnotationScanner.ParamDescriptor> params(String method, String... names) {

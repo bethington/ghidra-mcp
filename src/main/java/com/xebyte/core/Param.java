@@ -76,4 +76,22 @@ public @interface Param {
      * </ol>
      */
     String[] aliases() default {};
+
+    /**
+     * Whether an empty string is a meaningful value for this parameter.
+     *
+     * <p>The MCP bridge drops {@code ""} arguments by default, because some
+     * clients send every schema default on every call and an empty selector
+     * would otherwise be treated as "present but blank" and rejected.
+     *
+     * <p>That default is wrong for parameters where empty <em>is</em> the
+     * intent — clearing a comment is the motivating case: {@code set_comment}
+     * with {@code comment: ""} means "remove it", but the argument was being
+     * dropped before it reached Java, so the tool answered "Comment text is
+     * required" and clearing was unreachable through MCP.
+     *
+     * <p>Set this to {@code true} only where empty carries meaning, and make
+     * sure the handler distinguishes empty from absent.
+     */
+    boolean allowEmpty() default false;
 }

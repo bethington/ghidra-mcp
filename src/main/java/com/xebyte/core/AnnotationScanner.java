@@ -424,7 +424,8 @@ public class AnnotationScanner {
                 !NO_DEFAULT.equals(binding.param.defaultValue()),
                 NO_DEFAULT.equals(binding.param.defaultValue()) ? null : binding.param.defaultValue(),
                 binding.param.description(),
-                binding.param.paramType()    // NEW
+                binding.param.paramType(),
+                binding.param.allowEmpty()
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
@@ -477,7 +478,8 @@ public class AnnotationScanner {
 
     /** Describes a tool parameter for schema generation. */
     public record ParamDescriptor(String name, String type, String source,
-            boolean optional, String defaultValue, String description, String paramType) {
+            boolean optional, String defaultValue, String description, String paramType,
+            boolean allowEmpty) {
 
         /** Serialize to JSON. */
         public String toJson() {
@@ -494,6 +496,11 @@ public class AnnotationScanner {
             }
             if (paramType != null && !paramType.isEmpty()) {
                 sb.append(", \"param_type\": ").append(jsonStr(paramType));
+            }
+            // Only emitted when true: the bridge drops "" arguments unless a
+            // parameter declares that empty carries meaning.
+            if (allowEmpty) {
+                sb.append(", \"allow_empty\": true");
             }
             sb.append("}");
             return sb.toString();

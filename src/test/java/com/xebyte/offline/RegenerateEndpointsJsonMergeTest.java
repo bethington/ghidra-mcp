@@ -20,7 +20,7 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
     private static AnnotationScanner.ToolDescriptor tool(String... paramNames) {
         List<AnnotationScanner.ParamDescriptor> params = new ArrayList<>();
         for (String n : paramNames) {
-            params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string"));
+            params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string", false));
         }
         return new AnnotationScanner.ToolDescriptor("/open_project", "POST", "scanner description",
                 "headless", null, params);

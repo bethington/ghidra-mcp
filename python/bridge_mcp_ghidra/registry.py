@@ -63,12 +63,24 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # require a real value (e.g. /get_function_callers rejects empty
         # name/address). minimax avoids this by only sending params the LLM
         # explicitly provided, but the bridge is schema-driven and doesn't
-        # know which were defaults. Empty string is not a meaningful value
-        # for any current Ghidra endpoint — safe to filter.
+        # know which were defaults.
+        #
+        # Exception: a parameter may declare `allow_empty` when "" is itself
+        # the intent. This used to be a blanket rule on the claim that empty
+        # was meaningless for every endpoint, which made clearing a comment
+        # unreachable through MCP -- set_comment(comment="") was dropped here,
+        # arrived as null, and came back "Comment text is required". Whether
+        # empty is meaningful is a property of the parameter, so the parameter
+        # declares it (@Param(allowEmpty = true)) rather than the bridge
+        # guessing.
+        allow_empty = {
+            name for name, pdef in properties.items() if pdef.get("allow_empty")
+        }
         filtered = {
             k: v
             for k, v in kwargs.items()
-            if v is not None and not (isinstance(v, str) and v == "")
+            if v is not None
+            and not (isinstance(v, str) and v == "" and k not in allow_empty)
         }
         # Strict mode: refuse if any program selector is missing, so a forgotten
         # one fails loudly instead of running against the server's current

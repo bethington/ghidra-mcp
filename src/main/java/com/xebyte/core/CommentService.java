@@ -150,7 +150,8 @@ public class CommentService {
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
-            @Param(value = "comment", source = ParamSource.BODY) String comment,
+            @Param(value = "comment", source = ParamSource.BODY, allowEmpty = true,
+                   description = "Comment text. An empty string clears this comment kind at the address.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
                    description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
             @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
