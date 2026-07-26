@@ -57,14 +57,13 @@ tool_cases:
     assert:
       json_keys: ["data_items", "count", "offset", "total"]
 
-  # FINDING: `category` is REQUIRED here, so there is no way to list every data
-  # type -- the parameter is a filter and should be optional with an empty
-  # default, as it is on search_data_types. Passing one to keep the case honest.
+  # `category` is a filter and is now optional (it was required, so listing
+  # every data type was impossible). Omitting it here is the regression test.
   - tool: list_data_types
-    name: curated
+    name: curated_no_filter
     tier: read
     snapshot: false
-    args: { limit: 20, category: "int" }
+    args: { limit: 20 }
     assert:
       json_keys: ["data_types", "count", "offset", "total"]
 
