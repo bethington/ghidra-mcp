@@ -573,7 +573,8 @@ public class FunctionService {
     /**
      * Rename a variable in a function.
      */
-    @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function. Accepts function_name or function_address; address is more stable after recent renames.", category = "function")
+    // rename_variable merged into rename_variables in 6.0.0; kept as an internal helper
+    // (still used by the headless dispatcher). Callers pass variable_renames=[{old,new}].
     public Response renameVariableInFunction(
             @Param(value = "function_name", source = ParamSource.BODY, aliases = {"functionName"}, defaultValue = "") String functionName,
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
@@ -1252,7 +1253,8 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    @McpTool(path = "/set_local_variable_type", method = "POST", description = "Set the data type of a local variable. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    // set_local_variable_type merged into set_variable_type in 6.0.0; kept as the shared impl
+    // that set_variable_type (and set_parameter_type) delegate to.
     public Response setLocalVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1443,7 +1445,7 @@ public class FunctionService {
     /**
      * Endpoint wrapper for set_parameter_type (delegates to setLocalVariableType).
      */
-    @McpTool(path = "/set_parameter_type", method = "POST", description = "Set the data type of a function parameter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    // set_parameter_type merged into set_variable_type in 6.0.0; kept as an internal helper.
     public Response setParameterTypeEndpoint(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1604,8 +1606,8 @@ public class FunctionService {
     /**
      * Alias for {@link #setLocalVariableType} — name matches Ghidra UI "Retype Variable".
      */
-    @McpTool(path = "/set_decompiler_variable_type", method = "POST",
-            description = "Set a decompiler (high-level) variable or parameter type by name. Same as set_local_variable_type. For __thiscall 'this', prefer set_function_this_type.",
+    @McpTool(path = "/set_variable_type", method = "POST",
+            description = "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type.",
             category = "function")
     public Response setDecompilerVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY) String functionAddress,
