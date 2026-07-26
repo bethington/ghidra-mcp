@@ -133,14 +133,12 @@ public class DataTypeService {
                 dt.getName(), categoryName, sizeStr, dt.getPathName()));
         }
 
-        // Apply pagination
-        String result = ServiceUtils.paginateList(dataTypes, offset, limit);
-
-        if (result.isEmpty()) {
-            return Response.text("No data types found" + (category != null ? " for category: " + category : ""));
-        }
-
-        return Response.text(result);
+        // An empty result is a normal outcome (a filter that matched nothing),
+        // not an error -- callers read count==0 instead of parsing prose.
+        // TODO(response-contract): entries are still preformatted
+        // "name | category | size | path" strings; structure them into records
+        // in a follow-up. The envelope is contract-correct today.
+        return ServiceUtils.paged("data_types", dataTypes, offset, limit);
     }
 
     // Backward compatibility overload
@@ -2413,7 +2411,7 @@ public class DataTypeService {
             // Get all categories recursively
             addCategoriesRecursively(dtm.getRootCategory(), categories, "");
 
-            return Response.text(ServiceUtils.paginateList(categories, offset, limit));
+            return ServiceUtils.paged("categories", categories, offset, limit);
         } catch (Exception e) {
             return Response.err("Error listing categories: " + e.getMessage());
         }

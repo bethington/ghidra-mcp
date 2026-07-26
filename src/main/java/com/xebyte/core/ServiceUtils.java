@@ -230,8 +230,59 @@ public final class ServiceUtils {
     // ========================================================================
 
     /**
-     * Convert a list of strings into a newline-delimited string, applying offset and limit.
+     * Build the standard list-shaped response envelope.
+     *
+     * <p>Per {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}, every
+     * collection-returning tool emits a named plural key plus paging metadata:
+     *
+     * <pre>{@code {"segments": [...], "count": 7, "offset": 0, "limit": 100, "total": 7}}</pre>
+     *
+     * <p>{@code total} is the point of the envelope. A bare array cannot tell a
+     * caller whether it received everything or the first page of 5,739, and
+     * {@code len(items)} cannot either.
+     *
+     * @param key   plural name for the collection ("segments", "functions")
+     * @param all   the full result set, before paging
+     * @param offset first item to return
+     * @param limit  maximum items to return; {@code <= 0} means "no limit"
      */
+    public static Response paged(String key, List<?> all, int offset, int limit) {
+        int start = Math.max(0, offset);
+        int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
+        List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put(key, page);
+        out.put("count", page.size());
+        out.put("offset", start);
+        if (limit > 0) {
+            out.put("limit", limit);
+        }
+        out.put("total", all.size());
+        return Response.ok(out);
+    }
+
+    /**
+     * List envelope for tools that do not paginate.
+     *
+     * <pre>{@code {"entry_points": [...], "count": 12}}</pre>
+     */
+    public static Response listed(String key, List<?> all) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put(key, all);
+        out.put("count", all.size());
+        return Response.ok(out);
+    }
+
+    /**
+     * Convert a list of strings into a newline-delimited string, applying offset and limit.
+     *
+     * @deprecated Produces plain text, which violates the response contract
+     *     (see {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}). Use
+     *     {@link #paged(String, List, int, int)} instead. Retained only while
+     *     the staged text-to-JSON migration is in flight.
+     */
+    @Deprecated
     public static String paginateList(List<String> items, int offset, int limit) {
         int start = Math.max(0, offset);
         int end = Math.min(items.size(), offset + limit);
