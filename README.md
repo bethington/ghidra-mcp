@@ -1,5 +1,7 @@
 # Ghidra MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fbethington%2Fghidra-mcp.svg)](https://mcptoplist.com/server/glama%2Fbethington%2Fghidra-mcp)
+
 [![Tests](https://img.shields.io/github/actions/workflow/status/bethington/ghidra-mcp/tests.yml?branch=main&style=for-the-badge&label=Tests&logo=github-actions&logoColor=white)](https://github.com/bethington/ghidra-mcp/actions/workflows/tests.yml)
 [![Release](https://img.shields.io/github/v/release/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=blue)](https://github.com/bethington/ghidra-mcp/releases/latest)
 [![License](https://img.shields.io/github/license/bethington/ghidra-mcp?style=for-the-badge&color=green)](LICENSE)
