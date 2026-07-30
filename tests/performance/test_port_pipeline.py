@@ -14,6 +14,7 @@ instance -- see the port_pipeline module docstring and CLAUDE.md's OpenD2
 conformance section for that workflow; they are not practical to run in an
 offline unit suite (they shell out to cmake/msbuild and a real HTTP oracle).
 """
+import json
 import sys
 from pathlib import Path
 
@@ -24,7 +25,10 @@ FUN_DOC = Path(__file__).parent.parent.parent / "fun-doc"
 sys.path.insert(0, str(FUN_DOC))
 
 import port_pipeline as pp  # noqa: E402
-from fun_doc import _state_func_to_row, _row_to_state_func, _STATE_DIRECT_FIELDS  # noqa: E402
+from fun_doc import (  # noqa: E402
+    _state_func_to_row, _row_to_state_func, _STATE_DIRECT_FIELDS,
+    _void_return_needs_hard_skip, _class_b_outbuf_eligible, _model_declined_outbuf,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +141,72 @@ class TestClassifyFunction:
         }
         """
         assert pp.classify_function(text) == "stateful"
+
+
+# ---------------------------------------------------------------------------
+# process_port_candidate's routing gates (fun_doc.py)
+#
+# 2026-07-28: these three gates decide whether a stateful-classified,
+# void-return, or pointer-writing function reaches Class B out-param/buffer
+# proving or gets terminally stateful_skip'd. Extracted from
+# process_port_candidate/process_global_leaf_live specifically so this
+# safety-relevant routing logic is unit-testable without a live LLM/Ghidra
+# (process_port_candidate itself is manual-only -- see this file's module
+# docstring). See fun_doc.py's docstrings on each function for the full
+# incident history (STAT_ImportStateFlagsFromBuffer's wild frees, the
+# MONSTER_GetInvGridSize read+write hybrid) that shaped these gates.
+# ---------------------------------------------------------------------------
+
+class TestVoidReturnNeedsHardSkip:
+    def test_void_with_delegate_call_is_hard_skipped(self):
+        assert _void_return_needs_hard_skip(True, True) is True
+
+    def test_void_with_bare_pointer_deref_no_longer_hard_skipped(self):
+        """The 2026-07-28 loosening: a plain '->' with no call at all now
+        reaches classification instead of being pre-LLM skipped."""
+        assert _void_return_needs_hard_skip(True, False) is False
+
+    def test_non_void_never_hard_skipped(self):
+        assert _void_return_needs_hard_skip(False, True) is False
+        assert _void_return_needs_hard_skip(False, False) is False
+
+
+class TestClassBOutbufEligible:
+    def test_ptr_write_with_live_prove_is_eligible(self):
+        assert _class_b_outbuf_eligible("ptr_write", True) is True
+
+    def test_ptr_write_without_live_prove_is_not_eligible(self):
+        """Class B still needs the live oracle -- FUNDOC_LIVE_PROVE gates
+        this route exactly like every other live-prove path."""
+        assert _class_b_outbuf_eligible("ptr_write", False) is False
+
+    def test_other_skip_reasons_are_not_eligible(self):
+        for reason in ("delegate_call", "global_plus_ptr", "dat_global", "other"):
+            assert _class_b_outbuf_eligible(reason, True) is False
+
+
+class TestModelDeclinedOutbuf:
+    def test_bare_unsupported_reply(self):
+        assert _model_declined_outbuf("UNSUPPORTED") is True
+
+    def test_lowercase_and_whitespace_tolerant(self):
+        assert _model_declined_outbuf("  unsupported  \n") is True
+
+    def test_trailing_period_tolerant(self):
+        assert _model_declined_outbuf("UNSUPPORTED.") is True
+
+    def test_real_draft_is_not_a_decline(self):
+        assert _model_declined_outbuf("```cpp\nvoid Foo() {}\n```") is False
+
+    def test_explanatory_prose_is_not_a_bare_decline(self):
+        # The prompt asks for the single word UNSUPPORTED; extra prose means
+        # parse_live_response's own retry path handles it, not this fast path.
+        assert _model_declined_outbuf(
+            "UNSUPPORTED because this reads meaningful data") is False
+
+    def test_empty_or_none_is_not_a_decline(self):
+        assert _model_declined_outbuf("") is False
+        assert _model_declined_outbuf(None) is False
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +452,156 @@ class TestWriteDraftTemplate:
 
         vectors_text = Path(paths["vectors_path"]).read_text(encoding="utf-8")
         assert '"Fn"' in vectors_text
+
+
+class TestPendingVectorsNamespacing:
+    """Regression: pending-vector staging files are keyed by BINARY + function,
+    not function alone. Before 2026-07-30 `shutdown_stub_no_op.json` merged 101
+    vectors from five DLLs under one `fn` key -- five distinct compiled
+    functions that merely share a stub name."""
+
+    def _vec(self, fn, program, ret):
+        return [{"fn": fn, "in": {}, "out": {"ret": ret},
+                 "note": f"PD2-S12; src {program} 0x1000"}]
+
+    def test_stem_is_namespaced_by_module(self):
+        assert pp.pending_vectors_stem("Fog", "shutdown_stub_no_op") == \
+            "Fog_shutdown_stub_no_op"
+
+    def test_same_function_name_in_two_binaries_does_not_merge(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pp, "PENDING_VECTORS_DIR", tmp_path)
+
+        fog = pp.write_pending_vectors(
+            "Fog", "shutdown_stub_no_op",
+            self._vec("ShutdownStubNoOp", "/Mods/PD2-S12/Fog.dll", 0))
+        storm = pp.write_pending_vectors(
+            "Storm", "shutdown_stub_no_op",
+            self._vec("ShutdownStubNoOp", "/Mods/PD2-S12/Storm.dll", 7))
+
+        assert fog != storm
+        assert fog.name == "Fog_shutdown_stub_no_op.json"
+        assert storm.name == "Storm_shutdown_stub_no_op.json"
+
+        # Each file holds ONLY its own binary's vector -- the whole point.
+        fog_data = json.loads(fog.read_text(encoding="utf-8"))
+        storm_data = json.loads(storm.read_text(encoding="utf-8"))
+        assert len(fog_data) == 1 and fog_data[0]["out"]["ret"] == 0
+        assert len(storm_data) == 1 and storm_data[0]["out"]["ret"] == 7
+
+    def test_same_binary_appends_rather_than_replaces(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pp, "PENDING_VECTORS_DIR", tmp_path)
+        for ret in (1, 2, 3):
+            path = pp.write_pending_vectors(
+                "Fog", "some_fn", self._vec("SomeFn", "/Mods/PD2-S12/Fog.dll", ret))
+        assert [e["out"]["ret"] for e in json.loads(path.read_text(encoding="utf-8"))] == [1, 2, 3]
+
+    def test_concurrent_appends_do_not_lose_entries(self, tmp_path, monkeypatch):
+        """The read-modify-write was unguarded; concurrent stagers dropped
+        entries. _interprocess_lock must serialize them."""
+        import threading
+
+        monkeypatch.setattr(pp, "PENDING_VECTORS_DIR", tmp_path)
+        errors = []
+
+        def stage(i):
+            try:
+                pp.write_pending_vectors(
+                    "Fog", "race_fn",
+                    self._vec("RaceFn", "/Mods/PD2-S12/Fog.dll", i))
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=stage, args=(i,)) for i in range(24)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+
+        assert not errors, errors
+        data = json.loads((tmp_path / "Fog_race_fn.json").read_text(encoding="utf-8"))
+        assert len(data) == 24, f"lost updates: kept {len(data)}/24"
+        assert sorted(e["out"]["ret"] for e in data) == list(range(24))
+
+    def test_corrupt_existing_file_does_not_lose_the_new_vector(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pp, "PENDING_VECTORS_DIR", tmp_path)
+        (tmp_path / "Fog_broken.json").write_text("{not json", encoding="utf-8")
+        path = pp.write_pending_vectors(
+            "Fog", "broken", self._vec("Broken", "/Mods/PD2-S12/Fog.dll", 5))
+        assert len(json.loads(path.read_text(encoding="utf-8"))) == 1
+
+
+class TestMigratePendingVectors:
+    """The one-shot splitter for files staged before the namespacing fix."""
+
+    @staticmethod
+    def _mig():
+        sys.path.insert(0, str(FUN_DOC / "scripts"))
+        import migrate_pending_vectors as m
+        return m
+
+    def _entry(self, fn, program):
+        return {"fn": fn, "in": {}, "out": {"ret": 0},
+                "note": f"PD2-S12; src {program} 0x1000"}
+
+    def test_module_of_normalizes_both_spellings(self):
+        m = self._mig()
+        assert m.module_of(self._entry("F", "/Mods/PD2-S12/D2Common.dll")) == "D2Common"
+        assert m.module_of(self._entry("F", "D2Common.dll")) == "D2Common"
+        assert m.module_of({"fn": "F", "note": "no source here"}) is None
+
+    def test_splits_multi_binary_file_by_source(self, tmp_path, capsys):
+        m = self._mig()
+        (tmp_path / "shutdown_stub_no_op.json").write_text(json.dumps([
+            self._entry("ShutdownStubNoOp", "/Mods/PD2-S12/Fog.dll"),
+            self._entry("ShutdownStubNoOp", "/Mods/PD2-S12/Storm.dll"),
+            self._entry("ShutdownStubNoOp", "/Mods/PD2-S12/Fog.dll"),
+        ]), encoding="utf-8")
+
+        assert m.main(["--apply", "--pending-dir", str(tmp_path)]) == 0
+
+        fog = json.loads((tmp_path / "Fog_shutdown_stub_no_op.json").read_text(encoding="utf-8"))
+        storm = json.loads((tmp_path / "Storm_shutdown_stub_no_op.json").read_text(encoding="utf-8"))
+        assert len(fog) == 2 and len(storm) == 1
+        # original archived, not destroyed
+        assert (tmp_path / "_premigration" / "shutdown_stub_no_op.json").exists()
+        assert not (tmp_path / "shutdown_stub_no_op.json").exists()
+
+    def test_unattributed_entries_are_never_dropped(self, tmp_path):
+        m = self._mig()
+        (tmp_path / "mystery.json").write_text(json.dumps([
+            self._entry("Fn", "/Mods/PD2-S12/Fog.dll"),
+            {"fn": "Fn", "in": {}, "out": {"ret": 1}},  # no note at all
+        ]), encoding="utf-8")
+
+        assert m.main(["--apply", "--pending-dir", str(tmp_path)]) == 0
+        assert len(json.loads((tmp_path / "Fog_mystery.json").read_text(encoding="utf-8"))) == 1
+        assert len(json.loads(
+            (tmp_path / "mystery_unattributed.json").read_text(encoding="utf-8"))) == 1
+
+    def test_is_idempotent(self, tmp_path):
+        m = self._mig()
+        (tmp_path / "stub.json").write_text(json.dumps([
+            self._entry("Stub", "/Mods/PD2-S12/Fog.dll"),
+        ]), encoding="utf-8")
+
+        assert m.main(["--apply", "--pending-dir", str(tmp_path)]) == 0
+        first = (tmp_path / "Fog_stub.json").read_text(encoding="utf-8")
+        # Second pass must not produce Fog_Fog_stub.json nor duplicate entries.
+        assert m.main(["--apply", "--pending-dir", str(tmp_path)]) == 0
+        assert not (tmp_path / "Fog_Fog_stub.json").exists()
+        assert (tmp_path / "Fog_stub.json").read_text(encoding="utf-8") == first
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        m = self._mig()
+        src = tmp_path / "stub.json"
+        src.write_text(json.dumps([self._entry("Stub", "/Mods/PD2-S12/Fog.dll")]),
+                       encoding="utf-8")
+        before = src.read_text(encoding="utf-8")
+
+        assert m.main(["--pending-dir", str(tmp_path)]) == 0
+        assert src.read_text(encoding="utf-8") == before
+        assert not (tmp_path / "Fog_stub.json").exists()
+        assert not (tmp_path / "_premigration").exists()
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ RESHAPED = {
                                 "isinstance(out, dict)"),
     "list_segments": ("_envelope_items", "_segments_text", '"segments"'),
     "list_globals": ("_envelope_items", "_globals_text", '"globals"'),
+    "list_functions": ("_envelope_items", "_function_rows", '"functions"'),
     "list_exports": ("_envelope_items", '"exports"'),
     "get_metadata": ("_envelope_items", ".get("),
 }
@@ -70,10 +71,20 @@ def _enclosing_function(lines: list[str], idx: int) -> tuple[int, int]:
     return start, end
 
 # Modules that legitimately pass responses through without interpreting them.
+#
+# conformance_dashboard.py used to be listed here, justified as "contract-probe
+# list: endpoint names only" -- true of its _CONTRACT_REQUIRED table, false of the
+# eight real _get() call sites in the same file. The blanket exemption is why this
+# suite stayed green while the dashboard's globals AND functions read layers both
+# returned zero rows against a live Ghidra for days. Endpoint names that appear in
+# a contract table are now skipped by shape (_TABLE_ENTRY below), per line, so a
+# whole file is never blinded to keep a few literals quiet.
 EXEMPT = {
-    "conformance_dashboard.py",   # contract-probe list: endpoint names only
     "submission_api.py",          # forwards raw payloads to an external caller
 }
+
+# A ("GET", "/path") row in an endpoint-contract table -- a name, not a call.
+_TABLE_ENTRY = re.compile(r'^\(\s*["\'](?:GET|POST|PUT|DELETE|PATCH)["\']\s*,')
 
 
 def _python_sources() -> list[Path]:
@@ -93,9 +104,9 @@ def test_reshaped_endpoint_consumers_unwrap(endpoint: str, helpers: tuple[str, .
         for i, line in enumerate(lines):
             if not call_re.search(line):
                 continue
-            # A mention inside a comment or docstring is not a call site.
+            # A mention inside a comment, docstring or contract table is not a call site.
             stripped = line.strip()
-            if stripped.startswith("#"):
+            if stripped.startswith("#") or _TABLE_ENTRY.match(stripped):
                 continue
             start, end = _enclosing_function(lines, i)
             scope = "\n".join(lines[start:end])

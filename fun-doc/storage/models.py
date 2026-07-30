@@ -123,6 +123,7 @@ def build_metadata(schema: str | None = None) -> MetaData:
         Column("port_attempts", Integer, default=0),
         Column("port_draft_path", String),
         Column("port_last_result", String),
+        Column("port_failure_stage", String),
         # timestamps
         Column("created_at", DateTime(timezone=True)),
         Column("updated_at", DateTime(timezone=True)),

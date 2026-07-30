@@ -76,7 +76,7 @@ def _binaries():
 
 @conf_bp.route("/api/conformance/binaries/progress")
 def _binaries_progress():
-    """All open binaries with per-binary progress (Fn Doc / Fn Conf / Glob Doc segmented
+    """All open binaries with per-binary progress (Fn Doc / Fn Conf / Globals segmented
     bars + remaining), most-remaining-first. Feeds the focus picker. Not program-scoped."""
     data = cd.binaries_progress()
     # cd's `active` is the process-start default (FUNDOC_GHIDRA_PROGRAM or
@@ -136,6 +136,27 @@ def _globals():
     except (TypeError, ValueError):
         limit = 100
     return jsonify(cd.globals_inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
+
+
+@conf_bp.route("/api/conformance/global_review", methods=["POST"])
+def _global_review():
+    """Manual override for a global's REVIEWED bit (the Confirm/Clear control on
+    an inventory row). The bulk producer is the globals audit pass; this is the
+    'I checked it myself' path."""
+    d = request.get_json(silent=True) or {}
+    addr = d.get("address")
+    if not addr:
+        return jsonify({"error": "address required"}), 400
+    try:
+        int(str(addr).lower().replace("0x", ""), 16)
+    except ValueError:
+        return jsonify({"error": f"address must be hex, got {addr!r}"}), 400
+    reviewed = bool(d.get("reviewed", True))
+    try:
+        return jsonify(cd.set_global_reviewed(addr, reviewed,
+                                              program=d.get("program") or _prog()))
+    except OSError as exc:
+        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 502
 
 
 @conf_bp.route("/api/conformance/recommended")

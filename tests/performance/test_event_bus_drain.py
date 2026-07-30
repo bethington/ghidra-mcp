@@ -217,3 +217,50 @@ def test_subprocess_events_reach_parent_bus(fun_doc_on_path):
     # corresponding tool_result need to land in sequence so the pane
     # renders `calling` then `success`, not the reverse.
     assert [e[0] for e in captured] == [e[0] for e in events_to_emit]
+
+
+def test_waiting_heartbeat_does_not_count_as_provider_activity(fun_doc_on_path):
+    """2026-07-27: a MiniMax call wedged in a raw socket read (ssl.py `read`)
+    for 45+ minutes, but the worker's idle-based stall watchdog never fired
+    because the poll loop around that dead `future.result()` call
+    (`_invoke_minimax`) keeps emitting a provider_turn/"waiting" heartbeat
+    every ~15s regardless of whether the underlying request is alive or
+    permanently stuck. `_invoke_provider_with_watchdog`'s drain thread used
+    to treat every event as proof of liveness, so the heartbeat it was
+    supposed to be timing OUT on kept resetting its own idle clock — the kill
+    only ever happened at the 45-minute hard_cap backstop, not the 5-minute
+    idle_limit it was designed to hit.
+
+    Confirmed live: killing the wedged subprocess (PID resolved via py-spy,
+    which showed the ThreadPoolExecutor thread blocked in ssl.py read) let
+    the worker recover immediately and log a provider_hiccup_retry, proving
+    the subprocess-kill path itself was fine — only the liveness signal
+    feeding into WHEN to kill it was wrong.
+
+    This locks in the fix: a bare "waiting" heartbeat must not count as
+    activity, while every other provider_turn status (a real attempt/turn
+    transition) and every non-provider_turn event (tool calls, etc.) must."""
+    import fun_doc
+
+    # The one event shape that must NOT refresh the idle clock: the inner
+    # poll loop's heartbeat, repeatable forever around a single dead future.
+    assert fun_doc._event_proves_provider_activity(
+        "provider_turn", {"status": "waiting", "elapsed_sec": 900}
+    ) is False
+
+    # Every other provider_turn status is a genuine state transition (a new
+    # attempt/turn only starts after the previous one resolved, and
+    # response/error mark the in-flight request actually completing).
+    for status in ("request_start", "response", "error"):
+        assert fun_doc._event_proves_provider_activity(
+            "provider_turn", {"status": status}
+        ) is True, f"status={status!r} must count as activity"
+
+    # Any other event type entirely (tool_call, tool_result, model_text, ...)
+    # must count regardless of payload shape.
+    for event_type in ("tool_call", "tool_result", "model_text"):
+        assert fun_doc._event_proves_provider_activity(event_type, {}) is True
+
+    # A provider_turn event missing "status" (defensive — should not happen
+    # in practice) must not be silently treated as the excluded case.
+    assert fun_doc._event_proves_provider_activity("provider_turn", {}) is True

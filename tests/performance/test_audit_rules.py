@@ -154,7 +154,7 @@ def _queue_entries(tmp_path) -> list[dict]:
 def test_seed_rules_all_report_mode():
     """Phase 1 contract: no rule graduates above `report` yet."""
     rules = _load_seed_rules()
-    assert len(rules) == 5
+    assert len(rules) == 6
     for rule in rules:
         assert rule.get("mode") == "report", f"{rule['id']} is not at report mode"
 
@@ -329,6 +329,55 @@ def test_ghidra_offline_sustained_does_not_fire_when_recovers(tmp_path):
     clock.advance(minutes=3)
     watcher._bus.emit("ghidra_health", {"new": "healthy"})
     clock.advance(minutes=10)
+    watcher._tick()
+    assert _queue_entries(tmp_path) == []
+
+
+# -- oracle_offline_sustained --------------------------------------------
+# Mirrors ghidra_offline_sustained exactly (same evaluator shape) -- see
+# oracle_health.py's module docstring for the incident (2026-07-27) this
+# rule adds visibility for: a mid-run oracle death going unnoticed for hours.
+
+
+def test_oracle_offline_sustained_fires_after_duration(tmp_path):
+    rules = [_rule_by_id(_load_seed_rules(), "oracle_offline_sustained")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    watcher._bus.emit("oracle_health", {"reachable": False})
+    watcher._tick()
+    assert _queue_entries(tmp_path) == []
+
+    clock.advance(minutes=16)  # past the 15m threshold
+    watcher._tick()
+    entries = _queue_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["context"]["status"] == "unreachable"
+
+
+def test_oracle_offline_sustained_does_not_fire_when_recovers(tmp_path):
+    rules = [_rule_by_id(_load_seed_rules(), "oracle_offline_sustained")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    watcher._bus.emit("oracle_health", {"reachable": False})
+    clock.advance(minutes=5)
+    watcher._bus.emit("oracle_health", {"reachable": True})
+    clock.advance(minutes=20)
+    watcher._tick()
+    assert _queue_entries(tmp_path) == []
+
+
+def test_oracle_offline_sustained_ignores_events_missing_reachable_field(tmp_path):
+    rules = [_rule_by_id(_load_seed_rules(), "oracle_offline_sustained")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    watcher._bus.emit("oracle_health", {})  # malformed/partial event -- must not crash or fire
+    clock.advance(minutes=20)
     watcher._tick()
     assert _queue_entries(tmp_path) == []
 

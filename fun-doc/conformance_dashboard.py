@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re as _re
 import urllib.request
 from urllib.parse import urlencode, quote
 
@@ -63,6 +64,26 @@ def _post(path: str, data: dict) -> dict:
                                  headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def _envelope_items(resp, key: str) -> list:
+    """Items out of a 6.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
+
+    Mirrors `fun_doc._envelope_items`. This module read `/list_globals`,
+    `/list_segments` and `/list_functions` as newline text until 6.0.0 reshaped
+    them into JSON records; the `isinstance(txt, str) else ""` fallbacks then
+    parsed an empty string and every globals/functions read silently returned
+    ZERO rows -- the dashboard rendered 0/0 while the underlying property maps
+    held 17k entries. Returns [] for an unexpected shape so callers keep their
+    existing "no data -> fall back" behavior instead of raising.
+    """
+    if isinstance(resp, dict):
+        items = resp.get(key)
+        if isinstance(items, list):
+            return items
+    if isinstance(resp, str):          # pre-6.0.0 plugin still on the wire
+        return [ln for ln in resp.splitlines() if ln.strip()]
+    return []
 
 
 def _norm(a) -> str:
@@ -177,6 +198,29 @@ def intake(program: str = None) -> dict:
             "excluded_lib": s.get("excluded_lib"), "total_all": s.get("total_all")}
 
 
+_FN_LINE = _re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
+
+
+def _function_rows(program: str) -> list:
+    """[(0xaddr, name)] for every defined function. Handles the 6.0.0 record shape
+    ({"functions": [{"name","address"}]}) and the pre-6.0.0 "<name> at <addr>" text.
+
+    Address format matches `_tag_addrs` -- '0x' + bare lowercase hex, NOT zero-padded --
+    so the two can be set-compared directly."""
+    txt = _get("/list_functions", program=program, limit=100000)
+    out = []
+    for f in _envelope_items(txt, "functions"):
+        if isinstance(f, dict):
+            a, n = f.get("address"), f.get("name")
+            if a and n:
+                out.append(("0x" + str(a).lower().replace("0x", ""), n))
+            continue
+        m = _FN_LINE.match(str(f).strip())
+        if m:
+            out.append(("0x" + m.group("addr").lower(), m.group("name")))
+    return out
+
+
 def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
     """Searchable Function Inventory: the COMPLETE list of in-scope functions matching `search`
     (name substring), each with its DOC_/CONF_ rung. Library functions (LIB_-tagged) are
@@ -187,18 +231,10 @@ def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
     conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
     doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
     lib = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
-    txt = _get("/list_functions", program=program, limit=100000)
-    import re
-    line = re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
     s = search.lower()
     rows = []
     seen = set()
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
-        m = line.match(ln.strip())
-        if not m:
-            continue
-        a = "0x" + m.group("addr").lower()
-        name = m.group("name")
+    for a, name in _function_rows(program):
         if a in seen or a in lib:          # dedup + exclude library (out of scope)
             continue
         seen.add(a)
@@ -457,13 +493,16 @@ def list_binaries() -> dict:
     return out
 
 
-import re as _re
-
-# A global counts toward "typing groundwork" once it carries a real (non-primitive) type.
-# This is NOT a doc rung -- it's the interim signal shown while the DOC_ rung pass is pending.
-_GLOB_PRIM = _re.compile(
-    r"^(undefined\d*|dword|word|byte|qword|void\s*\*?\d*|u?int\d*|u?char|u?short|u?long|"
-    r"bool|float|double|pointer|code|undefined)\s*$", _re.I)
+# Does a global carry a real type? ONE definition, shared with the scorer.
+#
+# This used to be a much stricter `_GLOB_PRIM` regex that also rejected int/dword/
+# word/byte, and it fed a "typed groundwork" underlay on the Globals bar. The Java
+# scorer's type axis (DataTypeService.auditGlobalAt -> hasUndefinedType) only
+# rejects `undefined*`, so the same global was simultaneously "untyped" on the bar
+# and worth a full 20/20 type points to the band -- which is how the bar could read
+# 96% documented against 51% typed. The underlay is gone; this test now matches the
+# scorer exactly and is used only for inventory styling and work prioritization.
+_GLOB_UNTYPED = _re.compile(r"^\s*(undefined\d*|code)?\s*$", _re.I)
 _GLOB_LINE = _re.compile(
     r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
     r"(?:\s+xrefs=(?P<xrefs>\d+))?")
@@ -481,8 +520,14 @@ def _image_range(program: str):
     except OSError:
         return None
     ranges = []
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
-        m = _SEG_RANGE.search(ln.strip())
+    for seg in _envelope_items(txt, "segments"):
+        if isinstance(seg, dict):
+            try:
+                ranges.append((int(seg["start"], 16), int(seg["end"], 16)))
+            except (KeyError, TypeError, ValueError):
+                continue
+            continue
+        m = _SEG_RANGE.search(str(seg).strip())     # legacy text row
         if m:
             ranges.append((int(m.group(1), 16), int(m.group(2), 16)))
     if not ranges:
@@ -493,9 +538,25 @@ def _image_range(program: str):
     if not ends:
         return None
     return base, max(ends) + 1
-# Globals carry the SAME doc rungs as functions, but stored in a per-address property map
-# ("Doc") rather than Ghidra function-tags (which are function-scoped and can't attach to data).
+# Globals do NOT carry the function DOC_ ladder.
+#
+# They used to: the `Doc` property map held DOC_DRAFT/DOC_REVIEWED/DOC_VERIFIED,
+# copied from the function rungs. Only DOC_DRAFT ever got written, by the assess
+# pass, and it was written on any global whose score crossed Target and then never
+# re-examined -- so it behaved as an "assess visited this" watermark, not a quality
+# signal (2,142 of D2Common's 2,231 globals carried it). DOC_REVIEWED and
+# DOC_VERIFIED had no producer anywhere in the codebase and read zero on every
+# binary, forever; there is no proof pipeline for a data address, so DOC_VERIFIED
+# had no reachable definition at all.
+#
+# Globals now have two independent signals:
+#   COMPLETENESS -- the `Complete` band map, machine-scored, live, demotes on
+#                   re-score. This is the Globals progress bar.
+#   TRUST        -- the `Doc` map, reduced to the single value REVIEWED, set by the
+#                   globals audit pass or by hand from the inventory row. Absent
+#                   means "not vetted", which is the honest default.
 GLOB_DOC_MAP = "Doc"
+GLOB_REVIEWED = "REVIEWED"
 
 
 def _scope_excluded_globals(program: str) -> set[str]:
@@ -514,94 +575,127 @@ def _scope_excluded_globals(program: str) -> set[str]:
 
 
 def _global_rows(program: str) -> list[dict]:
-    """In-scope image globals for a program: {addr, name, type, typed}. Parsed from the
-    free list_globals text (one call, no per-global fanout). Excludes out-of-image OS
-    labels (TIB/PEB), Ordinal_ export aliases, and triage-marked library data (Scope)."""
+    """In-scope image globals for a program: {addr, name, type, typed, xrefs, aliases}.
+    Parsed from list_globals (one call, no per-global fanout). Excludes out-of-image OS
+    labels (TIB/PEB), Ordinal_ export aliases, and triage-marked library data (Scope).
+
+    ONE ROW PER ADDRESS. Ghidra allows many symbols on one data address, and
+    /list_globals emits a line for each: D2Client has 3,405 symbol lines over 3,223
+    distinct addresses, with up to SEVEN labels on a single address (0x6fbcb9a0 is
+    g_nScreenShiftX / g_nPanelBaseX / g_nScreenCenterX / ...). Both the `Complete`
+    and `Doc` property maps are keyed by ADDRESS, so counting symbol lines inflates
+    the scope while the band counts stay per-address -- which made the inventory
+    report 3,398 scored against glob_bands' 3,219 for the same binary. Extra labels
+    are kept in `aliases` so nothing is hidden, just not double-counted."""
     img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
     txt = _get("/list_globals", program=program, limit=100000)
     excluded = _scope_excluded_globals(program)
-    rows = []
-    for ln in (txt if isinstance(txt, str) else "").splitlines():
-        m = _GLOB_LINE.match(ln.strip())
+    by_addr = {}
+    for ln in _envelope_items(txt, "globals"):
+        m = _GLOB_LINE.match(str(ln).strip())
         if not m:
             continue
         a = int(m.group("addr"), 16)
         if not (img_lo <= a < img_hi):
             continue
         name = m.group("name")
-        if name.startswith("Ordinal_") or ("0x%08x" % a) in excluded:
+        key = "0x%08x" % a
+        if name.startswith("Ordinal_") or key in excluded:
+            continue
+        prev = by_addr.get(key)
+        if prev is not None:
+            prev["aliases"].append(name)     # secondary label, same address
             continue
         t = m.group("type").strip()
-        rows.append({"addr": "0x%08x" % a, "name": name, "type": t,
-                     "typed": not bool(_GLOB_PRIM.match(t)),
-                     "xrefs": int(m.group("xrefs") or 0)})
-    return rows
-
-
-def _doc_map_rungs(program: str) -> dict:
-    """{address -> DOC_ rung} from the `Doc` property map (globals' doc rungs). Empty until
-    a globals-doc pass writes them -- the honest 'not yet documented' state."""
-    out = {}
-    try:
-        r = _get("/list_properties", map=GLOB_DOC_MAP, program=program, limit=100000)
-        # the endpoint returns the list under "entries" (not "properties")
-        for p in (r.get("entries") or r.get("properties") or []):
-            a = p.get("address")
-            v = p.get("value")
-            if a and v in DOC_RUNGS:
-                out["0x" + str(a).lower().lstrip("0x").rjust(8, "0")] = v
-    except (OSError, AttributeError):
-        pass
-    return out
+        by_addr[key] = {"addr": key, "name": name, "type": t,
+                        "typed": not bool(_GLOB_UNTYPED.match(t)),
+                        "xrefs": int(m.group("xrefs") or 0), "aliases": []}
+    return list(by_addr.values())
 
 
 GLOB_COMPLETE_MAP = "Complete"
 
 
-def _complete_map_bands(program: str) -> dict:
-    """{address -> COMPLETE_<band>} from the `Complete` property map (globals'
-    completeness bands, written by the globals assess pass -- the data-address
-    analog of a function's COMPLETE_* tag). Empty until assess runs."""
+def _prop_map(program: str, name: str, allowed=None, img=None) -> dict:
+    """{normalized 0xaddr -> value} for one property map, restricted to the program's
+    OWN image when `img` is given.
+
+    The image filter is not cosmetic. A survey of all 32 project binaries found 4,848
+    of 17,442 `Doc` entries sitting at addresses outside the program that holds them --
+    D2CMP.dll held 4,049 entries of which only 307 were its own, the rest D2Client and
+    rebased-module addresses. Those are writes that leaked to whatever program was
+    active, the known hazard of `/set_property`'s QUERY-sourced `program` param. Every
+    consumer must filter or it double-counts other binaries' work as its own.
+    """
     out = {}
     try:
-        r = _get("/list_properties", map=GLOB_COMPLETE_MAP, program=program, limit=100000)
-        for p in (r.get("entries") or r.get("properties") or []):
-            a = p.get("address")
-            v = p.get("value")
-            if a and v in BAND_TAGS:
-                out["0x" + str(a).lower().lstrip("0x").rjust(8, "0")] = v
+        r = _get("/list_properties", map=name, program=program, limit=100000)
+        for p in ((r or {}).get("entries") or (r or {}).get("properties") or []):
+            a, v = p.get("address"), p.get("value")
+            if not a or (allowed is not None and v not in allowed):
+                continue
+            try:
+                n = int(str(a).lower().replace("0x", ""), 16)
+            except ValueError:
+                continue
+            if img and not (img[0] <= n < img[1]):
+                continue
+            out["0x%08x" % n] = v
     except (OSError, AttributeError):
         pass
     return out
 
 
+def _review_flags(program: str, img=None) -> set:
+    """Addresses carrying the REVIEWED trust bit in the `Doc` map. A set, not a
+    ladder -- see the GLOB_DOC_MAP note above."""
+    return set(_prop_map(program, GLOB_DOC_MAP, {GLOB_REVIEWED}, img))
+
+
+def _complete_map_bands(program: str, img=None) -> dict:
+    """{address -> COMPLETE_<band>} from the `Complete` property map (globals'
+    completeness bands -- the data-address analog of a function's COMPLETE_* tag).
+    Unlike the retired DOC rung this tracks LIVE completeness: it is rewritten on
+    every worker touch and cleared when a re-score drops below 80."""
+    return _prop_map(program, GLOB_COMPLETE_MAP, set(BAND_TAGS), img)
+
+
 def glob_bands(program: str = None) -> dict:
     """Global-variable completeness band counts (COMPLETE_80/90/95/100) from the
     `Complete` property map, with the in-scope globals denominator. The data-address
-    analog of bands(). `untagged` = in-scope globals below 80 or not yet scored."""
+    analog of bands(), and now the ONLY Globals progress bar. `untagged` = in-scope
+    globals below 80 or not yet scored."""
     program = program or PROGRAM
-    m = _complete_map_bands(program)
+    img = _image_range(program) or (_IMG_LO, _IMG_HI)
+    m = _complete_map_bands(program, img)
+    # Count bands against the ACTUAL in-scope rows, not raw map size: the map can
+    # hold entries for addresses that are no longer in-scope (triaged into `Scope`,
+    # or a label that went away), and `tagged` must agree with what the inventory
+    # shows or the two Globals views disagree on the same binary.
+    rows = _global_rows(program)
+    scope = len(rows)
     counts = {t: 0 for t in BAND_TAGS}
-    for v in m.values():
+    for g in rows:
+        v = m.get(g["addr"])
         if v in counts:
             counts[v] += 1
-    scope = len(_global_rows(program))
-    tagged = len(m)
+    tagged = sum(counts.values())
+    reviewed = _review_flags(program, img)
     return {"bands": counts, "tagged": tagged, "in_scope": scope,
-            "untagged": max(0, scope - tagged)}
+            "untagged": max(0, scope - tagged),
+            "reviewed": sum(1 for g in rows if g["addr"] in reviewed)}
 
 
 def _in_scope_fn(program: str, s: dict) -> int | None:
     """In-scope function count: from the summary option if present, else defined-minus-LIB_."""
     if s.get("in_scope") is not None:
         return s["in_scope"]
-    txt = _get("/list_functions", program=program, limit=100000)
-    line = _re.compile(r"\bat\s+([0-9a-fA-F]+)\s*$")
-    defined = {line.search(l.strip()).group(1).lower() for l in
-               (txt if isinstance(txt, str) else "").splitlines() if line.search(l.strip())}
+    # both sides are '0x' + bare lowercase hex, so they compare directly (the old
+    # code hand-stripped prefixes with lstrip("0x"), which also eats leading zeros)
+    defined = {a for a, _ in _function_rows(program)}
     lib = set()
     for t in EXCLUDE_TAGS:
-        lib |= {a.lstrip("0x") for a in _tag_addrs(t, program)}
+        lib |= _tag_addrs(t, program)
     return len(defined - lib) if defined else None
 
 
@@ -615,33 +709,69 @@ def _bar(scope, rung_order, rung_sets, addr_pool):
 
 def globals_inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
     """Searchable Globals Inventory (sibling of the function inventory): in-scope image
-    globals matching `search`, each with its type, typed-groundwork flag, and DOC rung
-    (from the `Doc` property map -- 'none' until the globals-doc pass runs). Untyped/
-    undocumented globals sort first (most work), then by name."""
+    globals matching `search`, each with its type, completeness band, and REVIEWED bit.
+
+    Sorted worst-first so the top of the list is the work: unscored before banded,
+    lower band before higher, untyped before typed, then by name. The `summary`
+    block is whole-program (NOT filtered by `search`) and feeds the single Globals
+    bar -- band distribution plus a reviewed count."""
     program = program or PROGRAM
-    doc = _doc_map_rungs(program)
+    img = _image_range(program) or (_IMG_LO, _IMG_HI)
+    bandmap = _complete_map_bands(program, img)
+    reviewed = _review_flags(program, img)
     allrows = _global_rows(program)
 
-    # whole-program summary (feeds the top Globals-Documentation bar; NOT affected by search)
     scope = len(allrows)
-    typed = sum(1 for g in allrows if g["typed"])
-    rungs = {r: 0 for r in DOC_RUNGS}
+    counts = {t: 0 for t in BAND_TAGS}
     for g in allrows:
-        dv = doc.get(g["addr"], "none")
-        if dv in rungs:
-            rungs[dv] += 1
-    done = sum(rungs.values())
-    summ = {"scope": scope, "typed": typed,
-            "typed_pct": round(typed / scope * 100, 1) if scope else 0,
-            "rungs": rungs, "done": done, "remaining": max(0, scope - done)}
+        b = bandmap.get(g["addr"])
+        if b in counts:
+            counts[b] += 1
+    scored = sum(counts.values())
+    summ = {"scope": scope, "bands": counts, "scored": scored,
+            "unscored": max(0, scope - scored),
+            "reviewed": sum(1 for g in allrows if g["addr"] in reviewed),
+            "complete_pct": round(counts["COMPLETE_100"] / scope * 100, 1) if scope else 0}
 
+    # worst band first: unscored (rank 0) then COMPLETE_80..100 (ranks 1..4)
+    rank = {None: 0, "COMPLETE_80": 1, "COMPLETE_90": 2, "COMPLETE_95": 3, "COMPLETE_100": 4}
     s = search.lower()
     rows = [{"name": g["name"], "address": g["addr"], "type": g["type"],
-             "typed": g["typed"], "doc": doc.get(g["addr"], "none")}
+             "typed": g["typed"], "xrefs": g.get("xrefs", 0),
+             "band": bandmap.get(g["addr"]), "reviewed": g["addr"] in reviewed}
             for g in allrows if not s or s in g["name"].lower()]
     total = len(rows)
-    rows.sort(key=lambda r: (r["doc"] != "none", r["typed"], r["name"].lower()))
+    rows.sort(key=lambda r: (rank.get(r["band"], 0), r["typed"], r["name"].lower()))
     return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit), "summary": summ}
+
+
+def set_global_reviewed(address: str, reviewed: bool, program: str = None) -> dict:
+    """Manual override for the trust bit: set or clear REVIEWED on one global.
+
+    The audit pass is the bulk producer; this is the "I looked at it myself" path
+    from the inventory row. Writes `program` in the QUERY string -- /set_property
+    and /remove_property resolve `program` from the query, so a body-only program
+    silently targets the ACTIVE program instead. That exact mistake is what put
+    4,848 foreign addresses into these maps."""
+    program = program or PROGRAM
+    address = "0x%08x" % int(str(address).lower().replace("0x", ""), 16)
+    q = "?program=" + quote(program, safe="")
+    if reviewed:
+        body = {"map": GLOB_DOC_MAP, "address": address, "value": GLOB_REVIEWED,
+                "program": program}
+        r = _post("/set_property" + q, body)
+        if isinstance(r, dict) and not r.get("success") and "No property map" in str(r):
+            _post("/create_property_map" + q,
+                  {"name": GLOB_DOC_MAP, "type": "string", "program": program})
+            r = _post("/set_property" + q, body)
+    else:
+        r = _post("/remove_property" + q,
+                  {"map": GLOB_DOC_MAP, "address": address, "program": program})
+    try:
+        _post("/save_program" + q, {})
+    except OSError:
+        pass
+    return {"address": address, "reviewed": bool(reviewed), "program": program, "result": r}
 
 
 # ---- Recommended next: 1 auto "closest to advancing" pick per entity + user pins ----
@@ -762,8 +892,8 @@ def native_types_status(program: str = None, force: bool = False) -> dict:
     try:
         img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
         txt = _get("/list_globals", program=program, limit=100000)
-        for ln in (txt if isinstance(txt, str) else "").splitlines():
-            m = _GLOB_LINE.match(ln.strip())
+        for ln in _envelope_items(txt, "globals"):
+            m = _GLOB_LINE.match(str(ln).strip())
             if not m:
                 continue
             a = int(m.group("addr"), 16)
@@ -835,26 +965,39 @@ def recommended_next(program: str = None) -> dict:
                        "conf": "none", "doc": rung,
                        "reason": f"documented ({_pretty(rung)}) but unproven → prove"}
 
-    # globals
+    # globals -- "closest to advancing" is now band-driven, not rung-driven:
+    # a typed global that has never scored is the cheapest real progress, then
+    # anything sitting below COMPLETE_100, then untyped high-impact globals.
+    gimg = _image_range(program) or (_IMG_LO, _IMG_HI)
     grows = _global_rows(program)
     gmap = {g["addr"]: g for g in grows}
-    gdoc = _doc_map_rungs(program)
+    gband = _complete_map_bands(program, gimg)
+    greviewed = _review_flags(program, gimg)
     glob_auto = None
-    gt1 = sorted([g for g in grows if g["typed"] and gdoc.get(g["addr"], "none") == "none"],
-                 key=lambda g: -g.get("xrefs", 0))
-    if gt1:
-        g = gt1[0]
+
+    def _impact(g):
+        return -g.get("xrefs", 0)
+
+    unscored_typed = sorted([g for g in grows if g["typed"] and not gband.get(g["addr"])], key=_impact)
+    partial = sorted([g for g in grows
+                      if gband.get(g["addr"]) and gband[g["addr"]] != "COMPLETE_100"], key=_impact)
+    untyped = sorted([g for g in grows if not g["typed"]], key=_impact)
+    if unscored_typed:
+        g = unscored_typed[0]
         glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "document",
-                     "type": g["type"], "doc": "none",
-                     "reason": f"typed ({g['type']}), {g.get('xrefs', 0)} xrefs → document"}
-    else:
-        gt2 = sorted([g for g in grows if not g["typed"] and gdoc.get(g["addr"], "none") == "none"],
-                     key=lambda g: -g.get("xrefs", 0))
-        if gt2:
-            g = gt2[0]
-            glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "type",
-                         "type": g["type"], "doc": "none",
-                         "reason": f"untyped, {g.get('xrefs', 0)} xrefs → type & document"}
+                     "type": g["type"], "band": None,
+                     "reason": f"typed ({g['type']}), {g.get('xrefs', 0)} xrefs, never scored → document"}
+    elif partial:
+        g = partial[0]
+        b = gband[g["addr"]].replace("COMPLETE_", "")
+        glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "document",
+                     "type": g["type"], "band": gband[g["addr"]],
+                     "reason": f"at {b}, {g.get('xrefs', 0)} xrefs → finish to 100"}
+    elif untyped:
+        g = untyped[0]
+        glob_auto = {"kind": "glob", "address": g["addr"], "name": g["name"], "action": "type",
+                     "type": g["type"], "band": None,
+                     "reason": f"untyped, {g.get('xrefs', 0)} xrefs → type & document"}
 
     # resolve user pins to current status
     pins = get_pins(program)
@@ -868,7 +1011,8 @@ def recommended_next(program: str = None) -> dict:
         else:
             g = gmap.get(a, {})
             glob_pins.append({"kind": "glob", "address": a, "name": p.get("name") or g.get("name"),
-                              "type": g.get("type"), "doc": gdoc.get(a, "none"), "pinned": True})
+                              "type": g.get("type"), "band": gband.get(a),
+                              "reviewed": a in greviewed, "pinned": True})
 
     return {"functions": {"auto": fn_auto, "pins": fn_pins},
             "globals": {"auto": glob_auto, "pins": glob_pins}}
@@ -890,21 +1034,30 @@ def binaries_progress() -> dict:
         fn_conf = _bar(fn_scope, [r for r in CONF_RUNGS if r != "CONF_DRAFT"] + ["CONF_DRAFT"],
                        conf_sets, set().union(*conf_sets.values()))
 
+        # Globals: band distribution, image-filtered. The old version counted the
+        # WHOLE Doc map with no image filter, so a program holding another binary's
+        # leaked entries (D2CMP.dll: 4,049 entries, 307 its own) reported those as
+        # its own completed work.
+        gimg = _image_range(prog) or (_IMG_LO, _IMG_HI)
         grows = _global_rows(prog)
         g_scope = len(grows)
-        g_typed = sum(1 for g in grows if g["typed"])
-        g_doc = _doc_map_rungs(prog)
-        g_rungs = {r: sum(1 for v in g_doc.values() if v == r) for r in DOC_RUNGS}
-        g_done = sum(g_rungs.values())
-        glob_doc = {"scope": g_scope, "rungs": g_rungs, "done": g_done,
-                    "remaining": max(0, g_scope - g_done), "typed": g_typed,
-                    "typed_pct": round(g_typed / g_scope * 100, 1) if g_scope else 0}
+        gband = _complete_map_bands(prog, gimg)
+        g_bands = {t: 0 for t in BAND_TAGS}
+        for g in grows:
+            b_ = gband.get(g["addr"])
+            if b_ in g_bands:
+                g_bands[b_] += 1
+        g_scored = sum(g_bands.values())
+        glob = {"scope": g_scope, "bands": g_bands, "scored": g_scored,
+                "unscored": max(0, g_scope - g_scored),
+                "reviewed": len(_review_flags(prog, gimg)),
+                "remaining": max(0, g_scope - g_bands["COMPLETE_100"])}
 
         rem_total = sum(x for x in (fn_doc["remaining"], fn_conf["remaining"],
-                                    glob_doc["remaining"]) if x is not None)
+                                    glob["remaining"]) if x is not None)
         cards.append({"path": prog, "name": b["name"], "folder": b["folder"],
                       "fn_scope": fn_scope, "fn_doc": fn_doc, "fn_conf": fn_conf,
-                      "glob_doc": glob_doc, "remaining_total": rem_total})
+                      "glob": glob, "remaining_total": rem_total})
     cards.sort(key=lambda c: -c["remaining_total"])
     return {"binaries": cards, "active": PROGRAM,
             "doc_rungs": DOC_RUNGS, "conf_rungs": CONF_RUNGS}

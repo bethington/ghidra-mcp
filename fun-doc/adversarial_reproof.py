@@ -136,6 +136,135 @@ def _ghidra_decompile(address_hex: str, timeout: int = 60) -> str | None:
     return None
 
 
+def _ghidra_post(path: str, body: dict, program: str) -> dict:
+    """POST with `program` as a QUERY param, never in the body -- @Param(value=
+    "program") defaults to ParamSource.QUERY, so a body-sourced program is
+    silently ignored and the write lands on whatever program is ACTIVE. That is
+    the wrong-binary failure class fixed 2026-07-27."""
+    u = urlparse(GHIDRA_HTTP)
+    conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=15)
+    try:
+        conn.request("POST", f"{path}?{urlencode({'program': program})}",
+                     body=json.dumps(body),
+                     headers={"Content-Type": "application/json"})
+        raw = conn.getresponse().read().decode("utf-8", "replace")
+    except OSError as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"error": raw[:200]}
+
+
+def decide_adversarial_outcome(held, status, out, date):
+    """Which CONF_ rung (if any) this adversarial result should write.
+
+    Pure, so the two rules that matter are testable without Ghidra or a live
+    oracle:
+      * a PASS promotes to CONF_VETTED only if that OUTRANKS what is held --
+        a function already shadow-promoted to CONF_BATTLETESTED must not be
+        knocked back down by passing a check it already outranks;
+      * a DIVERGENCE refutes whatever rung is held, because the reimpl is now
+        demonstrably not equivalent.
+
+    Returns (rung, record) or (None, None).
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import conf_ladder
+
+    if status == "vetted":
+        if conf_ladder.rung_strength("CONF_VETTED") <= conf_ladder.rung_strength(held):
+            return (None, None)
+        return ("CONF_VETTED", {
+            "conf": "CONF_VETTED",
+            "method": "adversarial",
+            "vectors": out.get("vectors"),
+            "model": bool(out.get("used_model")),
+            "date": date,
+        })
+    if status == "DIVERGED":
+        demote, rung, record = conf_ladder.decide_refutation(
+            held, "adversarial_failure",
+            {"mismatches": out.get("mismatches"), "vectors": out.get("vectors"),
+             "regression_case": str(out.get("regression_case", ""))})
+        return (rung, record) if demote else (None, None)
+    return (None, None)
+
+
+def _current_conf_rung(row: dict) -> str | None:
+    """The CONF_ rung Ghidra currently holds for this function.
+
+    Read from GHIDRA, not from the registry's own `conf` field: the registry is
+    a mirror that can lag (a shadow promotion to CONF_BATTLETESTED updates
+    Ghidra, and battletest_promoter is what appends the mirror row). Trusting
+    the mirror here would let a stale CONF_LIVE value demote a function that
+    Ghidra already promoted past it.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import conf_ladder
+
+    program, addr = row.get("program"), row.get("address")
+    if not program or not addr:
+        return None
+    u = urlparse(GHIDRA_HTTP)
+    qs = urlencode({"function": f"0x{str(addr).lstrip('0x')}", "program": program})
+    conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=15)
+    try:
+        conn.request("GET", f"/get_function_tags?{qs}")
+        obj = json.loads(conn.getresponse().read().decode("utf-8", "replace"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    finally:
+        conn.close()
+    for t in (obj.get("tags") or []):
+        if t.get("name") in conf_ladder.ALL_CONF_TAGS:
+            return t["name"]
+    return None
+
+
+def _write_conf_rung(row: dict, rung: str, record: dict) -> None:
+    """WRITE-BACK the CONF_ rung earned (or lost) by this adversarial pass.
+
+    Before this, an adversarial result lived ONLY in proven_functions.jsonl as a
+    `vetted` field -- so 7 of 199 proven functions were vetted while all 199
+    read as CONF_LIVE in Ghidra, and a DIVERGED result (which REOPENS the
+    reimpl) left the disproved rung standing.
+
+    Best-effort, never raises, loud on failure -- a swallowed write-back is how
+    both the wrong-binary default and a 5-day property-write outage went
+    unnoticed. `program` comes from the registry row; no default, because a
+    defaulted program is exactly what caused the wrong-binary bug.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import conf_ladder
+
+    program = row.get("program")
+    addr = row.get("address")
+    if not program or not addr:
+        print(f"  [write-back WARN] no program/address on registry row for "
+              f"{row.get('name')!r}; CONF rung NOT written")
+        return
+    a = f"0x{str(addr).lstrip('0x')}"
+
+    others = ",".join(t for t in conf_ladder.ALL_CONF_TAGS if t != rung)
+    _ghidra_post("/remove_function_tag", {"function": a, "tags": others}, program)
+    resp = _ghidra_post("/add_function_tag", {"function": a, "tags": rung}, program)
+    if resp.get("status") != "success" and not resp.get("success"):
+        print(f"  [write-back WARN] CONF rung {rung} @ {a} ({program}): {str(resp)[:160]}")
+        return
+
+    pr = _ghidra_post("/set_property",
+                      {"map": conf_ladder.CONF_PROPERTY_MAP, "address": a,
+                       "value": json.dumps(record, separators=(",", ":"))}, program)
+    if not pr.get("success"):
+        print(f"  [write-back WARN] {rung} detail @ {a} ({program}): {str(pr)[:160]}")
+
+
 # --------------------------------------------------------------------------- #
 # Registry + spec resolution
 # --------------------------------------------------------------------------- #
@@ -628,6 +757,13 @@ def main() -> int:
                 if out.get("original_faults"):
                     r["vetted_quarantined"] = out["original_faults"]
                 r.pop("needs_review", None)
+                held = _current_conf_rung(r)
+                rung, record = decide_adversarial_outcome(
+                    held, "vetted", out, r["vetted_date"])
+                if rung:
+                    _write_conf_rung(r, rung, record)
+                else:
+                    print(f"  (keeps {held} -- already outranks CONF_VETTED)")
         elif tag == "DIVERGED":
             print(f"  !! DIVERGED: {out['mismatches']}/{out['vectors']} mismatch -- "
                   f"REOPENS reimpl. regression case: {out['regression_case']}")
@@ -636,6 +772,15 @@ def main() -> int:
                 r["vetted"] = "adversarial-FAILED"
                 r["needs_review"] = True
                 r["vetted_date"] = time.strftime("%Y-%m-%d")
+                # The rung was a claim and this falsified it. Leaving CONF_LIVE
+                # standing on a reimpl the adversary just broke is exactly the
+                # state the demotion path exists to end.
+                held = _current_conf_rung(r)
+                rung, record = decide_adversarial_outcome(
+                    held, "DIVERGED", out, r["vetted_date"])
+                if rung:
+                    _write_conf_rung(r, rung, record)
+                    print(f"  -> demoted {held} -> {rung} in Ghidra")
         else:
             print(f"  {tag}: {out.get('reason', '')}")
 

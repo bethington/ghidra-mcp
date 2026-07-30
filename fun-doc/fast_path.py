@@ -116,14 +116,14 @@ def prove_one(addr, program: str = PROGRAM, *, build: bool = True) -> dict:
 def _prove_routed(addr, ah, name, route, program, *, build=True) -> dict:
     import port_live_prove as plp
     if route["prover"] == "synth":
-        res = plp.run_synth_prove(route["code"], name, addr, ret=route["ret"], gates=route.get("gates"), build=build)
+        res = plp.run_synth_prove(route["code"], name, addr, program=program, ret=route["ret"], gates=route.get("gates"), build=build)
     elif route["prover"] == "synth2":
-        res = plp.run_synth2_prove(route["code"], name, addr, ret=route["ret"], gates=route.get("gates"), build=build)
+        res = plp.run_synth2_prove(route["code"], name, addr, program=program, ret=route["ret"], gates=route.get("gates"), build=build)
     elif route["prover"] == "delegate":
-        res = plp.run_delegate_prove(route["code"], name, addr, ret=route["ret"],
+        res = plp.run_delegate_prove(route["code"], name, addr, program=program, ret=route["ret"],
                                      arg_off=route.get("arg_off", 4), type_gates=route.get("type_gates"), build=build)
     else:  # global_table -> prove via a discriminating index sweep through prove_spec
-        res = _prove_global_table(route["code"], name, addr, route["ret"], build=build)
+        res = _prove_global_table(route["code"], name, addr, route["ret"], program, build=build)
 
     out = {"addr": ah, "name": name, "cls": route["cls"], "prover": route["prover"],
            "ok": bool(res.get("ok")), "allMatch": res.get("allMatch"),
@@ -134,7 +134,7 @@ def _prove_routed(addr, ah, name, route, program, *, build=True) -> dict:
     return out
 
 
-def _prove_global_table(code, name, addr, ret, *, build=True) -> dict:
+def _prove_global_table(code, name, addr, ret, program, *, build=True) -> dict:
     """Build + prove a global-table (scalar-index) getter via the live oracle (_invoke_prove)
     with a spread index sweep; STRONG only if allMatch AND the original VARIES across indices
     (>=3 distinct) -- else non-discriminating (a wrong offset would match a uniform field too).
@@ -162,7 +162,7 @@ def _prove_global_table(code, name, addr, ret, *, build=True) -> dict:
         r["ok"] = False
         r["failure_stage"] = f"non_discriminating (distinct={len(orig)})"
     if r.get("ok"):
-        r["writeback"] = plp.record_proof(name, addr, spec, r)
+        r["writeback"] = plp.record_proof(name, addr, spec, r, program=program)
     return r
 
 

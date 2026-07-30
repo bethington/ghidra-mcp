@@ -55,6 +55,23 @@ rules:
     condition:
       duration_seconds: 300   # 5 min
 
+  - id: oracle_offline_sustained
+    description: >
+      The D2Debugger live oracle (:8790) has reported unreachable for more
+      than 15 minutes. Confirmed live 2026-07-27: the port worker used to
+      only check this ONCE at startup and grind for hours against a dead
+      oracle after a mid-run crash, burning provider tokens on port_live
+      candidates with zero chance of a CONF_LIVE promotion. oracle_health.py
+      now re-checks continuously and auto-pauses the live-prove/shadow-
+      promote lanes via FUNDOC_LIVE_PROVE/FUNDOC_SHADOW_PROMOTE; this rule is
+      the visibility/history half — it does not act, the worker-side gate
+      already does.
+    kind: oracle_offline_sustained
+    mode: report
+    signature: "oracle_offline"
+    condition:
+      duration_seconds: 900   # 15 min
+
   - id: provider_timeout_cluster
     description: >
       Three or more provider_timeout events from the same provider within

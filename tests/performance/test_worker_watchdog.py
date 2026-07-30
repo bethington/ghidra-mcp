@@ -335,6 +335,166 @@ def test_subprocess_registry_tracks_and_kills(monkeypatch):
     assert fun_doc.kill_worker_subprocesses(None) == 0
 
 
+def test_watchdog_reaps_zombie_worker_after_stop_flag(fast_watchdog_env):
+    """A worker whose thread already exited (e.g. an unhandled exception that
+    escaped its own try/finally) must not sit in a non-terminal status forever.
+
+    Confirmed live 2026-07-25: worker 3abec5b6 (globals mode) was stuck in
+    status="stopping" for 8+ hours -- py-spy confirmed its thread was gone
+    entirely, but nothing ever finalized the dict entry. Because MAX_WORKERS
+    and the per-binary lock both treat "stopping" as active, this permanently
+    wastes a worker slot and can block a real relaunch on that binary. The
+    watchdog must detect thread.is_alive() is False on a worker still in a
+    live-looking status and force-finalize it.
+    """
+    web, test_log = fast_watchdog_env
+    mgr, bus, _ = _make_mgr(web)
+    try:
+        dead_thread = threading.Thread(target=lambda: None)
+        dead_thread.start()
+        dead_thread.join()
+        assert not dead_thread.is_alive()
+
+        stop_flag = threading.Event()
+        stop_flag.set()  # this worker was intentionally being stopped
+        now_iso = datetime.now().isoformat()
+        with mgr._lock:
+            mgr._globals_active_binaries.add("/proj/A.dll")
+            mgr._workers["test-zombie"] = {
+                "id": "test-zombie",
+                "mode": "globals",
+                "provider": "mock",
+                "count": 1,
+                "continuous": False,
+                "model": None,
+                "binary": "/proj/A.dll",
+                "thread": dead_thread,
+                "stop_flag": stop_flag,
+                "started_at": now_iso,
+                "status": "stopping",
+                "timeout_count": 0,
+                "last_alert": None,
+                "phase": "globals_running",
+                "phase_since": now_iso,
+                "stall_kill_fired": True,
+                "restore_on_restart": True,
+                "last_heartbeat_at": now_iso,
+                "progress": {"completed": 1, "skipped": 115, "failed": 0, "current": None},
+            }
+
+        time.sleep(1.5)  # one watchdog tick at the 1s test cadence
+
+        with mgr._lock:
+            worker = mgr._workers["test-zombie"]
+            assert worker["status"] == "stopped", (
+                "zombie worker (stop_flag was set) must finalize to 'stopped', "
+                f"not stay at {worker['status']!r}"
+            )
+            assert worker["last_error"]
+            assert worker["finished_at"] is not None
+            assert worker["restore_on_restart"] is False
+
+        # Per-binary lock must be released so a relaunch on this binary
+        # isn't blocked forever by a dead worker.
+        assert "/proj/A.dll" not in mgr._globals_active_binaries
+
+        events = _read_events(test_log)
+        reaped = [
+            e for e in events
+            if e.get("event") == "worker.reaped_zombie" and e.get("worker_id") == "test-zombie"
+        ]
+        assert len(reaped) == 1, f"expected exactly one reap event, got {reaped}"
+
+        stopped_emits = [
+            c for c in bus.emit.call_args_list
+            if c.args[0] == "worker_stopped" and c.args[1].get("worker_id") == "test-zombie"
+        ]
+        assert stopped_emits, "worker_stopped must be emitted for the reaped zombie"
+    finally:
+        mgr._watchdog_stop.set()
+
+
+def test_watchdog_reaps_zombie_worker_without_stop_flag(fast_watchdog_env):
+    """A worker thread that dies WITHOUT stop_flag being set (a genuine crash,
+    not an intentional stop) must be finalized as 'error', not 'stopped' --
+    the distinction matters for anyone reading worker history after the fact."""
+    web, _log = fast_watchdog_env
+    mgr, _, _ = _make_mgr(web)
+    try:
+        dead_thread = threading.Thread(target=lambda: None)
+        dead_thread.start()
+        dead_thread.join()
+
+        now_iso = datetime.now().isoformat()
+        with mgr._lock:
+            mgr._workers["test-zombie-crash"] = {
+                "id": "test-zombie-crash",
+                "mode": "functions",
+                "provider": "mock",
+                "count": 1,
+                "continuous": False,
+                "model": None,
+                "binary": None,
+                "thread": dead_thread,
+                "stop_flag": threading.Event(),  # never set -- not an intentional stop
+                "started_at": now_iso,
+                "status": "running",
+                "timeout_count": 0,
+                "last_alert": None,
+                "phase": "process_function",
+                "phase_since": now_iso,
+                "stall_kill_fired": False,
+                "restore_on_restart": True,
+                "last_heartbeat_at": now_iso,
+                "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
+            }
+
+        time.sleep(1.5)
+
+        with mgr._lock:
+            worker = mgr._workers["test-zombie-crash"]
+            assert worker["status"] == "error", (
+                f"unexpected zombie (no stop_flag) must finalize to 'error', not {worker['status']!r}"
+            )
+    finally:
+        mgr._watchdog_stop.set()
+
+
+def test_watchdog_ignores_workers_with_no_thread(fast_watchdog_env):
+    """Legacy/synthetic worker dicts with thread=None (as every other test in
+    this file seeds) must be completely unaffected by the zombie reaper --
+    only a real, already-dead Thread object should trigger it."""
+    web, _log = fast_watchdog_env
+    mgr, _, _ = _make_mgr(web)
+    try:
+        now_iso = datetime.now().isoformat()
+        with mgr._lock:
+            mgr._workers["test-no-thread"] = {
+                "id": "test-no-thread",
+                "provider": "mock",
+                "count": 1,
+                "continuous": False,
+                "model": None,
+                "binary": None,
+                "thread": None,
+                "stop_flag": threading.Event(),
+                "started_at": now_iso,
+                "status": "running",
+                "timeout_count": 0,
+                "last_alert": None,
+                "phase": "process_function",
+                "phase_since": now_iso,
+                "stall_kill_fired": False,
+                "last_heartbeat_at": now_iso,
+                "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
+            }
+        time.sleep(1.5)
+        with mgr._lock:
+            assert mgr._workers["test-no-thread"]["status"] == "running"
+    finally:
+        mgr._watchdog_stop.set()
+
+
 def test_watchdog_does_not_self_heartbeat(fast_watchdog_env):
     """H25: the watchdog must OBSERVE last_heartbeat_at, not write it.
     Before the fix, the watchdog reset last_heartbeat_at = now on every
@@ -386,3 +546,80 @@ def test_watchdog_does_not_self_heartbeat(fast_watchdog_env):
         f"(last_heartbeat_at={worker.get('last_heartbeat_at')!r}, seed={seed!r})"
     )
     mgr._watchdog_stop.set()
+
+
+def test_port_worker_idle_poll_does_not_trip_stall_kill(fast_watchdog_env, monkeypatch):
+    """2026-07-26: a continuous PORT worker's "no eligible candidates right
+    now, poll again shortly" loop (run_port_worker_pass's on-idle branch,
+    fun_doc.py) never touched last_heartbeat_at, because that field is only
+    refreshed by on_progress/on_started -- both of which require a real
+    candidate to exist. A worker correctly idle-polling an exhausted queue
+    therefore looked identical to a genuinely hung one to the watchdog.
+
+    Confirmed live: worker 18e96b51 (continuous port mode, D2Client.dll) was
+    killed by worker.stalled_kill at exactly the 900s threshold while
+    correctly idle-polling with zero candidates available -- a false
+    positive, not a real hang.
+
+    Fix: run_port_worker_pass gained an on_idle callback, invoked once per
+    poll cycle when the candidate pool is empty; WorkerManager._run_worker_port
+    wires it to refresh last_heartbeat_at exactly like on_progress/on_started
+    do. This test drives the REAL _run_worker_port (not a re-implementation)
+    with a fake run_port_worker_pass that simulates several idle-poll ticks
+    spanning longer than the stall threshold, and asserts the watchdog never
+    fires."""
+    web, test_log = fast_watchdog_env
+    mgr, bus, _ = _make_mgr(web)
+    worker_id = "w-port-idle"
+    stop_flag = threading.Event()
+    mgr._workers[worker_id] = {
+        "id": worker_id,
+        "mode": "port",
+        "provider": "minimax",
+        "count": 12,
+        "continuous": True,
+        "model": None,
+        "binary": "/Mods/PD2-S12/D2Client.dll",
+        "thread": None,
+        "stop_flag": stop_flag,
+        "started_at": datetime.now().isoformat(),
+        "status": "starting",
+        "restored": False,
+        "progress": {},
+        "restore_on_restart": True,
+    }
+
+    def _fake_pass(**kwargs):
+        on_idle = kwargs["on_idle"]
+        # STALL_KILL_THRESHOLD_SEC=2 here (fast_watchdog_env); simulate 6
+        # idle-poll ticks at 0.5s apart (3s total, well past the threshold)
+        # with zero candidates found the whole time -- exactly the drained-
+        # queue scenario that used to get killed as a false positive.
+        for _ in range(6):
+            time.sleep(0.5)
+            on_idle()
+        return {"processed": 0, "totals": {}, "stopped_reason": "user_stop"}
+
+    monkeypatch.setattr("fun_doc.run_port_worker_pass", _fake_pass)
+    monkeypatch.setattr("port_live_prove.check_oracle_alive", lambda: False, raising=False)
+
+    try:
+        worker_thread = threading.Thread(target=mgr._run_worker_port, args=(worker_id,))
+        worker_thread.start()
+        worker_thread.join(timeout=10)
+        assert not worker_thread.is_alive(), "worker thread did not finish in time"
+
+        worker = mgr._workers[worker_id]
+        assert worker.get("stall_kill_fired") is not True, (
+            "idle-polling with zero candidates must not trigger the stall-kill "
+            "watchdog -- on_idle should have kept last_heartbeat_at fresh"
+        )
+        events = _read_events(test_log)
+        kills = [
+            e for e in events
+            if e.get("event") == "worker.stalled_kill" and e.get("worker_id") == worker_id
+        ]
+        assert not kills, f"expected no stall-kill for an idle-polling worker, got {kills}"
+    finally:
+        stop_flag.set()
+        mgr._watchdog_stop.set()

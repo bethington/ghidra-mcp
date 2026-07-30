@@ -22,10 +22,13 @@ dict) it needs rather than this module loading its own copies.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 OPEND2_REPO = Path(os.environ.get("FUNDOC_OPEND2_REPO", r"C:\Users\benam\source\cpp\OpenD2"))
@@ -643,20 +646,111 @@ def mint_vectors(program, address, fn_name, param_layout, input_sets, *, max_ste
     return vectors, errors
 
 
-def write_pending_vectors(system_name, vectors):
-    """Append/merge vectors into vectors/_pending/<system>.json (existing
-    staging convention -- see the treasureclass.json precedent). Returns the
-    path written."""
+@contextlib.contextmanager
+def _interprocess_lock(name):
+    """Best-effort advisory lock serializing a read-modify-write ACROSS threads
+    AND processes. Mirrors provider_pause._interprocess_lock (same msvcrt /
+    fcntl split, same fail-open contract) -- a thread lock is not enough here
+    because the `--port` CLI runs in a DIFFERENT process from the dashboard's
+    worker threads and both call write_pending_vectors.
+
+    Lock files live in the system temp dir, never in the staging dir: `_pending/`
+    is a human-review surface and a litter of `.lock` files there would show up
+    in `git status` and in the reviewer's way.
+
+    Fail-open by design: if OS locking is unavailable it proceeds unlocked
+    rather than hang or crash. Staging a vector is worth more than the
+    (already small) chance of an interleave.
+    """
+    lock_dir = Path(tempfile.gettempdir()) / "fundoc_pending_vectors_locks"
+    f = None
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        f = open(lock_dir / f"{name}.lock", "a+")
+        if os.name == "nt":
+            import msvcrt
+
+            # Non-blocking acquire with bounded retry so a stuck holder can't
+            # hang a worker indefinitely (5s ceiling, then proceed unlocked).
+            for _ in range(50):
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        pass  # fail open
+    try:
+        yield
+    finally:
+        if f is not None:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                f.close()
+            except OSError:
+                pass
+
+
+def pending_vectors_stem(module, system_name):
+    """Filename stem for a binary's pending-vector staging file.
+
+    NAMESPACED BY BINARY, deliberately. Vector files were keyed on the
+    function name alone until 2026-07-30, which silently merged DIFFERENT
+    binaries' same-named functions into one file: running Prove workers on
+    Bnclient/Fog/Storm concurrently produced a single
+    `shutdown_stub_no_op.json` holding 81 vectors from four binaries, all
+    under one `fn: "ShutdownStubNoOp"` key. Those are four distinct compiled
+    functions that merely share a name (CRT/stub names like ShutdownStubNoOp,
+    strcoll, NoOp, UnwindExceptionFrame recur across nearly every D2 DLL), so
+    merging their golden values is how you manufacture false divergences --
+    the same class of error as reading MOVZX as a 32-bit datum.
+
+    Mirrors write_draft's `{module}_{symbol}` convention, which already got
+    this right (`Fog_ShutdownStubNoOp.hpp` vs `Storm_ShutdownStubNoOp.hpp`).
+    """
+    return f"{module}_{system_name}" if module else system_name
+
+
+def write_pending_vectors(module, system_name, vectors):
+    """Append/merge vectors into vectors/_pending/<module>_<system>.json
+    (staging convention -- see the treasureclass.json precedent). Returns the
+    path written.
+
+    `module` is the source binary's stem (e.g. "Fog"), matching write_draft's
+    first argument -- see pending_vectors_stem for why it is not optional.
+
+    The read-modify-write is serialized by _interprocess_lock: the append was
+    an unguarded read -> extend -> write, so two workers staging the same
+    binary's vectors concurrently would lose one side's entries entirely.
+    """
     PENDING_VECTORS_DIR.mkdir(parents=True, exist_ok=True)
-    path = PENDING_VECTORS_DIR / f"{system_name}.json"
-    existing = []
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = []
-    existing.extend(vectors)
-    path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    stem = pending_vectors_stem(module, system_name)
+    path = PENDING_VECTORS_DIR / f"{stem}.json"
+    with _interprocess_lock(stem):
+        existing = []
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = []
+        existing.extend(vectors)
+        path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     return path
 
 
@@ -1027,6 +1121,15 @@ _PORT_TERMINAL_STATUSES = frozenset({
     "shadow_unreachable",
 })
 
+# NOT terminal (2026-07-29). "The provider never answered" is a verdict about
+# the PROVIDER, not the function -- exactly like oracle_unavailable above. It
+# used to be filed as malformed_response, which IS terminal, and 18 functions
+# were permanently dropped from the pipeline without a single unparseable
+# response between them. Re-selected on a later pass; fun_doc caps the retry
+# rounds (_MAX_TIMEOUT_ROUNDS) so an un-answerable prompt still retires rather
+# than churning forever.
+_PORT_RETRYABLE_STATUSES = frozenset({"provider_timeout"})
+
 
 def select_port_candidates(funcs, conformance_protected, active_binary=None,
                             good_enough_score=80, limit=20,
@@ -1103,10 +1206,15 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
             "binary_priority": _BINARY_PORT_PRIORITY.get(binary_name, 99),
             "caller_count": func.get("caller_count", 0),
             "is_leaf": not func.get("callees"),
+            # Retryables go to the BACK of the pass: a function the provider
+            # already failed to answer shouldn't outrank one that's never been
+            # tried, or a stuck row would re-head every pass forever.
+            "retry": func.get("port_status") in _PORT_RETRYABLE_STATUSES,
         })
 
-    # Pinned first, then binary priority, leaves before callers, most xrefs first.
-    out.sort(key=lambda c: (not c["pinned"], c["binary_priority"],
+    # Pinned first, then never-failed before retries, then binary priority,
+    # leaves before callers, most xrefs first.
+    out.sort(key=lambda c: (not c["pinned"], c["retry"], c["binary_priority"],
                             not c["is_leaf"], -c["caller_count"]))
     return out[:limit] if limit else out
 

@@ -38,7 +38,15 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     ]
     is_post = http_method.upper() == "POST"
     has_schema_dry_run = "dry_run" in properties
-    use_synthetic_dry_run = is_post and not has_schema_dry_run
+    # The server implements the synthetic dry-run generically (AnnotationScanner:
+    # run the call inside a transaction that always rolls back) -- but ONLY when
+    # it can resolve a Program from a `program` param. With no such param it
+    # falls straight through to the real write. Advertising dry_run there is a
+    # lie that reads as a preview: confirmed 2026-07-28 when a
+    # server_version_control_checkin(dry_run=True) created a real new version on
+    # the shared server. So only offer it where the server can honour it.
+    server_can_honour_dry_run = "program" in properties
+    use_synthetic_dry_run = is_post and not has_schema_dry_run and server_can_honour_dry_run
 
     def is_truthy(value) -> bool:
         if isinstance(value, str):
@@ -86,6 +94,20 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # one fails loudly instead of running against the server's current
         # program. filtered has already dropped None and "", so absence is the
         # test (an empty selector counts as omitted).
+        # A dry run the server cannot honour must fail, never silently write.
+        # AnnotationScanner only wraps the call in a rolled-back transaction when
+        # it can resolve the Program from a non-empty `program` query value; with
+        # one missing it performs the REAL write while the caller believes it
+        # previewed. Refusing here keeps dry_run either honoured or loud.
+        if use_synthetic_dry_run and is_truthy(dry_run) and "program" not in filtered:
+            return json.dumps({
+                "error": (
+                    "dry_run=true requires an explicit `program=` on this endpoint: "
+                    "the server can only simulate a write it can scope to a program, "
+                    "and would otherwise perform the write for real. "
+                    "Pass program=, or call without dry_run if you intend to write."
+                )
+            })
         if state._require_selectors and program_selectors:
             missing = [p for p in program_selectors if p not in filtered]
             if missing:

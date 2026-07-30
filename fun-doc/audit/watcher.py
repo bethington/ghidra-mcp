@@ -50,6 +50,7 @@ from .registry import AuditRegistry, FireDecision
 # that need windowed history; other events only drive state transitions.
 BUS_SUBSCRIPTIONS = (
     "ghidra_health",
+    "oracle_health",
     "worker_started",
     "worker_stopped",
     "provider_timeout",
@@ -68,6 +69,10 @@ class _WatcherState:
     active_workers: set[str] = field(default_factory=set)
     ghidra_status: Optional[str] = None            # "healthy" | "slow" | "offline" | None
     ghidra_status_since: Optional[datetime] = None
+    # D2Debugger live-oracle reachability (oracle_health.py's periodic poll,
+    # see its module docstring for the incident this rule guards against).
+    oracle_status: Optional[str] = None            # "reachable" | "unreachable" | None
+    oracle_status_since: Optional[datetime] = None
 
     # Ring buffers of recent events. Capped so long-running watchers
     # don't leak memory; bounds far exceed any rule's evaluation window.
@@ -135,6 +140,7 @@ class AuditWatcher:
     def _subscribe(self) -> None:
         handlers = {
             "ghidra_health": self._on_ghidra_health,
+            "oracle_health": self._on_oracle_health,
             "worker_started": self._on_worker_started,
             "worker_stopped": self._on_worker_stopped,
             "provider_timeout": self._on_provider_timeout,
@@ -154,6 +160,16 @@ class AuditWatcher:
             if self._state.ghidra_status != new:
                 self._state.ghidra_status_since = self._now()
             self._state.ghidra_status = new
+
+    def _on_oracle_health(self, data: Optional[dict[str, Any]]) -> None:
+        data = data or {}
+        if "reachable" not in data:
+            return
+        new = "reachable" if data["reachable"] else "unreachable"
+        with self._lock:
+            if self._state.oracle_status != new:
+                self._state.oracle_status_since = self._now()
+            self._state.oracle_status = new
 
     def _on_worker_started(self, data: Optional[dict[str, Any]]) -> None:
         data = data or {}
@@ -213,6 +229,8 @@ class AuditWatcher:
                     self._eval_bridge_counter_stall(rule, counters)
                 elif kind == "ghidra_offline_sustained":
                     self._eval_ghidra_offline_sustained(rule)
+                elif kind == "oracle_offline_sustained":
+                    self._eval_oracle_offline_sustained(rule)
                 elif kind == "event_count_in_window":
                     self._eval_event_count_in_window(rule)
                 elif kind == "run_failure_rate":
@@ -297,6 +315,26 @@ class AuditWatcher:
             rule,
             rule["signature"],
             {"status": "offline", "elapsed_seconds": round(elapsed, 1)},
+        )
+
+    def _eval_oracle_offline_sustained(self, rule: dict[str, Any]) -> None:
+        cond = rule.get("condition") or {}
+        duration = float(cond.get("duration_seconds", 300))
+        now = self._now()
+
+        with self._lock:
+            status = self._state.oracle_status
+            since = self._state.oracle_status_since
+
+        if status != "unreachable" or since is None:
+            return
+        elapsed = (now - since).total_seconds()
+        if elapsed < duration:
+            return
+        self._fire(
+            rule,
+            rule["signature"],
+            {"status": "unreachable", "elapsed_seconds": round(elapsed, 1)},
         )
 
     def _eval_event_count_in_window(self, rule: dict[str, Any]) -> None:
@@ -461,6 +499,12 @@ class AuditWatcher:
                 "ghidra_status_since": (
                     self._state.ghidra_status_since.isoformat()
                     if self._state.ghidra_status_since
+                    else None
+                ),
+                "oracle_status": self._state.oracle_status,
+                "oracle_status_since": (
+                    self._state.oracle_status_since.isoformat()
+                    if self._state.oracle_status_since
                     else None
                 ),
                 "recent_provider_timeouts": len(self._state.provider_timeouts),

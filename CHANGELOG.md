@@ -4,6 +4,132 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### fun-doc: pending vectors are namespaced by binary and their append is locked
+
+**Golden-vector staging files were keyed on the function name alone, so different
+binaries' same-named functions merged into one file.** Running Prove (PORT)
+workers on eleven binaries concurrently surfaced it immediately:
+`vectors/_pending/shutdown_stub_no_op.json` had accumulated **101 vectors from
+five DLLs** — D2Common, Bnclient, Fog, Storm and D2CMP — all filed under a single
+`fn: "ShutdownStubNoOp"` key. Those are five distinct compiled functions that
+merely share a stub name, and stub/CRT names (`StubReturnZero`, `strcoll`,
+`NoOp`, `UnwindExceptionFrame`) recur in nearly every D2 DLL. Merging their
+golden values is how false divergences get manufactured — the same failure shape
+as reading `MOVZX` as a 32-bit datum. Four staging files were polluted this way.
+
+`write_pending_vectors` now takes the source binary as its first argument and
+writes `<module>_<system>.json`, mirroring `write_draft`'s `{module}_{symbol}`
+convention, which had this right all along (`Fog_ShutdownStubNoOp.hpp` vs
+`Storm_ShutdownStubNoOp.hpp`). The argument is required, not optional: a default
+would let the bug return silently.
+
+**The append was also an unguarded read-modify-write.** Two workers staging the
+same binary's vectors concurrently lost one side's entries outright — measured at
+up to **23 of 24 concurrent appends dropped**. It is now wrapped in an
+`_interprocess_lock` mirroring `provider_pause`'s (msvcrt/fcntl, fail-open), which
+is required rather than a thread lock because the `--port` CLI runs in a different
+process from the dashboard's worker threads and both call this function. Lock
+files live in the system temp dir, never in `_pending/` — that directory is a
+human-review surface.
+
+`fun-doc/scripts/migrate_pending_vectors.py` re-splits legacy files by the source
+binary recorded in each vector's own `note`, normalizing the two program spellings
+(`/Mods/PD2-S12/D2Common.dll` and bare `D2Common.dll`) to one stem. Dry-run by
+default, archives originals to `_pending/_premigration/` rather than deleting, and
+never drops an unattributable vector. Applied: 148 files migrated, 3,605 vectors
+rewritten, 0 lost, 0 multi-binary files remaining, idempotent on re-run.
+
+### fun-doc: globals lose the DOC_ rung ladder; dashboard read layer un-broken
+
+**The dashboard's Globals and Functions inventories had both been returning zero
+rows against a live Ghidra.** `conformance_dashboard.py` still parsed
+`/list_globals`, `/list_segments` and `/list_functions` as newline text; 6.0.0
+reshaped all three into JSON envelopes, and the `isinstance(txt, str) else ""`
+fallbacks turned each dict into an empty string. Measured on
+`/Mods/PD2-S12/D2Common.dll`: globals `0 → 2,222`, functions `0 → 2,195`,
+`_image_range` `None → 0x6fd50000-0x6fdf9000`.
+
+The 6.0.0 caller sweep had a guard test for exactly this class of miss, and it
+was green — `tests/performance/test_response_contract_callers.py` blanket-exempted
+`conformance_dashboard.py` to keep its endpoint-name contract table quiet, which
+also blinded it to eight real call sites in the same file. The exemption is now
+per-line and shape-based (`("GET", "/path")` table rows), the file is checked,
+and `list_functions` was added to the reshaped-endpoint list. Verified failing on
+a reintroduced bug, not just passing.
+
+**Globals no longer carry DOC_DRAFT / DOC_REVIEWED / DOC_VERIFIED.** A survey of
+all 32 project binaries found 19,996 `Doc` property entries and every one was
+`DOC_DRAFT`: the other two rungs had no producer anywhere and read zero on every
+binary, forever — `DOC_VERIFIED` had no reachable definition at all, since
+there is no proof pipeline for a data address. `DOC_DRAFT` itself was a watermark
+rather than a quality signal (stamped on any global crossing Target, then used as
+the assess pass's skip condition), which is why D2Common read 96% "documented"
+against 51% typed and why 2,142 of its 2,231 globals could never be re-scored.
+4,848 of the entries (28%) also sat on the wrong program — D2CMP.dll held 4,049
+of which only 307 were its own — from `/set_property`'s query-sourced `program`
+parameter being passed in the body.
+
+Globals now have two independent signals:
+
+- **Completeness** — the `Complete` band map (`COMPLETE_80/90/95/100`), machine-scored,
+  live, demoting. This is the single Globals bar; the second "Globals · Documentation"
+  bar and its hatched typed-groundwork underlay are gone. The underlay's `_GLOB_PRIM`
+  regex also disagreed with the Java scorer about what "typed" means (it rejected
+  `int`/`dword`/`word`/`byte`; the scorer only rejects `undefined*`), which is the
+  rest of the 96%-vs-51% gap. One definition now, matching the scorer.
+- **Trust** — `Doc` reduced to the single value `REVIEWED`, meaning a *different*
+  provider re-checked the global against its real uses and left no blocking issues.
+  New `config.globals_audit_provider` (default `null`, separate from the per-function
+  `audit_provider`); it refuses loudly if set to the provider doing the documenting.
+  Manual Confirm/Clear per row via `POST /api/conformance/global_review`.
+
+`run_assess_globals_pass` now re-scores every in-scope global every pass with no
+cache. The scorer is ~15 ms/address measured, so a full 2,231-global sweep is ~32
+seconds — never enough saving to justify a cache that could go stale.
+
+`fun-doc/migrate_doc_map.py` retires the legacy entries: dry-run survey by default,
+always snapshots to `fun-doc/backups/doc_map_<stamp>.json` first, `--apply` to
+clear, `--strays-only` for the wrong-program subset, `--restore` to replay.
+
+`fun-doc/assess_globals_all.py` sweeps the re-score across every project binary and
+reports what moved. Needed because the retired cache had frozen bands project-wide,
+not just on one binary.
+
+### fun-doc: priority_queue.json config writes merge instead of clobbering
+
+`save_priority_queue()` wrote the whole file from the caller's in-memory snapshot,
+making every writer a last-writer-wins clobberer of every other writer. Observed
+live twice while verifying the globals work: `globals_audit_provider` was set
+through the dashboard, confirmed on disk, and then silently reverted to `null` by a
+concurrent process that had loaded the queue before the edit and saved it back
+after. No error, no log line — the setting simply vanished, and it was only caught
+because a worker started afterwards with the wrong policy.
+
+`load_priority_queue()` now stamps a baseline and `save_priority_queue()` does a
+3-way merge on `config`, inside the write lock: a key the caller never touched
+takes whatever is on disk now, a key the caller changed wins. Explicitly setting a
+value to `null` still counts as an opinion, so settings remain clearable. Scoped to
+`config` — `pinned` is a list with add/remove semantics that a blind merge would
+corrupt by resurrecting unpinned entries. Covered by
+`tests/performance/test_queue_config_merge.py`, which reproduces the exact
+production sequence and fails without the merge.
+
+### fun-doc: worker progress counters stop reporting successes as failures
+
+Both the globals and port lanes bucketed "anything that is not `completed` or a
+short list of skips" into `failed`. A globals pass with 2 documented and 1
+legitimately unchanged global reported `failed=1`; the port lane reported 66
+failures that were all ordinary classifications. Both lanes now use their real
+outcome vocabularies — globals: `improved`/`lateral_change` are successes and
+`no_change` is a skip; port: `shadow_leaf_pending` is a success and
+`unknown_skip`/`handle_abort_hazard_skip`/`oracle_unavailable` are skips, leaving
+`harness_failed`/`blocked`/`error` as the only failures. A counter that cries wolf
+trains you to ignore the number that is supposed to mean something.
+
+---
+
 ## v6.0.0 - 2026-07-25 (major: security hardening with a breaking default, program storage tools, provider resilience)
 
 > **⚠️ Breaking change.** The HTTP servers now reject cross-origin browser

@@ -189,7 +189,7 @@ def submit_candidate(name: str, address: str, code: str,
 
     try:
         res = plp.run_live_prove(code, name, addr, param_layout, input_sets,
-                                 abort_class=abort_class)
+                                 program=program, abort_class=abort_class)
     except plp.UnsupportedLiveABI as e:
         plp.remove_candidate(name)
         v = {"stage": "abi_translate", "ok": False, "detail": str(e),
