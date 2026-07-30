@@ -45,6 +45,20 @@ DEFAULT_PROVE_CHARACTER = os.environ.get("D2MOO_PROVE_CHARACTER", "summoner-skel
 POLL_INTERVAL_SEC = float(os.environ.get("FUNDOC_ORACLE_POLL_SEC", "45"))
 GAME_PROCESS_NAME = "Game.exe"
 
+# Unattended recovery from a WEDGED game (process alive, embedded oracle dead --
+# the "Halt / Unrecoverable internal error" shape a bad proof vector produces).
+# ON by default, but deliberately narrow: it only fires when a port worker is
+# actually running, so it can never kill a game nobody is proving against.
+AUTO_RECOVER = os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER", "1") == "1"
+# Poll cycles the oracle must stay down before we call it wedged rather than
+# briefly busy. At the default 45s poll that is ~2 minutes of hard evidence.
+AUTO_RECOVER_AFTER_DOWN = int(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_AFTER", "3"))
+# Floor between attempts, and a hard cap. A relaunch that keeps failing must not
+# become a kill/launch loop chewing the machine -- after the cap it stays down
+# and stays LOUD until a human looks.
+AUTO_RECOVER_COOLDOWN_SEC = float(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_COOLDOWN", "600"))
+AUTO_RECOVER_MAX_ATTEMPTS = int(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_MAX", "3"))
+
 # Live-confirmed 2026-07-27: after killing a wedged worker subprocess with no
 # oracle, `os.environ` gating recovered the worker on the very next candidate.
 # This module extends that same gate to be periodically refreshed instead of
@@ -80,11 +94,63 @@ def _oracle_post(path: str, body: dict, timeout: float = 15.0):
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def _wait_for_game_exit(timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_game_running():
+            return True
+        time.sleep(0.5)
+    return not is_game_running()
+
+
+def kill_game(timeout: float = 20.0, allow_elevate: bool = True) -> bool:
+    """Terminate Game.exe and wait for it to actually disappear.
+
+    Only ever called for a WEDGED game -- one whose embedded oracle is gone.
+    A D2 "Halt / Unrecoverable internal error" dialog leaves the process alive
+    and message-pumping (so `is_game_running()` stays True and the window even
+    reports Responding=True) while the game itself can no longer execute
+    anything. There is nothing to save in that state; the alternative to
+    killing it is a permanently blocked recovery path.
+
+    PD2 runs ELEVATED (LaunchPD2-Oracle.bat self-elevates), so a plain taskkill
+    from a normal-integrity dashboard always fails with "Access is denied" --
+    measured 2026-07-30, which is what turned a wedged game into a dead end.
+    We therefore retry once via ShellExecute `runas`, which raises a UAC prompt
+    on the interactive desktop. That makes recovery one click instead of
+    impossible; for FULLY unattended recovery, run the dashboard elevated so
+    the first taskkill succeeds outright."""
+    try:
+        proc = subprocess.run(["taskkill", "/F", "/T", "/IM", GAME_PROCESS_NAME],
+                              capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if _wait_for_game_exit(timeout):
+        return True
+
+    denied = b"denied" in (proc.stderr or b"").lower() + (proc.stdout or b"").lower()
+    if not (allow_elevate and denied):
+        return False
+    print("  [oracle] taskkill was denied (the game runs elevated) -- requesting "
+          "an elevated kill; APPROVE THE UAC PROMPT to finish recovery", flush=True)
+    try:
+        # ShellExecuteW verb "runas" is the only way to cross the integrity
+        # boundary without a pre-elevated helper. Fire-and-poll: the call
+        # returns as soon as the user answers the prompt.
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "taskkill.exe", f"/F /T /IM {GAME_PROCESS_NAME}", None, 0)
+    except Exception:
+        return False
+    # Generous: this window includes a human noticing and clicking UAC.
+    return _wait_for_game_exit(max(timeout, 60.0))
+
+
 def _dismiss_diablo_error_dialog() -> bool:
-    """Best-effort dismissal of the transient "Diablo II Error" startup dialog
-    documented in LOOP_PLAYBOOK.md (a lingering lock from a crashed prior
-    instance) -- Win32 EnumWindows + WM_CLOSE, no pywin32 dependency. Returns
-    True if a matching window was found and closed."""
+    """Best-effort dismissal of a "Diablo II Error" dialog -- both the transient
+    startup one documented in LOOP_PLAYBOOK.md (a lingering lock from a crashed
+    prior instance) and the terminal "Halt / Unrecoverable internal error <addr>"
+    box a bad proof vector can produce. Win32 EnumWindows + WM_CLOSE, no pywin32
+    dependency. Returns True if a matching window was found and closed."""
     try:
         user32 = ctypes.windll.user32
         found = []
@@ -118,7 +184,8 @@ class OracleHealthMonitor:
     the whole time the dashboard is up.
     """
 
-    def __init__(self, bus=None, poll_interval=None, launch_bat=None, character=None):
+    def __init__(self, bus=None, poll_interval=None, launch_bat=None, character=None,
+                 auto_recover=None, auto_recover_needed=None):
         self._bus = bus
         self._poll_interval = poll_interval or POLL_INTERVAL_SEC
         self.launch_bat = launch_bat or LAUNCH_BAT
@@ -136,9 +203,22 @@ class OracleHealthMonitor:
             "relaunching": False,
             "relaunch_stage": None,
             "relaunch_error": None,
+            # WEDGED: the process is up but its embedded oracle is gone -- the
+            # D2 "Halt / Unrecoverable internal error" shape. Distinct from
+            # "game not running" because the recovery differs (this one has to
+            # close the corpse first) and because it is the state that silently
+            # starves every port worker of live candidates.
+            "game_wedged": False,
         }
         self._stop = threading.Event()
         self._thread = None
+        self._auto_recover = AUTO_RECOVER if auto_recover is None else bool(auto_recover)
+        # Predicate: "does anything actually need the oracle right now?" The
+        # WorkerManager passes 'is a port worker running'. Without it the
+        # monitor would happily kill a game the operator is using by hand.
+        self._auto_recover_needed = auto_recover_needed
+        self._auto_recover_attempts = 0
+        self._last_auto_recover_at = None
 
     # ---- lifecycle -------------------------------------------------------
     def start(self):
@@ -201,6 +281,34 @@ class OracleHealthMonitor:
             self._state["consecutive_down"] = (
                 0 if reachable else self._state["consecutive_down"] + 1
             )
+            # Game up + oracle down = the embedded oracle died without taking
+            # the process with it. Requiring a sustained down-streak keeps a
+            # single slow poll from being mistaken for a crash.
+            self._state["game_wedged"] = bool(
+                running and not reachable
+                and self._state["consecutive_down"] >= AUTO_RECOVER_AFTER_DOWN
+            )
+            # Clear a STALE relaunch failure once the oracle is actually back
+            # (2026-07-30). relaunch_stage/relaunch_error are written only by
+            # _set_relaunch, i.e. only while THIS class is driving a relaunch --
+            # so a failed attempt left "failed" + its error pinned forever, and
+            # any other route to recovery (the operator relaunching by hand,
+            # which is the common one) left the dashboard reporting
+            # reachable=true, game_running=true, relaunch_stage="failed" all at
+            # once. Cosmetic until it isn't: a stale "failed" sitting next to a
+            # healthy oracle is exactly what sends you debugging the wrong thing.
+            #
+            # Narrow on purpose: only a FAILED stage is cleared, and only when
+            # we are not mid-relaunch. A successful relaunch's "ready" is real
+            # information and survives.
+            cleared_stale = False
+            if (reachable and not self._state.get("relaunching")
+                    and (self._state.get("relaunch_error")
+                         or self._state.get("relaunch_stage") == "failed")):
+                self._state["relaunch_error"] = None
+                if self._state.get("relaunch_stage") == "failed":
+                    self._state["relaunch_stage"] = None
+                cleared_stale = True
             changed = prev_reachable != reachable
             snapshot = dict(self._state)
 
@@ -217,8 +325,79 @@ class OracleHealthMonitor:
                 log_event("oracle_health_changed", reachable=reachable, game_running=running)
             except Exception:
                 pass
+        if cleared_stale:
+            # Push the cleared state to the dashboard too, or the stale "failed"
+            # keeps rendering until some other change happens to emit.
+            self._emit_relaunch_progress(snapshot)
         self._emit_health(snapshot)
+        if snapshot["game_wedged"]:
+            self._maybe_auto_recover(snapshot)
         return snapshot
+
+    # ---- unattended recovery -------------------------------------------------------
+    def _auto_recover_blocked_reason(self, snapshot):
+        """Why auto-recovery will NOT fire, or None when it should. Split out so
+        the reason can be logged -- a recovery that silently declines is
+        indistinguishable from one that is broken."""
+        if not self._auto_recover:
+            return "disabled (FUNDOC_ORACLE_AUTO_RECOVER=0)"
+        if snapshot.get("relaunching"):
+            return "a relaunch is already in progress"
+        if self._auto_recover_attempts >= AUTO_RECOVER_MAX_ATTEMPTS:
+            return (f"gave up after {self._auto_recover_attempts} attempt(s) -- "
+                    "recover by hand and check the launcher")
+        if self._last_auto_recover_at is not None:
+            waited = time.monotonic() - self._last_auto_recover_at
+            if waited < AUTO_RECOVER_COOLDOWN_SEC:
+                return f"cooling down ({int(AUTO_RECOVER_COOLDOWN_SEC - waited)}s left)"
+        # No predicate -> we cannot know that anything wants the oracle, and
+        # "kill the game on a hunch" is not a safe default. The dashboard always
+        # supplies one; a bare monitor (scripts, tests) deliberately never
+        # auto-kills.
+        if self._auto_recover_needed is None:
+            return "no need-predicate configured -- refusing to close a game on spec"
+        try:
+            if not self._auto_recover_needed():
+                return "nothing needs the oracle right now (no port worker running)"
+        except Exception as e:
+            return f"need-predicate raised: {e}"
+        return None
+
+    def _maybe_auto_recover(self, snapshot):
+        """Wedged game + something waiting on the oracle -> close it and relaunch.
+
+        Loud either way. The failure this exists to prevent is silent: a halted
+        game starves every port worker of live candidates, they drain their pools
+        into `oracle_unavailable` and exit `exhausted`, and the only symptom is
+        that real proofs quietly stop appearing (the same shape as the 2026-07-27
+        incident this module was written for)."""
+        reason = self._auto_recover_blocked_reason(snapshot)
+        if reason is not None:
+            print(f"  [oracle] game WEDGED (process up, oracle dead) -- "
+                  f"auto-recovery declined: {reason}", flush=True)
+            self._log_event("oracle_auto_recover_declined", reason=reason)
+            return
+        self._auto_recover_attempts += 1
+        self._last_auto_recover_at = time.monotonic()
+        attempt = self._auto_recover_attempts
+        print(f"  [oracle] game WEDGED (process up, oracle dead) -- auto-recovering "
+              f"(attempt {attempt}/{AUTO_RECOVER_MAX_ATTEMPTS})", flush=True)
+        self._log_event("oracle_auto_recover_started", attempt=attempt)
+        result = self.relaunch(force=True)
+        if result.get("ok"):
+            self._auto_recover_attempts = 0
+            print("  [oracle] auto-recovery succeeded -- live-prove is back", flush=True)
+        else:
+            print(f"  [oracle] auto-recovery FAILED: {result.get('error')}", flush=True)
+        self._log_event("oracle_auto_recover_result", attempt=attempt,
+                        ok=bool(result.get("ok")), error=result.get("error"))
+
+    def _log_event(self, name, **fields):
+        try:
+            from event_log import log_event
+            log_event(name, **fields)
+        except Exception:
+            pass
 
     # ---- relaunch orchestration -------------------------------------------------------
     def _wait_for(self, predicate, timeout, interval):
@@ -294,10 +473,16 @@ class OracleHealthMonitor:
             return {"ok": False, "error": result.get("error", "load-character returned ok=false")}
         return {"ok": True}
 
-    def relaunch(self, character=None, timeout_boot=120.0, timeout_menu=90.0) -> dict:
+    def relaunch(self, character=None, timeout_boot=120.0, timeout_menu=90.0,
+                 force=False) -> dict:
         """Full one-click sequence: launch Game.exe + embedded oracle, wait
         for :8790, advance to character-select, auto-load `character`.
-        Synchronous -- callers (the dashboard route) run this in a thread."""
+        Synchronous -- callers (the dashboard route) run this in a thread.
+
+        `force=True` additionally CLOSES a wedged Game.exe first (dismiss the
+        Halt dialog, then taskkill). Without it a halted-but-alive game blocks
+        recovery forever, which is exactly how a whole Prove fleet ends up with
+        nothing live to do."""
         character = character or self.character
 
         if self.get_state().get("relaunching"):
@@ -308,13 +493,27 @@ class OracleHealthMonitor:
             # vs one oracle corrupt state") -- if Game.exe is up but the oracle
             # is unreachable, the embedded oracle almost certainly crashed
             # without taking the game process down with it. We can't safely
-            # re-embed hooks into an already-running process from here.
-            err = ("Game.exe is already running but the oracle is unreachable. "
-                   "This usually means the embedded oracle crashed without "
-                   "killing the game (a bad proof vector can do this). Close "
-                   "Game.exe manually first, then relaunch.")
-            self._set_relaunch(False, "failed", err)
-            return {"ok": False, "error": err}
+            # re-embed hooks into an already-running process from here, so the
+            # corpse has to go before we can launch a fresh one.
+            if not force:
+                err = ("Game.exe is already running but the oracle is unreachable. "
+                       "This usually means the embedded oracle crashed without "
+                       "killing the game (a bad proof vector can do this). Close "
+                       "Game.exe manually first, then relaunch -- or retry with "
+                       "force to have the dashboard close it for you.")
+                self._set_relaunch(False, "failed", err)
+                return {"ok": False, "error": err}
+
+            self._set_relaunch(True, "closing the wedged Game.exe", None)
+            _dismiss_diablo_error_dialog()
+            if not kill_game():
+                err = ("could not terminate the wedged Game.exe. PD2 runs "
+                       "elevated, so either approve the UAC prompt, close the "
+                       "game by hand, or run the dashboard elevated to make "
+                       "recovery fully unattended.")
+                self._set_relaunch(False, "failed", err)
+                self._log_result(False, err, character)
+                return {"ok": False, "error": err}
 
         self._set_relaunch(True, "starting", None)
         try:
