@@ -1172,13 +1172,24 @@ public class DataTypeService {
             // with transaction commit/rollback handled centrally.
             try {
                 return threadingStrategy.executeWrite(program, "Apply Data Type: " + typeName, () -> {
-                    // Clear existing code/data if requested
+                    // Clear existing code/data if requested. Unconditional over the
+                    // FULL target range -- gating this behind "a code unit starts
+                    // exactly at `address`" (the old check) misses the common case
+                    // where `address` falls in the middle or tail of a wider
+                    // already-defined unit (e.g. retyping one field of a struct
+                    // applied earlier): getCodeUnitAt(address) returns null there,
+                    // so nothing got cleared, and createData below still collided
+                    // with the surrounding unit -- "Error applying data type:
+                    // Conflicting data exists at address X to Y" even though the
+                    // caller explicitly asked to clear first. Confirmed live
+                    // 2026-07-26: a fun-doc FIX-mode worker retried the identical
+                    // apply_data_type call 2-3 times before it happened to succeed,
+                    // which only worked because an unrelated later clear coincidentally
+                    // freed the range. clearCodeUnits is a documented no-op over a
+                    // range with nothing defined, so this is safe to call unconditionally.
                     if (clearExisting) {
-                        CodeUnit existingCU = listing.getCodeUnitAt(address);
-                        if (existingCU != null) {
-                            listing.clearCodeUnits(address,
-                                address.add(Math.max(dataType.getLength() - 1, 0)), false);
-                        }
+                        listing.clearCodeUnits(address,
+                            address.add(Math.max(dataType.getLength() - 1, 0)), false);
                     }
 
                     // Apply the data type

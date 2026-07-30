@@ -1072,6 +1072,12 @@ _STATE_DIRECT_FIELDS = (
     "port_attempts",
     "port_draft_path",
     "port_last_result",
+    # Written on every failed live prove since the failure-stage taxonomy
+    # landed, but absent from BOTH field lists until 2026-07-30 -- so it was
+    # dropped silently on every write (the trap CLAUDE.md documents). Its
+    # absence is why classifying 234 terminal rows by cause needed a
+    # reconstruction from logs/runs.jsonl.
+    "port_failure_stage",
 )
 
 
@@ -1566,6 +1572,95 @@ _ACCUMULATOR_FIELDS = (
 )
 
 
+_CONF_SYNC_FAILURES = 0
+_CONF_SYNC_MAX_FAILURES = 10
+
+
+def _sync_conf_rung(func_key, updated_func):
+    """Project a `port_status` transition onto the Ghidra CONF_* rung.
+
+    This is the hook that closes the two-state-machine split: before it,
+    `port_status` was written on every transition while the CONF_ rung was
+    written only by `port_live_prove.record_proof()` -- which this worker path
+    never calls. D2Client.dll ended up with 0 CONF_ tags across 5,739 functions
+    while SQL held 35 static-harness passes for it, and CONF_DRAFT/CONF_VECTORS
+    had no writer anywhere in the codebase.
+
+    Ghidra stays the source of truth (writeback-source-of-truth); SQL keeps the
+    fine-grained operational detail. Rules come from conf_ladder.decide(), the
+    same function the bulk backfill uses, so the two cannot drift.
+
+    Best-effort and PROMOTE-ONLY -- never raises, never demotes an earned rung.
+    Loud on failure: a silently-swallowed write-back is how both the
+    wrong-binary default and a 5-day property-write outage went unnoticed.
+    Disable with FUNDOC_CONF_TAGS=0.
+
+    Called OUTSIDE _state_lock: it does HTTP, and holding the state lock across
+    a network round-trip would serialize every worker behind it.
+    """
+    global _CONF_SYNC_FAILURES
+    if os.environ.get("FUNDOC_CONF_TAGS", "1") == "0":
+        return
+    status = (updated_func or {}).get("port_status")
+    if not status:
+        return
+    # Circuit breaker: if Ghidra is down, every transition would otherwise pay a
+    # full HTTP timeout. Trip once and stay tripped for the process lifetime.
+    if _CONF_SYNC_FAILURES >= _CONF_SYNC_MAX_FAILURES:
+        return
+
+    try:
+        import conf_ladder
+
+        program_path = (updated_func.get("program")
+                        or (func_key.split("::", 1)[0] if "::" in func_key else ""))
+        address = (updated_func.get("address")
+                   or (func_key.split("::", 1)[1] if "::" in func_key else ""))
+        if not program_path or not address:
+            return
+        program = program_path.rsplit("/", 1)[-1]
+        addr = f"0x{str(address).lstrip('0x')}"
+
+        cur = None
+        r = requests.get(f"{GHIDRA_URL}/get_function_tags",
+                         params={"function": addr, "program": program}, timeout=5)
+        for t in (r.json().get("tags") or []):
+            if t.get("name") in conf_ladder.ALL_CONF_TAGS:
+                cur = t["name"]
+                break
+
+        bucket, rung, reason = conf_ladder.decide(status, cur)
+        if bucket != "promote":
+            return
+
+        # Mutually exclusive: a live transition really can move between rungs
+        # (CONF_VECTORS -> CONF_LIVE), unlike the one-shot backfill where every
+        # source rung was `none`. Drop the others before adding.
+        others = ",".join(t for t in conf_ladder.ALL_CONF_TAGS if t != rung)
+        requests.post(f"{GHIDRA_URL}/remove_function_tag",
+                      json={"function": addr, "tags": others},
+                      params={"program": program}, timeout=5)
+        resp = requests.post(f"{GHIDRA_URL}/add_function_tag",
+                             json={"function": addr, "tags": rung},
+                             params={"program": program}, timeout=5).json()
+        if resp.get("status") != "success" and not resp.get("success"):
+            _CONF_SYNC_FAILURES += 1
+            print(f"  [write-back WARN] CONF rung {rung} @ {addr} ({program}): "
+                  f"{str(resp)[:160]}")
+            return
+        _CONF_SYNC_FAILURES = 0
+
+        if rung == conf_ladder.CONF_BLOCKED and reason:
+            rec = json.dumps({"conf": rung, "reason": reason}, separators=(",", ":"))
+            requests.post(f"{GHIDRA_URL}/set_property",
+                          json={"map": conf_ladder.CONF_PROPERTY_MAP,
+                                "address": addr, "value": rec},
+                          params={"program": program}, timeout=5)
+    except Exception as e:  # noqa: BLE001 - a tag write must never fail a worker
+        _CONF_SYNC_FAILURES += 1
+        print(f"  [write-back WARN] CONF rung sync failed for {func_key}: {e}")
+
+
 def update_function_state(func_key, updated_func):
     """Atomically update a single function's state entry.
 
@@ -1590,6 +1685,7 @@ def update_function_state(func_key, updated_func):
     if repo is not None:
         with _state_lock:
             _update_function_via_repo(repo, func_key, updated_func)
+        _sync_conf_rung(func_key, updated_func)
         bus_emit("state_changed")
         return
 
@@ -1615,6 +1711,7 @@ def update_function_state(func_key, updated_func):
                     merged[field] = on_disk[field]
         funcs[func_key] = merged
         _atomic_write_state(latest)
+    _sync_conf_rung(func_key, updated_func)
     bus_emit("state_changed")
 
 
@@ -2268,22 +2365,6 @@ def _global_meaningful_name(name):
     return len(re.sub(r"[^A-Za-z]", "", n)) >= 3
 
 
-def _global_doc_rungs(program):
-    """{normalized 0xaddr -> DOC rung} from the `Doc` property map (already-assessed globals)."""
-    out = {}
-    try:
-        r = ghidra_get("/list_properties", params={"map": "Doc", "program": program, "limit": 100000})
-        if isinstance(r, str):
-            r = json.loads(r)
-        for p in (r.get("entries") or r.get("properties") or []):
-            a, v = p.get("address"), p.get("value")
-            if a and v in _ASSESS_DOC_TAGS:
-                out["0x" + str(a).lower().lstrip("0x")] = v
-    except Exception:
-        pass
-    return out
-
-
 def _global_comment_state(program, addr):
     """(explanatory, available) for the listing comment at a data address, via /get_comment
     (reads plate/pre/eol/... -- the kinds set_global/batch_set_comments write on a global).
@@ -2309,14 +2390,25 @@ def _global_comment_state(program, addr):
 
 
 def run_assess_globals_pass(program, count=None, draft_score=None):
-    """Assess documentation completeness of in-scope globals -- the data-address analog of
-    run_assess_pass, backed by the /analyze_global_completeness budgeted 0-100 scorer (six
-    axes: meaningful name, explanatory comment, real type, formatted bytes -- core -- plus
-    enum/equate and struct membership, forgiven in effective_score). A global earns DOC_DRAFT
-    when its EFFECTIVE score >= the Target (good_enough_score), and its COMPLETE_<band> is
-    written to the `Complete` property map so the dashboard can render a completeness
-    distribution. Only globals without a DOC rung are scored (sticky, pool-shrinking).
-    `draft_score` defaults to the live Target. Streams per-global progress. Returns 0."""
+    """Re-score EVERY in-scope global and rewrite the `Complete` band map -- the
+    data-address analog of run_assess_pass, backed by the
+    /analyze_global_completeness budgeted 0-100 scorer (six axes: meaningful name,
+    explanatory comment, real type, formatted bytes -- core -- plus enum/equate and
+    struct membership, forgiven in effective_score).
+
+    No cache, by design. This pass used to skip any global that already carried a
+    DOC rung, and it stamped DOC_DRAFT on every global whose score crossed Target.
+    The rung was therefore a "already visited" watermark, and because it was sticky
+    it froze 2,142 of D2Common's 2,231 globals out of ever being re-scored -- a
+    global the worker improved kept reporting its stale pre-fix band forever. The
+    scorer costs ~15ms per address (measured), so a full 2,231-global sweep is ~32
+    seconds; there was never enough saving here to justify a cache that could go
+    stale. Bands are rewritten AND cleared, so this pass now converges on the truth
+    from any starting state.
+
+    `draft_score` is accepted for CLI compatibility and reported in the summary as
+    the band-of-interest threshold; it no longer gates any write. Streams per-global
+    progress. Returns 0."""
     if draft_score is None:
         draft_score = _good_enough_for_draft()
 
@@ -2344,18 +2436,14 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
     if not rows:
         emit(f"no globals found for {program}")
         return 1
-    already = _global_doc_rungs(program)
-    candidates = [g for g in rows if g["addr"] not in already]
-    emit(f"[globals] {len(rows)} in-image globals - {len(already)} already DOC-tagged "
-         f"-> {len(candidates)} to assess (Target={draft_score})")
+    candidates = rows
+    emit(f"[globals] {len(rows)} in-image globals -> re-scoring all "
+         f"(no cache; Target={draft_score})")
     if count:
         candidates = candidates[:count]
         emit(f"  (this pass: first {len(candidates)})")
-    if not candidates:
-        emit("[globals] nothing to assess -- every in-scope global already carries a DOC rung")
-        return 0
 
-    stamped = 0
+    at_target = 0
     bands = {}          # band string / "none" -> count
     scorer_live = True
     total = len(candidates)
@@ -2387,10 +2475,9 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
         _sync_global_band(program, g["addr"], band)
         _tally(band)
         if eff is not None and eff >= draft_score:
-            _stamp_global_doc_rung(program, g["addr"], "DOC_DRAFT")
-            stamped += 1
-            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  DOC_DRAFT "
-                 f"(effective {eff:.0f}, {band})")
+            at_target += 1
+            emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  {band or 'no band'} "
+                 f"(effective {eff:.0f}, at/above Target)")
         else:
             miss = ", ".join(res.get("missing") or []) or "polish"
             eff_s = f"{eff:.0f}" if eff is not None else "?"
@@ -2406,9 +2493,10 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
     band_summary = " ".join(f"{b}={bands[b]}" for b in
                             ("COMPLETE_100", "COMPLETE_95", "COMPLETE_90", "COMPLETE_80")
                             if bands.get(b))
-    emit(f"\n[globals] assessed {total}: stamped DOC_DRAFT on {stamped} (effective >= {draft_score}); "
+    emit(f"\n[globals] re-scored {total}: {at_target} at/above Target ({draft_score}); "
          f"bands: {band_summary or 'none'}; below-band={bands.get('none', 0)}")
-    emit("next: the Globals lane raises names/types/comments/bytes; re-run assess to promote to DOC_DRAFT")
+    emit("next: the Globals lane raises names/types/comments/bytes; re-run assess any time — "
+         "it is idempotent and re-scores everything")
     return 0
 
 
@@ -3469,6 +3557,14 @@ DEFAULT_QUEUE_CONFIG = {
     # result and fixes gaps (missing plate sections, unrenamed variables, etc.).
     # Set to None / "off" to disable. Only fires when score gain < audit_min_delta.
     "audit_provider": None,
+    # Second-provider review for the GLOBALS lane, kept separate from
+    # `audit_provider` so globals review can be enabled without also turning on
+    # per-function audits (and vice versa) — the two lanes have very different
+    # per-item costs. Set to a provider name to enable; None = off, and the
+    # dashboard's reviewed count honestly stays at 0. Never set this to the same
+    # provider that documents: review_global refuses that pairing, because a
+    # model checking its own output is not independent evidence.
+    "globals_audit_provider": None,
     # Optional immediate retry after a below-threshold run. Off by default so
     # the dashboard worker does not silently escalate to a more expensive model.
     "auto_escalate_provider": None,
@@ -3609,6 +3705,7 @@ def build_worker_config_snapshot(queue, primary_provider):
     snapshot = {
         "good_enough_score": int(cfg.get("good_enough_score", 80)),
         "audit_provider": _role_provider(cfg.get("audit_provider")),
+        "globals_audit_provider": _role_provider(cfg.get("globals_audit_provider")),
         "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
         "complexity_handoff_provider": _role_provider(
             cfg.get("complexity_handoff_provider")
@@ -3642,6 +3739,7 @@ def build_worker_config_snapshot(queue, primary_provider):
 
     _add_provider(primary_provider)
     _add_provider(snapshot["audit_provider"])
+    _add_provider(snapshot["globals_audit_provider"])
     _add_provider(snapshot["complexity_handoff_provider"])
     snapshot["providers"] = providers
     snapshot["primary_provider"] = primary_provider
@@ -3686,6 +3784,9 @@ def load_priority_queue():
     cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
     cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
     queue["config"] = cfg
+    # Baseline for save_priority_queue's 3-way config merge. See that function
+    # for why. Stripped before serialization, so it never reaches disk.
+    queue[_CONFIG_BASELINE_KEY] = copy.deepcopy(cfg)
     return queue
 
 
@@ -3782,23 +3883,79 @@ def _require_model_name(model, provider):
 _load_priority_queue = load_priority_queue
 
 
+_CONFIG_BASELINE_KEY = "_config_baseline"
+
+
+def _merge_config_on_write(cfg, baseline):
+    """3-way merge of `config` against whatever is on disk RIGHT NOW.
+
+    save_priority_queue writes the whole file from the caller's snapshot, which
+    made every writer a last-writer-wins clobberer of every other writer. That is
+    not theoretical: setting `globals_audit_provider` through the dashboard was
+    silently reverted to None by a concurrent `fun_doc.py --assess` subprocess
+    that had loaded the queue before the edit and saved it back after. The
+    setting vanished with no error, and the only reason it was caught is that a
+    worker started afterwards with the wrong policy.
+
+    Rule per key: if the caller's value is unchanged from the baseline it loaded,
+    the caller has no opinion -- take whatever is on disk now. If the caller
+    changed it, the caller wins. Keys only on disk are kept; keys the caller
+    genuinely added are added.
+
+    Scoped to `config` on purpose. `pinned` is a list with its own add/remove
+    semantics and merging it blindly would resurrect unpinned entries.
+    """
+    if not isinstance(baseline, dict):
+        return cfg                      # no baseline (hand-built queue) -> caller wins
+    try:
+        with open(PRIORITY_QUEUE_FILE, "r", encoding="utf-8") as f:
+            disk = (json.load(f) or {}).get("config") or {}
+    except (json.JSONDecodeError, OSError):
+        return cfg                      # no readable file -> nothing to merge against
+    merged = dict(cfg)
+    for key, disk_val in disk.items():
+        if key not in baseline and key not in cfg:
+            merged[key] = disk_val      # someone else added it
+        elif key in cfg and cfg[key] == baseline.get(key) and disk_val != cfg[key]:
+            merged[key] = disk_val      # caller didn't touch it; disk is newer
+    return merged
+
+
 def save_priority_queue(queue):
-    """Persist priority_queue.json atomically."""
-    if isinstance(queue, dict):
-        cfg = dict(queue.get("config") or {})
-        cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
-        cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
-        queue["config"] = cfg
-        # Drop any lingering dashboard_active_workers meta — workers no
-        # longer auto-restore across restarts, so persisting a snapshot
-        # only serves to confuse future readers.
-        meta = queue.get("meta")
-        if isinstance(meta, dict) and "dashboard_active_workers" in meta:
-            meta.pop("dashboard_active_workers", None)
+    """Persist priority_queue.json atomically, merging `config` against disk."""
     tmp_path = PRIORITY_QUEUE_FILE.with_suffix(".json.tmp")
     with _queue_lock:
+        # Re-read + merge INSIDE the lock, immediately before the write. Doing it
+        # outside leaves a read-modify-write window that another writer can land
+        # in -- which is the very race this merge exists to close.
+        payload = queue
+        if isinstance(queue, dict):
+            # READ the baseline, do not consume it. Popping here silently
+            # disarmed the merge for every caller that loads once and saves more
+            # than once -- select_candidates takes a `queue` from its caller and
+            # saves it repeatedly, so the second save onwards reverted to
+            # last-writer-wins. That is not hypothetical: it ate
+            # globals_audit_provider a THIRD time, after the merge was already in
+            # place, which is how this path was found.
+            baseline = queue.get(_CONFIG_BASELINE_KEY)
+            cfg = _merge_config_on_write(dict(queue.get("config") or {}), baseline)
+            cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+            cfg["provider_max_turns"] = _normalize_provider_max_turns(
+                cfg.get("provider_max_turns"))
+            queue["config"] = cfg
+            # Re-arm: what we just wrote is this caller's new "unchanged" state,
+            # so a later save from the same dict compares against the right thing.
+            queue[_CONFIG_BASELINE_KEY] = copy.deepcopy(cfg)
+            # Drop any lingering dashboard_active_workers meta — workers no
+            # longer auto-restore across restarts, so persisting a snapshot
+            # only serves to confuse future readers.
+            meta = queue.get("meta")
+            if isinstance(meta, dict) and "dashboard_active_workers" in meta:
+                meta.pop("dashboard_active_workers", None)
+            # Serialize a view WITHOUT the private baseline; it never hits disk.
+            payload = {k: v for k, v in queue.items() if k != _CONFIG_BASELINE_KEY}
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(queue, f, indent=2)
+            json.dump(payload, f, indent=2)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -5655,6 +5812,50 @@ def _provider_timeout_seconds(provider, complexity_tier=None):
     return timeout_secs
 
 
+# Provider circuit breaker (2026-07-29). A systemically unhealthy provider used
+# to be indistinguishable from a hard function: every candidate burned its full
+# retry budget (6 watchdog kills x ~300s = ~30 min) and was then stamped with a
+# TERMINAL status, so the worker ground through the queue destroying rows at
+# ~2/hour. Counting consecutive timed-out sessions lets the pass stop and say
+# so instead. The threshold is deliberately larger than one candidate's retry
+# budget so a single pathological function can't trip it -- it takes a second
+# consecutive all-timeout candidate, which no longer happens by accident.
+_PROVIDER_HEALTH = {"consecutive_timeouts": 0}
+_PROVIDER_HEALTH_LOCK = threading.Lock()
+
+
+def _breaker_threshold():
+    try:
+        return max(2, int(os.environ.get("FUNDOC_PROVIDER_BREAKER_TIMEOUTS", "8")))
+    except (TypeError, ValueError):
+        return 8
+
+
+def note_provider_session(timed_out):
+    """Record one provider session outcome for the circuit breaker.
+
+    Any session that returns -- even with an unparseable body -- proves the
+    provider is reachable and resets the streak; only watchdog kills count.
+    """
+    with _PROVIDER_HEALTH_LOCK:
+        if timed_out:
+            _PROVIDER_HEALTH["consecutive_timeouts"] += 1
+        else:
+            _PROVIDER_HEALTH["consecutive_timeouts"] = 0
+        return _PROVIDER_HEALTH["consecutive_timeouts"]
+
+
+def provider_circuit_open():
+    """True when consecutive provider timeouts have crossed the threshold."""
+    with _PROVIDER_HEALTH_LOCK:
+        return _PROVIDER_HEALTH["consecutive_timeouts"] >= _breaker_threshold()
+
+
+def reset_provider_circuit():
+    with _PROVIDER_HEALTH_LOCK:
+        _PROVIDER_HEALTH["consecutive_timeouts"] = 0
+
+
 def _terminate_process_tree(pid):
     if not pid:
         return
@@ -5876,6 +6077,26 @@ def _restore_debug_context_for_worker(debug_ctx=None, log_dir=None):
         _debug_ctx.set(dict(debug_ctx))
 
 
+def _event_proves_provider_activity(event_type, data) -> bool:
+    """Decide whether a subprocess-emitted event is real evidence the provider
+    session is progressing, for `_invoke_provider_with_watchdog`'s idle-based
+    kill deadline.
+
+    provider_turn/"waiting" is the one event that must NOT count: it's emitted
+    by the MiniMax poll loop (`_invoke_minimax`) every ~15s FOR AS LONG AS A
+    SINGLE `future.result()` call hasn't returned — including when it never
+    will, e.g. a raw socket read wedged past the client's own request timeout
+    (confirmed live, 2026-07-27: a MiniMax call hung in `ssl.py` read for 45+
+    minutes while this heartbeat kept firing). It proves the poll loop is
+    still spinning, not that the request itself is progressing. Treating it
+    as liveness let a truly dead request ride all the way to hard_cap instead
+    of tripping the much faster idle_limit. Every other event (attempt/turn
+    transitions, responses, errors, tool calls) reflects a real state change
+    and still counts.
+    """
+    return not (event_type == "provider_turn" and data.get("status") == "waiting")
+
+
 def _provider_worker_entry(
     result_queue,
     prompt,
@@ -5964,9 +6185,10 @@ def _invoke_provider_with_watchdog(
             except (ValueError, OSError):
                 # Queue was closed under us — nothing more to drain.
                 return
-            last_event["t"] = time.time()
             try:
                 event_type, data = event
+                if _event_proves_provider_activity(event_type, data):
+                    last_event["t"] = time.time()
                 get_bus().emit(event_type, data)
             except Exception:
                 pass  # never let one bad event kill the drain loop
@@ -6019,7 +6241,27 @@ def _invoke_provider_with_watchdog(
     #     (protects non-event-emitting providers from immortal hangs)
     #   - hard_cap elapsed -> kill regardless of activity (runaway backstop)
     # Active sessions can therefore run past their tier budget to completion.
-    idle_limit = max(60.0, float(os.environ.get("FUNDOC_PROVIDER_IDLE_SECS", "300")))
+    # "Quiet" means no event OTHER than a provider_turn/"waiting" poll-loop
+    # heartbeat (see _drain_events above) — that heartbeat repeats forever
+    # around a single future.result() call whether or not it will ever
+    # return, so treating it as liveness would let a wedged socket read ride
+    # all the way to hard_cap instead of tripping idle_limit.
+    #
+    # The idle limit must never undercut the tier budget (2026-07-29). It used
+    # to be a flat 300s regardless of complexity_tier, which quietly made the
+    # "complex" tier (base + 300s; 750s here with FUNDOC_MINIMAX_TIMEOUT_SECS
+    # =450) unreachable: the tier value only ever governed the `seen is None`
+    # branch, so as soon as ANY event arrived the effective deadline snapped
+    # back to 300s. Port drafts were deliberately moved to the complex tier to
+    # survive long generations and were being killed at 301s anyway -- 18
+    # functions ended up in the terminal malformed_response status having never
+    # returned a single unparseable response. A session that has proven itself
+    # alive gets at least its full tier budget of quiet before we call it hung.
+    idle_limit = max(
+        60.0,
+        float(os.environ.get("FUNDOC_PROVIDER_IDLE_SECS", "300")),
+        float(timeout_secs),
+    )
     hard_cap = max(
         float(timeout_secs),
         float(os.environ.get("FUNDOC_PROVIDER_HARD_CAP_SECS", "2700")),
@@ -6053,12 +6295,14 @@ def _invoke_provider_with_watchdog(
                     break
 
         if result_msg is None and worker.is_alive():
+            streak = note_provider_session(timed_out=True)
             timeout_message = (
                 f"{effective_provider} session hard timeout: "
                 f"{kill_reason or f'after {timeout_secs}s'}"
             )
             print(
-                f"  [{effective_provider}] hard timeout ({kill_reason or f'{timeout_secs}s'}) — terminating session",
+                f"  [{effective_provider}] hard timeout ({kill_reason or f'{timeout_secs}s'}) — "
+                f"terminating session [consecutive timeouts: {streak}]",
                 flush=True,
             )
             bus_emit(
@@ -6084,9 +6328,13 @@ def _invoke_provider_with_watchdog(
                     "timed_out": True,
                     "timeout_provider": effective_provider,
                     "timeout_secs": timeout_secs,
+                    "timeout_streak": streak,
                 },
             )
 
+        # Any session that came back at all proves the provider is reachable,
+        # regardless of whether the body parsed.
+        note_provider_session(timed_out=False)
         worker.join(timeout=5)
         if result_msg is None:
             if worker.exitcode not in (0, None):
@@ -6682,6 +6930,148 @@ def _apply_program_scope(arguments, valid_params, context_program):
     return arguments
 
 
+def _minimax_stream_completion(client, kwargs, on_delta=None):
+    """Run one MiniMax chat completion in STREAMING mode and reassemble the
+    chunks into a normal ChatCompletion object.
+
+    Why streaming (2026-07-29): the non-streaming call gave the parent
+    watchdog no liveness signal whatsoever. Its only in-flight event was the
+    poll-loop's provider_turn/"waiting" heartbeat, which
+    `_event_proves_provider_activity` deliberately disqualifies (it spins
+    whether or not the request will ever return). So a session that was
+    happily generating into its 32K-token budget looked exactly like a wedged
+    socket, and the idle watchdog killed BOTH at 300s -- silently capping every
+    port draft at 300s despite the 750s "complex" tier budget, and stranding
+    18 functions in the terminal malformed_response status without a single
+    unparseable response between them.
+
+    Streaming makes token deltas the liveness signal, which is the real thing
+    the watchdog wants to measure. It also restores the client's own read
+    timeout as a meaningful guard: httpx's `timeout` is a per-read (max gap
+    between bytes) budget, not a total-elapsed one, so against a non-streaming
+    response whose body trickles it never fired -- 30 watchdog kills in one run
+    produced exactly zero APITimeoutErrors. Under streaming a truly stalled
+    stream trips it, raising into the caller's transient-retry loop the way it
+    always should have.
+
+    `on_delta(chars)` is invoked as content arrives so the caller can emit a
+    rate-limited liveness event.
+
+    Accumulation is done by hand rather than via the SDK's own stream helper
+    because MiniMax carries M3's thinking in the non-standard
+    `reasoning_content` / `reasoning_details` delta fields, which the SDK's
+    accumulator drops. The port lanes' `reasoning_salvage_parse` path depends
+    on those surviving.
+    """
+    from openai.types.chat import ChatCompletion, ChatCompletionMessage
+    from openai.types.chat.chat_completion import Choice
+
+    stream_kwargs = dict(kwargs)
+    stream_kwargs["stream"] = True
+    # Usage is omitted from streamed responses unless explicitly requested;
+    # without it the cost/token accounting silently zeroes out.
+    stream_kwargs["stream_options"] = {"include_usage": True}
+
+    content_parts = []
+    reasoning_parts = []
+    reasoning_details = []
+    # tool_calls arrive fragmented across chunks and are keyed by `index`:
+    # the id/name typically land in the first fragment and the JSON arguments
+    # dribble in over many. Keyed accumulation (not append) is what keeps a
+    # split argument string from becoming N separate malformed calls.
+    tool_calls = {}
+    finish_reason = None
+    usage = None
+    resp_id = None
+    resp_model = kwargs.get("model")
+
+    for chunk in client.chat.completions.create(**stream_kwargs):
+        if getattr(chunk, "id", None):
+            resp_id = chunk.id
+        if getattr(chunk, "model", None):
+            resp_model = chunk.model
+        # The usage-bearing chunk (include_usage) carries an empty choices list.
+        if getattr(chunk, "usage", None):
+            usage = chunk.usage
+        if not getattr(chunk, "choices", None):
+            continue
+        choice0 = chunk.choices[0]
+        if getattr(choice0, "finish_reason", None):
+            finish_reason = choice0.finish_reason
+        delta = getattr(choice0, "delta", None)
+        if delta is None:
+            continue
+
+        text = getattr(delta, "content", None)
+        if text:
+            content_parts.append(text)
+            if on_delta:
+                on_delta(len(text))
+
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            reasoning_parts.append(reasoning)
+            if on_delta:
+                on_delta(len(reasoning))
+
+        # reasoning_details is a non-standard list field; it survives on the
+        # delta only because the SDK's models allow extras.
+        details = None
+        try:
+            details = (delta.model_dump() or {}).get("reasoning_details")
+        except Exception:
+            details = None
+        if details:
+            reasoning_details.extend(d for d in details if isinstance(d, dict))
+            if on_delta:
+                on_delta(1)
+
+        for tc in (getattr(delta, "tool_calls", None) or []):
+            idx = getattr(tc, "index", 0) or 0
+            slot = tool_calls.setdefault(
+                idx, {"id": None, "type": "function",
+                      "function": {"name": "", "arguments": ""}})
+            if getattr(tc, "id", None):
+                slot["id"] = tc.id
+            if getattr(tc, "type", None):
+                slot["type"] = tc.type
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    slot["function"]["name"] = fn.name
+                if getattr(fn, "arguments", None):
+                    slot["function"]["arguments"] += fn.arguments
+            if on_delta:
+                on_delta(1)
+
+    message_fields = {
+        "role": "assistant",
+        "content": "".join(content_parts) or None,
+    }
+    if reasoning_parts:
+        message_fields["reasoning_content"] = "".join(reasoning_parts)
+    if reasoning_details:
+        message_fields["reasoning_details"] = reasoning_details
+    if tool_calls:
+        message_fields["tool_calls"] = [
+            tool_calls[i] for i in sorted(tool_calls)
+            # A fragment that never received an id/name is an incomplete call
+            # the model didn't finish emitting; sending it back would 400.
+            if tool_calls[i]["id"] and tool_calls[i]["function"]["name"]
+        ] or None
+
+    # construct() skips validation, which is what lets the non-standard
+    # reasoning_* fields ride along into model_dump().
+    message = ChatCompletionMessage.construct(**message_fields)
+    choice = Choice.construct(
+        index=0, message=message, finish_reason=finish_reason or "stop"
+    )
+    return ChatCompletion.construct(
+        id=resp_id or "", choices=[choice], created=0, model=resp_model or "",
+        object="chat.completion", usage=usage,
+    )
+
+
 def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                     use_tools=True):
     """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
@@ -6785,7 +7175,11 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                 "params": params,
             }
 
-    if not tools_openai:
+    # Only a warning when tools were WANTED. use_tools=False is the deliberate
+    # single-shot path (port drafts), where an empty tool list is the whole
+    # point -- warning there printed a scary line before every draft and, since
+    # it landed right before each watchdog kill in the log, read like a cause.
+    if not tools_openai and use_tools:
         print("  WARNING: No tools from /mcp/schema, running without tools", flush=True)
 
     # Per-session decompile cache. decompile_function is called 3.2× per run on
@@ -6910,6 +7304,14 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
         api_key=api_key,
         base_url="https://api.minimax.io/v1",
         timeout=_req_timeout,
+        # max_retries=0 (2026-07-29): the SDK defaults to 2, and those retries
+        # happen INSIDE a single create() call -- emitting no events, invisible
+        # to the parent watchdog, and stacking up to 3x _req_timeout of silence
+        # before anything is raised. That silence outlived the 300s idle limit,
+        # so the watchdog killed the session before the SDK ever surfaced the
+        # error and the retry loop below (which DOES emit, log, and back off)
+        # never got to run. One attempt per call; retries belong to that loop.
+        max_retries=0,
     )
 
     messages = [
@@ -7007,13 +7409,17 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                 kwargs["parallel_tool_calls"] = False
 
             # Retry transient errors (429 rate limit, 529 overloaded, 5xx server,
-            # and read/connect timeouts from the 180s client timeout above).
+            # and read/connect timeouts from the client timeout above).
             #
-            # The OpenAI-compatible MiniMax call is non-streaming, so no tool-call
-            # events can be emitted until the API returns an assistant message.
-            # Emit provider_turn wait events while the request is in flight so a
-            # quiet dashboard means "waiting on MiniMax", not "worker lost".
+            # Streamed (2026-07-29): each token delta emits a rate-limited
+            # provider_turn/"streaming" event. Unlike the "waiting" heartbeat
+            # this is REAL evidence the request is progressing, so
+            # `_event_proves_provider_activity` counts it and the parent
+            # watchdog stops killing healthy long generations at the idle
+            # limit. Set MINIMAX_STREAM=0 to fall back to the blind
+            # non-streaming call if the endpoint ever misbehaves.
             response = None
+            _stream_enabled = os.environ.get("MINIMAX_STREAM", "1") != "0"
             for _attempt in range(4):
                 try:
                     import concurrent.futures
@@ -7030,35 +7436,67 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None,
                             "tool_calls_so_far": tool_call_count,
                             "messages": len(messages),
                             "max_tokens": max_output_tokens,
+                            "stream": _stream_enabled,
                         },
                     )
-                    with concurrent.futures.ThreadPoolExecutor(
-                        max_workers=1
-                    ) as executor:
-                        future = executor.submit(
-                            client.chat.completions.create, **kwargs
+                    if _stream_enabled:
+                        _liveness = {"last": 0.0, "chars": 0}
+
+                        def _on_delta(n, _lv=_liveness, _att=_attempt, _t=turn):
+                            _lv["chars"] += n
+                            elapsed = time.perf_counter() - started
+                            # Bus events are far cheaper than tokens, but a
+                            # 50-chunk/s stream would still flood the drain
+                            # queue; 10s cadence is well inside the >=60s idle
+                            # limit it feeds.
+                            if elapsed - _lv["last"] < 10:
+                                return
+                            _lv["last"] = elapsed
+                            bus_emit(
+                                "provider_turn",
+                                {
+                                    "provider": "minimax",
+                                    "model": model,
+                                    "turn": _t + 1,
+                                    "attempt": _att + 1,
+                                    "status": "streaming",
+                                    "elapsed_sec": int(elapsed),
+                                    "chars": _lv["chars"],
+                                    "tool_calls_so_far": tool_call_count,
+                                },
+                            )
+
+                        response = _minimax_stream_completion(
+                            client, kwargs, on_delta=_on_delta
                         )
-                        last_emit = 0
-                        while True:
-                            try:
-                                response = future.result(timeout=5)
-                                break
-                            except concurrent.futures.TimeoutError:
-                                elapsed = int(time.perf_counter() - started)
-                                if elapsed - last_emit >= 15:
-                                    last_emit = elapsed
-                                    bus_emit(
-                                        "provider_turn",
-                                        {
-                                            "provider": "minimax",
-                                            "model": model,
-                                            "turn": turn + 1,
-                                            "attempt": _attempt + 1,
-                                            "status": "waiting",
-                                            "elapsed_sec": elapsed,
-                                            "tool_calls_so_far": tool_call_count,
-                                        },
-                                    )
+                    else:
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=1
+                        ) as executor:
+                            future = executor.submit(
+                                client.chat.completions.create, **kwargs
+                            )
+                            last_emit = 0
+                            while True:
+                                try:
+                                    response = future.result(timeout=5)
+                                    break
+                                except concurrent.futures.TimeoutError:
+                                    elapsed = int(time.perf_counter() - started)
+                                    if elapsed - last_emit >= 15:
+                                        last_emit = elapsed
+                                        bus_emit(
+                                            "provider_turn",
+                                            {
+                                                "provider": "minimax",
+                                                "model": model,
+                                                "turn": turn + 1,
+                                                "attempt": _attempt + 1,
+                                                "status": "waiting",
+                                                "elapsed_sec": elapsed,
+                                                "tool_calls_so_far": tool_call_count,
+                                            },
+                                        )
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
                     bus_emit(
                         "provider_turn",
@@ -7985,6 +8423,103 @@ def _note_shadow_backlog(program, address, func_name, reason):
                                 "name": func_name, "reason": reason}) + "\n")
     except OSError:
         pass
+
+
+# A draft loop can exhaust for two completely different reasons, and until
+# 2026-07-29 both were stamped `malformed_response` -- a TERMINAL status that
+# drops the function from select_port_candidates forever. 18 functions were
+# retired that way without the provider ever returning a single unparseable
+# response; they had only ever been killed by the watchdog. Separate the two:
+# a genuine parse failure is a real verdict about the function and stays
+# terminal, while "the provider never answered" is a verdict about the
+# PROVIDER and must not cost the function its place in the queue.
+_MAX_TIMEOUT_ROUNDS = 3
+
+
+def _draft_exhausted_status(key, program, address, attempts, timeouts,
+                            real_responses, detail):
+    """Decide the port_status for a draft loop that produced no usable draft.
+
+    Returns the status string; writes the state row as a side effect.
+
+    Falls back to the terminal status once a function has burned
+    `_MAX_TIMEOUT_ROUNDS` all-timeout rounds across passes, so a genuinely
+    un-answerable prompt can't churn the queue forever on a healthy provider.
+    Rounds accumulate in port_attempts (already persisted in both
+    _STATE_DIRECT_FIELDS and _UPDATABLE_WORKFLOW_FIELDS).
+    """
+    if real_responses or not timeouts:
+        update_function_state(key, {
+            "port_status": "malformed_response",
+            "port_attempts": attempts,
+            "port_last_result": detail,
+        })
+        return "malformed_response"
+
+    prior_rounds = 0
+    try:
+        row = _get_storage_repo().get_function(program, address) or {}
+        if row.get("port_status") == "provider_timeout":
+            prior_rounds = int(row.get("port_attempts") or 0)
+    except Exception:
+        prior_rounds = 0
+    rounds = prior_rounds + 1
+
+    if rounds >= _MAX_TIMEOUT_ROUNDS:
+        update_function_state(key, {
+            "port_status": "malformed_response",
+            "port_attempts": attempts,
+            "port_last_result": (
+                f"provider never answered across {rounds} rounds "
+                f"({timeouts} watchdog kills this round) -- retiring"),
+        })
+        return "malformed_response"
+
+    update_function_state(key, {
+        "port_status": "provider_timeout",
+        "port_attempts": rounds,
+        "port_last_result": (
+            f"provider timed out {timeouts}x with no response (round {rounds}"
+            f"/{_MAX_TIMEOUT_ROUNDS}) -- re-queued, NOT a bad draft"),
+    })
+    return "provider_timeout"
+
+
+def _prove_failure_is_environmental(fstage):
+    """True when a failed live prove says nothing about the FUNCTION.
+
+    Same principle as the provider-timeout split: a verdict about the
+    environment must not be recorded as a terminal verdict about the function.
+    live_prove_failed IS terminal, so before this every oracle outage
+    permanently retired whatever happened to be in flight. 24 functions were
+    lost that way (14 oracle_unreachable + 10 oracle_died_during) with nothing
+    wrong with any of them.
+
+      oracle_unreachable -- the oracle was already down when we started, so the
+        function was never actually tested. Unambiguously environmental.
+
+      oracle_died_during -- ambiguous by construction: "alive before, dead
+        after" is equally true of a bad proof vector crashing the embedded
+        oracle AND of somebody closing the game mid-prove. Disambiguate on the
+        GAME process, which is the same signal oracle_health's relaunch path
+        already reasons about ("Game.exe is already running but the oracle is
+        unreachable ... a bad proof vector can do this"):
+          - game gone   -> the environment went away; not this function's doing
+          - game alive  -> the oracle died under a live game, i.e. THIS
+                           function's vectors killed it. A real finding; stays
+                           terminal.
+    """
+    if fstage == "oracle_unreachable":
+        return True
+    if fstage != "oracle_died_during":
+        return False
+    try:
+        from oracle_health import is_game_running
+        return not is_game_running()
+    except Exception:
+        # Can't tell -> keep the conservative (terminal) verdict rather than
+        # silently re-queueing something that may genuinely crash the oracle.
+        return False
 
 
 def _persist_port_transcript(func_name, address, lane, attempt, text, meta):
@@ -10129,6 +10664,17 @@ def main():
         from web import create_app
         from event_bus import get_bus
 
+        # Recover provider subprocesses orphaned by a PREVIOUS dashboard that
+        # was force-killed (taskkill /F, crash, OOM) -- no in-process handler
+        # can cover that case, and a wedged provider child never exits on its
+        # own. Four were found alive on 2026-07-29, aged up to five days.
+        # Best-effort and fully guarded; must never block startup.
+        try:
+            import orphan_reaper
+            orphan_reaper.reap_orphans()
+        except Exception as e:  # noqa: BLE001
+            print(f"  [orphan-reaper] sweep skipped: {e}", flush=True)
+
         bus = get_bus()
         app, socketio = create_app(STATE_FILE, event_bus=bus, dashboard_port=args.web_port)
         dashboard_url = f"http://127.0.0.1:{args.web_port}"
@@ -10740,23 +11286,86 @@ def _save_globals_clean_cache(cache, base_dir=None):
         )
 
 
+# Clean-cache AXES. One cache used to gate every kind of globals work, which
+# silently broke typing: a pass that returned "skipped" for DOCUMENTATION
+# (already_clean / OS-canonical / function label) marked the address clean for
+# 7 days, and the TYPING worker then filtered it out — so a global could sit at
+# `undefined*` while the worker reported "nothing to do" and exited in
+# microseconds. Observed 2026-07-29 on D2Client.dll: the dashboard counted 873
+# untyped globals while all 3,311 were cache-clean, and the typing worker quit
+# with `no_more_binaries` having processed zero.
+#
+# Axes are independent: clearing a global for naming/plate work says nothing
+# about whether its TYPE is resolved.
+GLOBALS_AXIS_DOC = "doc"        # naming, plate comments, documentation quality
+GLOBALS_AXIS_TYPE = "type"      # applying a real data type (vs undefined*)
+GLOBALS_CLEAN_AXES = (GLOBALS_AXIS_DOC, GLOBALS_AXIS_TYPE)
+
+# Bump when audit_global's RULE SET changes (a new issue kind, a severity
+# change). Entries stamped with an older version are treated as stale and
+# re-checked.
+#
+# This is the deeper half of the 2026-07-29 bug. The 3,311 cached-clean
+# D2Client globals were not corrupt -- they faithfully replayed a "clean"
+# verdict from BEFORE the `untyped` rule existed. audit_global now reports
+# `issues: ['untyped'], severity: {hard: 1}` for 873 of them, but the cache
+# short-circuits before the audit is ever consulted, so the new rule could
+# never fire. A cache that gates a rule engine has to know when the rules
+# moved; without this, every future audit rule is silently suppressed for a
+# week on every already-cached address.
+GLOBALS_AUDIT_RULES_VERSION = 2
+
+
 def _clean_cache_is_fresh(
-    cache, prog_path, address, ttl_seconds=GLOBALS_CLEAN_CACHE_TTL_SECONDS
+    cache, prog_path, address, ttl_seconds=GLOBALS_CLEAN_CACHE_TTL_SECONDS,
+    axis=GLOBALS_AXIS_DOC,
 ):
+    """Is `address` cached clean FOR THIS AXIS and still within the TTL?
+
+    Back-compat: pre-axis entries were a bare ISO timestamp string. Those were
+    written by documentation passes, so they are honoured for the `doc` axis
+    only — never for `type`. Treating a legacy entry as type-clean is exactly
+    the bug this split fixes, and would keep untyped globals suppressed.
+    """
     entry = ((cache.get("programs") or {}).get(prog_path) or {}).get(address)
     if not entry:
         return False
+    if isinstance(entry, str):                       # legacy single-axis entry
+        # Written before axes existed AND before the current rule set, so it
+        # can only ever speak for documentation, and only under old rules.
+        return False
+    if not isinstance(entry, dict):
+        return False
+    if int(entry.get("v", 1)) != GLOBALS_AUDIT_RULES_VERSION:
+        return False                                 # audit rules moved on
+    stamp = entry.get(axis)
+    if not stamp:
+        return False
     try:
-        age = (datetime.now() - datetime.fromisoformat(entry)).total_seconds()
+        age = (datetime.now() - datetime.fromisoformat(stamp)).total_seconds()
     except (ValueError, TypeError):
         return False
     return 0 <= age < ttl_seconds
 
 
-def _clean_cache_mark(cache, prog_path, address):
-    cache.setdefault("programs", {}).setdefault(prog_path, {})[
-        address
-    ] = datetime.now().isoformat()
+def _clean_cache_mark(cache, prog_path, address, axes=GLOBALS_CLEAN_AXES):
+    """Mark `address` clean for the given axes, stamped with the rule version.
+
+    Callers pass the axes the pass actually established. A documentation-only
+    pass must NOT claim the type axis -- that conflation is what let 873
+    untyped globals sit suppressed behind a clean cache entry.
+    """
+    if isinstance(axes, str):
+        axes = (axes,)
+    slot = cache.setdefault("programs", {}).setdefault(prog_path, {})
+    prev = slot.get(address)
+    if not isinstance(prev, dict) or int(prev.get("v", 1)) != GLOBALS_AUDIT_RULES_VERSION:
+        prev = {}                                    # legacy/old-rules: start clean
+    now = datetime.now().isoformat()
+    for a in axes:
+        prev[a] = now
+    prev["v"] = GLOBALS_AUDIT_RULES_VERSION
+    slot[address] = prev
 
 
 # Placeholder / offset-derived name detector — names like
@@ -10865,6 +11474,26 @@ def _list_global_entries(prog_path):
                                 ),
                                 "name": item.get("name") or item.get("label"),
                             }
+                        )
+                elif isinstance(item, str):
+                    # Current `/list_globals` shape: {"globals": [<formatted
+                    # display line>, ...]}, e.g. "g_foo @ 6fbd5290 [Label]
+                    # (Type *) xrefs=3" -- not the {address, name} dict shape
+                    # this parser originally targeted. Before this branch,
+                    # every string item silently failed the `isinstance(item,
+                    # dict)` check above, page_entries stayed empty on page 0,
+                    # and the pagination loop's `new_count == 0` exit fired
+                    # immediately -- the worker saw "list_globals returned
+                    # empty" for every binary and picked up nothing, even
+                    # though the same endpoint's raw text (parsed by the
+                    # string-fallback branch above) and the MCP tool wrapper
+                    # both returned thousands of entries. Reuse the same
+                    # line-parsing regex as that fallback branch.
+                    m = line_re.search(item)
+                    if m:
+                        name = item[: m.start()].strip().rstrip("@").strip() or None
+                        page_entries.append(
+                            {"address": f"0x{m.group(1)}", "name": name}
                         )
         new_count = 0
         for entry in page_entries:
@@ -11079,6 +11708,59 @@ def _build_global_prompt(prog_path, address, audit_before, prompt_dir=None):
     return "".join(parts)
 
 
+def _build_global_review_prompt(prog_path, address, audit_before, prompt_dir=None):
+    """The second-provider REVIEW prompt: verify an already-documented global
+    against its real uses, fix what is actually wrong, change nothing otherwise.
+
+    Reuses the same rules corpus as `_build_global_prompt` (worker-globals.md /
+    step-globals.md) so the auditor is held to the identical naming and plate
+    conventions -- an auditor working from a different rulebook produces churn,
+    not review. The framing is what differs: this pass is told the global has
+    ALREADY been documented and that agreeing is a valid, expected outcome.
+    Without that, a second provider rewrites correct work to prove it ran."""
+    base_dir = Path(prompt_dir) if prompt_dir else (SCRIPT_DIR / "prompts")
+    parts = [
+        f"# CRITICAL: pass `program=\"{prog_path}\"` to EVERY tool call.\n\n"
+        f"Multiple programs are open in this Ghidra session. A tool call without\n"
+        f"`program=\"{prog_path}\"` is routed to whichever program is focused in the\n"
+        f"UI — almost certainly not this one — and your changes land on the wrong\n"
+        f"binary while the audit here keeps reporting unchanged state.\n\n---\n\n"
+        "# Role: REVIEWER (second pass)\n\n"
+        "Another provider has already documented this global. You are the\n"
+        "independent check. Your job is to decide whether the documentation is\n"
+        "actually correct **against how the global is used**, not whether you would\n"
+        "have written it the same way.\n\n"
+        "1. Read the current name, type and plate comment.\n"
+        "2. Inspect the real uses — `get_xrefs_to`, then decompile one or two of the\n"
+        "   most informative callers. The uses are the ground truth; the existing\n"
+        "   documentation is a claim about them.\n"
+        "3. Fix ONLY what is demonstrably wrong or missing: a name that contradicts\n"
+        "   the use, a type that does not match the access width or shape, a plate\n"
+        "   that describes something the code does not do, a missing plate.\n"
+        "4. If the documentation is correct, **change nothing and say so.** Agreeing\n"
+        "   is a successful review. Do not rewrite correct work to look busy —\n"
+        "   churn on a correct global is a worse outcome than no review at all.\n\n"
+        "Follow the same conventions as the original pass (below). Rewriting a\n"
+        "compliant name into a differently-compliant name is churn, not review.\n\n---\n\n"
+    ]
+    try:
+        parts.append((base_dir / "worker-globals.md").read_text(encoding="utf-8"))
+    except OSError as exc:
+        parts.append(f"# Worker prompt missing ({exc})\n")
+    try:
+        parts.append("\n\n---\n\n# Reference: step-globals.md\n\n")
+        parts.append((base_dir / "step-globals.md").read_text(encoding="utf-8"))
+    except OSError:
+        pass
+    parts.append("\n\n---\n\n## Target\n")
+    parts.append(f"- Program: `{prog_path}` ← pass this as `program=` on every tool call\n")
+    parts.append(f"- Address: `{address}`\n")
+    parts.append("\n## Audit of the CURRENT (already-documented) state\n```json\n")
+    parts.append(json.dumps(audit_before, indent=2, default=str))
+    parts.append("\n```\n")
+    return "".join(parts)
+
+
 def process_global(
     prog_path,
     address,
@@ -11191,6 +11873,7 @@ def process_global(
             }
         )
         _count("soft_issues_only" if soft_only else "already_clean")
+        _sync_global_band_live(prog_path, address)
         return "skipped"
 
     # Function-label short-circuit. Names like `FID_conflict:__time32`,
@@ -11221,6 +11904,7 @@ def process_global(
             }
         )
         _count("function_label")
+        _sync_global_band_live(prog_path, address)
         return "skipped"
 
     # OS-canonical short-circuit (TIB/PEB/KUSER labels). The audit flags
@@ -11249,6 +11933,7 @@ def process_global(
             }
         )
         _count("os_canonical_label")
+        _sync_global_band_live(prog_path, address)
         return "skipped"
 
     # Real work is about to happen — emit the started event so the
@@ -11568,6 +12253,7 @@ def process_global(
             "fixed_count": fixed_count,
         },
     )
+    _sync_global_band_live(prog_path, address)
     return result
 
 
@@ -11654,31 +12340,145 @@ def _pick_next_globals_binary(programs, exclude_binaries):
     return candidates[0][2]
 
 
-def _stamp_global_doc_rung(program, address, rung="DOC_DRAFT"):
-    """Stamp a DOC rung for a freshly-documented global into the `Doc` property
-    map -- the globals-doc equivalent of a function's DOC tag (Ghidra function
-    tags are function-scoped and can't attach to a data address). The pipeline
-    dashboard reads this map for the Globals-Documentation bar/column. An
-    auto-documented global lands at DOC_DRAFT; human review promotes it later.
-    Best-effort -- never affects the worker result."""
+# The globals TRUST bit. The `Doc` property map used to hold the function DOC_
+# ladder (DRAFT/REVIEWED/VERIFIED) for data addresses; only DRAFT ever had a
+# producer, and it was written on every global that crossed Target and never
+# revisited, so it measured "assess saw this" rather than any kind of quality.
+# The map now holds exactly one value: REVIEWED, meaning a SECOND provider
+# re-examined the global against its actual uses and left it with no blocking
+# issues -- evidence the band cannot supply, since the band is computed from the
+# same artifacts the first provider wrote.
+GLOB_DOC_MAP = "Doc"
+GLOB_REVIEWED = "REVIEWED"
+
+
+def _set_global_reviewed(program, address, reviewed=True):
+    """Set or clear the REVIEWED bit on one global. Best-effort -- never affects
+    the worker result."""
     if not program or not address:
         return
     try:
         # `program` MUST ride in the query string: /set_property's program param is
         # QUERY-sourced, so a body-only program silently targets the *active*
-        # program instead (a real hazard with many same-named versions open).
+        # program instead. That is not hypothetical -- a survey of the 32 project
+        # binaries found 4,848 property entries sitting on the wrong program.
         qp = {"program": program}
-        p = ghidra_post("/set_property",
-                        {"map": "Doc", "address": address, "value": rung, "program": program},
+        if not reviewed:
+            ghidra_post("/remove_property",
+                        {"map": GLOB_DOC_MAP, "address": address, "program": program},
                         params=qp)
+            return
+        body = {"map": GLOB_DOC_MAP, "address": address,
+                "value": GLOB_REVIEWED, "program": program}
+        p = ghidra_post("/set_property", body, params=qp)
         if isinstance(p, dict) and not p.get("success") and "No property map" in str(p):
             ghidra_post("/create_property_map",
-                        {"name": "Doc", "type": "string", "program": program}, params=qp)
-            ghidra_post("/set_property",
-                        {"map": "Doc", "address": address, "value": rung, "program": program},
-                        params=qp)
+                        {"name": GLOB_DOC_MAP, "type": "string", "program": program}, params=qp)
+            ghidra_post("/set_property", body, params=qp)
     except Exception:
         pass
+
+
+def _blocking_issue_count(audit):
+    """hard + medium issues from an audit_global result. Soft issues
+    (plate_line_too_long, generic_descriptor, bytes_size_unknown) are cosmetics
+    the design already demoted to non-blocking, matching process_global's own
+    completion rule."""
+    if not isinstance(audit, dict):
+        return None
+    sev = audit.get("severity_summary") or {}
+    if sev:
+        return (sev.get("hard", 0) or 0) + (sev.get("medium", 0) or 0)
+    return len(audit.get("issues") or [])
+
+
+def _resolve_globals_audit_provider(doc_provider, config_snapshot=None):
+    """The provider that reviews globals this pass, or None when review is off.
+
+    Resolved once at pass start and frozen, so a mid-run dashboard edit can't
+    change this worker's policy. Returns None — loudly — when it matches the
+    documenting provider: the whole value of the REVIEWED bit is that a
+    *different* model checked the work, so silently allowing self-review would
+    make the badge mean nothing while still looking populated."""
+    if config_snapshot is not None:
+        name = config_snapshot.get("globals_audit_provider")
+    else:
+        cfg = load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG
+        name = cfg.get("globals_audit_provider")
+    if not name or str(name).lower() in ("off", "none"):
+        return None
+    if doc_provider and str(name).lower() == str(doc_provider).lower():
+        print(f"  [globals-worker] review DISABLED — globals_audit_provider "
+              f"({name}) is the same provider doing the documenting; a model "
+              f"reviewing its own output is not independent evidence.", flush=True)
+        return None
+    return name
+
+
+def review_global(prog_path, address, audit_provider, config_snapshot=None):
+    """Second-provider review of one freshly-documented global. Sets the REVIEWED
+    bit when an INDEPENDENT provider ran to completion and left the global with
+    zero blocking issues.
+
+    Deliberately not a verdict parse. The function-side audit stage doesn't parse
+    a verdict either -- it re-measures afterwards -- and free-text verdict parsing
+    is the fragile part of every pipeline that has tried it here. Requiring the
+    second pass to have actually EXECUTED is what keeps this from collapsing into
+    a restatement of the band: a global sitting at COMPLETE_100 that no auditor
+    ever looked at stays unreviewed, which is the honest answer.
+
+    Returns one of: "reviewed", "issues_remain", "provider_error", "skipped".
+    """
+    if not audit_provider:
+        return "skipped"
+    try:
+        model = select_model("FIX", provider=audit_provider,
+                             config_snapshot=config_snapshot)
+    except ValueError as exc:
+        print(f"  [glob-audit] skipped — {exc}", flush=True)
+        return "skipped"
+
+    audit_before = _audit_global_with_retry(prog_path, address)
+    if audit_before is None:
+        print("  [glob-audit] skipped — audit_global unavailable (pre)", flush=True)
+        return "skipped"
+
+    name = audit_before.get("name") or address
+    print(f"\n  [glob-audit] {audit_provider}: reviewing {name} @ {address}", flush=True)
+    bus_emit("glob_audit_start",
+             {"program": prog_path, "address": address,
+              "name": name, "provider": audit_provider})
+
+    prompt = _build_global_review_prompt(prog_path, address, audit_before)
+    if audit_provider != "gemini":
+        prompt = _inject_tool_block(prompt)
+    _, meta = invoke_claude(prompt, model=model, provider=audit_provider, max_turns=10)
+
+    if (meta or {}).get("provider_error") or (meta or {}).get("quota_paused"):
+        # Loud, not silent: a swallowed write-back failure is what hid the
+        # wrong-binary CONF_ bug for weeks.
+        print(f"  [glob-audit] provider error — {name} left unreviewed: "
+              f"{(meta or {}).get('provider_error') or 'quota paused'}", flush=True)
+        bus_emit("glob_audit_complete",
+                 {"program": prog_path, "address": address,
+                  "provider": audit_provider, "outcome": "provider_error"})
+        return "provider_error"
+
+    audit_after = _audit_global_with_retry(prog_path, address)
+    blocking = _blocking_issue_count(audit_after)
+    if blocking == 0:
+        _set_global_reviewed(prog_path, address, True)
+        outcome = "reviewed"
+        print(f"  [glob-audit] REVIEWED — {name}", flush=True)
+    else:
+        outcome = "issues_remain"
+        left = ", ".join(str(i) for i in (audit_after or {}).get("issues") or [])[:160]
+        print(f"  [glob-audit] not reviewed — {blocking} blocking issue(s) remain "
+              f"on {name}: {left or 'unknown'}", flush=True)
+    bus_emit("glob_audit_complete",
+             {"program": prog_path, "address": address,
+              "provider": audit_provider, "outcome": outcome})
+    return outcome
 
 
 # The globals analog of a function's COMPLETE_<band> tag. Data addresses can't
@@ -11687,6 +12487,27 @@ def _stamp_global_doc_rung(program, address, rung="DOC_DRAFT"):
 # band tracks LIVE effective completeness -- it updates and clears on re-assess,
 # exactly like function COMPLETE_* tags demote when a re-score drops the band.
 GLOB_COMPLETE_MAP = "Complete"
+
+
+def _sync_global_band_live(program, address):
+    """Fetch the current `/analyze_global_completeness` band for one address and
+    write it via `_sync_global_band`. Best-effort, silent on failure -- called
+    from the worker path (process_global) so the `Complete` map stays live as
+    globals get fixed, instead of only ever being refreshed by a separate,
+    manually-triggered `run_assess_globals_pass`. Before this, a global the
+    worker fixed today kept showing its stale pre-fix band (or no band at all)
+    on the dashboard until someone remembered to re-run the assess pass --
+    which also meant a *drained* binary looked like it had "80%" work left,
+    so the worker (correctly, per a live re-audit) picked up nothing new."""
+    if not program or not address:
+        return
+    try:
+        res = ghidra_get("/analyze_global_completeness",
+                         params={"address": address, "program": program}, timeout=15)
+        if isinstance(res, dict) and "band" in res:
+            _sync_global_band(program, address, res.get("band"))
+    except Exception:
+        pass
 
 
 def _sync_global_band(program, address, band):
@@ -11730,6 +12551,7 @@ def run_globals_worker_pass(
     on_started=None,
     exclude_binaries_provider=None,
     target_addresses=None,
+    config_snapshot=None,
 ):
     """Orchestrate a globals worker run. Processes up to `count` globals
     across one or more binaries (continuous mode advances to the next
@@ -11745,7 +12567,10 @@ def run_globals_worker_pass(
     `target_addresses` is an optional list of specific addresses to
         process (the dashboard cleanup queue's targeted-fix path). When
         set, only those addresses are dispatched — the clean cache and
-        continuous rotation are bypassed so a targeted fix always runs."""
+        continuous rotation are bypassed so a targeted fix always runs.
+    `config_snapshot` is the frozen worker config (see freeze_config_snapshot);
+        it supplies the review provider so a mid-run dashboard edit can't change
+        this worker's policy, matching the function-worker contract."""
     summary = {
         "binaries_visited": [],
         "totals": {
@@ -11759,9 +12584,18 @@ def run_globals_worker_pass(
             "cache_skipped": 0,
         },
         "skip_reasons": {},
+        "review": {},
         "stopped": False,
         "stopped_reason": None,
     }
+
+    # Review provider, resolved ONCE at pass start (frozen, like the function
+    # worker's audit policy). Never the same provider that documents — a model
+    # reviewing its own output is not independent evidence, so a matching
+    # configuration disables review rather than faking it.
+    globals_audit_provider = _resolve_globals_audit_provider(provider, config_snapshot)
+    if globals_audit_provider:
+        print(f"  [globals-worker] review provider: {globals_audit_provider}", flush=True)
 
     processed = 0
     current_binary = _resolve_globals_program_path(initial_binary)
@@ -11840,10 +12674,17 @@ def run_globals_worker_pass(
         # clean within the TTL. Before this, every pass re-audited every
         # global in the binary — 40% of all historic dispatches were
         # redundant skips.
+        # Skip only when EVERY axis is clean. A global cleared for
+        # documentation but still `undefined*` must stay in the work list --
+        # requiring all axes is what stops one axis' verdict from suppressing
+        # another's outstanding work.
         cached_set = set() if target_addresses else {
             a
             for a in addresses
-            if _clean_cache_is_fresh(clean_cache, current_binary, a)
+            if all(
+                _clean_cache_is_fresh(clean_cache, current_binary, a, axis=ax)
+                for ax in GLOBALS_CLEAN_AXES
+            )
         }
         if cached_set:
             summary["totals"]["cache_skipped"] += len(cached_set)
@@ -11878,11 +12719,22 @@ def run_globals_worker_pass(
                 reason_counter=summary["skip_reasons"],
             )
             summary["totals"][result] = summary["totals"].get(result, 0) + 1
-            # A documented global gets a DOC rung stamped into the `Doc` map so the
-            # pipeline dashboard's Globals-Documentation bar reflects it (draft level;
-            # human review promotes). Best-effort, never affects the result.
-            if result in ("completed", "improved"):
-                _stamp_global_doc_rung(current_binary, address, "DOC_DRAFT")
+            # Review stage: a DIFFERENT provider re-checks what this worker just
+            # documented and sets the REVIEWED bit if it holds up. Off unless
+            # config.globals_audit_provider is set, and never routed to the same
+            # provider that did the documenting — a model reviewing its own output
+            # is not independent evidence.
+            if result in ("completed", "improved") and globals_audit_provider:
+                try:
+                    outcome = review_global(
+                        current_binary, address, globals_audit_provider,
+                        config_snapshot=config_snapshot,
+                    )
+                    summary["review"][outcome] = summary["review"].get(outcome, 0) + 1
+                except Exception as exc:  # noqa: BLE001 — review must not kill the pass
+                    summary["review"]["error"] = summary["review"].get("error", 0) + 1
+                    print(f"  [glob-audit] failed on {address}: "
+                          f"{type(exc).__name__}: {exc}", flush=True)
             # `skipped` results don't count toward the cap — they're cheap
             # filter passes, not real work.
             if result != "skipped":
@@ -11890,8 +12742,18 @@ def run_globals_worker_pass(
             # Clean-cache: skipped (already_clean / OS-canonical / function
             # label) and completed globals stay clean until the TTL expires
             # — don't re-audit them next pass.
+            #
+            # Both axes are claimed here because BOTH verdicts come from the
+            # same audit_global call that produced `result`: a "skipped" means
+            # the audit found no blocking issue of ANY kind (the `untyped` rule
+            # included), and a "completed" means the dispatched fix cleared
+            # them. The axis split earns its keep on the READ side — legacy and
+            # old-rule-version entries can no longer satisfy the type axis, so
+            # they get re-checked once instead of suppressing new rules for a
+            # week.
             if result in ("completed", "skipped"):
-                _clean_cache_mark(clean_cache, current_binary, address)
+                _clean_cache_mark(clean_cache, current_binary, address,
+                                  axes=GLOBALS_CLEAN_AXES)
                 cache_dirty = True
             # Checkpoint-save so a Ghidra crash mid-binary can't discard
             # more than GLOBALS_SAVE_EVERY runs of provider work. `blocked`
@@ -12137,6 +12999,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
 
     if not reimpl:
         _timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
+        _real_responses = 0  # sessions that actually came back (parseable or not)
         while attempts < max(1, max_fix_attempts):
             attempts += 1
             # "complex" tier: port drafts are long generations (reasoning +
@@ -12161,7 +13024,22 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                 if _timeouts <= max(2, max_fix_attempts):
                     attempts -= 1
                 continue
+            _real_responses += 1
             reimpl, layout, input_sets = plp.parse_live_response(text or "")
+            if not reimpl and _model_declined_outbuf(text):
+                # The model correctly self-classified via the OUT-PARAM prompt
+                # block (build_live_draft_prompt) that this pointer reads
+                # meaningful data rather than being a pure write -- an
+                # intentional decline, not a parse failure. Route straight
+                # back to stateful_skip like every other genuinely
+                # out-of-scope shape instead of burning the retry budget
+                # re-asking a question already correctly answered.
+                update_function_state(key, {
+                    "port_status": "stateful_skip",
+                    "port_last_result": "model declined (UNSUPPORTED): reads meaningful data "
+                                        "through the pointer param, not a pure out-param write"})
+                _log("outbuf_declined_by_model", attempt=attempts)
+                return "stateful_skip"
             if not reimpl and (meta or {}).get("reasoning_text"):
                 # Chronological order, no separator — heals reasoning_split's
                 # mid-fence cut (see the static-lane comment).
@@ -12212,11 +13090,12 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
             _log("malformed_response_retry", attempt=attempts, output=(text or "")[-500:])
 
     if not reimpl:
-        update_function_state(key, {"port_status": "malformed_response",
-                                    "port_attempts": attempts,
-                                    "port_last_result": "no parseable live-draft blocks"})
-        _log("malformed_response", attempts=attempts)
-        return "malformed_response"
+        status = _draft_exhausted_status(
+            key, program, address, attempts, _timeouts, _real_responses,
+            "no parseable live-draft blocks")
+        _log(status, attempts=attempts, timeouts=_timeouts,
+             real_responses=_real_responses)
+        return status
 
     # OVERRIDE the drafted layout with the statically derived ABI: the disasm's
     # RET n / register facts beat any model guess (a guessed ECX/fastcall on a
@@ -12285,12 +13164,14 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     live = None
     prove_attempts = 0
     clamp_retried = False
+    need_build = True   # only the FIRST attempt and a post-redraft reimpl need a rebuild
     hiccups = 0   # provider timeouts/empties during fix drafts -- capped free retries
     while prove_attempts < max(1, max_fix_attempts):
         prove_attempts += 1
         try:
             live = plp.run_live_prove(reimpl, func_name, address, layout, input_sets,
-                                      abort_class=abort_class)
+                                      program=program, abort_class=abort_class,
+                                      build=need_build)
         except plp.UnsupportedLiveABI as e:
             plp.remove_candidate(func_name)
             update_function_state(key, {"port_status": "unsupported_abi",
@@ -12320,6 +13201,12 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                     input_sets, decompiled_text=decompiled)
                 _log("marshal_fault_clamp_retry", dropped=_dropped,
                      kept=len(input_sets))
+                # reimpl is UNCHANGED (only the vectors were clamped) -- the provider
+                # DLL just built for this attempt is still valid, so skip the rebuild.
+                # Found live 2026-07-27: this retry defaulted build=True despite no
+                # source change, so every marshal-fault clamp-retry paid a full
+                # cmake+msbuild cycle (multi-minute stall, worker looked hung).
+                need_build = False
                 continue
             except Exception as e:
                 _log("marshal_fault_clamp_retry_error", error=str(e))
@@ -12359,6 +13246,7 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
                  names=sorted(_unknown_resolve_names(new_reimpl)))
             break
         reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
+        need_build = True   # reimpl source changed -- the next attempt needs a fresh build
         try:  # the fix draft gets the same ABI override + abort clamp as the first
             import abi_static
             layout, input_sets, _n = abi_static.apply_static_abi(layout, input_sets, static_abi)
@@ -12411,6 +13299,14 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
     plp.remove_candidate(func_name)
     fstage = live.get("failure_stage") or "prove"
     fdetail = live.get("failure_detail") or ""
+    if _prove_failure_is_environmental(fstage):
+        # NOT this function's verdict -- re-queue instead of retiring it.
+        update_function_state(key, {
+            "port_status": "oracle_unavailable", "port_attempts": attempts,
+            "port_failure_stage": fstage,
+            "port_last_result": f"{fstage}: oracle down, function never tested -- re-queued"})
+        _log("oracle_unavailable", failure_stage=fstage, requeued=True)
+        return "oracle_unavailable"
     update_function_state(key, {
         "port_status": "live_prove_failed", "port_attempts": attempts,
         "port_failure_stage": fstage,
@@ -13217,7 +14113,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                          arg_off=deleg.get("arg_off"), result_off=deleg.get("result_off"))
                     try:
                         live = plp.run_delegate_prove(
-                            deleg["code"], func_name, address, ret=deleg["ret"],
+                            deleg["code"], func_name, address, program=program, ret=deleg["ret"],
                             arg_off=deleg["arg_off"], type_gates=deleg.get("type_gates"))
                     except Exception as e:
                         plp.remove_candidate(func_name)
@@ -13256,6 +14152,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             "status": "drafting (handle)",
         })
         _timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
+        _real_responses = 0  # sessions that actually came back (parseable or not)
         while attempts < max(1, max_fix_attempts):
             attempts += 1
             # "complex" tier: port drafts are long generations (reasoning +
@@ -13276,6 +14173,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
                 if _timeouts <= max(2, max_fix_attempts):
                     attempts -= 1
                 continue
+            _real_responses += 1
             reimpl, layout, input_sets = plp.parse_handle_response(text or "")
             if not reimpl and (meta or {}).get("reasoning_text"):
                 # Chronological order, no separator — heals reasoning_split's
@@ -13318,10 +14216,12 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             _log("malformed_response_retry", attempt=attempts, output=(text or "")[-500:])
 
     if not reimpl:
-        update_function_state(key, {"port_status": "malformed_response", "port_attempts": attempts,
-                                    "port_last_result": "no parseable handle-draft blocks"})
-        _log("malformed_response", attempts=attempts)
-        return "malformed_response"
+        status = _draft_exhausted_status(
+            key, program, address, attempts, _timeouts, _real_responses,
+            "no parseable handle-draft blocks")
+        _log(status, attempts=attempts, timeouts=_timeouts,
+             real_responses=_real_responses)
+        return status
 
     # FLAT getter (single fixed-offset read, no sub-pointer deref) -> prove via the
     # oracle's SYNTHETIC DISCRIMINATING object instead of a live capture. A live idle-
@@ -13346,7 +14246,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             # pass any disasm-derived type-gates (e.g. `dwType==4`) so the oracle patches
             # the synth object to SATISFY the precondition -> the getter takes its success
             # path and reads the discriminating field (else both sides bail -> degenerate).
-            live = _runner(reimpl, func_name, address, ret=mech["ret"],
+            live = _runner(reimpl, func_name, address, program=program, ret=mech["ret"],
                            gates=mech.get("type_gates"))
         except Exception as e:
             plp.remove_candidate(func_name)
@@ -13369,21 +14269,40 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         reimpl = layout = input_sets = None
         prompt += ("\n\n## The mechanical translation did NOT match the original on a discriminating "
                    "synthetic object -- re-derive the offset(s) carefully from the disassembly above.")
-        for _a in range(max(1, max_fix_attempts)):
+        # This loop had NO timeout handling at all: a watchdog kill returned
+        # empty text, burned an attempt, and landed on the same terminal
+        # malformed_response. Mirror the other three lanes -- refund timeouts
+        # and distinguish "provider never answered" from "bad draft".
+        _synth_timeouts = 0
+        _synth_real = 0
+        _a = 0
+        while _a < max(1, max_fix_attempts):
+            _a += 1
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
                                        provider=provider, complexity_tier="complex",
                                        use_tools=False)
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 return "blocked"
+            if (meta or {}).get("timed_out"):
+                _synth_timeouts += 1
+                _log("provider_timeout_retry", attempt=_a,
+                     timeout_secs=(meta or {}).get("timeout_secs"))
+                if _synth_timeouts <= max(2, max_fix_attempts):
+                    _a -= 1
+                continue
+            _synth_real += 1
             reimpl, layout, input_sets = plp.parse_handle_response(text or "")
             if reimpl:
                 layout, _pads = _apply_handle_abi(layout)
                 break
         if not reimpl:
-            update_function_state(key, {"port_status": "malformed_response",
-                                        "port_last_result": "synth fallback: no parseable draft"})
-            return "malformed_response"
+            status = _draft_exhausted_status(
+                key, program, address, _a, _synth_timeouts, _synth_real,
+                "synth fallback: no parseable draft")
+            _log(status, attempts=_a, timeouts=_synth_timeouts,
+                 real_responses=_synth_real)
+            return status
 
     if os.environ.get("FUNDOC_DRAFT_ONLY") == "1":
         _draft_only_dump(reimpl, func_name, address, layout, input_sets, abort_class, "handle")
@@ -13393,10 +14312,12 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
     prove_attempts = 0
     best = plp.BestDraft()          # keep the highest-scoring draft across retries
     hiccups = 0
+    need_build = True   # only the FIRST attempt and a post-redraft reimpl need a rebuild
     while prove_attempts < max(1, max_fix_attempts):
         prove_attempts += 1
         try:
-            live = plp.run_handle_prove(reimpl, func_name, address, layout, input_sets)
+            live = plp.run_handle_prove(reimpl, func_name, address, layout, input_sets,
+                                        program=program, build=need_build)
         except Exception as e:  # bad spec / oracle down -> clean up, report
             plp.remove_candidate(func_name)
             update_function_state(key, {"port_status": "error", "port_last_result": str(e)})
@@ -13419,6 +14340,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             prove_attempts -= 1
             _log("provider_hiccup_retry", attempt=prove_attempts, hiccups=hiccups)
             if hiccups <= max(1, max_fix_attempts):
+                need_build = False   # reimpl unchanged -- the prior build is still valid
                 continue
             break
         new_reimpl, new_layout, new_inputs = plp.parse_handle_response(text or "")
@@ -13434,6 +14356,7 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             break
         new_layout, _pads = _apply_handle_abi(new_layout)   # fix drafts too
         reimpl, layout, input_sets = new_reimpl, new_layout, new_inputs
+        need_build = True   # reimpl source changed -- the next attempt needs a fresh build
         _log("handle_prove_fix_retry", attempt=prove_attempts)
 
     # Never let a provider hiccup or a worse re-draft lose an earlier better attempt.
@@ -13464,6 +14387,13 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         fstage = "provider_degraded"
         fdetail = (f"{hiccups} provider hiccup(s) during the fix loop -- retries were degraded; "
                    f"re-run when the provider is healthy. Last prove: {fdetail}")
+    if _prove_failure_is_environmental(fstage):
+        update_function_state(key, {
+            "port_status": "oracle_unavailable", "port_attempts": attempts,
+            "port_failure_stage": fstage,
+            "port_last_result": f"{fstage}: oracle down, function never tested -- re-queued"})
+        _log("oracle_unavailable", failure_stage=fstage, requeued=True)
+        return "oracle_unavailable"
     update_function_state(key, {
         "port_status": "live_prove_failed", "port_attempts": attempts,
         "port_failure_stage": fstage,
@@ -13507,6 +14437,80 @@ def _writeback_shadow_leaf_note(program_name, address):
                     params={"program": program_name})
     except Exception:
         pass
+
+
+def _void_return_needs_hard_skip(is_void_ret: bool, has_delegate_call: bool) -> bool:
+    """VOID-RETURN MUTATOR GUARD gate (2026-07-14, iter28; loosened 2026-07-28).
+
+    Only a delegate/subroutine call still forces an unconditional pre-LLM
+    skip. `has_delegate_call` (port_pipeline._has_delegate_call) is a BROAD
+    check -- any call that isn't control-flow/an abort helper/a decompiler
+    intrinsic -- so it already catches free()/realloc()/malloc() and calls
+    into other D2Common functions, which covers the two incidents that
+    motivated this guard with a documented crash mechanism (STAT_
+    ImportStateFlagsFromBuffer's "wild frees in-process under synthetic
+    args"; DATATBLS_GetRandomStringB's delegate loop into STATLIST_AddStat).
+
+    A bare pointer-deref ('->') with NO call at all is no longer sufficient
+    by itself to hard-skip: the existing outbuf-classification prompt
+    (build_live_draft_prompt's OUT-PARAM block) already asks the model to
+    self-classify write-only-outbuf vs reads-meaningful-data and reply
+    UNSUPPORTED rather than guess -- see _model_declined_outbuf. Previously
+    ANY '->' triggered a hard skip, which silently dead-ended pure out-param
+    writers like SetTextControlStringFromMultibyte/ConvertUnicodeBufferToUtf
+    that write into their output via `pDest->field = ...`, even though Class
+    B out-param capture (translate_layout_to_spec's `kind: "outbuf"`) has
+    supported exactly this shape since 2026-07-13.
+
+    Residual risk (documented, not fully closed): a purely-inline mutation
+    with NO function call at all but that walks/frees an EMBEDDED pointer or
+    count inside the out-param structure (rather than a flat scalar/text
+    write) isn't caught by has_delegate_call and isn't covered by the
+    model's read-vs-write self-classification either -- the oracle only
+    ever supplies a fixed-size flat scratch buffer for a declared outbuf, so
+    such a function could still walk into invalid memory. None of the
+    functions actually observed reaching stateful_skip in practice matched
+    this shape at last check; revisit if one does.
+    """
+    return bool(is_void_ret and has_delegate_call)
+
+
+def _class_b_outbuf_eligible(skip_reason: str, live_prove_enabled: bool) -> bool:
+    """CLASS B ROUTE gate (2026-07-13; loosened 2026-07-28).
+
+    A 'ptr_write' classification (port_pipeline.stateful_reason) is trusted
+    on its own now. stateful_reason's _PTR_WRITE_RE already requires an
+    actual assignment through the pointer/array/cast (`p->f =`, `*p =`,
+    `a[i] =`), and the model's own outbuf-classification prompt is the
+    safety net for the read+write hybrid shape (MONSTER_GetInvGridSize:
+    reads pUnit->dwType AND writes *pnWidth) -- reply UNSUPPORTED rather
+    than guess, per build_live_draft_prompt's OUT-PARAM block.
+
+    No longer additionally requires the whole decompile to be arrow-free.
+    That blanket requirement excluded exactly the pure out-param writers
+    Class B exists to prove -- almost any struct-shaped out-param write is
+    naturally spelled with `->` (`pDest->cch = len;`), so the old gate left
+    Class B able to fire only for the rare all-pointer-cast writer shape.
+    """
+    return skip_reason == "ptr_write" and live_prove_enabled
+
+
+def _model_declined_outbuf(text) -> bool:
+    """True if the model's raw draft-prompt reply is the single-word
+    UNSUPPORTED bail-out build_live_draft_prompt's OUT-PARAM block asks for
+    ("If the function READS meaningful data through a pointer param, ...
+    reply with the single word UNSUPPORTED instead of guessing") rather than
+    a real draft attempt. Loose match (case-insensitive, tolerates a little
+    trailing punctuation/whitespace) since models don't always reply with
+    byte-exact text even when told to.
+
+    Without this check the decline looks identical to a parse failure --
+    parse_live_response finds no ```cpp block either way -- and burns the
+    full malformed_response retry budget (max_fix_attempts real LLM calls)
+    re-asking a question the model already correctly answered once."""
+    if not text:
+        return False
+    return text.strip().rstrip(".").strip().upper() == "UNSUPPORTED"
 
 
 def process_port_candidate(program, address, func_name, *, provider, model=None,
@@ -13590,27 +14594,20 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     except Exception:
         pass
 
-    # VOID-RETURN MUTATOR GUARD (2026-07-14, iter28 near-miss): a void-return
-    # function that derefs a pointer param (`->`) or delegates has NOTHING to
-    # compare (no EAX) and almost certainly MUTATES -- STAT_RecalculateVitalCosts
-    # (in-place stat-list clamp), STAT_ImportStateFlagsFromBuffer (frees +
-    # reallocs a stat-list extension: wild frees in-process under synthetic
-    # args), DATATBLS_GetRandomStringB (loops STATLIST_AddStat despite the
-    # "Get" name) all reached draft lanes; only flaky malformed responses kept
-    # them from being live-called. Genuinely-mutating fns need state-diff
-    # capture (unbuilt) -- skip them BEFORE any prove/shadow routing. The pure
-    # out-param writer lane (leaf_outbuf: void, no `->`, no delegate) is
-    # intentionally NOT caught by this guard.
+    # VOID-RETURN MUTATOR GUARD -- see _void_return_needs_hard_skip for the
+    # 2026-07-28 loosening (delegate calls only; a bare '->' now reaches
+    # classification, where a Class B outbuf route + the model's own
+    # self-classification handle the pure-writer case).
     try:
         _sig_hdr, _, _sig_body = (decompiled or "").partition("{")
         _is_void_ret = bool(re.search(
             r"^\s*void\s+(?:__\w+\s+)?\w+\s*\(", _sig_hdr.splitlines()[-1] if _sig_hdr.splitlines() else "", re.M)) \
             or bool(re.search(r"\bvoid\s+(?:__\w+\s+)?" + re.escape(func_name) + r"\s*\(", _sig_hdr))
-        if _is_void_ret and ("->" in _sig_body or pp._has_delegate_call(_sig_body)):
+        if _void_return_needs_hard_skip(_is_void_ret, pp._has_delegate_call(_sig_body)):
             update_function_state(key, {
                 "port_status": "stateful_skip",
-                "port_last_result": "void-return mutator (derefs/delegates, no comparable "
-                                    "output) -- out of scope until state-diff capture exists"})
+                "port_last_result": "void-return delegate/subroutine call, no comparable "
+                                    "output -- out of scope until state-diff capture exists"})
             _log("void_mutator_skip")
             return "stateful_skip"
     except Exception:
@@ -13646,20 +14643,14 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             skip_reason = pp.stateful_reason(decompiled)
         except Exception:
             skip_reason = "other"
-        # CLASS B ROUTE (2026-07-13, capability loop): a PURE OUT-PARAM writer
-        # ('ptr_write') is live-provable now that translate_layout_to_spec
-        # supports outbuf args (the oracle allocates scratch buffers and
-        # compares the WRITTEN BYTES; it always could -- only the translator
-        # was EAX-only). GATE: only a pure writer whose pointer params are
-        # WRITTEN, not READ. A `->` field READ (pUnit->dwType) means a live
-        # HANDLE input -- that is the handle+outbuf HYBRID class (needs the
-        # handle path extended to carry out-bufs, a LATER capability), NOT the
-        # global/scalar outbuf path here. Misrouting MONSTER_GetInvGridSize
-        # (reads pUnit->dwType AND writes *pnWidth) to the global path would
-        # just fail to marshal the unit -- so exclude `->`-reading writers.
-        # (Refinement surfaced by the GetInvGridSize pilot, 2026-07-13.)
-        if (skip_reason == "ptr_write" and "->" not in (decompiled or "")
-                and os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
+        # CLASS B ROUTE -- see _class_b_outbuf_eligible for the 2026-07-28
+        # loosening (trusts the 'ptr_write' classification on its own; no
+        # longer requires the whole decompile to be arrow-free). The
+        # read+write hybrid shape (MONSTER_GetInvGridSize: reads pUnit->
+        # dwType AND writes *pnWidth) is now the model's self-classification
+        # problem via the OUT-PARAM prompt block, not a static pre-filter --
+        # see _model_declined_outbuf for the UNSUPPORTED-reply fast path.
+        if _class_b_outbuf_eligible(skip_reason, os.environ.get("FUNDOC_LIVE_PROVE") == "1"):
             _log("outbuf_route", classification=classification)
             return process_global_leaf_live(
                 program, address, func_name, decompiled,
@@ -13974,6 +14965,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     draft_attempts = 0
     max_draft_attempts = max(1, max_fix_attempts)
     _draft_timeouts = 0  # provider timeouts do NOT consume the draft-attempt budget
+    _draft_real = 0      # sessions that actually came back (parseable or not)
     while draft_attempts < max_draft_attempts:
         draft_attempts += 1
         # "complex" tier (600s watchdog): port drafts are long generations
@@ -14004,6 +14996,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             if _draft_timeouts <= max(2, max_fix_attempts):
                 draft_attempts -= 1
             continue
+        _draft_real += 1
         header, dispatch, spec = pp.parse_port_response_full(text or "")
         if not header and (meta or {}).get("reasoning_text"):
             # M3 frequently leaves part or all of the deliverable in its
@@ -14023,12 +15016,12 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         _log("malformed_response_retry", attempt=draft_attempts, output=(text or "")[-500:])
 
     if not header:
-        update_function_state(key, {
-            "port_status": "malformed_response", "port_attempts": draft_attempts,
-            "port_last_result": f"no parseable code blocks after {draft_attempts} attempt(s)",
-        })
-        _log("malformed_response", attempts=draft_attempts)
-        return "malformed_response"
+        status = _draft_exhausted_status(
+            key, program, address, draft_attempts, _draft_timeouts, _draft_real,
+            f"no parseable code blocks after {draft_attempts} attempt(s)")
+        _log(status, attempts=draft_attempts, timeouts=_draft_timeouts,
+             real_responses=_draft_real)
+        return status
 
     module = Path(program).stem
     symbol = spec["fn"]
@@ -14049,7 +15042,10 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     })
 
     system_name = pp.pascal_to_snake_case(symbol)
-    pp.write_pending_vectors(system_name, vectors)
+    # `module` namespaces the staging file by binary -- Fog's and Storm's
+    # ShutdownStubNoOp are different functions that share a name. See
+    # pp.pending_vectors_stem.
+    pp.write_pending_vectors(module, system_name, vectors)
 
     draft_paths = pp.write_draft(module, symbol, header, dispatch, vectors)
     harness = pp.run_harness()
@@ -14121,7 +15117,8 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         if plp is not None:
             try:
                 live = plp.run_live_prove(
-                    header, symbol, address, spec["param_layout"], spec["input_sets"]
+                    header, symbol, address, spec["param_layout"], spec["input_sets"],
+                    program=program
                 )
                 oracle_spec = live.get("spec")  # for shadow_promote.py below (WS-6c)
                 live_status = "proven_live" if live["ok"] else "live_prove_failed"
@@ -14192,7 +15189,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
 
 def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                           stop_flag, conformance_protected=None,
-                          on_progress=None, on_started=None,
+                          on_progress=None, on_started=None, on_idle=None,
                           continuous=False, poll_interval=30, battletest_poll=None):
     """Orchestrate a PORT worker run: processes Stage-2/3 candidates on
     `active_binary`. Unlike the globals worker, PORT does NOT rotate across
@@ -14205,6 +15202,15 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
     `on_progress` is invoked after each candidate with
         (program, address, result, processed, count).
     `on_started` is invoked before each candidate with (program, address, name).
+    `on_idle` is invoked (no args) once per poll cycle in continuous mode when
+        `select_port_candidates` comes back empty -- a real "still alive, just
+        nothing eligible right now" signal, distinct from on_progress/on_started
+        which only fire when a candidate actually exists. Without this, a
+        drained-but-continuous worker's last_heartbeat_at goes stale the whole
+        time it's idly polling, and the dashboard's watchdog stall-kills it as
+        if it had hung (confirmed live 2026-07-26 -- worker 18e96b51 killed at
+        exactly the 900s threshold while correctly idle-polling, zero actual
+        progress expected or missed).
 
     `continuous` (default False, matching the existing one-shot behavior
     exactly): when True, mirrors the functions-mode worker's continuous loop
@@ -14246,17 +15252,52 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         except Exception:
             pass
 
+    def _log_provider_unhealthy():
+        """Halt loudly. A dead provider used to look like a queue of hard
+        functions -- each candidate burning ~30 min of watchdog kills before
+        being stamped terminal. Stopping the pass and SAYING SO is what turns
+        that into a 5-minute diagnosis (see feedback_loud_failures)."""
+        streak = _PROVIDER_HEALTH["consecutive_timeouts"]
+        msg = (f"provider {provider}: {streak} consecutive session timeouts "
+               f"with no response — stopping pass (circuit breaker)")
+        print(f"  [port-worker {worker_id}] {msg}", flush=True)
+        bus_emit("provider_circuit_open", {
+            "provider": provider, "worker_id": worker_id,
+            "consecutive_timeouts": streak, "message": msg,
+        })
+        _append_run_log({
+            "timestamp": datetime.now().isoformat(), "mode": "port",
+            "worker_id": worker_id, "provider": provider,
+            "result": "provider_circuit_open", "consecutive_timeouts": streak,
+        })
+
     def _poll_battletest():
         if not battletest_poll:
             return
+        # NOTE: there is no module-level _log — it's a closure defined per
+        # candidate inside process_port_candidate. Both calls here used to name
+        # it, so a promotion (or any error) raised NameError: the success path's
+        # was swallowed by this handler, but the handler's OWN call then
+        # propagated and killed the continuous pass. Use the module-level
+        # run-log helper instead.
+        def _pass_log(result, **extra):
+            _append_run_log({
+                "timestamp": datetime.now().isoformat(), "mode": "port",
+                "worker_id": worker_id, "provider": provider,
+                "result": result, **extra,
+            })
+
         try:
             import battletest_promoter as btp
             result = btp.poll_and_promote()
             if result.get("promoted"):
                 bus_emit("battletest_promoted", {"promoted": result["promoted"]})
-                _log("battletest_promoted", **result)
+                _pass_log("battletest_promoted", **result)
         except Exception as e:  # never fail the worker pass over this
-            _log("battletest_promote_error", error=str(e))
+            try:
+                _pass_log("battletest_promote_error", error=str(e))
+            except Exception:
+                pass
 
     def _process_one(cand, processed):
         func = cand["func"]
@@ -14353,6 +15394,10 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
             if result == "blocked":
                 summary["stopped_reason"] = "blocked"
                 break
+            if provider_circuit_open():
+                summary["stopped_reason"] = "provider_unhealthy"
+                _log_provider_unhealthy()
+                break
 
         summary["processed"] = processed
         if summary["stopped_reason"] is None:
@@ -14371,6 +15416,11 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
             pinned=load_priority_queue().get("pinned", []),
         )
         if not candidates:
+            if on_idle:
+                try:
+                    on_idle()
+                except Exception:
+                    pass
             _poll_battletest()
             for _ in range(poll_interval):
                 if stop_flag.is_set():
@@ -14388,8 +15438,13 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 summary["stopped_reason"] = "blocked"
                 drained_this_round = False
                 break
+            if provider_circuit_open():
+                summary["stopped_reason"] = "provider_unhealthy"
+                _log_provider_unhealthy()
+                drained_this_round = False
+                break
         _poll_battletest()
-        if summary["stopped_reason"] in ("user_stop", "blocked"):
+        if summary["stopped_reason"] in ("user_stop", "blocked", "provider_unhealthy"):
             break
         if not drained_this_round:
             break

@@ -1,0 +1,114 @@
+[
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd67c80",
+  "name": "IsPathNodePositionValidAndOpen",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd72700",
+  "name": "GetItemRecordFlagBit2",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd7ed30",
+  "name": "DATATBLS_IsObjectRecordFlag167Set",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd7ede0",
+  "name": "GetObjectAnimModeRecordByte",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Client.dll",
+  "address": "6fac5820",
+  "name": "FireSkillMissilesAtTarget",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Client.dll",
+  "address": "6fac5c40",
+  "name": "MISSILE_CreateAndFire",
+  "port_status": "live_prove_failed",
+  "port_attempts": 2,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Client.dll",
+  "address": "6facc830",
+  "name": "ResetControlPanelFlags",
+  "port_status": "live_prove_failed",
+  "port_attempts": 2,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Client.dll",
+  "address": "6fad1e80",
+  "name": "CLIENT_GetLayerTypeFromFlags",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd853d0",
+  "name": "DATATBLS_ResolveItemCategoryFromTables",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd87db0",
+  "name": "STATS_TestStatFlag",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd88470",
+  "name": "STATS_GetStateFlagsPointer",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd8b1e0",
+  "name": "DUNGEON_GetTownLevelIdFromActNo",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd8e910",
+  "name": "GetDataRecordStrideB8",
+  "port_status": "live_prove_failed",
+  "port_attempts": 2,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ },
+ {
+  "program": "/Mods/PD2-S12/D2Common.dll",
+  "address": "6fd9e180",
+  "name": "SKILLS_GetSkillNodeField8Safe",
+  "port_status": "live_prove_failed",
+  "port_attempts": 1,
+  "port_last_result": "D2Debugger :8790 unreachable"
+ }
+]

@@ -191,6 +191,35 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
+    public void parseAddress_nonHexSymbolLikeInput_suggestionIsValidHexNotEchoedGarbage() {
+        // Confirmed live 2026-07-26: a fun-doc FIX worker passed a bogus Ghidra
+        // decompiler auto-label ("DAT_41544144" -- not a real symbol, not a real
+        // address in the program) into rename_symbol's address param. The old
+        // buildSpaceSuggestion() blindly echoed the invalid input back into its
+        // "try this instead" example ("ram:DAT_41544144"), which is *still* not
+        // valid hex -- a caller retrying the suggestion verbatim would fail
+        // identically. No existing test exercised this: every prior case here
+        // passes either a colon-form address or valid (if out-of-range) hex: none
+        // pass a bare, non-hex, non-colon string through to the suggestion builder.
+        when(factory.getAddress("DAT_41544144")).thenReturn(null);
+        Address result = ServiceUtils.parseAddress(program, "DAT_41544144");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        // The message legitimately echoes the original input earlier ("Address
+        // 'DAT_41544144' could not be resolved...", same as every other case in
+        // this file) -- only the SUGGESTION example after "e.g., " must not
+        // contain it, since that part is supposed to be a working example.
+        int suggestionStart = err.indexOf("e.g., ");
+        assertTrue("Suggestion marker must be present: " + err, suggestionStart >= 0);
+        String suggestion = err.substring(suggestionStart);
+        assertFalse("Suggestion example must not echo back the invalid non-hex input verbatim: " + err,
+                suggestion.contains("DAT_41544144"));
+        assertTrue("Suggestion should still point at the <space>:<hex> format: " + err,
+                err.contains("Try <space>:<hex>"));
+    }
+
+    @Test
     public void parseAddress_unmappedButValidAddress_returnsNonNull() {
         // parseAddress does NOT check Memory.contains() — that's the caller's job
         Address unmappedAddr = mock(Address.class);

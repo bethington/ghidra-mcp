@@ -899,6 +899,18 @@ public final class ServiceUtils {
     private static String buildSpaceSuggestion(Program program, String rawOffset) {
         // Strip leading 0x if present
         String hex = rawOffset.toLowerCase().startsWith("0x") ? rawOffset.substring(2) : rawOffset;
+        // rawOffset isn't guaranteed to be a hex address -- a caller that passes a
+        // decompiler-visible label (e.g. Ghidra's own "DAT_<addr>" auto-name for an
+        // unresolved data reference) lands here too, since that's exactly the
+        // "couldn't resolve this as an address" path. Blindly echoing it back
+        // produces a nonsensical suggestion like "ram:DAT_41544144" -- still not
+        // valid hex, so retrying it would just fail the same way. Confirmed live
+        // 2026-07-26. Fall back to a generic placeholder when the input isn't
+        // actually hex, so the suggested example is always something that would
+        // really work.
+        if (!hex.matches("[0-9a-fA-F]+")) {
+            hex = "1000";
+        }
         StringBuilder sb = new StringBuilder();
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
             if (space.isOverlaySpace()) continue;
@@ -976,6 +988,28 @@ public final class ServiceUtils {
      * @return The resolved DataType, or null if not found
      */
     public static DataType resolveDataType(DataTypeManager dtm, String typeName) {
+        try {
+            return resolveDataTypeInternal(dtm, typeName);
+        } catch (IllegalArgumentException e) {
+            // Ghidra's CategoryPath(String) constructor throws this for a
+            // malformed path (empty segment from an internal "//", missing
+            // leading "/", trailing "/") when typeName itself is used to
+            // probe a category path, e.g. via dtm.getDataType("/" + typeName)
+            // below. Confirmed live 2026-07-26: this leaked through every
+            // caller's generic outer catch as a raw, unhelpful "Error
+            // processing request: Paths must have non-empty elements" --
+            // every one of this method's 18 call sites already treats a
+            // null return as "type not found" with its own clear message,
+            // so folding a malformed name into that same path is strictly
+            // more useful than exposing Ghidra's internal path-validation
+            // wording as if it were a generic request-processing failure.
+            Msg.error(ServiceUtils.class,
+                    "Invalid type name (malformed path segment): " + typeName + " -- " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static DataType resolveDataTypeInternal(DataTypeManager dtm, String typeName) {
         // ZERO: Map common C type names to Ghidra built-in DataType instances
         DataType wellKnown = resolveWellKnownType(typeName);
         if (wellKnown != null) {
@@ -1012,7 +1046,7 @@ public final class ServiceUtils {
 
             try {
                 int count = Integer.parseInt(countStr);
-                DataType baseType = resolveDataType(dtm, baseTypeName);
+                DataType baseType = resolveDataTypeInternal(dtm, baseTypeName);
 
                 if (baseType != null && count > 0) {
                     ArrayDataType arrayType = new ArrayDataType(baseType, count, baseType.getLength());
@@ -1039,7 +1073,7 @@ public final class ServiceUtils {
                 return new PointerDataType(dtm.getDataType("/void"));
             }
 
-            DataType baseType = resolveDataType(dtm, baseTypeName);
+            DataType baseType = resolveDataTypeInternal(dtm, baseTypeName);
             if (baseType != null) {
                 Msg.info(ServiceUtils.class, "Creating pointer type: " + typeName +
                         " (base: " + baseType.getName() + ")");

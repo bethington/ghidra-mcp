@@ -686,7 +686,7 @@ def _gate_spec(gates):
             for (d, o, i, w) in (gates or [])]
 
 
-def run_synth_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+def run_synth_prove(reimpl_cpp: str, name: str, address, *, program: str, ret: str = "u32",
                     struct_size: int = 256, gates=None, build: bool = True) -> dict:
     """Prove a FLAT getter (a single fixed-offset read, no sub-pointer deref) via the
     oracle's SYNTHETIC DISCRIMINATING object (arg kind 'synth', 2026-07-08). The oracle
@@ -721,11 +721,11 @@ def run_synth_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
     res["spec"] = spec
     res["proof_kind"] = "synth"          # a discriminating proof -- never weak
     if res.get("ok"):
-        res["writeback"] = record_proof(name, address, spec, res)
+        res["writeback"] = record_proof(name, address, spec, res, program=program)
     return res
 
 
-def run_synth2_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+def run_synth2_prove(reimpl_cpp: str, name: str, address, *, program: str, ret: str = "u32",
                      gates=None, build: bool = True) -> dict:
     """Prove a 2-LEVEL getter (read a pointer at O1, deref, read the field at O2 --
     no third level) via the oracle's NESTED discriminating object (arg kind
@@ -760,14 +760,14 @@ def run_synth2_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
     res["spec"] = spec
     res["proof_kind"] = "synth2"        # discriminates the field offset -- never weak
     if res.get("ok"):
-        res["writeback"] = record_proof(name, address, spec, res)
+        res["writeback"] = record_proof(name, address, spec, res, program=program)
     return res
 
 
 _DELEGATE_INDICES = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
 
 
-def run_delegate_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
+def run_delegate_prove(reimpl_cpp: str, name: str, address, *, program: str, ret: str = "u32",
                        arg_off: int, type_gates=None, indices=None,
                        build: bool = True) -> dict:
     """Prove a DELEGATE call-through getter (abi_static.translate_delegate_getter_to_c):
@@ -818,7 +818,7 @@ def run_delegate_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
            "proof_kind": "delegate_call_through", "orig_distinct": len(orig_vals)}
     if npass == len(idxs) and len(orig_vals) > 1:
         res["ok"] = True
-        res["writeback"] = record_proof(name, address, spec, res)
+        res["writeback"] = record_proof(name, address, spec, res, program=program)
         res["note"] = f"delegate call-through; discriminating multi-index ({npass}/{len(idxs)}, orig varies)"
     elif npass == len(idxs) and len(orig_vals) <= 1:
         res["ok"] = False
@@ -833,7 +833,7 @@ def run_delegate_prove(reimpl_cpp: str, name: str, address, *, ret: str = "u32",
 
 
 def run_handle_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
-                     input_sets: list, *, build: bool = True) -> dict:
+                     input_sets: list, *, program: str, build: bool = True) -> dict:
     """Prove a live-pointer getter against the running game via the oracle handle
     path (a real captured object is passed to both original and reimpl). Same
     {ok,passed,total,output,...} shape as run_live_prove."""
@@ -871,7 +871,8 @@ def run_handle_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
                                   if isinstance(r.get("probe"), list) and r["probe"]]
     res["weak_proof"] = _degenerate_capture_note(oracle)
     if res.get("ok"):
-        res["writeback"] = record_proof(name, address, spec, res, weak_proof=res["weak_proof"])
+        res["writeback"] = record_proof(name, address, spec, res, program=program,
+                                        weak_proof=res["weak_proof"])
     return res
 
 
@@ -1204,7 +1205,26 @@ def _extract_oracle_json(out: str):
 
 def _ghidra_post(path: str, data: dict) -> dict:
     """POST a JSON body to the Ghidra plugin REST server (source of truth).
-    Best-effort -- write-back must NEVER fail a proof."""
+    Best-effort -- write-back must NEVER fail a proof.
+
+    `program`, if present in `data`, is moved to the URL QUERY string, never
+    left in the JSON body. Ghidra's `@McpTool` endpoints declare `program`
+    with no explicit `source`, which defaults to `ParamSource.QUERY` (see
+    CLAUDE.md "Code Conventions") -- every endpoint this module posts to
+    (/add_function_tag, /remove_function_tag, /set_property,
+    /create_property_map, /save_program) resolves `program` this way. Before
+    2026-07-27 every one of THIS function's callers passed `program` in the
+    body instead, where the Java side never looks for it -- it silently fell
+    back to Ghidra's ACTIVE program (or 400'd "No function found" when the
+    active program didn't have a function at that address). That is the
+    actual mechanism behind the wrong-binary tag writes this module produced
+    for its entire history: fixing the Python-level `program` plumbing (this
+    same commit) was necessary but not sufficient without this half too."""
+    data = dict(data)
+    program = data.pop("program", None)
+    if program:
+        sep = "&" if "?" in path else "?"
+        path = f"{path}{sep}{urllib.parse.urlencode({'program': program})}"
     u = urllib.parse.urlparse(GHIDRA_HTTP)
     conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=15)
     try:
@@ -1230,20 +1250,31 @@ CONF_TAGS = ["CONF_DRAFT", "CONF_VECTORS", "CONF_LIVE", "CONF_BATTLETESTED"]
 DOC_TAGS = ["DOC_DRAFT", "DOC_REVIEWED", "DOC_VERIFIED"]
 
 
-def _set_rung(address, level: str, ladder, program: str = "D2Common.dll") -> dict:
+def _set_rung(address, level: str, ladder, program: str) -> dict:
     """Set ONE rung on a mutually-exclusive Ghidra tag ladder: remove the other
     rungs, add this one. Additive to OTHER axes and to decompiler comments.
-    Best-effort; never raises. Shared by the DOC_ and CONF_ write-backs."""
+    Best-effort -- never raises, so a write-back failure can't fail a proof --
+    but LOUD: `program` has no default (2026-07-27: a hardcoded "D2Common.dll"
+    default silently wrote every non-D2Common proof's tag to the wrong binary
+    -- and often to no function at all, since the address rarely resolves in
+    D2Common -- for the whole project history; nothing ever surfaced it because
+    the failed /add_function_tag call was swallowed here). Callers MUST pass
+    the function's actual program; omitting it is now a TypeError, not a silent
+    wrong-binary write. Shared by the DOC_ and CONF_ write-backs."""
     if level not in ladder:
         return {"status": f"bad level {level!r} (want one of {ladder})"}
     addr = f"0x{address:x}" if isinstance(address, int) else str(address)
     others = ",".join(t for t in ladder if t != level)
     _ghidra_post("/remove_function_tag", {"function": addr, "tags": others, "program": program})
     tag = _ghidra_post("/add_function_tag", {"function": addr, "tags": level, "program": program})
-    return {"level": level, "status": "ok" if tag.get("status") == "success" else tag.get("error", tag)}
+    ok = tag.get("status") == "success"
+    if not ok:
+        print(f"  [write-back WARN] Ghidra tag write FAILED: {level} @ {addr} "
+              f"(program={program!r}): {str(tag.get('error', tag))[:200]}")
+    return {"level": level, "status": "ok" if ok else tag.get("error", tag)}
 
 
-def set_doc_level(address, doc_level: str, *, program: str = "D2Common.dll") -> dict:
+def set_doc_level(address, doc_level: str, *, program: str) -> dict:
     """WRITE-BACK the DOC_ documentation-maturity rung in Ghidra (source of truth),
     mutually exclusive. Call from fun-doc's documentation stages:
       first-pass model doc            -> DOC_DRAFT
@@ -1301,7 +1332,7 @@ def _conf_record_json(row: dict) -> str:
 
 
 def record_proof(name: str, address, spec: dict, result: dict, *,
-                 program: str = "D2Common.dll", conf_level: str = "CONF_LIVE",
+                 program: str, conf_level: str = "CONF_LIVE",
                  abort_class: bool = False, weak_proof: str = None) -> dict:
     """WRITE-BACK (see the writeback-source-of-truth principle). On a successful
     live proof, make GHIDRA the source of truth for the proof, three ways:
@@ -1313,8 +1344,11 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
       (3) append a machine-readable row to conformance/proven_functions.jsonl -- now a
           git-tracked MIRROR of (1)+(2).
     Additive to the DOC_ axis and decompiler comments (never clobbered). Each write is
-    independent best-effort; never raises. Ends with a per-proof save_program (chosen
-    cadence: zero-loss over speed -- every rung/property is persisted immediately).
+    independent best-effort; never raises -- but every failure prints a loud
+    `[write-back WARN]` (see _set_rung's docstring for why: a silently-swallowed
+    write-back is how the wrong-binary default and a lost 5-day property-write outage
+    both went unnoticed). `program` has no default -- the caller must know which
+    binary it just proved a function in.
 
     conf_level defaults to CONF_LIVE (the live-oracle proof). A future battle-test
     promoter passes CONF_BATTLETESTED (earned by zero shadow divergences in real
@@ -1323,7 +1357,8 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
     a = spec.get("addr", address)
     addr = f"0x{a:x}" if isinstance(a, int) else str(a)
 
-    # Mutual exclusivity handled by the shared ladder helper.
+    # Mutual exclusivity handled by the shared ladder helper (which itself prints
+    # a WARN on failure -- this line just folds that outcome into `status`).
     r = _set_rung(addr, conf_level, CONF_TAGS, program)
     status["ghidra_tag"] = f"{conf_level}={r['status']}"
 
@@ -1381,20 +1416,24 @@ def record_proof(name: str, address, spec: dict, result: dict, *,
         status["registry"] = str(PROVEN_REGISTRY)
     except OSError as e:
         status["registry"] = f"error: {e}"
+        print(f"  [write-back WARN] registry mirror write FAILED for {name} @ {addr}: {e}")
 
     # (4) per-proof save -- persist the tag + property to the .rep immediately. Chosen
     # cadence: zero-loss over speed. save_program is a full program save, so batches run
     # slower, but no Ghidra write is ever lost to an unexpected close/crash.
     try:
-        _ghidra_post("/save_program", {"program": program})
-        status["saved"] = "ok"
+        saved = _ghidra_post("/save_program", {"program": program})
+        status["saved"] = "ok" if saved.get("success", True) else saved.get("error", saved)
     except OSError as e:
         status["saved"] = f"error: {e}"
+    if status["saved"] != "ok":
+        print(f"  [write-back WARN] save_program FAILED for {name} @ {addr} "
+              f"(program={program!r}): {str(status['saved'])[:160]}")
     return status
 
 
 def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
-                   input_sets: list, *, build: bool = True,
+                   input_sets: list, *, program: str, build: bool = True,
                    abort_class: bool = False) -> dict:
     """Prove a D2MOO reimpl of `name` against the live game. Writes the reimpl
     into the provider, translates fun-doc's layout+cases into an oracle spec,
@@ -1428,7 +1467,7 @@ def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
                         # the ABI shape without recomputing translate_layout_to_spec
     if res.get("ok"):
         # Write-back to the source of truth on every successful proof.
-        res["writeback"] = record_proof(name, address, spec, res,
+        res["writeback"] = record_proof(name, address, spec, res, program=program,
                                         abort_class=abort_class)
     return res
 

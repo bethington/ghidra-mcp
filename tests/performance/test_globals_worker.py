@@ -527,13 +527,18 @@ def _entries(addresses):
 def globals_pass_env(monkeypatch):
     """Isolate `run_globals_worker_pass` side channels. The pass reads and
     writes the repo's real globals_clean_cache.json via SCRIPT_DIR and
-    fires best-effort HTTP calls (save_program, Doc-rung set_property) —
+    fires best-effort HTTP calls (save_program, review set_property) —
     none of which belong in the offline tier."""
     monkeypatch.setattr(fun_doc, "_load_globals_clean_cache", lambda base_dir=None: {})
     monkeypatch.setattr(fun_doc, "_save_globals_clean_cache", lambda cache, base_dir=None: None)
     monkeypatch.setattr(fun_doc, "_save_globals_worker_program", lambda p: None)
-    monkeypatch.setattr(fun_doc, "_stamp_global_doc_rung", lambda *a, **k: None)
+    monkeypatch.setattr(fun_doc, "_set_global_reviewed", lambda *a, **k: None)
     monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda p: None)
+    # Review is off unless a test opts in — mirrors the shipped default
+    # (config.globals_audit_provider = None), so these tests never dispatch a
+    # second provider call.
+    monkeypatch.setattr(fun_doc, "_resolve_globals_audit_provider",
+                        lambda doc_provider, config_snapshot=None: None)
 
 
 def test_run_globals_worker_pass_respects_count_cap(

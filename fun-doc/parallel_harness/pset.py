@@ -93,10 +93,10 @@ def prove_serial(draft_outcomes):
         try:
             if m.get("prove_kind") == "handle":
                 res = plp.run_handle_prove(m["reimpl"], m["name"], m["address"],
-                                           m["layout"], m["input_sets"], build=build)
+                                           m["layout"], m["input_sets"], program=PROGRAM, build=build)
             else:
                 res = plp.run_live_prove(m["reimpl"], m["name"], m["address"],
-                                         m["layout"], m["input_sets"], build=build,
+                                         m["layout"], m["input_sets"], program=PROGRAM, build=build,
                                          abort_class=m.get("abort_class", False))
             results[m["name"]] = {
                 "ok": bool(res.get("ok")), "passed": res.get("passed"),

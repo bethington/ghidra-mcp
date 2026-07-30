@@ -79,16 +79,13 @@
   /* ---- completion bars (replaces the stat cards) ---- */
   .bars { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
   @media (max-width:980px){ .bars{grid-template-columns:1fr;} }
-  /* globals bar: faint typed-groundwork underlay (hatched) with solid DOC rungs on top */
-  #globBar { position:relative; }
-  .glob-underlay { position:absolute; left:0; top:0; bottom:0; z-index:0; border-radius:3px 0 0 3px;
-    background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 6px); opacity:.55; }
-  #globBar .rung { position:relative; z-index:1; }
-  .glob-sw { background:repeating-linear-gradient(45deg, var(--text-secondary) 0 2px, transparent 2px 4px) !important; opacity:.9; }
   .bar-lab { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
   .bar-lab .t { font-family:var(--font-mono); font-size:.62rem; letter-spacing:1px; text-transform:uppercase; color:var(--text-secondary); }
   .bar-lab .p { font-family:var(--font-mono); font-size:.75rem; color:var(--text-primary); }
   .bar-lab .p b { color:var(--gold); }
+  /* trust bit next to the Globals percentage -- a badge, not a bar segment */
+  .revchip { font-size:.58rem; color:var(--text-secondary); border:1px solid var(--border-dark);
+    border-radius:8px; padding:1px 6px; margin-left:6px; white-space:nowrap; cursor:help; }
   .segbar { display:flex; height:22px; border-radius:4px; overflow:hidden; background:var(--bg-darkest); border:1px solid var(--border-dark); }
   .segbar span { display:block; }
   .seg-legend { display:flex; flex-wrap:wrap; gap:3px 12px; margin-top:7px; }
@@ -326,6 +323,13 @@
   .types-bar .tb-msg { flex:1; font-size:.72rem; color:var(--text-secondary); }
   .types-bar .tb-btn { padding:.28rem .7rem; font-size:.66rem; }
   .types-bar .tb-dismiss { background:none; border:none; color:var(--text-muted); font-size:1rem; cursor:pointer; padding:0 .3rem; }
+  /* ---- oracle/live-game health bar (down = red, relaunching = blue, just-recovered = green) ---- */
+  .oracle-bar { max-height:0; overflow:hidden; display:flex; align-items:center; gap:.6rem;
+    background:linear-gradient(90deg,rgba(199,60,60,.18),rgba(199,60,60,.05)); border-bottom:1px solid transparent;
+    padding:0 1rem; transition:max-height .2s ease, border-color .2s ease; }
+  .oracle-bar.active { max-height:52px; padding:.5rem 1rem; border-bottom-color:#c77b7b; }
+  .oracle-bar.busy { background:linear-gradient(90deg,rgba(120,150,199,.16),rgba(120,150,199,.04)); border-bottom-color:var(--gold,#c7b377); }
+  .oracle-bar.ok { background:linear-gradient(90deg,rgba(120,199,140,.16),rgba(120,199,140,.04)); border-bottom-color:#78c78c; }
   .settings-popout { max-height:0; overflow:hidden; background:linear-gradient(180deg,var(--bg-medium),var(--bg-dark));
     border-bottom:1px solid transparent; transition:max-height .18s ease, border-color .18s ease; }
   .settings-popout.active { max-height:460px; border-bottom-color:var(--red); overflow:auto; }
@@ -368,14 +372,14 @@
           <span class="lg"><span class="sw" style="background:var(--rare)"></span>regression</span>
           <span class="lg"><span class="sw" style="background:var(--crafted)"></span>draft/vectors</span>
           <span class="lg"><span class="sw" style="background:var(--bg-darkest);border:1px solid var(--border-dark)"></span>remaining</span>
-          <span class="picker-note">Glob Doc rungs are empty until the globals-doc pass runs; the % is typing groundwork.</span>
+          <span class="picker-note">Globals shows COMPLETE_100 / in-scope; &#10003; is the independently-reviewed count.</span>
         </div>
       </div>
     </div>
     <span class="spacer"></span>
     <div class="lane-pill">
       <label>Lane</label>
-      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess" title="Score current docs of functions AND globals; stamp DOC_DRAFT on the documented ones">Assess</option><option value="triage" title="Intake-classify functions AND globals: exclude library/stub/thunk, enqueue the rest">Triage</option></select>
+      <select id="lane"><option value="document">Document</option><option value="globals">Globals</option><option value="prove">Prove</option><option value="assess" title="Re-score current docs of functions AND globals. Functions stamp DOC_DRAFT on the documented ones; globals rewrite their COMPLETE_* band (every global, every pass — no cache).">Assess</option><option value="triage" title="Intake-classify functions AND globals: exclude library/stub/thunk, enqueue the rest">Triage</option></select>
     </div>
     <select id="provider"><option>minimax</option><option>gemini</option><option>claude</option></select>
     <input class="worker-input" id="count" type="number" value="12" min="1" max="500" title="count">
@@ -396,6 +400,14 @@
     <span class="tb-msg" id="typesBarMsg">Loading type status&hellip;</span>
     <button class="btn go tb-btn" id="typesBarBtn" onclick="typesBarAction()">Load types</button>
     <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('typesBar').classList.remove('active')">&times;</button>
+  </div>
+
+  <!-- ORACLE / LIVE GAME slide-out bar (D2Debugger oracle unreachable or relaunching) -->
+  <div class="oracle-bar" id="oracleBar">
+    <span class="tb-icon">&#9888;</span>
+    <span class="tb-msg" id="oracleBarMsg">Checking oracle status&hellip;</span>
+    <button class="btn go tb-btn" id="oracleBarBtn" onclick="oracleBarAction()">Relaunch</button>
+    <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('oracleBar').classList.remove('active')">&times;</button>
   </div>
 
   <!-- SETTINGS slide-out (queue config: good@, cold, debug, handoff, audit, provider models) -->
@@ -436,6 +448,11 @@
                 </select></label>
               <label class="settings-label" title="Skip audit if the worker's score gain >= this value">
                 <span>Min&Delta;</span><input type="number" class="worker-input" id="auditMinDeltaInput" min="0" max="100" onchange="saveQueueConfig()" style="width:48px"></label>
+              <label class="settings-label" title="Second-provider review for the GLOBALS lane, separate from the per-function audit above (the two lanes cost very different amounts per item). A reviewed global is one an INDEPENDENT provider re-checked against its real uses and left with no blocking issues — this is what fills the Globals bar's reviewed count. Must differ from the documenting provider; a matching choice disables review rather than faking it. Off = no review, and the count honestly stays 0.">
+                <span>Glob review&rarr;</span>
+                <select class="header-select" id="globAuditProviderInput" onchange="saveQueueConfig()">
+                  <option value="off">Off</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="minimax">MiniMax</option><option value="gemini">Gemini</option>
+                </select></label>
             </div>
           </div>
           <div style="margin-top:.75rem">
@@ -472,13 +489,14 @@
           <div class="segbar" id="confBar"></div>
           <div class="seg-legend" id="confLegend"></div>
         </div>
+        <!-- ONE globals bar. There used to be a second "Globals - Documentation" bar
+             driven by DOC_DRAFT/REVIEWED/VERIFIED in the `Doc` property map. Only
+             DRAFT ever had a producer and it was stamped on any global that crossed
+             Target and never revisited, so it measured "assess visited this" (96% on
+             D2Common) while the completeness bar below it said 51%. The rungs are
+             retired; trust now rides as the `reviewed` count in the label. -->
         <div>
-          <div class="bar-lab"><span class="t">Globals &middot; Documentation</span><span class="p" id="globPct">-</span></div>
-          <div class="segbar" id="globBar"></div>
-          <div class="seg-legend" id="globLegend"></div>
-        </div>
-        <div>
-          <div class="bar-lab"><span class="t">Globals &middot; Completeness</span><span class="p" id="globBandPct">-</span></div>
+          <div class="bar-lab"><span class="t">Globals</span><span class="p" id="globBandPct">-</span></div>
           <div class="segbar" id="globBandBar"></div>
           <div class="seg-legend" id="globBandLegend"></div>
         </div>
@@ -541,7 +559,7 @@
           <span class="hint" id="globHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
-          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th>DOC</th></tr></thead>
+          <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th title="Completeness band from the 6-axis scorer. Blank = never scored.">BAND</th><th title="Confirmed by an independent review pass">&#10003;</th></tr></thead>
           <tbody id="globBody"></tbody></table>
         </div>
       </div>
@@ -594,31 +612,31 @@
     {path:"/Mods/PD2-S12/D2Client.dll",name:"D2Client.dll",folder:"/Mods/PD2-S12",fn_scope:4658,remaining_total:12142,
       fn_doc:{scope:4658,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:4658,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:2826,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:648,typed_pct:22.9}},
+      glob:{scope:2826,bands:{COMPLETE_80:129,COMPLETE_90:64,COMPLETE_95:54,COMPLETE_100:108},scored:355,unscored:2471,reviewed:0}},
     {path:"/Mods/PD2-S12/D2Game.dll",name:"D2Game.dll",folder:"/Mods/PD2-S12",fn_scope:4734,remaining_total:9924,
       fn_doc:{scope:4734,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:4734,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:456,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:175,typed_pct:38.4}},
+      glob:{scope:456,bands:{COMPLETE_80:35,COMPLETE_90:17,COMPLETE_95:14,COMPLETE_100:29},scored:95,unscored:361,reviewed:0}},
     {path:"/Mods/PD2-S12/D2Common.dll",name:"D2Common.dll",folder:"/Mods/PD2-S12",fn_scope:2547,remaining_total:7064,
       fn_doc:{scope:2547,done:31,rungs:{DOC_VERIFIED:6,DOC_REVIEWED:25,DOC_DRAFT:0}},
       fn_conf:{scope:2547,done:119,rungs:{CONF_REGRESSION:4,CONF_BATTLETESTED:35,CONF_LIVE:80,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:2120,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:697,typed_pct:32.9}},
+      glob:{scope:2120,bands:{COMPLETE_80:139,COMPLETE_90:69,COMPLETE_95:58,COMPLETE_100:116},scored:382,unscored:1738,reviewed:0}},
     {path:"/Mods/PD2-S12/D2Win.dll",name:"D2Win.dll",folder:"/Mods/PD2-S12",fn_scope:647,remaining_total:1843,
       fn_doc:{scope:647,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:647,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:549,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:182,typed_pct:33.2}},
+      glob:{scope:549,bands:{COMPLETE_80:36,COMPLETE_90:18,COMPLETE_95:15,COMPLETE_100:30},scored:99,unscored:450,reviewed:0}},
     {path:"/Mods/OtherMod/D2Common.dll",name:"D2Common.dll",folder:"/Mods/OtherMod",fn_scope:2500,remaining_total:5000,
       fn_doc:{scope:2500,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:2500,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:1200,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:300,typed_pct:25}},
+      glob:{scope:1200,bands:{COMPLETE_80:60,COMPLETE_90:30,COMPLETE_95:25,COMPLETE_100:50},scored:165,unscored:1035,reviewed:0}},
     {path:"/testing/D2Common.dll",name:"D2Common.dll",folder:"/testing",fn_scope:2220,remaining_total:4441,
       fn_doc:{scope:2220,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:2220,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:1,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}},
+      glob:{scope:1,bands:{COMPLETE_80:0,COMPLETE_90:0,COMPLETE_95:0,COMPLETE_100:0},scored:0,unscored:1,reviewed:0}},
     {path:"/benchmark/bench_core.dll",name:"bench_core.dll",folder:"/benchmark",fn_scope:460,remaining_total:920,
       fn_doc:{scope:460,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0}},
       fn_conf:{scope:460,done:0,rungs:{CONF_REGRESSION:0,CONF_BATTLETESTED:0,CONF_LIVE:0,CONF_VECTORS:0,CONF_DRAFT:0}},
-      glob_doc:{scope:0,done:0,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},typed:0,typed_pct:0}}]};
+      glob:{scope:0,bands:{COMPLETE_80:0,COMPLETE_90:0,COMPLETE_95:0,COMPLETE_100:0},scored:0,unscored:0,reviewed:0}}]};
   async function loadBinaries(){
     const r=await api("/binaries/progress")||SAMPLE_PROG;
     BINARIES=r.binaries||[]; PROGRAM=r.active||(BINARIES[0]&&BINARIES[0].path)||null;
@@ -647,6 +665,20 @@
       `<span class="seg" title="${lbl}: ${(bar.done||0).toLocaleString()} of ${bar.scope==null?'?':bar.scope.toLocaleString()}">`+
       `${segHTML(bar,order)}<span class="cnt">${cnt}</span></span></div>`;
   }
+  // Per-binary globals row: completeness bands, same vocabulary as the big bar.
+  // Was a DOC-rung row; the rungs are retired (see the bars markup comment).
+  const BAND_ORDER=[["COMPLETE_80","var(--crafted)"],["COMPLETE_90","var(--magic)"],
+                    ["COMPLETE_95","var(--set)"],["COMPLETE_100","var(--rare)"]];
+  function globRow(g){
+    g=g||{}; const scope=g.scope||0, bands=g.bands||{}, c100=bands.COMPLETE_100||0;
+    let html="";
+    BAND_ORDER.forEach(([k,c])=>{ const n=bands[k]||0;
+      if(n>0&&scope>0) html+=`<span class="sg" title="${k.replace('COMPLETE_','')}+: ${n}" style="width:${(n/scope*100).toFixed(2)}%;background:${c}"></span>`; });
+    const rev=g.reviewed?` &middot;&#10003;${kf(g.reviewed)}`:"";
+    return `<div class="brow"><span class="lbl">Globals</span>`+
+      `<span class="seg" title="Globals at COMPLETE_100: ${c100.toLocaleString()} of ${scope.toLocaleString()}${g.reviewed?` — ${g.reviewed.toLocaleString()} reviewed`:''}">`+
+      `${html}<span class="cnt">${kf(c100)}/${kf(scope)}${rev}</span></span></div>`;
+  }
   function bcardHTML(c){
     const active=c.path===PROGRAM;
     return `<div class="bcard ${active?'active':''}" onclick="pickBinary('${c.path.replace(/'/g,"\\'")}')">
@@ -656,7 +688,7 @@
       </div>
       ${brow("Fn Doc",c.fn_doc,DOC_ORDER)}
       ${brow("Fn Conf",c.fn_conf,CONF_ORDER)}
-      ${brow("Glob Doc",c.glob_doc,DOC_ORDER,` &middot;${Math.round(c.glob_doc.typed_pct)}%`)}
+      ${globRow(c.glob)}
     </div>`;
   }
   // ---- folder breadcrumb (recursive; each dropdown has an "All"; leading "All folders") ----
@@ -772,17 +804,22 @@
          target=parseInt((j.config||j||{}).good_enough_score)||90; }catch(e){}
     const n=t=>((b.bands||{})[t]||0);
     const c80=n("COMPLETE_80"), c90=n("COMPLETE_90"), c95=n("COMPLETE_95"), c100=n("COMPLETE_100");
-    const inscope=b.in_scope||1;
+    // in_scope can legitimately be 0 (e.g. a transient rescan) while `bands` still
+    // carries real counts from a prior scope -- `||1` used to fold that into a fake
+    // denominator of 1 and inflate the percentage (see renderBars' "326700%" note
+    // above for the same bug class). Render "--" instead of dividing by a fake 1.
+    const inscope=b.in_scope||0;
     const atLevel={80:c80+c90+c95+c100, 90:c90+c95+c100, 95:c95+c100, 100:c100};
     const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
-    document.getElementById("bandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
+    const pct=inscope>0?`${(100*done/inscope).toFixed(1)}%`:"&mdash;";
+    document.getElementById("bandPct").innerHTML=`<b>${pct}</b> at target (${target}+)`;
     seg(document.getElementById("bandBar"),document.getElementById("bandLegend"),[
       {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
       {label:"80+",n:c80,c:"var(--crafted)"},
       {label:"90+",n:c90,c:"var(--magic)"},
       {label:"95+",n:c95,c:"var(--set)"},
       {label:"100",n:c100,c:"var(--rare)"},
-    ],inscope);
+    ],inscope>0?inscope:(c80+c90+c95+c100));
   }
 
   // ---- Globals - Completeness: untagged -> COMPLETE_80 -> 90 -> 95 -> 100 ----
@@ -795,37 +832,30 @@
          target=parseInt((j.config||j||{}).good_enough_score)||90; }catch(e){}
     const n=t=>((b.bands||{})[t]||0);
     const c80=n("COMPLETE_80"), c90=n("COMPLETE_90"), c95=n("COMPLETE_95"), c100=n("COMPLETE_100");
-    const inscope=b.in_scope||1;
+    // Same bug class as renderBandBar (see its comment) -- 0 || 1 turned a
+    // legitimate in_scope=0 into a fake denominator of 1 and produced a
+    // triple-digit-thousands percentage (observed live: 228600%).
+    const inscope=b.in_scope||0;
     const atLevel={80:c80+c90+c95+c100, 90:c90+c95+c100, 95:c95+c100, 100:c100};
     const done=atLevel[target]!=null?atLevel[target]:c90+c95+c100;
-    document.getElementById("globBandPct").innerHTML=`<b>${(100*done/inscope).toFixed(1)}%</b> at target (${target}+)`;
+    const pct=inscope>0?`${(100*done/inscope).toFixed(1)}%`:"&mdash;";
+    // `reviewed` is the trust bit -- a SECOND provider (or a human, via the
+    // inventory row) confirmed the documentation against the global's real uses.
+    // It is deliberately not a bar segment: it is orthogonal to completeness, not
+    // a further rung of it, and folding it into the bar is exactly the conflation
+    // the retired DOC ladder made.
+    const rev=b.reviewed||0;
+    document.getElementById("globBandPct").innerHTML=
+      `<b>${pct}</b> at target (${target}+) <span class="revchip" title="Confirmed by an independent review pass — set by the globals audit provider, or by hand from the inventory row. 0 is honest: review is off unless config.globals_audit_provider is set.">&#10003; ${rev.toLocaleString()} reviewed</span>`;
     seg(document.getElementById("globBandBar"),document.getElementById("globBandLegend"),[
       {label:"&lt;80",n:Math.max(0,inscope-(c80+c90+c95+c100)),c:"var(--text-muted)"},
       {label:"80+",n:c80,c:"var(--crafted)"},
       {label:"90+",n:c90,c:"var(--magic)"},
       {label:"95+",n:c95,c:"var(--set)"},
       {label:"100",n:c100,c:"var(--rare)"},
-    ],inscope);
+    ],inscope>0?inscope:(c80+c90+c95+c100));
   }
 
-  // Globals - Documentation: hatched typed-groundwork underlay is the untagged-first leftmost;
-  // solid DOC rungs on top in progression order DRAFT -> REVIEWED -> VERIFIED.
-  function segGlob(g){
-    const bar=document.getElementById("globBar"), legend=document.getElementById("globLegend");
-    bar.innerHTML=""; legend.innerHTML="";
-    const scope=g.scope||1, r=g.rungs||{};
-    document.getElementById("globPct").innerHTML=`<b>${(100*(g.done||0)/scope).toFixed(1)}%</b> documented &middot; ${g.typed_pct||0}% typed`;
-    if(g.typed>0){ const u=document.createElement("span"); u.className="glob-underlay";
-      u.style.width=(100*g.typed/scope)+"%"; u.title=`typed groundwork ${g.typed}`; bar.appendChild(u); }
-    [["DOC_DRAFT","var(--crafted)"],["DOC_REVIEWED","var(--magic)"],["DOC_VERIFIED","var(--set)"]].forEach(([k,c])=>{
-      const n=r[k]||0; if(!n) return;
-      const s=document.createElement("span"); s.className="rung"; s.style.background=c;
-      s.style.width=(100*n/scope)+"%"; s.title=`${pretty(k)} ${n}`; bar.appendChild(s); });
-    legend.innerHTML=`<span class="lg"><span class="sw glob-sw"></span>typed groundwork ${g.typed||0}</span>`+
-      `<span class="lg"><span class="sw" style="background:var(--crafted)"></span>DRAFT ${r.DOC_DRAFT||0}</span>`+
-      `<span class="lg"><span class="sw" style="background:var(--magic)"></span>REVIEWED ${r.DOC_REVIEWED||0}</span>`+
-      `<span class="lg"><span class="sw" style="background:var(--set)"></span>VERIFIED ${r.DOC_VERIFIED||0}</span>`;
-  }
   const jsq=s=>String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const addrCell=a=>`<span class="mono" style="color:var(--text-muted);font-size:.6rem">${a}</span>`;
   async function postJSON(path,body){ try{ await fetch("/api/conformance"+path,{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){} }
@@ -886,23 +916,42 @@
     el.textContent=text||""; el.className="steer-status"+(cls?" "+cls:"");
   }
   let invTimer; function debouncedInv(){ clearTimeout(invTimer); invTimer=setTimeout(loadInv,220); }
-  const SAMPLE_GLOB={total:2120,shown:5,rows:[
-    {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,doc:"none"},
-    {name:"g_awSuperUniquesHcIdxLookup",address:"0x6fd9b220",type:"word",typed:false,doc:"none"},
-    {name:"g_pSkillsTxt",address:"0x6fde9f10",type:"SkillsTxt *",typed:true,doc:"DOC_REVIEWED"},
-    {name:"g_pDataTables",address:"0x6fde9e1c",type:"DataTablesContext *",typed:true,doc:"none"},
-    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:false,doc:"none"}],
-    summary:{scope:2120,typed:697,typed_pct:32.9,rungs:{DOC_VERIFIED:0,DOC_REVIEWED:0,DOC_DRAFT:0},done:0,remaining:2120}};
+  const SAMPLE_GLOB={total:2222,shown:5,rows:[
+    {name:"g_dwDataTablesBaseOffset",address:"0x6fd9a1c0",type:"undefined",typed:false,band:null,reviewed:false},
+    {name:"g_awSuperUniquesHcIdxLookup",address:"0x6fd9b220",type:"word",typed:true,band:"COMPLETE_80",reviewed:false},
+    {name:"g_pSkillsTxt",address:"0x6fde9f10",type:"SkillsTxt *",typed:true,band:"COMPLETE_100",reviewed:true},
+    {name:"g_pDataTables",address:"0x6fde9e1c",type:"DataTablesContext *",typed:true,band:"COMPLETE_100",reviewed:false},
+    {name:"g_nItemTypesCount",address:"0x6fde9f80",type:"int",typed:true,band:"COMPLETE_90",reviewed:false}],
+    summary:{scope:2222,bands:{COMPLETE_80:71,COMPLETE_90:0,COMPLETE_95:0,COMPLETE_100:72},
+             scored:143,unscored:2079,reviewed:0,complete_pct:3.2}};
   let globTimer; function debouncedGlob(){ clearTimeout(globTimer); globTimer=setTimeout(loadGlobals,220); }
+  const BAND_COLOR={COMPLETE_80:"var(--crafted)",COMPLETE_90:"var(--magic)",
+                    COMPLETE_95:"var(--set)",COMPLETE_100:"var(--rare)"};
+  function bandBadge(b){
+    if(!b) return `<span class="badge none" title="never scored — run the Assess lane">&mdash;</span>`;
+    return `<span class="badge" style="border-color:${BAND_COLOR[b]};color:${BAND_COLOR[b]}" title="${b}">${b.replace("COMPLETE_","")}</span>`;
+  }
+  // Manual override for the trust bit. The globals audit provider is the bulk
+  // producer; this is the "I checked it myself" path, and it can also CLEAR a
+  // review that turned out to be wrong.
+  async function toggleReview(addr,now,name){
+    const want=!now;
+    await postJSON("/global_review",{program:PROGRAM,address:addr,reviewed:want});
+    flash(`${name||addr} ${want?"marked reviewed":"review cleared"}`);
+    loadGlobals(); renderGlobBandBar();
+  }
   async function loadGlobals(){
     const q=document.getElementById("globSearch").value;
     const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200")||SAMPLE_GLOB;
     document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
-    if(g.summary) segGlob(g.summary);
     document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
       `<tr><td class="fn gname" title="${escHtml(r.name)}">${escHtml(r.name)}</td>`+
       `<td class="gtype ${r.typed?'':'untyped'}" title="${escHtml(r.type)}">${escHtml(r.type)||'-'}</td>`+
-      `<td>${badge(r.doc)}</td>`+
+      `<td>${bandBadge(r.band)}</td>`+
+      `<td class="act"><button class="pin-btn ${r.reviewed?'pinned':''}" `+
+        `title="${r.reviewed?'reviewed — click to clear':'mark reviewed (independent check)'}" `+
+        `onclick="event.stopPropagation();toggleReview('${r.address}',${!!r.reviewed},'${jsq(r.name)}')">`+
+        `${r.reviewed?'&#10003;':'&#9633;'}</button></td>`+
       `</tr>`).join("")
       ||'<div class="worker-empty">none</div>';
   }
@@ -1012,6 +1061,7 @@
     if(g("handoffProviderInput")) g("handoffProviderInput").value = cfg.complexity_handoff_provider || "off";
     if(g("handoffMaxInput"))  g("handoffMaxInput").value  = cfg.complexity_handoff_max!=null ? cfg.complexity_handoff_max : 0;
     if(g("auditProviderInput")) g("auditProviderInput").value = cfg.audit_provider || "off";
+    if(g("globAuditProviderInput")) g("globAuditProviderInput").value = cfg.globals_audit_provider || "off";
     if(g("auditMinDeltaInput")) g("auditMinDeltaInput").value = cfg.audit_min_delta!=null ? cfg.audit_min_delta : 5;
     // provider models grid: keep the 5 header cells, rebuild the provider rows
     const grid = g("modelsGrid");
@@ -1055,6 +1105,7 @@
       complexity_handoff_provider: v("handoffProviderInput","off")==="off" ? null : v("handoffProviderInput","off"),
       complexity_handoff_max: parseInt(v("handoffMaxInput",0)) || 0,
       audit_provider: v("auditProviderInput","off")==="off" ? null : v("auditProviderInput","off"),
+      globals_audit_provider: v("globAuditProviderInput","off")==="off" ? null : v("globAuditProviderInput","off"),
       audit_min_delta: parseInt(v("auditMinDeltaInput",5)) || 5,
       provider_models: collectProviderModels(),
       provider_max_turns: collectProviderMaxTurns(),
@@ -1124,6 +1175,57 @@
   function typesBarAction(){
     const mode=document.getElementById("typesBar").dataset.mode;
     if(mode==="detect") startGlobalsTyping(); else loadTypes();
+  }
+
+  // ---------- D2Debugger oracle / live-game health bar ----------
+  // Renders whatever the last oracle_health / oracle_relaunch_progress push
+  // said. A relaunch in progress always wins the display over a plain "down"
+  // message so the operator sees live progress instead of a stale warning.
+  let _oracleRelaunching = false;
+  function renderOracleBar(h){
+    if(!h) return;
+    const bar=document.getElementById("oracleBar"), msg=document.getElementById("oracleBarMsg"),
+          btn=document.getElementById("oracleBarBtn");
+    _oracleRelaunching = !!h.relaunching;
+    if(h.relaunching){
+      bar.classList.remove("ok"); bar.classList.add("active","busy");
+      btn.disabled=true; btn.textContent="Relaunching…";
+      msg.textContent = h.relaunch_stage ? `Relaunching oracle: ${h.relaunch_stage}…` : "Relaunching oracle…";
+      return;
+    }
+    bar.classList.remove("busy");
+    if(h.relaunch_stage==="ready"){
+      bar.classList.add("active","ok"); btn.disabled=false; btn.textContent="Relaunch";
+      msg.textContent="Oracle back up and character loaded.";
+      setTimeout(()=>{ bar.classList.remove("active","ok"); }, 5000);
+      return;
+    }
+    if(h.relaunch_stage==="failed" && h.relaunch_error){
+      bar.classList.remove("ok"); bar.classList.add("active");
+      btn.disabled=false; btn.textContent="Retry relaunch";
+      msg.textContent=`Relaunch failed: ${h.relaunch_error}`;
+      return;
+    }
+    if(h.reachable===false){
+      bar.classList.remove("ok"); bar.classList.add("active");
+      btn.disabled=false; btn.textContent="Relaunch";
+      msg.textContent = h.game_running
+        ? "D2Debugger oracle (:8790) is unreachable, but Game.exe is still running — the embedded oracle likely crashed. Close Game.exe manually, then relaunch."
+        : "D2Debugger oracle (:8790) is unreachable and Game.exe is not running. Live-prove and shadow-promote are paused until it's back.";
+      return;
+    }
+    bar.classList.remove("active","busy","ok");   // healthy -> bar stays hidden
+  }
+  async function checkOracleStatus(){
+    try{
+      const r=await fetch("/api/oracle/status"); if(!r.ok) return;
+      renderOracleBar(await r.json());
+    }catch(e){ /* best-effort; the socket push will catch up */ }
+  }
+  function oracleBarAction(){
+    if(_oracleRelaunching || !socket) return;
+    socket.emit("request_oracle_relaunch");
+    flash("relaunching D2Debugger oracle…");
   }
 
   // One click: start a continuous globals worker on the current binary using the
@@ -1220,6 +1322,7 @@
     const fullModel = (pe.models||{}).FULL; if(fullModel) tk.push(fullModel);
     if(pe.max_turns!==undefined) tk.push(`t:${pe.max_turns}`);
     tk.push(snap.audit_provider ? `audit:${snap.audit_provider} Δ${snap.audit_min_delta}` : 'audit:off');
+    if(snap.globals_audit_provider) tk.push(`glob-review:${snap.globals_audit_provider}`);
     tk.push(snap.complexity_handoff_provider ? `esc:${snap.complexity_handoff_provider}` : 'esc:off');
     if(snap.good_enough_score!==undefined) tk.push(`good@${snap.good_enough_score}`);
     el.textContent = tk.join(' · '); el.style.display = '';
@@ -1289,7 +1392,7 @@
   // ---------- socket (live-dot + streaming worker output + push refresh) ----------
   try {
     socket=io();
-    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; socket.emit("request_worker_status"); });
+    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; socket.emit("request_worker_status"); checkOracleStatus(); });
     socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
     let confTimer;   // debounce: workers emit conf_changed per documented/proven item
     socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
@@ -1319,6 +1422,9 @@
     });
     socket.on("scan_error",d=>setScanStatus(`scan error: ${d.error||'unknown'}`,"err"));
     // canonical-types load progress
+    // D2Debugger oracle health / relaunch progress (see oracle_health.py)
+    socket.on("oracle_health", renderOracleBar);
+    socket.on("oracle_relaunch_progress", renderOracleBar);
     socket.on("types_load_started", ()=>{ document.getElementById("typesBarMsg").textContent="Loading canonical types…"; });
     socket.on("types_load_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });
     socket.on("types_load_done", d=>{
@@ -1377,14 +1483,14 @@
       p.element.className='worker-pane running';
       const st=document.getElementById(`wp-status-${id}`); if(st) st.textContent='running';
       const stopBtn=document.getElementById(`wp-stop-${id}`); if(stopBtn) stopBtn.style.display='none';   // can't stop a quick subprocess
-      const head = id==='assess' ? '▶ assess: score in-scope functions → stamp DOC_DRAFT on documented ones'
+      const head = id==='assess' ? '▶ assess: re-score in-scope functions (DOC_DRAFT) and every global (COMPLETE_* band)'
                                  : '▶ triage: scope-classify (drain LIB_) + enqueue backlog';
       appendToPane(id, head, 'fn-header');
     });
     socket.on("triage_line", d=>{
       const t=d.text||''; let cls='neutral';
       if(d.error||/\berror\b|traceback|\bfail/i.test(t)) cls='error';
-      else if(/->\s*DOC_DRAFT/i.test(t)) cls='success';                    // assess stamped a rung
+      else if(/->\s*(DOC_DRAFT|COMPLETE_\d+)/i.test(t)) cls='success';     // assess stamped a rung / band
       else if(/^\s*\[\d+\/\d+\]/.test(t)) cls='tool';                       // other per-item -> dim
       else if(/\btagged LIB_/i.test(t)) cls='tool';
       else if(/enqueued|excluded \d|backlog|complete|drain|never-evaluated|assessed \d|stamped|scored \d/i.test(t)) cls='success';

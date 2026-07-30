@@ -25,6 +25,7 @@ from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit as sio_emit
 
 from event_bus import get_bus
+from oracle_health import OracleHealthMonitor
 
 import uuid
 
@@ -129,6 +130,27 @@ class WorkerManager:
             daemon=True,
         )
         self._watchdog_thread.start()
+        # Oracle/game health: started at dashboard boot (not tied to any one
+        # worker) so FUNDOC_LIVE_PROVE/FUNDOC_SHADOW_PROMOTE stay gated on
+        # CURRENT reachability the whole time the dashboard runs, and so the
+        # status panel has something to show even with no worker active.
+        # See oracle_health.py module docstring for the incident this fixes.
+        self._oracle_monitor = OracleHealthMonitor(bus=self._bus)
+        self._oracle_monitor.start()
+
+    def get_oracle_health(self):
+        return self._oracle_monitor.get_state()
+
+    def relaunch_oracle(self):
+        """Trigger the one-click relaunch sequence in a background thread so
+        the calling Flask/SocketIO request returns immediately; progress is
+        pushed via oracle_relaunch_progress bus events."""
+        if self._oracle_monitor.get_state().get("relaunching"):
+            return {"ok": False, "error": "a relaunch is already in progress"}
+        threading.Thread(
+            target=self._oracle_monitor.relaunch, name="fun-doc-oracle-relaunch", daemon=True,
+        ).start()
+        return {"ok": True, "started": True}
 
     def _handle_run_logged(self, data):
         worker_id = (data or {}).get("worker_id")
@@ -1236,10 +1258,21 @@ class WorkerManager:
                 },
             )
 
+            # process_global's result vocabulary is wider than completed/skipped:
+            # improved, lateral_change, no_change, regressed, blocked, audit_fail,
+            # cache_skipped. Bucketing "anything else" as failed made an ordinary
+            # pass look broken -- a run of 3 with 2 documented and 1 legitimately
+            # unchanged reported "failed=1", and the port lane showed 66 failures
+            # that were all `static_abi`, a normal classification. A counter that
+            # cries wolf is worse than no counter: it trains you to ignore the
+            # number that is supposed to tell you something is wrong.
+            _GLOB_OK = ("completed", "improved", "lateral_change")
+            _GLOB_SKIP = ("skipped", "cache_skipped", "no_change")
+
             def _on_progress(binary_path, address, result, processed, total):
-                bucket = "completed" if result == "completed" else (
-                    "skipped" if result == "skipped" else "failed"
-                )
+                bucket = ("completed" if result in _GLOB_OK
+                          else "skipped" if result in _GLOB_SKIP
+                          else "failed")
                 worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
                 with self._lock:
                     worker["last_heartbeat_at"] = datetime.now().isoformat()
@@ -1279,6 +1312,7 @@ class WorkerManager:
                 on_started=_on_global_started,
                 exclude_binaries_provider=_exclude_binaries,
                 target_addresses=worker.get("addresses"),
+                config_snapshot=worker.get("config_snapshot"),
             )
             # Stash for the worker_stopped emit in the finally block so the
             # dashboard pane can render the skip breakdown — "0 processed"
@@ -1291,6 +1325,16 @@ class WorkerManager:
                 "stopped_reason": summary.get("stopped_reason"),
                 "binaries_visited": summary.get("binaries_visited"),
             }
+            # The port worker's own `exit_reason` field fix (2026-07-14, "a
+            # user-visible '12 iterations then exits' report") never got
+            # mirrored here: /api/worker/status's top-level `exit_reason`
+            # comes from this field, not `globals_summary`, so a headless
+            # caller of the HTTP API (unlike the socket-driven dashboard
+            # pane, which does read globals_summary) could never tell WHY a
+            # globals worker stopped -- confirmed live 2026-07-26, worker
+            # 73da92f0 showed exit_reason: null despite a real
+            # stopped_reason existing in the same summary.
+            worker["exit_reason"] = summary.get("stopped_reason")
             print(
                 f"  [globals-worker {worker_id}] done: "
                 f"{summary['processed']} processed across "
@@ -1343,20 +1387,18 @@ class WorkerManager:
             # Live-prove parity with the --port CLI (which defaults these ON):
             # without FUNDOC_LIVE_PROVE the dashboard's Prove lane is static-
             # harness-only -- global/handle getters (the main CONF_LIVE
-            # producers) all skip with "needs FUNDOC_LIVE_PROVE=1". Gate on
-            # the oracle actually answering so a dead game degrades to the
-            # old static-only behavior instead of failing every candidate.
-            try:
-                from port_live_prove import check_oracle_alive
-
-                if check_oracle_alive():
-                    os.environ.setdefault("FUNDOC_LIVE_PROVE", "1")
-                    os.environ.setdefault("FUNDOC_SHADOW_PROMOTE", "1")
-                    print(f"  [port-worker {worker_id}] live oracle up -> live-prove enabled", flush=True)
-                else:
-                    print(f"  [port-worker {worker_id}] live oracle DOWN -> static-only pass", flush=True)
-            except Exception:
-                pass
+            # producers) all skip with "needs FUNDOC_LIVE_PROVE=1". Force a
+            # fresh check right now (don't trust a stale up-to-45s-old poll)
+            # via the shared oracle_monitor -- the SAME env-var gate then
+            # keeps getting refreshed by its background loop for the rest of
+            # this worker's run, instead of the old one-time-at-start snapshot
+            # that let a mid-run oracle death go unnoticed for hours
+            # (confirmed live 2026-07-27; see oracle_health.py docstring).
+            health = self._oracle_monitor.check_once()
+            if health["reachable"]:
+                print(f"  [port-worker {worker_id}] live oracle up -> live-prove enabled", flush=True)
+            else:
+                print(f"  [port-worker {worker_id}] live oracle DOWN -> static-only pass", flush=True)
 
             worker["status"] = "running"
             self._set_phase(worker_id, "port_running")
@@ -1374,10 +1416,22 @@ class WorkerManager:
                 },
             )
 
+            # process_port_candidate's full outcome vocabulary. The old rule was
+            # "proven_pending_review is success, three named values are skips,
+            # EVERYTHING else is a failure", which put four legitimate outcomes
+            # -- unknown_skip, handle_abort_hazard_skip, shadow_leaf_pending and
+            # oracle_unavailable -- in the failure bucket. A prove pass that
+            # correctly declined to port 60 unportable functions reported 60
+            # failures, and a counter that cries wolf trains you to ignore it.
+            _PORT_OK = ("proven_pending_review", "shadow_leaf_pending")
+            _PORT_SKIP = ("stateful_skip", "malformed_response", "no_vectors",
+                          "unknown_skip", "handle_abort_hazard_skip",
+                          "oracle_unavailable")
+
             def _on_progress(program, address, result, processed, total):
-                bucket = "completed" if result == "proven_pending_review" else (
-                    "skipped" if result in ("stateful_skip", "malformed_response", "no_vectors") else "failed"
-                )
+                bucket = ("completed" if result in _PORT_OK
+                          else "skipped" if result in _PORT_SKIP
+                          else "failed")     # harness_failed, blocked, error
                 worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
                 with self._lock:
                     worker["last_heartbeat_at"] = datetime.now().isoformat()
@@ -1419,6 +1473,17 @@ class WorkerManager:
                     "mode": "port",
                 })
 
+            def _on_idle():
+                # Continuous mode's "no eligible candidates right now" poll
+                # loop -- a real, correct wait, not a hang. Without refreshing
+                # last_heartbeat_at here, the watchdog can't tell this apart
+                # from an actually-stuck worker and stall-kills it once
+                # STALL_KILL_THRESHOLD_SEC of idle polling elapses (confirmed
+                # live 2026-07-26: worker 18e96b51 killed this exact way).
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+                self._emit_status()
+
             summary = run_port_worker_pass(
                 worker_id=worker_id,
                 active_binary=worker.get("binary"),
@@ -1429,6 +1494,7 @@ class WorkerManager:
                 stop_flag=worker["stop_flag"],
                 on_progress=_on_progress,
                 on_started=_on_started,
+                on_idle=_on_idle,
             )
             # Surface WHY the pass ended for every exit, not just an empty
             # queue. "exhausted" (candidate pool consumed before `count`
@@ -1588,6 +1654,8 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         "worker_progress",
         "worker_stopped",
         "provider_timeout",
+        "oracle_health",
+        "oracle_relaunch_progress",
     ]:
         bus.on(evt, bridge(evt))
 
@@ -2746,6 +2814,19 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     def handle_worker_status(data=None):
         sio_emit("worker_status", worker_mgr.get_status())
 
+    @socketio.on("request_oracle_status")
+    def handle_oracle_status(data=None):
+        sio_emit("oracle_health", worker_mgr.get_oracle_health())
+
+    @socketio.on("request_oracle_relaunch")
+    def handle_oracle_relaunch(data=None):
+        result = worker_mgr.relaunch_oracle()
+        if not result.get("ok"):
+            sio_emit("oracle_relaunch_progress", {
+                "relaunching": False, "relaunch_stage": "failed",
+                "relaunch_error": result.get("error"),
+            })
+
     # --- HTTP routes ---
 
     # The confidence/pipeline dashboard is the only UI; /pipeline is kept
@@ -3105,6 +3186,22 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                         jsonify(
                             {
                                 "error": "audit_provider must be claude/codex/minimax/gemini/null"
+                            }
+                        ),
+                        400,
+                    )
+            if "globals_audit_provider" in data:
+                v = data["globals_audit_provider"]
+                if v in (None, "", "none", "off"):
+                    cfg["globals_audit_provider"] = None
+                elif v in ("claude", "codex", "minimax", "gemini"):
+                    cfg["globals_audit_provider"] = v
+                else:
+                    return (
+                        jsonify(
+                            {
+                                "error": "globals_audit_provider must be "
+                                         "claude/codex/minimax/gemini/null"
                             }
                         ),
                         400,
@@ -3609,6 +3706,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             return result
         except Exception:
             return []
+
+    @app.route("/api/oracle/status", methods=["GET"])
+    def get_oracle_status():
+        return jsonify(worker_mgr.get_oracle_health())
+
+    @app.route("/api/oracle/relaunch", methods=["POST"])
+    def post_oracle_relaunch():
+        result = worker_mgr.relaunch_oracle()
+        return jsonify(result), (200 if result.get("ok") else 409)
 
     @app.route("/api/context", methods=["GET"])
     def get_context():

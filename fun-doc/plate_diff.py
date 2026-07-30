@@ -170,18 +170,28 @@ def _fn_sample(program, count, tag):
 
 
 def _glob_sample(program, count):
-    """Documented globals: addresses in the Doc property map."""
-    out = []
+    """Documented globals: addresses carrying a completeness band.
+
+    Reads the `Complete` map, not `Doc`. `Doc` used to hold a DOC_ rung for every
+    global assess had visited, which made it a usable proxy for "documented"; that
+    ladder was retired 2026-07-28 and `Doc` now holds only the REVIEWED trust bit,
+    which most documented globals will never carry. A band is the real signal that
+    a global has a name, type and plate worth diffing -- and it prefers the
+    best-documented ones, which is what a plate sample wants.
+    """
+    ranked = {"COMPLETE_100": 0, "COMPLETE_95": 1, "COMPLETE_90": 2, "COMPLETE_80": 3}
+    rows = []
     try:
-        r = ps._get("/list_properties", map="Doc", program=program, limit=100000)
+        r = ps._get("/list_properties", map="Complete", program=program, limit=100000)
         ents = (r.get("entries") or r.get("properties") or []) if isinstance(r, dict) else []
-        for e in ents[:count * 2]:
-            a = e.get("address")
-            if a:
-                out.append("0x" + str(a).lower().lstrip("0x"))
+        for e in ents:
+            a, v = e.get("address"), e.get("value")
+            if a and v in ranked:
+                rows.append((ranked[v], "0x" + str(a).lower().replace("0x", "")))
     except Exception:
         pass
-    return out[:count]
+    rows.sort()
+    return [a for _, a in rows[:count]]
 
 
 # ---- aggregate + render ----------------------------------------------------------------------

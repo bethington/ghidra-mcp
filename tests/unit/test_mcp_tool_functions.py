@@ -150,25 +150,70 @@ class TestPostToolDispatch(unittest.TestCase):
             "properties": {
                 "address": {"type": "string"},
                 "name": {"type": "string"},
+                # The server can only simulate a write it can scope to a
+                # program, so the synthetic dry_run is offered only when the
+                # endpoint takes one.
+                "program": {"type": "string", "source": "query"},
             },
             "required": ["address", "name"],
         }
         fn = _build_tool_function("/rename_function", "POST", schema)
 
-        fn(address="0x401000", name="main", dry_run="false")
+        fn(address="0x401000", name="main", program="a.exe", dry_run="false")
         mock_post.assert_called_once_with(
             "/rename_function",
             data={"address": "0x401000", "name": "main"},
-            query_params=None,
+            query_params={"program": "a.exe"},
         )
 
         mock_post.reset_mock()
-        fn(address="0x401000", name="main", dry_run=True)
+        fn(address="0x401000", name="main", program="a.exe", dry_run=True)
         mock_post.assert_called_once_with(
             "/rename_function",
             data={"address": "0x401000", "name": "main"},
-            query_params={"dry_run": "true"},
+            query_params={"program": "a.exe", "dry_run": "true"},
         )
+
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
+    def test_no_synthetic_dry_run_when_server_cannot_honour_it(self, mock_post):
+        """A POST with no `program` param cannot be simulated server-side --
+        AnnotationScanner falls through to the real write -- so the parameter
+        must not be advertised at all. Regression for the 2026-07-28 incident
+        where checkin(dry_run=True) created a real shared-server version."""
+        from bridge_mcp_ghidra import _build_tool_function
+        import inspect
+
+        schema = {
+            "properties": {
+                "path": {"type": "string"},
+                "comment": {"type": "string"},
+            },
+            "required": ["path"],
+        }
+        fn = _build_tool_function("/server/version_control/checkin", "POST", schema)
+
+        self.assertNotIn("dry_run", inspect.signature(fn).parameters)
+
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
+    def test_dry_run_without_program_value_refuses_instead_of_writing(self, mock_post):
+        """dry_run=true with the program left off would reach the server as a
+        REAL write (it can't resolve a Program to roll back). Refuse loudly."""
+        from bridge_mcp_ghidra import _build_tool_function
+        import json as _json
+
+        schema = {
+            "properties": {
+                "address": {"type": "string"},
+                "program": {"type": "string", "source": "query"},
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/rename_function", "POST", schema)
+
+        result = _json.loads(fn(address="0x401000", dry_run=True))
+        self.assertIn("error", result)
+        self.assertIn("dry_run", result["error"])
+        mock_post.assert_not_called()
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_schema_declared_query_dry_run_does_not_duplicate_signature(self, mock_post):
@@ -262,10 +307,13 @@ class TestSchemaEdgeCases(unittest.TestCase):
     def test_many_parameters(self):
         """Schema with many parameters should work."""
         from bridge_mcp_ghidra import _build_tool_function
-        props = {f"param_{i}": {"type": "string"} for i in range(20)}
+        props = {f"param_{i}": {"type": "string"} for i in range(19)}
+        props["program"] = {"type": "string", "source": "query"}
         schema = {"properties": props, "required": ["param_0"]}
         fn = _build_tool_function("/test", "POST", schema)
         sig = inspect.signature(fn)
+        # 20 declared + the synthetic dry_run (offered because `program` is
+        # present, so the server can actually simulate the write)
         self.assertEqual(len(sig.parameters), 21)
         self.assertIn("dry_run", sig.parameters)
 

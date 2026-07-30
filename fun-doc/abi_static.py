@@ -31,6 +31,7 @@ known-answer corpus captured from live D2Common 1.13c).
 """
 from __future__ import annotations
 
+import os
 import re
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,14 @@ _ABS_MEM_RE = re.compile(r"\[\s*(0x[0-9a-fA-F]+)\s*\]")
 # separates the two. (Before this, array-base getters were mis-tagged provable_now.)
 _DISP_GLOBAL_RE = re.compile(r"\+\s*(0x[0-9a-fA-F]+)\s*\]")
 _IMAGE_MIN = 0x6f000000
+# ...and an UPPER bound, because Ghidra renders a NEGATIVE displacement as an
+# unsigned 32-bit hex: `LEA EAX,[ECX + 0xfffffd94]` is `ECX - 620`, a stack/struct
+# offset, not a global. 0xfffffd94 clears _IMAGE_MIN, so without a ceiling every
+# such operand became a phantom global that could never be wired -- which parked
+# the function on a blocker that did not exist (found 2026-07-28: 10 of the 13
+# functions still blocked after a full global-wiring pass were ALL this).
+# The loaded D2 modules top out well below 0x70000000.
+_IMAGE_MAX = 0x70000000
 _IMM_RE = re.compile(r"^(?:0x[0-9a-fA-F]+|-?\d+)$")
 
 _ABORT_DECOMPILE_RE = re.compile(
@@ -183,7 +192,7 @@ def derive_abi(disasm_text: str) -> dict:
         # threshold keeps small struct-field offsets from being mistaken for globals.
         for m in _DISP_GLOBAL_RE.finditer(ops):
             v = int(m.group(1), 16)
-            if v >= _IMAGE_MIN and v not in data_globals:
+            if _IMAGE_MIN <= v < _IMAGE_MAX and v not in data_globals:
                 data_globals.append(v)
 
         # --- stack arg reads: [ESP] / [ESP+off], adjusted by tracked push depth ---
@@ -507,7 +516,7 @@ def translate_getter_to_c(name: str, disasm_text: str, *, callconv: str = "stdca
                 if base != "EAX":
                     return {"ok": False, "reason": f"deref base {base}, not the EAX chain"}
                 off = int(mm.group(2), 0) if mm.group(2) else 0
-                if off >= _IMAGE_MIN:
+                if _IMAGE_MIN <= off < _IMAGE_MAX:
                     # `[EAX + 0x<image-range>]` is `global_base[index]`, NOT a struct
                     # field read -- the arg is an INDEX, not a pointer. Defer to the
                     # global-table translator; treating it as flat makes synth pass a
@@ -592,18 +601,37 @@ def translate_getter_to_c(name: str, disasm_text: str, *, callconv: str = "stdca
 
 
 _RESOLVE_REV = None
+_RESOLVE_REV_STAMP = None   # (mtime_ns, size) of the file _RESOLVE_REV was built from
 _RESOLVE_GEN = (r"C:\Users\benam\source\cpp\D2MOO\D2.Detours.patches\1.13c"
                 r"\D2Common_ResolveTable.gen.h")
+
+
+def _resolve_gen_stamp(p: str):
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def resolve_reverse_map(path: str = None) -> dict:
     """address(int) -> verified name, parsed from D2Common_ResolveTable.gen.h. A
     delegate reimpl resolves its callee BY NAME (D2MOO_Resolve), so the CALL target
-    address from the disasm must map to a name the resolver knows. Cached."""
-    global _RESOLVE_REV
-    if _RESOLVE_REV is not None and path is None:
-        return _RESOLVE_REV
+    address from the disasm must map to a name the resolver knows.
+
+    Cached, but re-read whenever the generated file changes. A plain
+    cache-forever bit an entire afternoon on 2026-07-28: the dashboard process
+    is long-lived, so it kept a map built BEFORE a wiring pass, judged every
+    freshly-wired name "unknown", and deferred each candidate to
+    shadow-first -- a false `unresolvable_global_defer` for globals that were
+    sitting right there in the table on disk. Wiring a global has to become
+    visible to the running workers without restarting them, or the whole
+    wire-and-retry loop silently no-ops."""
+    global _RESOLVE_REV, _RESOLVE_REV_STAMP
     p = path or _RESOLVE_GEN
+    stamp = _resolve_gen_stamp(p)
+    if path is None and _RESOLVE_REV is not None and stamp == _RESOLVE_REV_STAMP:
+        return _RESOLVE_REV
     rev = {}
     try:
         text = open(p, encoding="utf-8").read()
@@ -613,6 +641,7 @@ def resolve_reverse_map(path: str = None) -> dict:
         pass
     if path is None:
         _RESOLVE_REV = rev
+        _RESOLVE_REV_STAMP = stamp
     return rev
 
 
@@ -681,7 +710,7 @@ def resolvable_globals(disasm_text: str, resolve_rev: dict = None) -> list:
         # provider's D2MOO_Resolve(<invented>) returns null and the prove mismatches.
         for m in _DISP_GLOBAL_RE.finditer(ops):
             a = int(m.group(1), 16)
-            if a >= _IMAGE_MIN and a in rev and a not in seen:
+            if _IMAGE_MIN <= a < _IMAGE_MAX and a in rev and a not in seen:
                 out.append((a, rev[a]))
                 seen.add(a)
     return out

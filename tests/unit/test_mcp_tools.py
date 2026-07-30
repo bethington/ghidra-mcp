@@ -311,7 +311,9 @@ class TestSchemaFormat(unittest.TestCase):
                 "str_param": {"type": "string"},
                 "int_param": {"type": "integer"},
                 "bool_param": {"type": "boolean"},
-                "num_param": {"type": "number"},
+                # `program` also makes the endpoint eligible for the synthetic
+                # dry_run -- the server can only roll back a scoped write.
+                "program": {"type": "string", "source": "query"},
             },
             "required": ["str_param"],
         }

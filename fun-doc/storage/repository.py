@@ -85,6 +85,7 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "port_status",
     "port_attempts",
     "port_draft_path",
+    "port_failure_stage",
     "port_last_result",
 }
 
