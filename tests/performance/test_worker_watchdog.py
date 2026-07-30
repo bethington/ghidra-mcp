@@ -70,6 +70,23 @@ def fast_watchdog_env(monkeypatch, tmp_path):
     test_log = tmp_path / "events.jsonl"
     event_log._EVENT_LOG_FILE = test_log
 
+    # Cut the live-oracle dependency. WorkerManager.__init__ builds an
+    # OracleHealthMonitor and calls .start(), whose synchronous first
+    # check_once() does a REAL socket call to :8790 plus a real tasklist --
+    # so _make_mgr's "never touch real I/O" promise was not true, and these
+    # tests passed or failed depending on whether the game happened to be
+    # up. With the oracle down that call blocks past the 2s stall threshold
+    # and the watchdog fires before on_idle ever runs (2026-07-30: the whole
+    # file went red the moment a D2 Halt dialog wedged the game).
+    #
+    # Patch on `oracle_health`, NOT on port_live_prove: oracle_health does
+    # `from port_live_prove import check_oracle_alive`, so the name is bound
+    # at import and patching the source module has no effect -- which is
+    # exactly why this test's own existing patch missed it.
+    import oracle_health
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: False)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: False)
+
     # Reload web with the test env vars in place so the module-level
     # constants pick up the fast cadence.
     import importlib
@@ -601,6 +618,9 @@ def test_port_worker_idle_poll_does_not_trip_stall_kill(fast_watchdog_env, monke
         return {"processed": 0, "totals": {}, "stopped_reason": "user_stop"}
 
     monkeypatch.setattr("fun_doc.run_port_worker_pass", _fake_pass)
+    # NB: oracle reachability is already stubbed on `oracle_health` by
+    # fast_watchdog_env -- that is the binding _run_worker_port actually
+    # consults. This patch is kept only so the intent reads locally.
     monkeypatch.setattr("port_live_prove.check_oracle_alive", lambda: False, raising=False)
 
     try:
@@ -623,3 +643,69 @@ def test_port_worker_idle_poll_does_not_trip_stall_kill(fast_watchdog_env, monke
     finally:
         stop_flag.set()
         mgr._watchdog_stop.set()
+
+
+# ---------------------------------------------------------------------------
+# Stop responsiveness (2026-07-30).
+#
+# stop_flag used to be consulted ONLY between candidates, so "stop" meant "stop
+# after the current function finishes" -- and a port candidate is an LLM draft +
+# a bounded fix loop + a CMake build + a prove subprocess. Observed repeatedly
+# this session: stops taking 4-10+ minutes, which is indistinguishable from a
+# hung worker and invites a force-kill (the very thing that orphans provider
+# subprocesses).
+# ---------------------------------------------------------------------------
+
+import threading as _threading
+
+if str(FUN_DOC_DIR) not in sys.path:
+    sys.path.insert(0, str(FUN_DOC_DIR))
+_fd = pytest.importorskip("fun_doc")
+
+
+def test_stop_flag_is_visible_to_deep_call_sites():
+    """The provider watchdog has no stop_flag in its signature; it resolves the
+    flag by worker id so nothing has to be threaded through."""
+    flag = _threading.Event()
+    _fd.register_worker_stop_flag("w-test", flag)
+    try:
+        assert _fd.worker_stop_requested("w-test") is False
+        flag.set()
+        assert _fd.worker_stop_requested("w-test") is True
+    finally:
+        _fd.unregister_worker_stop_flag("w-test")
+
+
+def test_unregistered_worker_never_reports_stop():
+    assert _fd.worker_stop_requested("no-such-worker") is False
+
+
+def test_unregister_releases_the_flag():
+    flag = _threading.Event(); flag.set()
+    _fd.register_worker_stop_flag("w-test2", flag)
+    _fd.unregister_worker_stop_flag("w-test2")
+    assert _fd.worker_stop_requested("w-test2") is False
+
+
+def test_stop_requested_is_safe_when_worker_id_is_unresolvable(monkeypatch):
+    """Called from deep inside the provider watchdog -- it must never raise."""
+    monkeypatch.setattr(_fd, "get_worker_id", lambda: (_ for _ in ()).throw(RuntimeError))
+    assert _fd.worker_stop_requested() is False
+
+
+def test_worker_subprocess_registry_is_snapshotted_for_kill():
+    """stop_worker kills the registered children directly; it must get a stable
+    snapshot rather than the live set it is about to mutate."""
+    class _P:
+        pid = 1234
+        def is_alive(self): return True
+    p = _P()
+    _fd.register_worker_subprocess("w-test3", p)
+    try:
+        snap = _fd.get_worker_subprocesses("w-test3")
+        assert snap == [p]
+        _fd.unregister_worker_subprocess("w-test3", p)
+        assert snap == [p]                                  # snapshot unaffected
+        assert _fd.get_worker_subprocesses("w-test3") == []  # registry updated
+    finally:
+        _fd.unregister_worker_subprocess("w-test3", p)

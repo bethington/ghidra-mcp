@@ -135,22 +135,41 @@ class WorkerManager:
         # CURRENT reachability the whole time the dashboard runs, and so the
         # status panel has something to show even with no worker active.
         # See oracle_health.py module docstring for the incident this fixes.
-        self._oracle_monitor = OracleHealthMonitor(bus=self._bus)
+        # auto_recover_needed gates unattended kill-and-relaunch of a WEDGED
+        # game on "a port worker is actually waiting for the oracle". Without
+        # it the monitor would close a game the operator is driving by hand.
+        self._oracle_monitor = OracleHealthMonitor(
+            bus=self._bus, auto_recover_needed=self.has_active_port_workers,
+        )
         self._oracle_monitor.start()
 
     def get_oracle_health(self):
         return self._oracle_monitor.get_state()
 
-    def relaunch_oracle(self):
+    def has_active_port_workers(self):
+        """True if any PORT worker is starting/running/stopping -- i.e. something
+        is actually waiting on the live oracle. Gates unattended recovery."""
+        with self._lock:
+            return any(
+                w.get("mode") == "port"
+                and w["status"] in ("starting", "running", "stopping")
+                for w in self._workers.values()
+            )
+
+    def relaunch_oracle(self, force=False):
         """Trigger the one-click relaunch sequence in a background thread so
         the calling Flask/SocketIO request returns immediately; progress is
-        pushed via oracle_relaunch_progress bus events."""
+        pushed via oracle_relaunch_progress bus events.
+
+        `force` also closes a wedged Game.exe (halted process whose embedded
+        oracle died) before launching -- otherwise recovery is blocked forever."""
         if self._oracle_monitor.get_state().get("relaunching"):
             return {"ok": False, "error": "a relaunch is already in progress"}
         threading.Thread(
-            target=self._oracle_monitor.relaunch, name="fun-doc-oracle-relaunch", daemon=True,
+            target=lambda: self._oracle_monitor.relaunch(force=force),
+            name="fun-doc-oracle-relaunch", daemon=True,
         ).start()
-        return {"ok": True, "started": True}
+        return {"ok": True, "started": True, "force": bool(force)}
 
     def _handle_run_logged(self, data):
         worker_id = (data or {}).get("worker_id")
@@ -542,6 +561,21 @@ class WorkerManager:
             worker["status"] = "stopping"
             worker["restore_on_restart"] = False
             self._persist_active_workers()
+        # Setting the flag is necessary but not sufficient: the worker thread is
+        # usually parked in result_queue.get() waiting on a provider subprocess
+        # that can legitimately run for minutes. The watchdog now polls the flag
+        # and kills its own child, but a worker wedged BELOW that check (or one
+        # already past it) would still hold the pass open, so terminate the
+        # registered subprocesses directly too. Belt and braces, because a stop
+        # that takes 20 minutes reads as a hung worker and gets force-killed --
+        # which is how orphaned provider children were created in the first place.
+        try:
+            import fun_doc
+            for proc in list(fun_doc.get_worker_subprocesses(worker_id)):
+                if proc.is_alive():
+                    fun_doc._terminate_process_tree(proc.pid)
+        except Exception as e:  # never let cleanup block the stop
+            print(f"  Worker {worker_id}: subprocess terminate on stop failed: {e}")
         self._emit_status()
 
     def has_active_workers(self):
@@ -1423,10 +1457,25 @@ class WorkerManager:
             # oracle_unavailable -- in the failure bucket. A prove pass that
             # correctly declined to port 60 unportable functions reported 60
             # failures, and a counter that cries wolf trains you to ignore it.
-            _PORT_OK = ("proven_pending_review", "shadow_leaf_pending")
+            # Same failure mode, found again 2026-07-30 across a 12-binary
+            # Prove fleet: the vocabulary drifted and this tuple didn't. Worst
+            # of the three misfilings was `proven_live_pending_review` -- the
+            # LIVE oracle's success outcome, the entire point of live proving,
+            # returned by process_global_leaf_live/process_handle_leaf_live --
+            # landing in `failed`. `unsupported_abi` (register layout outside
+            # the v1 marshaller) and `stopped` (the operator pressed stop) are
+            # not failures either, and `capability_pending` (added to
+            # port_pipeline the same day) is the non-terminal
+            # "class is provable, oracle capability not deployed yet" decline.
+            # When adding an outcome to process_port_candidate, add it here too
+            # -- `bucket` has no default-safe fallback, only `failed`.
+            _PORT_OK = ("proven_pending_review", "proven_live_pending_review",
+                        "proven_live", "shadow_leaf_pending")
             _PORT_SKIP = ("stateful_skip", "malformed_response", "no_vectors",
                           "unknown_skip", "handle_abort_hazard_skip",
-                          "oracle_unavailable")
+                          "oracle_unavailable", "capability_pending",
+                          "shadow_unreachable", "unsupported_abi", "stopped",
+                          "drafted")
 
             def _on_progress(program, address, result, processed, total):
                 bucket = ("completed" if result in _PORT_OK
@@ -3713,7 +3762,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
     @app.route("/api/oracle/relaunch", methods=["POST"])
     def post_oracle_relaunch():
-        result = worker_mgr.relaunch_oracle()
+        # {"force": true} closes a wedged Game.exe first. Opt-in per call: the
+        # plain relaunch must keep refusing to touch a running game.
+        data = request.get_json(silent=True) or {}
+        result = worker_mgr.relaunch_oracle(force=bool(data.get("force")))
         return jsonify(result), (200 if result.get("ok") else 409)
 
     @app.route("/api/context", methods=["GET"])

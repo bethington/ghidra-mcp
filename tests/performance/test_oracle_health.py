@@ -391,3 +391,425 @@ def test_navigate_loads_the_matching_character(monkeypatch):
     assert result == {"ok": True}
     load_calls = [b for (p, b) in posted if p == "/action/load-character"]
     assert load_calls == [{"name": "summoner-skele", "difficulty": 0, "confirm": True}]
+
+
+# -- stale relaunch failure is cleared on recovery (2026-07-30) --------------
+#
+# relaunch_stage/relaunch_error are written ONLY by _set_relaunch, i.e. only
+# while this class is driving a relaunch. A failed attempt therefore pinned
+# "failed" + its error forever, and any other route back to health -- above all
+# the operator relaunching by hand, which is the common one -- left the
+# dashboard reporting reachable=true, game_running=true and
+# relaunch_stage="failed" simultaneously. Observed live 2026-07-30.
+
+def test_recovery_clears_a_stale_relaunch_failure(monkeypatch, clean_gate_env):
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+    mon._set_relaunch(False, "failed", "Game.exe is already running but the oracle is unreachable")
+
+    state = mon.check_once()
+
+    assert state["reachable"] is True
+    assert state["relaunch_stage"] is None
+    assert state["relaunch_error"] is None
+
+
+def test_recovery_emits_so_the_dashboard_stops_rendering_the_stale_failure(
+        monkeypatch, clean_gate_env):
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    bus = FakeBus()
+    mon = _make_monitor(bus=bus)
+    mon._set_relaunch(False, "failed", "boom")
+    before = len(bus.emitted)
+
+    mon.check_once()
+
+    kinds = [t for (t, _d) in bus.emitted[before:]]
+    assert "oracle_relaunch_progress" in kinds, kinds
+    # and the pushed snapshot must actually carry the cleared state
+    cleared = bus.of_type("oracle_relaunch_progress")[-1]
+    assert cleared["relaunch_stage"] is None and cleared["relaunch_error"] is None
+
+
+def test_a_successful_relaunch_stage_is_preserved(monkeypatch, clean_gate_env):
+    """Only a FAILED stage is stale. 'ready' is real information about a
+    relaunch that actually worked and must survive the next poll."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+    mon._set_relaunch(False, "ready", None)
+
+    state = mon.check_once()
+
+    assert state["relaunch_stage"] == "ready"
+
+
+def test_in_progress_relaunch_is_not_clobbered(monkeypatch, clean_gate_env):
+    """A relaunch in flight legitimately owns the stage; the poller must not
+    wipe it just because the oracle answered mid-sequence."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+    mon._set_relaunch(True, "waiting_for_oracle", None)
+
+    state = mon.check_once()
+
+    assert state["relaunching"] is True
+    assert state["relaunch_stage"] == "waiting_for_oracle"
+
+
+def test_failure_is_retained_while_still_unreachable(monkeypatch, clean_gate_env):
+    """Nothing has recovered -- the diagnosis is still the current truth."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: False)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+    mon._set_relaunch(False, "failed", "oracle crashed without killing the game")
+
+    state = mon.check_once()
+
+    assert state["relaunch_stage"] == "failed"
+    assert state["relaunch_error"] == "oracle crashed without killing the game"
+
+
+# -- wedged game: process alive, embedded oracle dead ----------------------
+#
+# The 2026-07-30 incident: a D2 "Halt / Unrecoverable internal error 6fdb767c"
+# box left Game.exe alive and message-pumping (is_game_running() True, the
+# window even reported Responding=True) while its embedded oracle was gone.
+# check_oracle_alive() went False, every live candidate short-circuited to
+# oracle_unavailable, and the whole 12-worker Prove fleet drained its pools
+# into skips -- while relaunch() refused to act BECAUSE the game was
+# "running". Recovery was blocked precisely when it was needed most.
+
+
+def test_wedged_state_needs_a_sustained_down_streak(monkeypatch, clean_gate_env):
+    """One slow poll is not a crash. game_wedged only latches once the oracle
+    has been down for AUTO_RECOVER_AFTER_DOWN consecutive checks."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: False)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+
+    for _ in range(oracle_health.AUTO_RECOVER_AFTER_DOWN - 1):
+        assert mon.check_once()["game_wedged"] is False
+    assert mon.check_once()["game_wedged"] is True
+
+
+def test_game_down_entirely_is_not_wedged(monkeypatch, clean_gate_env):
+    """No process at all is the ordinary relaunch case, not a wedge -- they
+    need different recovery, so they must not collapse into one flag."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: False)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: False)
+    mon = _make_monitor()
+
+    for _ in range(oracle_health.AUTO_RECOVER_AFTER_DOWN + 2):
+        snap = mon.check_once()
+    assert snap["game_wedged"] is False
+
+
+def test_relaunch_force_closes_the_wedged_game_then_launches(monkeypatch, tmp_path):
+    """force=True is the whole point: dismiss the Halt dialog, kill the corpse,
+    then run the normal launch sequence."""
+    import oracle_health
+
+    bat = tmp_path / "LaunchPD2-Oracle.bat"
+    bat.write_text("@echo off\n")
+    calls = []
+    alive = {"v": True}
+
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: alive["v"])
+    monkeypatch.setattr(oracle_health, "_dismiss_diablo_error_dialog",
+                        lambda: calls.append("dismiss") or True)
+
+    def _kill(timeout=20.0):
+        calls.append("kill")
+        alive["v"] = False
+        return True
+
+    monkeypatch.setattr(oracle_health, "kill_game", _kill)
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+
+    mon = _make_monitor(launch_bat=str(bat))
+    monkeypatch.setattr(mon, "_launch_game", lambda: calls.append("launch"))
+    monkeypatch.setattr(mon, "_navigate_and_load_character",
+                        lambda c, t: {"ok": True, "character": c})
+
+    result = mon.relaunch(force=True)
+
+    assert result["ok"] is True
+    # Order matters: the corpse must be gone BEFORE the launcher runs, or
+    # the launcher's own double-launch guard refuses.
+    assert calls == ["dismiss", "kill", "launch"]
+
+
+def test_relaunch_force_fails_clearly_when_the_game_will_not_die(monkeypatch, tmp_path):
+    """An elevated/unkillable game must not silently fall through to a launch
+    the launcher will refuse anyway -- say so and stop."""
+    import oracle_health
+
+    bat = tmp_path / "LaunchPD2-Oracle.bat"
+    bat.write_text("@echo off\n")
+    launched = []
+
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    monkeypatch.setattr(oracle_health, "_dismiss_diablo_error_dialog", lambda: False)
+    monkeypatch.setattr(oracle_health, "kill_game", lambda timeout=20.0: False)
+
+    mon = _make_monitor(launch_bat=str(bat))
+    monkeypatch.setattr(mon, "_launch_game", lambda: launched.append(1))
+
+    result = mon.relaunch(force=True)
+
+    assert result["ok"] is False
+    assert "could not terminate" in result["error"]
+    assert launched == []
+
+
+def test_relaunch_without_force_still_refuses_and_says_how(monkeypatch):
+    """The default must keep its hands off a running game -- but now point at
+    the way out instead of dead-ending."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    killed = []
+    monkeypatch.setattr(oracle_health, "kill_game",
+                        lambda timeout=20.0: killed.append(1) or True)
+    mon = _make_monitor()
+
+    result = mon.relaunch()
+
+    assert result["ok"] is False
+    assert "force" in result["error"]
+    assert killed == []
+
+
+# -- unattended recovery gating -------------------------------------------
+
+
+def _wedge(monkeypatch):
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: False)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+
+
+def _drive_to_wedged(mon):
+    import oracle_health
+
+    snap = None
+    for _ in range(oracle_health.AUTO_RECOVER_AFTER_DOWN):
+        snap = mon.check_once()
+    return snap
+
+
+def test_auto_recover_fires_when_a_port_worker_is_waiting(monkeypatch, clean_gate_env):
+    _wedge(monkeypatch)
+    attempts = []
+    mon = _make_monitor(auto_recover_needed=lambda: True)
+    monkeypatch.setattr(mon, "relaunch",
+                        lambda **kw: attempts.append(kw) or {"ok": True})
+
+    _drive_to_wedged(mon)
+
+    assert attempts == [{"force": True}]
+
+
+def test_auto_recover_declines_when_nothing_needs_the_oracle(monkeypatch, clean_gate_env):
+    """A game the operator is driving by hand must never be killed just because
+    the dashboard happens to be up."""
+    _wedge(monkeypatch)
+    attempts = []
+    mon = _make_monitor(auto_recover_needed=lambda: False)
+    monkeypatch.setattr(mon, "relaunch", lambda **kw: attempts.append(kw))
+
+    _drive_to_wedged(mon)
+
+    assert attempts == []
+
+
+def test_auto_recover_declines_without_a_need_predicate(monkeypatch, clean_gate_env):
+    """A bare monitor (scripts, tests) must not close a game on spec."""
+    _wedge(monkeypatch)
+    attempts = []
+    mon = _make_monitor()  # no predicate
+    monkeypatch.setattr(mon, "relaunch", lambda **kw: attempts.append(kw))
+
+    _drive_to_wedged(mon)
+
+    assert attempts == []
+
+
+def test_auto_recover_can_be_switched_off(monkeypatch, clean_gate_env):
+    _wedge(monkeypatch)
+    attempts = []
+    mon = _make_monitor(auto_recover=False, auto_recover_needed=lambda: True)
+    monkeypatch.setattr(mon, "relaunch", lambda **kw: attempts.append(kw))
+
+    _drive_to_wedged(mon)
+
+    assert attempts == []
+
+
+def test_auto_recover_gives_up_rather_than_looping(monkeypatch, clean_gate_env):
+    """A relaunch that keeps failing must not become a kill/launch loop. After
+    the cap it stays down and stays loud until a human looks."""
+    import oracle_health
+
+    _wedge(monkeypatch)
+    monkeypatch.setattr(oracle_health, "AUTO_RECOVER_COOLDOWN_SEC", 0.0)
+    attempts = []
+    mon = _make_monitor(auto_recover_needed=lambda: True)
+    monkeypatch.setattr(
+        mon, "relaunch",
+        lambda **kw: (attempts.append(kw), {"ok": False, "error": "boom"})[1])
+
+    for _ in range(oracle_health.AUTO_RECOVER_MAX_ATTEMPTS + 5):
+        mon.check_once()
+
+    assert len(attempts) == oracle_health.AUTO_RECOVER_MAX_ATTEMPTS
+
+
+def test_auto_recover_cooldown_blocks_a_rapid_second_attempt(monkeypatch, clean_gate_env):
+    import oracle_health
+
+    _wedge(monkeypatch)
+    monkeypatch.setattr(oracle_health, "AUTO_RECOVER_COOLDOWN_SEC", 9999.0)
+    attempts = []
+    mon = _make_monitor(auto_recover_needed=lambda: True)
+    monkeypatch.setattr(
+        mon, "relaunch",
+        lambda **kw: (attempts.append(kw), {"ok": False, "error": "boom"})[1])
+
+    for _ in range(oracle_health.AUTO_RECOVER_AFTER_DOWN + 6):
+        mon.check_once()
+
+    assert len(attempts) == 1
+
+
+def test_a_successful_auto_recovery_rearms_the_attempt_budget(monkeypatch, clean_gate_env):
+    """Two unrelated crashes hours apart must both get recovered; the counter
+    is for a failing LOOP, not a lifetime quota."""
+    import oracle_health
+
+    _wedge(monkeypatch)
+    monkeypatch.setattr(oracle_health, "AUTO_RECOVER_COOLDOWN_SEC", 0.0)
+    mon = _make_monitor(auto_recover_needed=lambda: True)
+    monkeypatch.setattr(mon, "relaunch", lambda **kw: {"ok": True})
+
+    _drive_to_wedged(mon)
+    assert mon._auto_recover_attempts == 0
+
+
+class _Completed:
+    """Minimal subprocess.CompletedProcess stand-in for kill_game tests."""
+
+    def __init__(self, stdout=b"", stderr=b""):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = 0
+
+
+class _FakeWindll:
+    """ctypes.windll stand-in: records ShellExecuteW calls so a test can assert
+    whether a UAC elevation was attempted."""
+
+    def __init__(self, sink, shell_exec=None):
+        outer = self
+
+        class _Shell32:
+            def ShellExecuteW(self, *args):
+                if shell_exec is not None:
+                    return shell_exec(*args)
+                sink.append(args)
+                return 42
+
+        class _User32:
+            def __getattr__(self, _name):
+                return lambda *a, **k: 0
+
+        self.shell32 = _Shell32()
+        self.user32 = _User32()
+
+
+# -- kill_game: PD2 runs elevated -----------------------------------------
+
+
+def test_kill_game_succeeds_without_elevation_when_taskkill_works(monkeypatch):
+    import oracle_health
+
+    calls = []
+    monkeypatch.setattr(oracle_health.subprocess, "run",
+                        lambda *a, **k: calls.append(a) or _Completed(b"", b""))
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: False)
+    shell = []
+    monkeypatch.setattr(oracle_health.ctypes, "windll", _FakeWindll(shell), raising=False)
+
+    assert oracle_health.kill_game(timeout=1.0) is True
+    assert shell == []  # no UAC prompt when it wasn't needed
+
+
+def test_kill_game_escalates_to_uac_when_access_is_denied(monkeypatch):
+    """PD2 self-elevates, so a normal-integrity dashboard gets 'Access is
+    denied' -- measured 2026-07-30. Without the runas retry a wedged game is
+    simply unrecoverable from the dashboard."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health.subprocess, "run",
+                        lambda *a, **k: _Completed(b"", b"ERROR: Access is denied."))
+    alive = {"v": True}
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: alive["v"])
+    shell = []
+
+    def _shell_exec(*args):
+        shell.append(args)
+        alive["v"] = False   # the user approved the prompt
+        return 42
+
+    monkeypatch.setattr(oracle_health.ctypes, "windll",
+                        _FakeWindll(shell, shell_exec=_shell_exec), raising=False)
+
+    assert oracle_health.kill_game(timeout=0.5) is True
+    assert len(shell) == 1
+    assert shell[0][1] == "runas"
+
+
+def test_kill_game_does_not_escalate_for_a_non_permission_failure(monkeypatch):
+    """A kill that failed for some other reason must not spam a UAC prompt."""
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health.subprocess, "run",
+                        lambda *a, **k: _Completed(b"", b"ERROR: process not found"))
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    shell = []
+    monkeypatch.setattr(oracle_health.ctypes, "windll", _FakeWindll(shell), raising=False)
+
+    assert oracle_health.kill_game(timeout=0.5) is False
+    assert shell == []
+
+
+def test_kill_game_can_refuse_to_elevate(monkeypatch):
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health.subprocess, "run",
+                        lambda *a, **k: _Completed(b"", b"Access is denied."))
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    shell = []
+    monkeypatch.setattr(oracle_health.ctypes, "windll", _FakeWindll(shell), raising=False)
+
+    assert oracle_health.kill_game(timeout=0.5, allow_elevate=False) is False
+    assert shell == []
