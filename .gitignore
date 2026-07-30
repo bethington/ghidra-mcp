@@ -637,6 +637,12 @@ fun-doc/audit/queue.jsonl.*-archived
 fun-doc/state_*.json
 fun-doc/benchmark/bh/source/
 
+# fun-doc pre-migration / pre-reset data snapshots. Generated safety copies
+# written before a destructive migration or a bulk status reset (doc_map_*,
+# port_status_reset_*, oracle_unreachable_reset_*). Timestamped, near-duplicate
+# and ~700KB each -- recoverable state, not source.
+fun-doc/backups/
+
 # Third-party ScyllaHide (anti-anti-debug) binaries -- obtain per tools/scyllahide/README.md
 /tools/scyllahide/*
 !/tools/scyllahide/README.md
