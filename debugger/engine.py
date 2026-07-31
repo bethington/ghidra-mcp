@@ -21,6 +21,7 @@ from contextlib import contextmanager, nullcontext
 from concurrent.futures import Future
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from . import scyllahide
 from .windbg import ensure_windbg_dir
 
 ensure_windbg_dir()
@@ -375,12 +376,41 @@ class DebugEngine:
         self._executing = False
 
         logger.info(f"Attached to PID {pid}, {len(modules)} modules loaded")
-        return {
+        result = {
             "pid": pid,
             "name": self._target_name,
             "module_count": len(modules),
             "state": self._state.value,
         }
+
+        # ANTI-ANTI-DEBUG (2026-07-30). Hardening belongs to ATTACHING, not to
+        # whichever launcher started the game: injection is post-launch anyway, and
+        # only one launcher (start-oracle.ps1) ever did it -- not the one the
+        # conformance work uses, nor oracle_health's unattended recovery. Without
+        # the hook, PD2's anti-debug can strip or detect software breakpoints, so
+        # breakpoints (and call_function's return-catch) fail QUIETLY. Never fatal:
+        # a hardening step must not be able to refuse an attach -- but it must say
+        # so loudly when the target is not hardened.
+        try:
+            # A 32-bit process on 64-bit Windows is by definition WOW64, and PD2's
+            # Game.exe is 32-bit -- so WOW64 is exactly the "use the x86 build" signal.
+            arch = "x86" if self._is_wow64 else "x64"
+            names = [m.name for m in modules]
+            status = scyllahide.ensure(
+                pid, names, arch=arch,
+                refresh_modules=lambda: [m.name for m in self._get_modules_impl()])
+            result["scyllahide"] = status
+            warning = scyllahide.warning_for(status)
+            if warning:
+                result["warning"] = warning
+                logger.warning(warning)
+            else:
+                logger.info("ScyllaHide: %s", status.get("detail"))
+        except Exception as exc:  # noqa: BLE001 -- must never fail an attach
+            logger.warning(f"ScyllaHide ensure step raised (continuing): {exc}")
+            result["scyllahide"] = {"status": "error", "detail": str(exc)}
+
+        return result
 
     def _wait_for_target_access_impl(self, timeout_seconds: float = 5.0) -> List[Any]:
         deadline = time.monotonic() + timeout_seconds
