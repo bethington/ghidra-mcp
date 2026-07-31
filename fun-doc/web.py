@@ -181,6 +181,11 @@ class WorkerManager:
         # Identifies THIS dashboard run, so the sticky roster can tell "grew
         # within the current session" from "a fresh session's own roster".
         self._session_id = datetime.now().isoformat()
+        # Global pause. Distinct from stop: parks workers at a candidate
+        # boundary, keeps the threads alive, and stands oracle auto-recovery
+        # down so a paused fleet does not relaunch the game underneath you.
+        self._paused = threading.Event()
+        self._pause_reason = None
         self._bus.on("provider_timeout", self._handle_provider_timeout)
         # Every runs.jsonl row (drafts, retries, sub-step results) refreshes the
         # owning worker's heartbeat. Without this, a PORT candidate that spends
@@ -205,7 +210,7 @@ class WorkerManager:
         # wants the live oracle" -- see port_work_pending for why that is no
         # longer the same question as "a port worker is running".
         self._oracle_monitor = OracleHealthMonitor(
-            bus=self._bus, auto_recover_needed=self.port_work_pending,
+            bus=self._bus, auto_recover_needed=self._oracle_wanted,
         )
         self._oracle_monitor.start()
         # Ghidra is the OTHER hard dependency of every lane, and until
@@ -242,6 +247,11 @@ class WorkerManager:
         return {
             "ok": True,
             "checked_at": datetime.now().isoformat(),
+            # Surfaced at the top level, not as a sixth dot: a paused fleet is
+            # not a DEPENDENCY fault, and rendering it as one would train you to
+            # read a deliberate pause as something broken.
+            "paused": self._paused.is_set(),
+            "pause_reason": self._pause_reason,
             "subsystems": {
                 "dashboard": self._health_dashboard(),
                 "ghidra": self._health_ghidra(),
@@ -1082,12 +1092,93 @@ class WorkerManager:
         self._emit_status()
         return worker_id
 
+    # ---- pause / resume --------------------------------------------------
+    #
+    # PAUSE is not STOP. Stop is cooperative at one-CANDIDATE granularity: the
+    # worker finishes the in-flight provider call (which routinely runs 350s)
+    # or live-prove build before it can honour the flag, so a stop request sits
+    # there looking hung for minutes. Pause parks the worker at the next
+    # candidate boundary instead and keeps the thread alive, so it is both
+    # faster to take effect and instantly reversible.
+    #
+    # A paused fleet also stands DOWN oracle auto-recovery. That is the whole
+    # point in the case this was built for: stopping the workers did not stop
+    # the monitor relaunching the game, because the need-predicate is "port
+    # worker running OR candidates queued" and the queue is rarely empty.
+
+    def pause_workers(self, reason=None):
+        with self._lock:
+            self._pause_reason = reason or "paused by operator"
+            self._paused.set()
+        self._emit_status()
+        try:
+            from event_log import log_event
+            log_event("workers_paused", reason=self._pause_reason)
+        except Exception:
+            pass
+        return {"paused": True, "reason": self._pause_reason}
+
+    def resume_workers(self):
+        with self._lock:
+            self._pause_reason = None
+            self._paused.clear()
+        self._emit_status()
+        try:
+            from event_log import log_event
+            log_event("workers_resumed")
+        except Exception:
+            pass
+        return {"paused": False}
+
+    def is_paused(self):
+        return self._paused.is_set()
+
+    def pause_state(self):
+        return {"paused": self._paused.is_set(), "reason": self._pause_reason}
+
+    def _oracle_wanted(self):
+        """Does anything actually want the live oracle right now?
+
+        Paused means "leave the game alone" -- including not relaunching it.
+        Without this the monitor happily brings the game back up underneath an
+        operator who just closed it on purpose.
+        """
+        if self._paused.is_set():
+            return False
+        return self.port_work_pending()
+
+    def _park_if_paused(self, worker):
+        """Block at a candidate boundary while paused. Called from the lanes'
+        progress/idle callbacks, so no worker signature changes.
+
+        Heartbeats throughout: a parked worker that stops heartbeating is
+        indistinguishable from a hung one and the watchdog stall-kills it.
+        """
+        if not self._paused.is_set():
+            return
+        prev = worker.get("status")
+        with self._lock:
+            worker["status"] = "paused"
+        self._emit_status()
+        while self._paused.is_set() and not worker["stop_flag"].is_set():
+            with self._lock:
+                worker["last_heartbeat_at"] = datetime.now().isoformat()
+            self._emit_status()
+            worker["stop_flag"].wait(2.0)
+        if not worker["stop_flag"].is_set():
+            with self._lock:
+                worker["status"] = prev or "running"
+            self._emit_status()
+
     def stop_worker(self, worker_id):
         with self._lock:
             worker = self._workers.get(worker_id)
             if not worker:
                 raise ValueError(f"Unknown worker: {worker_id}")
             worker["stop_flag"].set()
+            # Stamped so the UI can say "stopping for 4m -- finishing <fn>"
+            # rather than showing a button that appears to have done nothing.
+            worker["stop_requested_at"] = datetime.now().isoformat()
             worker["status"] = "stopping"
             worker["restore_on_restart"] = False
             self._persist_active_workers()
@@ -1445,6 +1536,12 @@ class WorkerManager:
                 # which made the stall-kill threshold unreachable.)
                 with self._lock:
                     worker["last_heartbeat_at"] = datetime.now().isoformat()
+
+                # Operator pause, checked at the same boundary as the quota
+                # wall: between functions, never mid-provider-call.
+                self._park_if_paused(worker)
+                if worker["stop_flag"].is_set():
+                    break
 
                 # Per-iteration pause check (Q1): another worker may have
                 # discovered the wall while we were idle/processing. Yield
@@ -1834,6 +1931,7 @@ class WorkerManager:
             _GLOB_SKIP = ("skipped", "cache_skipped", "no_change")
 
             def _on_progress(binary_path, address, result, processed, total):
+                self._park_if_paused(worker)
                 bucket = ("completed" if result in _GLOB_OK
                           else "skipped" if result in _GLOB_SKIP
                           else "failed")
@@ -2008,6 +2106,7 @@ class WorkerManager:
                           "drafted")
 
             def _on_progress(program, address, result, processed, total):
+                self._park_if_paused(worker)
                 bucket = ("completed" if result in _PORT_OK
                           else "skipped" if result in _PORT_SKIP
                           else "failed")     # harness_failed, blocked, error
@@ -2053,6 +2152,7 @@ class WorkerManager:
                 })
 
             def _on_idle():
+                self._park_if_paused(worker)
                 # Continuous mode's "no eligible candidates right now" poll
                 # loop -- a real, correct wait, not a hang. Without refreshing
                 # last_heartbeat_at here, the watchdog can't tell this apart
@@ -4333,6 +4433,24 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "count": len(result["restored"]),
             "errors": result["errors"],
         })
+
+    @app.route("/api/worker/pause", methods=["POST"])
+    def post_worker_pause():
+        """Park every worker at its next candidate boundary.
+
+        Distinct from stop: threads stay alive, nothing is torn down, and
+        oracle auto-recovery stands down so the game is left alone.
+        """
+        data = request.get_json(silent=True) or {}
+        return jsonify({"ok": True, **worker_mgr.pause_workers(data.get("reason"))})
+
+    @app.route("/api/worker/resume", methods=["POST"])
+    def post_worker_resume():
+        return jsonify({"ok": True, **worker_mgr.resume_workers()})
+
+    @app.route("/api/worker/pause_state", methods=["GET"])
+    def get_worker_pause_state():
+        return jsonify({"ok": True, **worker_mgr.pause_state()})
 
     @app.route("/api/worker/roster/dismiss", methods=["POST"])
     def post_worker_roster_dismiss():
