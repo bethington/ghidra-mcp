@@ -665,23 +665,41 @@ def test_auto_recover_can_be_switched_off(monkeypatch, clean_gate_env):
     assert attempts == []
 
 
-def test_auto_recover_gives_up_rather_than_looping(monkeypatch, clean_gate_env):
-    """A relaunch that keeps failing must not become a kill/launch loop. After
-    the cap it stays down and stays loud until a human looks."""
+def test_auto_recover_slows_down_rather_than_giving_up(monkeypatch, clean_gate_env):
+    """CONTRACT CHANGED 2026-07-30. This used to assert a permanent give-up
+    after AUTO_RECOVER_MAX_ATTEMPTS, and that was the right call for an
+    attended session but the wrong one for the overnight fleet this exists to
+    protect -- the third failure stalled the run until a human looked, which
+    at 2am costs the whole night.
+
+    The kill/launch-loop concern the old test guarded is now handled by the
+    BACKOFF (see test_auto_recover_cooldown_blocks_a_rapid_second_attempt and
+    test_cooldown_backs_off_past_the_burst_and_is_capped in
+    test_oracle_recovery.py): attempts continue indefinitely but settle at
+    AUTO_RECOVER_MAX_COOLDOWN_SEC apart, i.e. ~2/hour, not a tight loop.
+
+    With the cooldown pinned to 0 here, every poll is allowed to attempt, so
+    attempts must keep accruing past the burst instead of flatlining."""
     import oracle_health
 
     _wedge(monkeypatch)
     monkeypatch.setattr(oracle_health, "AUTO_RECOVER_COOLDOWN_SEC", 0.0)
+    monkeypatch.setattr(oracle_health, "AUTO_RECOVER_MAX_COOLDOWN_SEC", 0.0)
     attempts = []
     mon = _make_monitor(auto_recover_needed=lambda: True)
     monkeypatch.setattr(
         mon, "relaunch",
         lambda **kw: (attempts.append(kw), {"ok": False, "error": "boom"})[1])
 
-    for _ in range(oracle_health.AUTO_RECOVER_MAX_ATTEMPTS + 5):
+    extra = 5
+    for _ in range(oracle_health.AUTO_RECOVER_BURST + extra):
         mon.check_once()
 
-    assert len(attempts) == oracle_health.AUTO_RECOVER_MAX_ATTEMPTS
+    assert len(attempts) > oracle_health.AUTO_RECOVER_BURST, (
+        "recovery must not stop permanently at the burst size"
+    )
+    # And it must have announced that it is no longer keeping up.
+    assert mon.get_state()["recovery_degraded"] is True
 
 
 def test_auto_recover_cooldown_blocks_a_rapid_second_attempt(monkeypatch, clean_gate_env):

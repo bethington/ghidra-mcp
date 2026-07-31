@@ -13,6 +13,7 @@ Features:
 import hmac
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -25,9 +26,18 @@ from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit as sio_emit
 
 from event_bus import get_bus
+from ghidra_health import GhidraHealthMonitor
 from oracle_health import OracleHealthMonitor
 
 import uuid
+
+# Windows spawns a console for every child process unless told not to, and
+# these helpers run on a POLL: is_game_running fires every 45s, _pid_alive on
+# every in-flight check. Each one flashed a console window on the desktop.
+# CREATE_NO_WINDOW suppresses it; it is 0 on non-Windows so the flag is inert
+# there.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -84,13 +94,61 @@ STALL_ACTIVITY_GRACE_SEC = float(os.environ.get("FUNDOC_STALL_ACTIVITY_GRACE_SEC
 STALL_KILL_HARD_CAP_SEC = float(os.environ.get("FUNDOC_STALL_KILL_HARD_CAP_SEC", "3000"))
 
 
+def _listener_pid(port):
+    """PID holding the LISTEN socket on `port`, or None.
+
+    The dashboard is a parent/child pair and the process serving an HTTP
+    request is not always the one bound to the port, so a restart has to
+    target the socket owner explicitly rather than assume it is itself.
+    """
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True,
+            timeout=20, creationflags=_NO_WINDOW).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].upper() == "TCP" and                 parts[-2].upper() == "LISTENING" and parts[1].endswith(f":{port}"):
+            try:
+                return int(parts[-1])
+            except ValueError:
+                continue
+    return None
+
+
+def _ghidra_endpoint():
+    """Ghidra HTTP base, resolved the same way fun_doc resolves it."""
+    return os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
+
+
+def _oracle_endpoint():
+    """D2Debugger oracle base. Mirrors port_live_prove.ORACLE_URL."""
+    return os.environ.get("D2DBG_MCP_URL", "http://127.0.0.1:8790").rstrip("/")
+
+
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
     MAX_WORKERS = 12
     RESTORE_META_KEY = "dashboard_active_workers"
+    # Sticky roster: the last non-empty set of workers this dashboard ran.
+    #
+    # RESTORE_META_KEY above is the LIVE roster and is cleared the moment a
+    # worker stops -- stop_worker sets restore_on_restart=False by design, so
+    # an operator-stopped worker does not silently come back. Correct, and it
+    # is also why nothing was offered on 2026-07-30: all six prove workers
+    # ended `user_stop` when the oracle died, the live roster emptied, and the
+    # restart had nothing to restore.
+    #
+    # This key is written whenever the live roster is non-empty and is NEVER
+    # cleared automatically. It is the answer to "what was this machine
+    # working on before it fell over", which survives the stop that erases the
+    # live roster. It is an OFFER, never an auto-start.
+    LAST_ROSTER_META_KEY = "dashboard_last_roster"
 
-    def __init__(self, state_file, bus, socketio, load_queue, save_queue):
+    def __init__(self, state_file, bus, socketio, load_queue, save_queue,
+                 dashboard_port=5000):
         self._workers = {}
         self._lock = threading.Lock()
         self._state_file = state_file
@@ -115,6 +173,14 @@ class WorkerManager:
         # rather than sharing it since port and globals work are unrelated
         # write streams (port never touches Ghidra function names/comments).
         self._port_active_binaries = set()
+        # (monotonic_ts, count) memo for the oracle need-predicate's
+        # "unresolved port candidates exist" half. See _pending_port_candidates.
+        self._port_pending_cache = None
+        # Needed by request_restart to tell the replacement which port to bind.
+        self._dashboard_port = dashboard_port
+        # Identifies THIS dashboard run, so the sticky roster can tell "grew
+        # within the current session" from "a fresh session's own roster".
+        self._session_id = datetime.now().isoformat()
         self._bus.on("provider_timeout", self._handle_provider_timeout)
         # Every runs.jsonl row (drafts, retries, sub-step results) refreshes the
         # owning worker's heartbeat. Without this, a PORT candidate that spends
@@ -135,26 +201,385 @@ class WorkerManager:
         # CURRENT reachability the whole time the dashboard runs, and so the
         # status panel has something to show even with no worker active.
         # See oracle_health.py module docstring for the incident this fixes.
-        # auto_recover_needed gates unattended kill-and-relaunch of a WEDGED
-        # game on "a port worker is actually waiting for the oracle". Without
-        # it the monitor would close a game the operator is driving by hand.
+        # auto_recover_needed gates unattended relaunch on "something actually
+        # wants the live oracle" -- see port_work_pending for why that is no
+        # longer the same question as "a port worker is running".
         self._oracle_monitor = OracleHealthMonitor(
-            bus=self._bus, auto_recover_needed=self.has_active_port_workers,
+            bus=self._bus, auto_recover_needed=self.port_work_pending,
         )
         self._oracle_monitor.start()
+        # Ghidra is the OTHER hard dependency of every lane, and until
+        # 2026-07-30 it had no monitor at all -- no dashboard indicator, and
+        # audit/rules.yaml's ghidra_offline_sustained rule keyed on a
+        # `ghidra_health` event nothing ever emitted. This is that emitter.
+        # Launch-if-absent only; it never kills a running Ghidra.
+        self._ghidra_monitor = GhidraHealthMonitor(bus=self._bus)
+        self._ghidra_monitor.start()
 
     def get_oracle_health(self):
         return self._oracle_monitor.get_state()
 
+    def get_ghidra_health(self):
+        return self._ghidra_monitor.get_state()
+
+    # Every dependency renders as one of these. "degraded" is the one that
+    # matters: it means "working, but not fully" (a provider paused with
+    # others available, a Ghidra alive but not answering) and it is the state
+    # a single up/down dot cannot express.
+    _OK, _DEGRADED, _DOWN, _UNKNOWN = "ok", "degraded", "down", "unknown"
+
+    def get_health_summary(self):
+        """Aggregate every monitored dependency for the header strip.
+
+        Each entry is {state, label, detail, endpoint, action}. `action` names
+        a UI affordance the dot can offer when it is not green; None means
+        "nothing you can click, this one needs a human elsewhere".
+
+        Never raises: a broken probe reports `unknown` for its own dot rather
+        than 500-ing the whole strip. A health endpoint that can fail as a
+        unit is a health endpoint you stop trusting.
+        """
+        return {
+            "ok": True,
+            "checked_at": datetime.now().isoformat(),
+            "subsystems": {
+                "dashboard": self._health_dashboard(),
+                "ghidra": self._health_ghidra(),
+                "oracle": self._health_oracle(),
+                "provider": self._health_provider(),
+                "store": self._health_store(),
+            },
+        }
+
+    def _health_dashboard(self):
+        # If this response is being generated at all, the dashboard is up.
+        # The dot's real job is reporting ELEVATION: without it, unattended
+        # oracle recovery cannot taskkill a self-elevated PD2 and silently
+        # degrades to "pop a UAC prompt and hope somebody is sitting there".
+        elevated = bool(self._oracle_monitor.get_state().get("elevated"))
+        with self._lock:
+            active = sum(
+                1 for w in self._workers.values()
+                if w["status"] in ("starting", "running", "stopping")
+            )
+        return {
+            "state": self._OK if elevated else self._DEGRADED,
+            "label": "Dashboard",
+            "detail": (f"elevated · {active} worker(s) active" if elevated else
+                       "NOT elevated — unattended game recovery will stall on a "
+                       "UAC prompt. Start via fun-doc/start-dashboard.ps1."),
+            "endpoint": None,
+            "action": None,
+        }
+
+    def _health_ghidra(self):
+        try:
+            s = self._ghidra_monitor.get_state()
+        except Exception as e:
+            return {"state": self._UNKNOWN, "label": "Ghidra", "detail": str(e),
+                    "endpoint": None, "action": None}
+        if s.get("reachable"):
+            state, detail = self._OK, "answering /mcp/schema"
+        elif s.get("reachable") is None:
+            state, detail = self._UNKNOWN, "not probed yet"
+        elif s.get("unresponsive"):
+            # Deliberately degraded, not down: the process is alive and we
+            # will not touch it (killing risks unsaved programs).
+            state = self._DEGRADED
+            detail = ("process alive but not answering — not restarting it "
+                      "(risks unsaved programs); workers are backing off")
+        else:
+            state = self._DOWN
+            attempts = s.get("launch_attempts") or 0
+            detail = "no Ghidra process found"
+            if attempts:
+                detail += f" · {attempts} launch attempt(s)"
+            if s.get("launch_error"):
+                detail += f" · {s['launch_error']}"
+            if s.get("next_retry_in"):
+                detail += f" · retry in {s['next_retry_in']}s"
+        return {
+            "state": state, "label": "Ghidra", "detail": detail,
+            "endpoint": _ghidra_endpoint(),
+            "action": None,
+            "install_dir": s.get("install_dir"),
+            "degraded": bool(s.get("recovery_degraded")),
+        }
+
+    def _health_oracle(self):
+        try:
+            s = self._oracle_monitor.get_state()
+        except Exception as e:
+            return {"state": self._UNKNOWN, "label": "Oracle", "detail": str(e),
+                    "endpoint": None, "action": None}
+        if s.get("reachable"):
+            state, detail = self._OK, "live-prove enabled"
+        elif s.get("reachable") is None:
+            state, detail = self._UNKNOWN, "not probed yet"
+        else:
+            state = self._DOWN
+            if s.get("relaunching"):
+                state = self._DEGRADED
+                detail = f"relaunching: {s.get('relaunch_stage') or 'starting'}"
+            elif s.get("game_wedged"):
+                detail = "Game.exe wedged (process up, oracle dead)"
+            elif s.get("game_dead"):
+                detail = "Game.exe not running"
+            else:
+                detail = "unreachable"
+            if s.get("recover_attempts"):
+                detail += f" · {s['recover_attempts']} recovery attempt(s)"
+            if s.get("next_retry_in"):
+                detail += f" · retry in {s['next_retry_in']}s"
+            if s.get("relaunch_error"):
+                detail += f" · {s['relaunch_error']}"
+        return {
+            "state": state, "label": "Oracle + Game", "detail": detail,
+            "endpoint": _oracle_endpoint(),
+            "action": "relaunch_oracle" if state != self._OK else None,
+            "degraded": bool(s.get("recovery_degraded")),
+        }
+
+    def _health_provider(self):
+        try:
+            from provider_pause import get_default_manager
+
+            active = get_default_manager().all_active()
+        except Exception as e:
+            return {"state": self._UNKNOWN, "label": "Provider", "detail": str(e),
+                    "endpoint": None, "action": None}
+        if not active:
+            return {"state": self._OK, "label": "Provider",
+                    "detail": "no quota walls or circuit breaks",
+                    "endpoint": None, "action": None}
+        try:
+            from fun_doc import load_priority_queue
+
+            configured = set((load_priority_queue().get("config") or {})
+                             .get("provider_models", {}).keys())
+        except Exception:
+            configured = set()
+        paused = {row[0] for row in active if row}
+        names = ", ".join(sorted(paused))
+        # All configured providers walled = nothing can run. That is DOWN, not
+        # degraded, and it is the state where workers quietly stop producing.
+        if configured and paused >= configured:
+            return {"state": self._DOWN, "label": "Provider",
+                    "detail": f"ALL providers paused ({names}) — no work can run",
+                    "endpoint": None, "action": None}
+        return {"state": self._DEGRADED, "label": "Provider",
+                "detail": f"paused: {names}",
+                "endpoint": None, "action": None}
+
+    def _health_store(self):
+        try:
+            from fun_doc import _get_storage_repo
+
+            repo = _get_storage_repo()
+            if repo is None:
+                return {"state": self._DOWN, "label": "Store",
+                        "detail": "storage backend unavailable (see server log)",
+                        "endpoint": None, "action": None}
+            # Cheapest possible liveness proof that still touches the engine.
+            repo.get_meta()
+            # `backend`, never `url`: a Postgres URL carries credentials and
+            # this payload is rendered in a browser.
+            kind = getattr(repo.config, "backend", "unknown")
+            return {"state": self._OK, "label": "Store", "detail": f"{kind} reachable",
+                    "endpoint": None, "action": None}
+        except Exception as e:
+            return {"state": self._DOWN, "label": "Store",
+                    "detail": f"{type(e).__name__}: {e}",
+                    "endpoint": None, "action": None}
+
     def has_active_port_workers(self):
         """True if any PORT worker is starting/running/stopping -- i.e. something
-        is actually waiting on the live oracle. Gates unattended recovery."""
+        is actually waiting on the live oracle right now."""
         with self._lock:
             return any(
                 w.get("mode") == "port"
                 and w["status"] in ("starting", "running", "stopping")
                 for w in self._workers.values()
             )
+
+    def port_work_pending(self):
+        """True if a port worker is running OR unresolved port candidates exist.
+
+        This is the oracle's need-predicate, and the second half of it is the
+        whole point. Gating recovery on a LIVE worker alone deadlocks: a dead
+        oracle makes port workers drain into `oracle_unavailable` and exit,
+        and once the last one is gone the predicate goes false and recovery
+        refuses forever with "nothing needs the oracle right now". Measured
+        2026-07-30 -- oracle down 70 minutes, six workers gone, zero recovery
+        attempts, 53,188 candidates still queued.
+
+        "Work is queued" is the durable fact; "a worker is running" is a
+        transient consequence of it. Recovering on the durable one means the
+        fleet can be restarted into a healthy oracle instead of racing to
+        start one before the game is up.
+
+        Still a real gate: on a machine with no port work left, this is false
+        and the dashboard will not launch a game on its own.
+        """
+        if self.has_active_port_workers():
+            return True
+        return self._pending_port_candidates() > 0
+
+    # Counting is a DB round trip; the oracle polls every 45s and the answer
+    # moves on the order of minutes, so cache it. Kept short enough that
+    # finishing the last candidate stops holding a game open for long.
+    _PORT_PENDING_TTL_SEC = 120.0
+
+    def _pending_port_candidates(self):
+        """Cached existence probe for unresolved port work. Never raises --
+        a storage hiccup must not be reported as 'no work', because that
+        silently disarms recovery."""
+        now = time.monotonic()
+        with self._lock:
+            cached = self._port_pending_cache
+        if cached is not None and (now - cached[0]) < self._PORT_PENDING_TTL_SEC:
+            return cached[1]
+        try:
+            from fun_doc import _get_storage_repo
+            from port_pipeline import _PORT_TERMINAL_STATUSES
+
+            repo = _get_storage_repo()
+            # limit=1: this is an EXISTS probe. Counting all 53K matching rows
+            # takes ~100ms and trips the slow-query log every poll; the probe
+            # is ~8ms.
+            n = repo.count_pending_port_candidates(_PORT_TERMINAL_STATUSES, limit=1)
+        except Exception as e:
+            # Fail SAFE, in the direction that keeps the fleet alive: assume
+            # work exists. The cost of a false positive is a game we did not
+            # strictly need; the cost of a false negative is another silent
+            # 70-minute stall.
+            print(f"  [oracle] pending-port-work probe failed ({e}) -- "
+                  "assuming work exists so recovery stays armed", flush=True)
+            n = 1
+        with self._lock:
+            self._port_pending_cache = (now, n)
+        return n
+
+    def request_restart(self, stop_timeout=45.0):
+        """Restart THIS dashboard, in place, with no UAC prompt.
+
+        The dashboard runs elevated (start-dashboard.ps1 / the Scheduled Task),
+        which is what lets it taskkill a self-elevated PD2. The awkward
+        consequence is that a NON-elevated shell cannot stop it -- Stop-Process
+        returns "Access is denied" -- so every code deploy needed an
+        interactive UAC click, which is exactly the thing that stalls an
+        unattended pipeline. Registering the Scheduled Task does not fix this:
+        it removes UAC from STARTING the dashboard, not from stopping a
+        running elevated one.
+
+        Restarting from INSIDE the elevated process crosses no privilege
+        boundary at all. We spawn start-dashboard.ps1 as a child (it inherits
+        our elevated token, so no prompt), hand it our PID to wait on, and
+        exit. The child waits for the port to free and binds it.
+
+        Workers are stopped first so provider subprocesses are terminated
+        rather than orphaned, and the roster is persisted so the new instance
+        can offer to restore them.
+        """
+        script = Path(__file__).resolve().parent / "start-dashboard.ps1"
+        if not script.exists():
+            return {"ok": False, "error": f"launcher not found: {script}"}
+
+        def _do_restart():
+            try:
+                # Stop workers: this terminates their provider children. Without
+                # it they become the orphans orphan_reaper has to sweep next boot.
+                with self._lock:
+                    ids = [w["id"] for w in self._workers.values()
+                           if w["status"] in ("starting", "running")]
+                for wid in ids:
+                    try:
+                        self.stop_worker(wid)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  [restart] stop {wid} failed: {e}", flush=True)
+                deadline = time.monotonic() + stop_timeout
+                while time.monotonic() < deadline:
+                    with self._lock:
+                        busy = any(w["status"] in ("starting", "running", "stopping")
+                                   for w in self._workers.values())
+                    if not busy:
+                        break
+                    time.sleep(1)
+
+                ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                  "System32", "WindowsPowerShell", "v1.0",
+                                  "powershell.exe")
+                if not os.path.exists(ps):
+                    ps = "powershell.exe"
+                # The child MUST leave a trace of its own. First attempt at
+                # this spawned detached with inherited handles and died without
+                # a single line anywhere -- start-dashboard.ps1 never even
+                # reached its own boot log, so there was nothing to diagnose
+                # and the dashboard simply stayed down.
+                #
+                # Two fixes, both load-bearing:
+                #   * redirect stdout/stderr to a FILE. Inheriting the parent's
+                #     handles is fatal here by construction: we exit two
+                #     seconds later and the child is then writing to closed
+                #     handles.
+                #   * do not use DETACHED_PROCESS. It is not needed -- a
+                #     Windows child does not die with its parent -- and it
+                #     denies the child a console it may want.
+                log_dir = script.parent / "logs"
+                try:
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+                child_log = log_dir / "restart-child.log"
+                # Hand off on the PID that OWNS THE LISTENING SOCKET, which is
+                # not necessarily us: the dashboard runs as a parent/child pair
+                # and the HTTP request is served by a process that does not
+                # hold port 5000. Waiting on os.getpid() therefore waited on a
+                # process that exited immediately while the port stayed bound,
+                # so start-dashboard.ps1 correctly refused with "already
+                # listening" and the restart silently did nothing (observed
+                # 2026-07-31: served by PID 132424, listener was 171288).
+                owner = _listener_pid(self._dashboard_port) or os.getpid()
+                print(f"  [restart] spawning replacement dashboard "
+                      f"(waiting on listener PID {owner}, we are {os.getpid()}); "
+                      f"child log -> {child_log}", flush=True)
+                fh = open(child_log, "a", encoding="utf-8", errors="replace")
+                fh.write(f"\n=== restart spawned by PID {os.getpid()} at "
+                         f"{datetime.now().isoformat()} ===\n")
+                fh.flush()
+                subprocess.Popen(
+                    [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                     str(script), "-Port", str(self._dashboard_port),
+                     "-WaitForPid", str(owner)],
+                    cwd=str(script.parent),
+                    stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f"  [restart] FAILED to spawn replacement: {e}", flush=True)
+                return
+            # Give the HTTP response time to flush, then go. os._exit because
+            # socketio.run() is blocking and there is no clean shutdown path;
+            # the replacement is already waiting on the listener PID.
+            time.sleep(2.0)
+            if owner != os.getpid():
+                # The socket owner is a different process and will not exit on
+                # its own. We are elevated, so we can end it -- and we must, or
+                # the port never frees and the replacement refuses to bind.
+                print(f"  [restart] terminating listener PID {owner}", flush=True)
+                try:
+                    subprocess.run(["taskkill", "/PID", str(owner), "/T", "/F"],
+                                   capture_output=True, timeout=20,
+                                   creationflags=_NO_WINDOW)
+                except Exception as e:  # noqa: BLE001
+                    print(f"  [restart] taskkill failed: {e}", flush=True)
+            print("  [restart] exiting for the replacement dashboard", flush=True)
+            os._exit(0)
+
+        threading.Thread(target=_do_restart, name="fun-doc-self-restart",
+                         daemon=True).start()
+        return {"ok": True, "restarting": True, "pid": os.getpid()}
 
     def relaunch_oracle(self, force=False):
         """Trigger the one-click relaunch sequence in a background thread so
@@ -363,31 +788,117 @@ class WorkerManager:
             "addresses": worker.get("addresses"),
         }
 
+    @staticmethod
+    def _roster_key(w):
+        """Identity for roster de-duplication.
+
+        (binary, mode) and not worker_id: the point of the sticky roster is
+        "what was this machine running", and a worker restarted on the same
+        binary is the same slot, not a second one to offer twice.
+        """
+        return ((w or {}).get("binary"), (w or {}).get("mode"))
+
     def _persist_active_workers(self):
         try:
             queue = self._load_queue()
             meta = dict(queue.get("meta") or {})
-            meta[self.RESTORE_META_KEY] = [
+            live = [
                 self._serialize_worker(w)
                 for w in self._workers.values()
                 if w.get("restore_on_restart", True)
                 and w["status"] in ("starting", "running")
             ]
+            meta[self.RESTORE_META_KEY] = live
+            # Sticky copy: the PEAK roster of this dashboard session.
+            #
+            # "Last non-empty" is not good enough, and using it is how the
+            # first real test of this feature offered 1 worker instead of 7:
+            # _persist_active_workers runs on every stop, so a sequential
+            # shutdown rewrites the sticky copy with a progressively smaller
+            # roster and the final survivor wins. What you want restored is
+            # what the machine was running at its fullest, not whichever
+            # worker happened to stop last.
+            #
+            # So within a session the sticky copy only ever grows; a NEW
+            # session always adopts its own roster (otherwise yesterday's
+            # 12-worker fleet would outrank today's deliberate 2).
+            # "Grows" means a UNION over the session, not the longest single
+            # snapshot. Max-length lost a worker for real (2026-07-31: a 6-worker
+            # fleet came back as 5, silently, with the restore reporting
+            # errors:[]). Two ways it happens, and dedup-union closes both:
+            #   * the FIRST worker stopped is absent from every snapshot taken
+            #     afterwards, so if the peak was not already banked it can never
+            #     include it;
+            #   * a session-key mismatch makes that first shrunken snapshot
+            #     adopt itself wholesale as the new peak.
+            # A new session still starts from scratch, so yesterday's 12-worker
+            # fleet cannot outrank today's deliberate 2.
+            if live:
+                prev = meta.get(self.LAST_ROSTER_META_KEY) or {}
+                same_session = prev.get("session") == self._session_id
+                merged = list(live)
+                if same_session:
+                    seen = {self._roster_key(w) for w in merged}
+                    for w in prev.get("workers") or []:
+                        if self._roster_key(w) not in seen:
+                            seen.add(self._roster_key(w))
+                            merged.append(w)
+                meta[self.LAST_ROSTER_META_KEY] = {
+                    "workers": merged,
+                    "captured_at": datetime.now().isoformat(),
+                    "session": self._session_id,
+                }
             queue["meta"] = meta
             self._save_queue(queue)
         except Exception as e:
             print(f"  Worker restore-state persist failed: {e}")
 
-    def restore_workers(self):
+    def load_restore_offer(self):
+        """Read the boot-time roster OFFER. Does not start anything.
+
+        Auto-restore is deliberately not performed (operator decision
+        2026-07-30): a dashboard that crash-loops would re-spawn the whole
+        fleet on every cycle, and a silent relaunch of 6 LLM-driven workers is
+        not a thing that should happen without a human seeing it. The
+        dashboard surfaces this as a one-click banner instead.
+
+        Prefers the live roster (workers that were genuinely running at
+        shutdown); falls back to the sticky one (what was running before they
+        were stopped), which is the case that actually occurs when a
+        dependency outage takes the fleet down.
+        """
         try:
-            queue = self._load_queue()
-            specs = list((queue.get("meta") or {}).get(self.RESTORE_META_KEY) or [])
+            meta = self._load_queue().get("meta") or {}
         except Exception as e:
             print(f"  Worker restore-state load failed: {e}")
-            return []
+            return None
 
-        restored = []
-        for spec in specs[: self.MAX_WORKERS]:
+        specs = list(meta.get(self.RESTORE_META_KEY) or [])
+        source, captured_at = "running at shutdown", None
+        if not specs:
+            sticky = meta.get(self.LAST_ROSTER_META_KEY) or {}
+            specs = list(sticky.get("workers") or [])
+            source = "last known roster"
+            captured_at = sticky.get("captured_at")
+        if not specs:
+            return None
+        return {
+            "workers": specs[: self.MAX_WORKERS],
+            "source": source,
+            "captured_at": captured_at,
+        }
+
+    def restore_workers(self, specs=None):
+        """Start workers from `specs` (default: the boot-time offer).
+
+        Explicit call only -- nothing invokes this at boot.
+        """
+        if specs is None:
+            offer = self.load_restore_offer()
+            specs = (offer or {}).get("workers") or []
+
+        restored, errors = [], []
+        for spec in list(specs)[: self.MAX_WORKERS]:
             try:
                 restored.append(
                     self.start_worker(
@@ -402,8 +913,27 @@ class WorkerManager:
                     )
                 )
             except Exception as e:
-                print(f"  Worker restore skipped: {e}")
-        return restored
+                # Per-binary locks and MAX_WORKERS legitimately reject some of
+                # these (e.g. half the roster already restarted by hand). Keep
+                # going and report -- a partial restore beats an aborted one.
+                msg = f"{spec.get('mode', 'functions')} on {spec.get('binary')}: {e}"
+                print(f"  Worker restore skipped: {msg}")
+                errors.append(msg)
+        return {"restored": restored, "errors": errors}
+
+    def dismiss_restore_offer(self):
+        """Drop both rosters so the banner stops being offered."""
+        try:
+            queue = self._load_queue()
+            meta = dict(queue.get("meta") or {})
+            meta.pop(self.RESTORE_META_KEY, None)
+            meta.pop(self.LAST_ROSTER_META_KEY, None)
+            queue["meta"] = meta
+            self._save_queue(queue)
+            return True
+        except Exception as e:
+            print(f"  Worker restore-state dismiss failed: {e}")
+            return False
 
     def _handle_provider_timeout(self, data):
         if not isinstance(data, dict):
@@ -2474,6 +3004,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         socketio,
         load_queue,
         save_queue,
+        dashboard_port=dashboard_port,
     )
 
     # --- Background inventory scorer (Q1-Q12 design, opt-in via config) ---
@@ -2715,7 +3246,8 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             try:
                 proc = subprocess.Popen(args, cwd=cwd, env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                        text=True, bufsize=1)
+                                        text=True, bufsize=1,
+                                        creationflags=_NO_WINDOW)
                 for line in proc.stdout:
                     line = line.rstrip()
                     if not line:
@@ -3702,9 +4234,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             mgr.clear_all()
         return jsonify({"ok": True})
 
-    restored_workers = worker_mgr.restore_workers()
-    if restored_workers:
-        print(f"  Restored {len(restored_workers)} dashboard worker(s) after restart")
+    # Roster is OFFERED, not auto-started -- see load_restore_offer for why.
+    _restore_offer = worker_mgr.load_restore_offer()
+    if _restore_offer:
+        _n = len(_restore_offer["workers"])
+        _modes = sorted({w.get("mode", "functions") for w in _restore_offer["workers"]})
+        print(f"  {_n} worker(s) available to restore ({', '.join(_modes)}; "
+              f"{_restore_offer['source']}) -- use the dashboard banner or "
+              f"POST /api/worker/roster/restore")
 
     # --- Folder / binary selection ---
 
@@ -3756,9 +4293,68 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception:
             return []
 
+    @app.route("/api/admin/restart", methods=["POST"])
+    def post_admin_restart():
+        """Restart the dashboard in place, without a UAC prompt.
+
+        This is the supported way to deploy code changes to a RUNNING elevated
+        dashboard. See WorkerManager.request_restart for why a non-elevated
+        shell cannot do it from outside.
+
+        Loopback-only. The server already binds 127.0.0.1 so this is
+        belt-and-braces, but an endpoint that restarts an ELEVATED process is
+        exactly the one to check twice -- a future bind-address change must
+        not silently turn this into a remote control.
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify({"ok": False, "error": "restart is loopback-only"}), 403
+        return jsonify(worker_mgr.request_restart())
+
+    @app.route("/api/worker/roster", methods=["GET"])
+    def get_worker_roster():
+        """The pending restore OFFER, or {"offer": null} when there is none.
+
+        Suppressed once any worker is live again: an offer to restore six
+        workers while six are already running is noise, and acting on it
+        would just collide with the per-binary locks.
+        """
+        offer = worker_mgr.load_restore_offer()
+        if offer and worker_mgr.has_active_workers():
+            offer = None
+        return jsonify({"ok": True, "offer": offer})
+
+    @app.route("/api/worker/roster/restore", methods=["POST"])
+    def post_worker_roster_restore():
+        result = worker_mgr.restore_workers()
+        return jsonify({
+            "ok": True,
+            "restored": result["restored"],
+            "count": len(result["restored"]),
+            "errors": result["errors"],
+        })
+
+    @app.route("/api/worker/roster/dismiss", methods=["POST"])
+    def post_worker_roster_dismiss():
+        return jsonify({"ok": worker_mgr.dismiss_restore_offer()})
+
     @app.route("/api/oracle/status", methods=["GET"])
     def get_oracle_status():
         return jsonify(worker_mgr.get_oracle_health())
+
+    @app.route("/api/ghidra/status", methods=["GET"])
+    def get_ghidra_status():
+        return jsonify(worker_mgr.get_ghidra_health())
+
+    @app.route("/api/health/all", methods=["GET"])
+    def get_health_all():
+        """Every monitored dependency, in one poll, for the header strip.
+
+        One endpoint rather than five: the strip renders as a unit, and five
+        independent fetches on a 10s cadence is 5x the Flask round-trips for a
+        panel that is almost always all-green.
+        """
+        return jsonify(worker_mgr.get_health_summary())
 
     @app.route("/api/oracle/relaunch", methods=["POST"])
     def post_oracle_relaunch():

@@ -646,3 +646,13 @@ fun-doc/backups/
 # Third-party ScyllaHide (anti-anti-debug) binaries -- obtain per tools/scyllahide/README.md
 /tools/scyllahide/*
 !/tools/scyllahide/README.md
+
+# Runtime artifacts the GAME and its mods write into fun-doc/, which is their
+# working directory when the dashboard launches them. Not project source.
+# BH.json in particular is built to store a Battle.net password
+# (bnet.save_last_pass, with autofill_last_password on) -- it must never be
+# committed to a public repo, empty or not.
+fun-doc/imgui.ini
+fun-doc/BH.json
+fun-doc/ProjectDiablo.json
+fun-doc/SGD2FreeResolution.json

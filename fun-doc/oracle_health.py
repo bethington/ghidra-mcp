@@ -39,25 +39,68 @@ from datetime import datetime
 
 from port_live_prove import check_oracle_alive, ORACLE_URL  # single source of truth
 
+# Windows spawns a console for every child process unless told not to, and
+# several of these run on a POLL -- is_game_running every 45s, _pid_alive on
+# every in-flight check -- so each one flashed a console window on the desktop.
+# CREATE_NO_WINDOW suppresses it; the attribute is absent (and the flag 0) on
+# non-Windows, so this stays inert there.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 DEFAULT_LAUNCH_BAT = r"C:\Users\benam\source\cpp\D2MOO\LaunchPD2-Oracle.bat"
 LAUNCH_BAT = os.environ.get("D2MOO_LAUNCH_BAT", DEFAULT_LAUNCH_BAT)
 DEFAULT_PROVE_CHARACTER = os.environ.get("D2MOO_PROVE_CHARACTER", "summoner-skele")
 POLL_INTERVAL_SEC = float(os.environ.get("FUNDOC_ORACLE_POLL_SEC", "45"))
 GAME_PROCESS_NAME = "Game.exe"
 
-# Unattended recovery from a WEDGED game (process alive, embedded oracle dead --
-# the "Halt / Unrecoverable internal error" shape a bad proof vector produces).
-# ON by default, but deliberately narrow: it only fires when a port worker is
-# actually running, so it can never kill a game nobody is proving against.
+# Unattended recovery from an oracle that is DOWN -- either because the game
+# is wedged (process alive, embedded oracle dead: the "Halt / Unrecoverable
+# internal error" shape a bad proof vector produces) or because the game is
+# not running at all.
+#
+# The dead-game case was added 2026-07-30 after it cost a night of fleet
+# throughput. Recovery used to be reachable ONLY through `game_wedged`, which
+# requires `running and not reachable` -- so a game that fully EXITED had no
+# unattended path back at all. Measured that evening: oracle down 94
+# consecutive polls (~70 min), `game_running: false`, `relaunch_stage: null`.
+# Zero attempts were ever made, because the one predicate that could have
+# started one is false by construction when the process is gone.
 AUTO_RECOVER = os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER", "1") == "1"
-# Poll cycles the oracle must stay down before we call it wedged rather than
-# briefly busy. At the default 45s poll that is ~2 minutes of hard evidence.
+# Poll cycles the oracle must stay down before we treat it as a real outage
+# rather than a briefly busy game. At the default 45s poll that is ~2 minutes
+# of hard evidence.
 AUTO_RECOVER_AFTER_DOWN = int(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_AFTER", "3"))
-# Floor between attempts, and a hard cap. A relaunch that keeps failing must not
-# become a kill/launch loop chewing the machine -- after the cap it stays down
-# and stays LOUD until a human looks.
+# Cooldown between attempts inside the opening burst.
 AUTO_RECOVER_COOLDOWN_SEC = float(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_COOLDOWN", "600"))
-AUTO_RECOVER_MAX_ATTEMPTS = int(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_MAX", "3"))
+# Size of the fast burst. This USED to be a permanent give-up cap: after 3
+# failures the monitor stopped forever and waited for a human. That is the
+# right call for an attended session and the wrong one for the overnight
+# fleet it exists to protect -- a stall at 2am cost the whole night.
+#
+# It is now the burst size only. Attempts 1..N run at the flat cooldown
+# above; past that the interval doubles to AUTO_RECOVER_MAX_COOLDOWN_SEC and
+# retries continue INDEFINITELY. Never a tight loop (a permanently broken
+# launcher settles at 2 attempts/hour), never a permanent stall. Crossing out
+# of the burst flips `recovery_degraded`, which is what raises the banner and
+# fires the desktop notification -- so "we gave up" became "we are still
+# trying, slowly, and you have been told".
+AUTO_RECOVER_BURST = int(os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_MAX", "3"))
+AUTO_RECOVER_MAX_COOLDOWN_SEC = float(
+    os.environ.get("FUNDOC_ORACLE_AUTO_RECOVER_MAX_COOLDOWN", "1800")
+)
+# Backwards-compatible alias: this name is referenced by older scripts and by
+# the operator docs. It means "burst size" now, not "hard cap".
+AUTO_RECOVER_MAX_ATTEMPTS = AUTO_RECOVER_BURST
+
+# How many consecutive polls of zero gameplay traffic before the game counts as
+# parked at a menu. Two (~90s at the default cadence) rides out a legitimately
+# quiet stretch -- an act transition, a long load -- without letting a genuinely
+# stranded game sit. Loading screens still accrue dispatcher hits, so the quiet
+# window this has to survive is short.
+IDLE_AFTER_POLLS = int(os.environ.get("FUNDOC_ORACLE_IDLE_AFTER", "2"))
+# Floor between two enter-game attempts. Entering a world takes real time; the
+# cooldown stops a slow load from being read as failure and re-nudged into a
+# navigation loop.
+ENTER_GAME_COOLDOWN_SEC = float(os.environ.get("FUNDOC_ORACLE_ENTER_GAME_COOLDOWN", "300"))
 
 # Live-confirmed 2026-07-27: after killing a wedged worker subprocess with no
 # oracle, `os.environ` gating recovered the worker on the very next candidate.
@@ -72,7 +115,7 @@ def is_game_running() -> bool:
     try:
         out = subprocess.run(
             ["tasklist", "/FI", f"IMAGENAME eq {GAME_PROCESS_NAME}", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
         )
         return GAME_PROCESS_NAME.lower() in out.stdout.lower()
     except Exception:
@@ -136,6 +179,7 @@ def kill_game(timeout: float = 20.0, allow_elevate: bool = True) -> bool:
     the first taskkill succeeds outright."""
     try:
         proc = subprocess.run(["taskkill", "/F", "/T", "/IM", GAME_PROCESS_NAME],
+                              creationflags=_NO_WINDOW,
                               capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return False
@@ -223,6 +267,29 @@ class OracleHealthMonitor:
             # close the corpse first) and because it is the state that silently
             # starves every port worker of live candidates.
             "game_wedged": False,
+            # DEAD: oracle down and the process is gone entirely. Recovery is
+            # a plain launch (no corpse to close first). Tracked separately
+            # from `game_wedged` because for 3 days only the wedged branch
+            # could reach auto-recovery and this state silently could not.
+            "game_dead": False,
+            # IDLE: oracle reachable, process alive -- and the game parked at the
+            # title/character-select screen with no world loaded. Every liveness
+            # signal reads HEALTHY here, which is exactly the problem: proving
+            # needs a world, so six workers sit with nothing to prove against
+            # while the banner shows green. Observed 2026-07-31 after a deploy
+            # restart: the game came back to the main menu and stayed there,
+            # because recovery only ever fired on "oracle stopped answering".
+            "game_idle": False,
+            "consecutive_idle": 0,
+            # True once the opening burst is spent and we have dropped into
+            # slow-retry. This is the "a human should look" line: recovery is
+            # still running, but it is no longer keeping up on its own.
+            "recovery_degraded": False,
+            "recover_attempts": 0,
+            # Seconds until the next attempt is allowed, or None when no
+            # recovery is pending. Rendered in the banner so the wait is a
+            # visible countdown rather than an apparently-hung dashboard.
+            "next_retry_in": None,
             # Surfaced so the dashboard can show "auto-recovery will need a UAC
             # click" instead of silently promising self-healing it can't do.
             "elevated": is_elevated(),
@@ -236,6 +303,13 @@ class OracleHealthMonitor:
         self._auto_recover_needed = auto_recover_needed
         self._auto_recover_attempts = 0
         self._last_auto_recover_at = None
+        # Total dispatcher hits at the previous poll. Comparing ACROSS polls is
+        # both free and a wider window than sampling inline would give, and
+        # gameplay traffic is the only reliable in-world test -- /status's
+        # charSelectReady reads False at the title screen AND in-world alike
+        # (LOOP_PLAYBOOK.md), so it cannot tell "not there yet" from "playing".
+        self._prev_hits_total = None
+        self._last_enter_game_at = None
 
     # ---- lifecycle -------------------------------------------------------
     def start(self):
@@ -303,6 +377,7 @@ class OracleHealthMonitor:
         at worker-start) as well as from the background loop."""
         reachable = check_oracle_alive()
         running = is_game_running()
+        hits_total = self._gameplay_hits_total() if (reachable and running) else None
         with self._lock:
             prev_reachable = self._state["reachable"]
             self._state["reachable"] = reachable
@@ -311,12 +386,41 @@ class OracleHealthMonitor:
             self._state["consecutive_down"] = (
                 0 if reachable else self._state["consecutive_down"] + 1
             )
+            # A sustained down-streak separates a real outage from one slow
+            # poll. Both shapes below need recovery; they differ only in
+            # whether there is a corpse to close first.
+            sustained = self._state["consecutive_down"] >= AUTO_RECOVER_AFTER_DOWN
             # Game up + oracle down = the embedded oracle died without taking
-            # the process with it. Requiring a sustained down-streak keeps a
-            # single slow poll from being mistaken for a crash.
-            self._state["game_wedged"] = bool(
-                running and not reachable
-                and self._state["consecutive_down"] >= AUTO_RECOVER_AFTER_DOWN
+            # the process with it.
+            self._state["game_wedged"] = bool(running and not reachable and sustained)
+            # Game gone + oracle down = nothing to kill, just launch. This is
+            # the branch that had no recovery path until 2026-07-30.
+            self._state["game_dead"] = bool(not running and not reachable and sustained)
+            self._state["next_retry_in"] = self._seconds_until_next_attempt() if (
+                not reachable and sustained
+            ) else None
+
+            # A healthy oracle in front of a game that is not actually PLAYING.
+            # Compared against the previous poll, so no inline sleep is needed;
+            # `None` on either side means "no usable sample" and never counts as
+            # idle, which keeps a failed /dispatchers read from manufacturing a
+            # phantom recovery.
+            idle_now = False
+            if hits_total is not None and self._prev_hits_total is not None:
+                idle_now = hits_total <= self._prev_hits_total
+            if hits_total is not None:
+                self._prev_hits_total = hits_total
+            elif not reachable:
+                # Drop the baseline across an outage: comparing a pre-outage
+                # total against a post-relaunch one (counters reset to zero)
+                # would read the fresh game as idle forever.
+                self._prev_hits_total = None
+            self._state["consecutive_idle"] = (
+                self._state["consecutive_idle"] + 1 if idle_now else 0
+            )
+            self._state["game_idle"] = bool(
+                reachable and running
+                and self._state["consecutive_idle"] >= IDLE_AFTER_POLLS
             )
             # Clear a STALE relaunch failure once the oracle is actually back
             # (2026-07-30). relaunch_stage/relaunch_error are written only by
@@ -345,9 +449,24 @@ class OracleHealthMonitor:
         if reachable:
             os.environ["FUNDOC_LIVE_PROVE"] = "1"
             os.environ["FUNDOC_SHADOW_PROMOTE"] = "1"
+            # A reachable oracle re-arms the burst. Without this, three
+            # failures spread across an entire day would leave the monitor
+            # permanently in slow-retry even though every outage since had
+            # recovered on the first try.
+            if self._auto_recover_attempts or self._state.get("recovery_degraded"):
+                with self._lock:
+                    self._state["recovery_degraded"] = False
+                    self._state["recover_attempts"] = 0
+                self._auto_recover_attempts = 0
+                self._last_auto_recover_at = None
         else:
             os.environ.pop("FUNDOC_LIVE_PROVE", None)
             os.environ.pop("FUNDOC_SHADOW_PROMOTE", None)
+
+        # Edge-triggered desktop notification. Level-triggered would re-toast
+        # every 45s poll for the whole outage, which trains you to dismiss
+        # them unread -- the same end state as sending nothing.
+        self._notify_health_transition(reachable, running, snapshot)
 
         if changed:
             try:
@@ -360,11 +479,160 @@ class OracleHealthMonitor:
             # keeps rendering until some other change happens to emit.
             self._emit_relaunch_progress(snapshot)
         self._emit_health(snapshot)
-        if snapshot["game_wedged"]:
+        # Recover on EITHER shape. Gating this on `game_wedged` alone is the
+        # bug that let a dead game sit for 70 minutes with zero attempts.
+        if snapshot["game_wedged"] or snapshot["game_dead"]:
             self._maybe_auto_recover(snapshot)
+        elif snapshot["game_idle"]:
+            # Deliberately NOT a relaunch: the process is fine, it just needs
+            # navigating into a world. Killing a healthy game to fix a menu
+            # would throw away a working oracle and every restored shadow mode.
+            self._maybe_enter_game(snapshot)
         return snapshot
 
+    def _gameplay_hits_total(self):
+        """Sum of dispatcher hit counters, or None if unreadable.
+
+        Gameplay traffic is the ONLY reliable in-world signal (see
+        `_prev_hits_total`). Returning None rather than 0 on a failed read
+        matters: 0 would look like a perfectly idle game and trigger recovery
+        on what is really just a dropped HTTP call.
+        """
+        try:
+            resp = _oracle_get("/dispatchers")
+        except Exception:
+            return None
+        if not isinstance(resp, dict):
+            return None
+        ds = resp.get("dispatchers") or []
+        if not isinstance(ds, list) or not ds:
+            return None
+        try:
+            return sum(int(d.get("hits", 0)) for d in ds if isinstance(d, dict))
+        except Exception:
+            return None
+
+    def _gameplay_started(self, timeout):
+        """Did gameplay traffic actually start within `timeout` seconds?
+
+        Polls rather than sleeping the whole budget so a fast load returns fast.
+        """
+        base = self._gameplay_hits_total()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(3.0)
+            now = self._gameplay_hits_total()
+            if base is None:
+                base = now
+                continue
+            if now is not None and now > base:
+                return True
+        return False
+
+    def _maybe_enter_game(self, snapshot):
+        """Navigate a parked game back into a world, at most once per cooldown."""
+        if not self._auto_recover:
+            return
+        if snapshot.get("relaunching"):
+            return
+        # Same courtesy as auto-recovery: don't drive a game nobody is waiting
+        # on. An operator poking around at the menu is not a fault to correct.
+        if self._auto_recover_needed is not None:
+            try:
+                if not self._auto_recover_needed():
+                    return
+            except Exception:
+                return
+        now = time.monotonic()
+        if (self._last_enter_game_at is not None
+                and now - self._last_enter_game_at < ENTER_GAME_COOLDOWN_SEC):
+            return
+        self._last_enter_game_at = now
+
+        self._log_event("oracle_game_idle_enter_game",
+                        consecutive_idle=snapshot.get("consecutive_idle"))
+        try:
+            import notify
+            notify.notify("fun-doc", "Game was parked at a menu -- entering a world")
+        except Exception:
+            pass
+
+        self._set_relaunch(True, "game idle at menu, entering a world", None)
+        try:
+            result = self._navigate_and_load_character(self.character, 120.0)
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+        if isinstance(result, dict) and result.get("ok") is not False:
+            # Verify by OUTCOME. /action/* reports that the CALL succeeded, not
+            # that the game moved, and both exit actions have been observed
+            # returning ok:true while nothing changed (dispatch_control.py).
+            # Without this, a no-op nav would clear the idle state and the next
+            # real check would be a full cooldown away.
+            if not self._gameplay_started(20.0):
+                result = {"ok": False,
+                          "error": "load-character reported ok but no gameplay traffic followed"}
+        if isinstance(result, dict) and result.get("ok") is False:
+            # Non-fatal and LOUD: the next poll retries after the cooldown, but
+            # a silent failure here is indistinguishable from a healthy game.
+            err = result.get("error", "enter-game failed")
+            print(f"[oracle_health] enter-game failed: {err}", flush=True)
+            self._set_relaunch(False, "failed", err)
+            self._log_event("oracle_game_idle_enter_game_failed", error=str(err))
+            return
+        with self._lock:
+            self._state["consecutive_idle"] = 0
+            self._state["game_idle"] = False
+        self._prev_hits_total = None      # counters move on from here; rebaseline
+        self._set_relaunch(False, "ready", None)
+        self._log_event("oracle_game_idle_enter_game_ok")
+
+    def _notify_health_transition(self, reachable, running, snapshot):
+        """Desktop toast on oracle down/up, at most once per state change."""
+        try:
+            import notify
+            if reachable:
+                notify.notify_transition(
+                    "oracle", "up", "fun-doc: oracle recovered",
+                    "D2Debugger :8790 is answering again -- live-prove resumed.",
+                )
+            elif snapshot["consecutive_down"] >= AUTO_RECOVER_AFTER_DOWN:
+                shape = ("Game.exe is wedged (process alive, oracle dead)"
+                         if running else "Game.exe is not running")
+                notify.notify_transition(
+                    "oracle", "down", "fun-doc: oracle DOWN",
+                    f"{shape}. Live-prove and shadow-promote are paused; "
+                    "auto-recovery is attempting a relaunch.",
+                )
+        except Exception:
+            pass
+
     # ---- unattended recovery -------------------------------------------------------
+    def _cooldown_for_attempt(self, attempts_so_far: int) -> float:
+        """Seconds to wait before attempt number `attempts_so_far + 1`.
+
+        Flat for the opening burst, then doubling to a hard ceiling. The
+        ceiling is what makes indefinite retry safe: a launcher that is
+        permanently broken settles at one attempt per AUTO_RECOVER_MAX_COOLDOWN
+        (2/hour by default) instead of hammering the machine, while a
+        transient failure at 2am still self-heals on its own.
+        """
+        if attempts_so_far < AUTO_RECOVER_BURST:
+            return AUTO_RECOVER_COOLDOWN_SEC
+        over = attempts_so_far - AUTO_RECOVER_BURST + 1
+        # Guard the shift: `2 ** over` with a large `over` is an arbitrarily
+        # big int, and min() on it is wasted work. Cap the exponent well
+        # before that matters.
+        backoff = AUTO_RECOVER_COOLDOWN_SEC * (2 ** min(over, 16))
+        return min(backoff, AUTO_RECOVER_MAX_COOLDOWN_SEC)
+
+    def _seconds_until_next_attempt(self):
+        """Countdown to the next permitted attempt, or None if one may run now."""
+        if self._last_auto_recover_at is None:
+            return None
+        cooldown = self._cooldown_for_attempt(self._auto_recover_attempts)
+        remaining = cooldown - (time.monotonic() - self._last_auto_recover_at)
+        return int(remaining) if remaining > 0 else None
+
     def _auto_recover_blocked_reason(self, snapshot):
         """Why auto-recovery will NOT fire, or None when it should. Split out so
         the reason can be logged -- a recovery that silently declines is
@@ -373,13 +641,13 @@ class OracleHealthMonitor:
             return "disabled (FUNDOC_ORACLE_AUTO_RECOVER=0)"
         if snapshot.get("relaunching"):
             return "a relaunch is already in progress"
-        if self._auto_recover_attempts >= AUTO_RECOVER_MAX_ATTEMPTS:
-            return (f"gave up after {self._auto_recover_attempts} attempt(s) -- "
-                    "recover by hand and check the launcher")
+        # NOTE: no permanent give-up. Past the burst we slow down; we do not
+        # stop. See AUTO_RECOVER_BURST for why.
         if self._last_auto_recover_at is not None:
+            cooldown = self._cooldown_for_attempt(self._auto_recover_attempts)
             waited = time.monotonic() - self._last_auto_recover_at
-            if waited < AUTO_RECOVER_COOLDOWN_SEC:
-                return f"cooling down ({int(AUTO_RECOVER_COOLDOWN_SEC - waited)}s left)"
+            if waited < cooldown:
+                return f"cooling down ({int(cooldown - waited)}s left)"
         # No predicate -> we cannot know that anything wants the oracle, and
         # "kill the game on a hunch" is not a safe default. The dashboard always
         # supplies one; a bare monitor (scripts, tests) deliberately never
@@ -401,24 +669,61 @@ class OracleHealthMonitor:
         into `oracle_unavailable` and exit `exhausted`, and the only symptom is
         that real proofs quietly stop appearing (the same shape as the 2026-07-27
         incident this module was written for)."""
+        # The two shapes need different words -- "WEDGED" printed over a game
+        # that simply exited sends you looking for a Halt dialog that was
+        # never there.
+        shape = ("game WEDGED (process up, oracle dead)" if snapshot.get("game_wedged")
+                 else "game NOT RUNNING (oracle down, no process)")
         reason = self._auto_recover_blocked_reason(snapshot)
         if reason is not None:
-            print(f"  [oracle] game WEDGED (process up, oracle dead) -- "
-                  f"auto-recovery declined: {reason}", flush=True)
-            self._log_event("oracle_auto_recover_declined", reason=reason)
+            print(f"  [oracle] {shape} -- auto-recovery declined: {reason}", flush=True)
+            self._log_event("oracle_auto_recover_declined", reason=reason, shape=shape)
             return
         self._auto_recover_attempts += 1
         self._last_auto_recover_at = time.monotonic()
         attempt = self._auto_recover_attempts
-        print(f"  [oracle] game WEDGED (process up, oracle dead) -- auto-recovering "
-              f"(attempt {attempt}/{AUTO_RECOVER_MAX_ATTEMPTS})", flush=True)
-        self._log_event("oracle_auto_recover_started", attempt=attempt)
+        degraded = attempt > AUTO_RECOVER_BURST
+        with self._lock:
+            self._state["recover_attempts"] = attempt
+        phase = (f"attempt {attempt}, slow-retry every "
+                 f"{int(self._cooldown_for_attempt(attempt))}s" if degraded
+                 else f"attempt {attempt}/{AUTO_RECOVER_BURST}")
+        print(f"  [oracle] {shape} -- auto-recovering ({phase})", flush=True)
+        self._log_event("oracle_auto_recover_started", attempt=attempt, shape=shape,
+                        degraded=degraded)
+        # force=True is safe for both shapes: relaunch() only reaches its kill
+        # branch when is_game_running(), so a dead game goes straight to launch.
         result = self.relaunch(force=True)
         if result.get("ok"):
             self._auto_recover_attempts = 0
+            self._last_auto_recover_at = None
+            with self._lock:
+                self._state["recovery_degraded"] = False
+                self._state["recover_attempts"] = 0
             print("  [oracle] auto-recovery succeeded -- live-prove is back", flush=True)
         else:
             print(f"  [oracle] auto-recovery FAILED: {result.get('error')}", flush=True)
+            # Crossing out of the burst is the moment this stops being
+            # self-healing and starts being a thing a human should look at.
+            if attempt >= AUTO_RECOVER_BURST:
+                with self._lock:
+                    already = self._state.get("recovery_degraded")
+                    self._state["recovery_degraded"] = True
+                if not already:
+                    self._log_event("oracle_recovery_degraded", attempt=attempt,
+                                    error=result.get("error"))
+                    try:
+                        import notify
+                        notify.notify_transition(
+                            "oracle_recovery", "degraded",
+                            "fun-doc: oracle recovery is failing",
+                            f"{attempt} relaunch attempts failed "
+                            f"({result.get('error') or 'unknown error'}). Still retrying "
+                            f"every {int(AUTO_RECOVER_MAX_COOLDOWN_SEC / 60)} min -- "
+                            "check the launcher.",
+                        )
+                    except Exception:
+                        pass
         self._log_event("oracle_auto_recover_result", attempt=attempt,
                         ok=bool(result.get("ok")), error=result.get("error"))
 
@@ -445,12 +750,46 @@ class OracleHealthMonitor:
     def _launch_game(self):
         if not os.path.exists(self.launch_bat):
             return f"launcher script not found: {self.launch_bat}"
+        # Enforce the window geometry BEFORE launch: ddraw.ini is read at
+        # startup, and cnc-ddraw rewrites it on exit (savesettings=1), so
+        # writing it here is what makes the setting durable. Best-effort --
+        # a layout problem must never block a recovery launch.
         try:
-            # `start` opens its own window for the .bat regardless of how
-            # this wrapping cmd is spawned -- needed so the .bat's UAC
-            # self-elevation prompt actually surfaces on the interactive
-            # desktop instead of being tied to a hidden/background handle.
-            subprocess.Popen(["cmd", "/c", "start", "", self.launch_bat])
+            import game_window
+            r = game_window.apply_ddraw_ini()
+            if r.get("error"):
+                print(f"  [game-window] ddraw.ini not applied: {r['error']}",
+                      flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [game-window] ddraw.ini step skipped: {e}", flush=True)
+        try:
+            if is_elevated():
+                # ALREADY ELEVATED -> run the .bat directly, windowless.
+                #
+                # `start` exists only to give the .bat a window on the
+                # interactive desktop so its UAC self-elevation prompt can
+                # surface. When we are already elevated the .bat's `net
+                # session` check passes and it never elevates, so that window
+                # buys nothing -- and it LINGERS: LaunchPD2-Oracle.bat ends
+                # with `endlocal` and no `exit`, so the console it ran in sits
+                # at a prompt forever. Two such "Administrator:" windows were
+                # found on the desktop 2026-07-31, one per auto-recovery, each
+                # with a dead parent and nothing but conhost inside.
+                #
+                # The game still gets its own window: the .bat launches it via
+                # its own `start "" "%LAUNCHER%"`.
+                subprocess.Popen(["cmd", "/c", self.launch_bat],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,
+                                 stdin=subprocess.DEVNULL,
+                                 creationflags=_NO_WINDOW)
+            else:
+                # NOT elevated -> the .bat must self-elevate, and its UAC
+                # prompt has to be reachable. Keep `start`'s real window; a
+                # hidden console here means an invisible consent dialog and a
+                # launch that appears to hang.
+                subprocess.Popen(["cmd", "/c", "start", "", self.launch_bat],
+                                 creationflags=_NO_WINDOW)
         except Exception as e:
             return f"failed to spawn launcher: {e}"
         return None
@@ -572,6 +911,19 @@ class OracleHealthMonitor:
                 self._set_relaunch(False, "failed", err)
                 self._log_result(False, err, character)
                 return {"ok": False, "error": err}
+
+            # Windows exist by now (the oracle answering means the game is up),
+            # so enforce the layout. ddraw.ini is only advisory -- it is read at
+            # startup by the renderer and says nothing about the D2Debugger
+            # window -- so this is what actually guarantees the result.
+            # Best-effort: a layout failure must never fail a recovery.
+            try:
+                import game_window
+                lay = game_window.apply_layout()
+                if lay.get("game") or lay.get("debugger"):
+                    print(f"  [game-window] layout applied: {lay}", flush=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"  [game-window] layout skipped: {e}", flush=True)
 
             self._set_relaunch(True, "oracle up, entering single-player", None)
             nav = self._navigate_and_load_character(character, timeout_menu)

@@ -25,19 +25,59 @@
 .PARAMETER Foreground
     Run in this window instead of detaching. Useful for debugging startup.
 
+.PARAMETER WaitForPid
+    Wait for this process to exit (and for the port to free) before starting.
+
+    Used by the dashboard's own /api/admin/restart: the RUNNING dashboard is
+    already elevated, so it spawns this script as a child -- which inherits
+    elevation and therefore needs NO UAC PROMPT -- and then exits. This script
+    waits for it to go, then binds the port.
+
+    That is the whole point: UAC is only involved when a NON-elevated process
+    tries to touch an elevated one. Restarting from inside the elevated
+    dashboard never crosses that boundary.
+
 .EXAMPLE
     ./fun-doc/start-dashboard.ps1
+
+.EXAMPLE
+    ./fun-doc/start-dashboard.ps1 -WaitForPid 12345
 #>
 [CmdletBinding()]
 param(
     [int]$Port = 5000,
-    [switch]$Foreground
+    [switch]$Foreground,
+    [int]$WaitForPid = 0
 )
 
 $ErrorActionPreference = 'Stop'
 $FunDoc = $PSScriptRoot
 $Python = Join-Path $FunDoc '.venv\Scripts\python.exe'
 $LogDir = Join-Path $FunDoc 'logs'
+
+# Boot logging is defined UP HERE, before the elevation check, and not after
+# it as it used to be.
+#
+# `trap` is active from parse time, for the whole script -- but the function it
+# calls only exists once execution reaches its definition. So any terminating
+# error raised BEFORE that point (most importantly a DECLINED UAC prompt, which
+# turns the catch's Write-Error into a terminating error under
+# $ErrorActionPreference='Stop') fired the trap, which then died on
+# "Write-Boot is not recognized". The operator saw a CommandNotFoundException
+# about an internal helper instead of "UAC was declined", and nothing was
+# written to the boot log at all -- the precise failure the boot log exists to
+# prevent. Observed 2026-07-31.
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+$BootLog = Join-Path $LogDir 'start-dashboard.log'
+function Write-Boot([string]$msg) {
+    "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))  $msg" |
+        Add-Content -Path $BootLog -Encoding utf8
+}
+trap {
+    Write-Boot "FATAL: $_"
+    Write-Boot $_.ScriptStackTrace
+    exit 1
+}
 
 function Test-Elevated {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -54,12 +94,19 @@ if (-not (Test-Elevated)) {
         '-Port', $Port
     )
     if ($Foreground) { $argList += '-Foreground' }
+    if ($WaitForPid) { $argList += @('-WaitForPid', $WaitForPid) }
     try {
-        Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs
+        # -WindowStyle Hidden: the elevated relaunch used to leave a console
+        # sitting on the desktop for the life of the script. Safe to hide now
+        # that boot logging is set up BEFORE the elevation check, so a failure
+        # still lands in logs/start-dashboard.log rather than vanishing with
+        # the window.
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs -WindowStyle Hidden
     } catch {
-        Write-Error ("UAC was declined or unavailable. The dashboard was NOT started. " +
-                     "Without elevation, recovery from a wedged game needs a manual " +
-                     "UAC click -- see fun-doc/oracle_health.py.")
+        Write-Boot "UAC declined or unavailable -- not started"
+        Write-Warning ("UAC was declined or unavailable. The dashboard was NOT started. " +
+                       "Without elevation, recovery from a wedged game needs a manual " +
+                       "UAC click -- see fun-doc/oracle_health.py.")
         exit 1
     }
     exit 0
@@ -70,18 +117,7 @@ if (-not (Test-Elevated)) {
 # silently is indistinguishable from one that never ran (learned the hard way:
 # the first run of this script died after the UAC prompt and took its own error
 # message with it when the window closed).
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
-$BootLog = Join-Path $LogDir 'start-dashboard.log'
-function Write-Boot([string]$msg) {
-    "$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))  $msg" |
-        Add-Content -Path $BootLog -Encoding utf8
-}
 Write-Boot "--- elevated start requested (port $Port) ---"
-trap {
-    Write-Boot "FATAL: $_"
-    Write-Boot $_.ScriptStackTrace
-    exit 1
-}
 
 # --- preflight ---------------------------------------------------------------
 if (-not (Test-Path $Python)) {
@@ -89,6 +125,22 @@ if (-not (Test-Path $Python)) {
     Write-Error "venv python not found: $Python  (run 'uv sync --group fun-doc' in fun-doc/)"
     exit 1
 }
+# --- restart hand-off: wait for the outgoing dashboard to release the port ---
+if ($WaitForPid -gt 0) {
+    Write-Boot "waiting for PID $WaitForPid to exit before binding port $Port"
+    for ($i = 0; $i -lt 120; $i++) {
+        $alive = Get-Process -Id $WaitForPid -ErrorAction SilentlyContinue
+        if (-not $alive) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    # The process can be gone a beat before Windows releases the listener.
+    for ($i = 0; $i -lt 60; $i++) {
+        if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    Write-Boot "handoff complete (PID $WaitForPid gone, port $Port free)"
+}
+
 # Refuse to double-launch. The dashboard has its own single-instance guard, but
 # a second process that loses the port race sits there half-alive and confusing;
 # better to say so here.
