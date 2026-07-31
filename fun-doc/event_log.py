@@ -38,7 +38,42 @@ from pathlib import Path
 
 from log_rotation import write_jsonl_rotating
 
-_EVENT_LOG_FILE = Path(__file__).parent / "logs" / "events.jsonl"
+def _default_event_log() -> Path:
+    import os
+
+    override = os.environ.get("FUNDOC_EVENT_LOG")
+    return Path(override) if override else Path(__file__).parent / "logs" / "events.jsonl"
+
+
+_EVENT_LOG_FILE = _default_event_log()
+
+
+def _event_log_path() -> Path:
+    """Where events.jsonl lives, resolved PER CALL.
+
+    Per call, not at import, so a test fixture can redirect it by patching
+    `_EVENT_LOG_FILE` -- the module is imported long before any conftest runs.
+
+    The module attribute is the single source of truth and the env var only
+    seeds its default. An earlier version checked the env var HERE, on every
+    call, which silently outranked tests that patch the attribute directly
+    (test_worker_watchdog does exactly that, then reads its own file back):
+    writes went to the conftest's path while the test read from its own, and
+    three passing tests started asserting on an empty list.
+
+    This exists because tests were writing to the PRODUCTION event log.
+    `test_oracle_recovery.py` drives a real OracleHealthMonitor whose
+    `_log_event` lands here, so a single suite run injected ~100
+    `oracle_auto_recover_started` records into fun-doc/logs/events.jsonl --
+    all stamped the same second, all with the fixture's fake "launcher failed"
+    error. That is not cosmetic:
+
+      * it corrupted a throughput measurement badly enough to look like a
+        runaway kill/relaunch loop against the live game (2026-07-31);
+      * the audit watcher consumes this file, so test noise can fire real
+        rules and burn their once-per-day cooldowns.
+    """
+    return _EVENT_LOG_FILE
 # Kept for backwards compatibility with anything still grabbing this lock
 # directly. Real serialization happens inside write_jsonl_rotating's
 # per-path RLock; this one is now effectively unused.
@@ -85,7 +120,7 @@ def log_event(event, **fields):
             pass
         return
 
-    ok = write_jsonl_rotating(_EVENT_LOG_FILE, line)
+    ok = write_jsonl_rotating(_event_log_path(), line)
     with _counter_lock:
         if ok:
             _counters["events_logged"] += 1
@@ -104,4 +139,4 @@ def get_counters():
 
 def get_log_file():
     """Path to the events JSONL file (for tail/monitor consumers)."""
-    return _EVENT_LOG_FILE
+    return _event_log_path()

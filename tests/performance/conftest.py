@@ -119,3 +119,37 @@ def _isolate_storage_repo(tmp_path, monkeypatch):
             fd._storage_repo = None
         fd._storage_repo_failed = False
     _safe_clean_state_db()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_event_log(tmp_path_factory, monkeypatch):
+    """Redirect fun-doc's events.jsonl to a temp file for EVERY test.
+
+    Tests were writing to the production log. `test_oracle_recovery.py` drives
+    a real OracleHealthMonitor, and its `_log_event` goes straight to
+    fun-doc/logs/events.jsonl -- one suite run injected ~100
+    `oracle_auto_recover_started` records, all stamped the same second, all
+    carrying the fixture's fake "launcher failed" error.
+
+    Two ways that bites, both observed 2026-07-31:
+      * it corrupted a live throughput measurement badly enough to look like a
+        runaway kill/relaunch loop against the running game;
+      * the audit watcher consumes this file, so test noise can fire real
+        rules and burn their once-per-day cooldowns.
+
+    Autouse and unconditional: opting in per-test is exactly the discipline
+    that fails silently, since nothing errors when a test writes to the real
+    log -- it just quietly pollutes it.
+
+    Patches the module ATTRIBUTE rather than setting FUNDOC_EVENT_LOG, because
+    tests that read their own events back (test_worker_watchdog) already
+    redirect `event_log._EVENT_LOG_FILE` themselves. An env var consulted on
+    every write silently outranked those: they wrote to this fixture's path and
+    read from their own, and three of them started asserting on an empty list.
+    Patching the same attribute makes the innermost redirect simply win.
+    """
+    import event_log
+
+    log = tmp_path_factory.mktemp("event_log") / "events.jsonl"
+    monkeypatch.setattr(event_log, "_EVENT_LOG_FILE", log)
+    yield log
