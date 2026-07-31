@@ -101,6 +101,11 @@ IDLE_AFTER_POLLS = int(os.environ.get("FUNDOC_ORACLE_IDLE_AFTER", "2"))
 # cooldown stops a slow load from being read as failure and re-nudged into a
 # navigation loop.
 ENTER_GAME_COOLDOWN_SEC = float(os.environ.get("FUNDOC_ORACLE_ENTER_GAME_COOLDOWN", "300"))
+# Consecutive polls with the game presenting ZERO frames before it counts as
+# hung. The render thread stopping is not an exception, so the in-process fault
+# observer never sees it -- /crash stayed null through every freeze measured on
+# 2026-07-31 while the game drew nothing for twenty minutes at a time.
+NOT_PRESENTING_AFTER_POLLS = int(os.environ.get("FUNDOC_ORACLE_FROZEN_AFTER", "2"))
 
 # Live-confirmed 2026-07-27: after killing a wedged worker subprocess with no
 # oracle, `os.environ` gating recovered the worker on the very next candidate.
@@ -203,6 +208,32 @@ def kill_game(timeout: float = 20.0, allow_elevate: bool = True) -> bool:
     return _wait_for_game_exit(max(timeout, 60.0))
 
 
+def _present_count():
+    """The game's frame counter (StretchBlt calls), or None if unreadable.
+
+    D2 presents through GDI's StretchBlt (~25-49/sec). This is the ONLY probe
+    that distinguishes a running game from a hung one: the oracle answers from
+    its own thread and keeps answering long after the render thread has stopped,
+    which is exactly why a frozen game read healthy on every other signal.
+
+    None, never 0, on a failed read -- 0 is indistinguishable from "hung" and
+    would turn a dropped HTTP call into a phantom fault.
+    """
+    try:
+        resp = _oracle_get("/capture/probe")
+    except Exception:
+        return None
+    if not isinstance(resp, dict):
+        return None
+    for api in resp.get("apis") or []:
+        if isinstance(api, dict) and api.get("api") == "StretchBlt":
+            try:
+                return int(api.get("calls"))
+            except Exception:
+                return None
+    return None
+
+
 def _fetch_crash(consume: bool = True):
     """The D2Debugger fault observer's latest record, or None.
 
@@ -303,6 +334,15 @@ class OracleHealthMonitor:
             # because recovery only ever fired on "oracle stopped answering".
             "game_idle": False,
             "consecutive_idle": 0,
+            # FROZEN: oracle answering, process alive, and the game drawing
+            # NOTHING. Distinct from IDLE (parked at a menu, which still
+            # presents) and from WEDGED (oracle gone). Measured 2026-07-31: two
+            # fresh launches in a row came up alive, answering and blank, and
+            # every existing probe called them healthy -- including the fault
+            # observer, because a stalled render thread raises no exception.
+            "game_frozen": False,
+            "consecutive_not_presenting": 0,
+            "present_rate": None,
             # True once the opening burst is spent and we have dropped into
             # slow-retry. This is the "a human should look" line: recovery is
             # still running, but it is no longer keeping up on its own.
@@ -332,6 +372,11 @@ class OracleHealthMonitor:
         # (LOOP_PLAYBOOK.md), so it cannot tell "not there yet" from "playing".
         self._prev_hits_total = None
         self._last_enter_game_at = None
+        self._prev_present = None
+        self._prev_present_at = None
+        # Edge-triggered: level-triggered would re-toast every poll for the
+        # whole freeze, which trains you to ignore it.
+        self._reported_frozen = False
 
     # ---- lifecycle -------------------------------------------------------
     def start(self):
@@ -400,6 +445,7 @@ class OracleHealthMonitor:
         reachable = check_oracle_alive()
         running = is_game_running()
         hits_total = self._gameplay_hits_total() if (reachable and running) else None
+        present = _present_count() if (reachable and running) else None
         with self._lock:
             prev_reachable = self._state["reachable"]
             self._state["reachable"] = reachable
@@ -444,6 +490,28 @@ class OracleHealthMonitor:
                 reachable and running
                 and self._state["consecutive_idle"] >= IDLE_AFTER_POLLS
             )
+
+            # Frames drawn since the previous poll. Same None-discipline as the
+            # dispatcher sample: an unreadable probe is not evidence of a hang.
+            stalled = False
+            now_mono = time.monotonic()
+            if present is not None and self._prev_present is not None:
+                elapsed = max(0.001, now_mono - (self._prev_present_at or now_mono))
+                self._state["present_rate"] = round((present - self._prev_present) / elapsed, 1)
+                stalled = present <= self._prev_present
+            if present is not None:
+                self._prev_present = present
+                self._prev_present_at = now_mono
+            elif not reachable:
+                self._prev_present = None      # rebaseline across an outage
+                self._state["present_rate"] = None
+            self._state["consecutive_not_presenting"] = (
+                self._state["consecutive_not_presenting"] + 1 if stalled else 0
+            )
+            self._state["game_frozen"] = bool(
+                reachable and running
+                and self._state["consecutive_not_presenting"] >= NOT_PRESENTING_AFTER_POLLS
+            )
             # Clear a STALE relaunch failure once the oracle is actually back
             # (2026-07-30). relaunch_stage/relaunch_error are written only by
             # _set_relaunch, i.e. only while THIS class is driving a relaunch --
@@ -468,7 +536,7 @@ class OracleHealthMonitor:
             changed = prev_reachable != reachable
             snapshot = dict(self._state)
 
-        if reachable:
+        if reachable and not self._state.get("game_frozen"):
             os.environ["FUNDOC_LIVE_PROVE"] = "1"
             os.environ["FUNDOC_SHADOW_PROMOTE"] = "1"
             # A reachable oracle re-arms the burst. Without this, three
@@ -512,7 +580,29 @@ class OracleHealthMonitor:
         self._emit_health(snapshot)
         # Recover on EITHER shape. Gating this on `game_wedged` alone is the
         # bug that let a dead game sit for 70 minutes with zero attempts.
+        if snapshot["game_frozen"] and not self._reported_frozen:
+            self._reported_frozen = True
+            print("[oracle_health] GAME FROZEN: oracle answering but 0 frames "
+                  f"drawn over {snapshot['consecutive_not_presenting']} polls", flush=True)
+            self._log_event("game_frozen",
+                            polls=snapshot.get("consecutive_not_presenting"))
+            try:
+                import notify
+                notify.notify("D2 frozen", "The game is running but drawing nothing.")
+            except Exception:
+                pass
+        elif not snapshot["game_frozen"]:
+            self._reported_frozen = False
+
         if snapshot["game_wedged"] or snapshot["game_dead"]:
+            self._maybe_auto_recover(snapshot)
+        elif snapshot["game_frozen"]:
+            # Treated exactly like WEDGED: the process must be force-closed.
+            # A frozen game cannot be asked to exit -- the menu pump runs on the
+            # stalled thread -- so a graceful request just times out, and
+            # navigation (the IDLE cure) is hopeless against a game that draws
+            # nothing. Observed looping fruitlessly for 20 minutes before this
+            # state was distinguished at all.
             self._maybe_auto_recover(snapshot)
         elif snapshot["game_idle"]:
             # Deliberately NOT a relaunch: the process is fine, it just needs
