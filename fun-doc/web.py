@@ -4614,6 +4614,30 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         """
         return jsonify(worker_mgr.get_health_summary())
 
+    @app.route("/api/oracle/kill", methods=["POST"])
+    def post_oracle_kill():
+        """Close Game.exe and do NOT relaunch it.
+
+        The game runs elevated, so an ordinary shell cannot kill it -- and a
+        frozen one cannot be asked to exit gracefully either, which leaves it
+        holding D2Debugger.dll and blocking the very deploy that would fix it.
+        This dashboard is already elevated, so it can do it without a UAC
+        prompt; `relaunch` was the only existing route and it always brings the
+        game straight back up, re-locking the DLL.
+
+        Requires {"confirm": true} -- it terminates a running game.
+        """
+        data = request.get_json(silent=True) or {}
+        if not data.get("confirm"):
+            return jsonify({"ok": False,
+                            "error": 'refused: send {"confirm": true} -- this CLOSES the game'}), 400
+        from oracle_health import kill_game, is_game_running
+        if not is_game_running():
+            return jsonify({"ok": True, "killed": False, "detail": "no game running"})
+        killed = kill_game(allow_elevate=True)
+        return jsonify({"ok": bool(killed), "killed": bool(killed),
+                        "still_running": is_game_running()})
+
     @app.route("/api/oracle/relaunch", methods=["POST"])
     def post_oracle_relaunch():
         # {"force": true} closes a wedged Game.exe first. Opt-in per call: the
