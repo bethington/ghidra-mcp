@@ -813,3 +813,52 @@ def test_kill_game_can_refuse_to_elevate(monkeypatch):
 
     assert oracle_health.kill_game(timeout=0.5, allow_elevate=False) is False
     assert shell == []
+
+
+# -- elevation reporting ---------------------------------------------------
+#
+# PD2 self-elevates, so a normal-integrity dashboard cannot taskkill a wedged
+# game and "unattended" recovery silently degrades to waiting on a UAC click.
+# Whether we are elevated is therefore load-bearing operational state, not
+# decoration -- it must be readable rather than assumed.
+
+
+def test_health_state_reports_elevation(monkeypatch, clean_gate_env):
+    import oracle_health
+
+    monkeypatch.setattr(oracle_health, "check_oracle_alive", lambda: True)
+    monkeypatch.setattr(oracle_health, "is_game_running", lambda: True)
+    mon = _make_monitor()
+
+    assert "elevated" in mon.get_state()
+    assert mon.check_once()["elevated"] in (True, False)
+
+
+def test_is_elevated_is_false_when_the_api_is_unavailable(monkeypatch):
+    """Never raise out of a health check -- a probe that explodes is worse than
+    one that answers 'no'."""
+    import oracle_health
+
+    class _Boom:
+        @property
+        def shell32(self):
+            raise OSError("no shell32 here")
+
+    monkeypatch.setattr(oracle_health.ctypes, "windll", _Boom(), raising=False)
+
+    assert oracle_health.is_elevated() is False
+
+
+def test_is_elevated_reflects_the_win32_answer(monkeypatch):
+    import oracle_health
+
+    for raw, expected in ((1, True), (0, False)):
+        class _Shell:
+            def IsUserAnAdmin(self_inner):
+                return raw
+
+        class _Windll:
+            shell32 = _Shell()
+
+        monkeypatch.setattr(oracle_health.ctypes, "windll", _Windll(), raising=False)
+        assert oracle_health.is_elevated() is expected

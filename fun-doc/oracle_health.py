@@ -94,6 +94,20 @@ def _oracle_post(path: str, body: dict, timeout: float = 15.0):
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def is_elevated() -> bool:
+    """Whether this process runs with an elevated token.
+
+    Load-bearing, not cosmetic: PD2 self-elevates, so a normal-integrity
+    dashboard cannot taskkill a wedged game and unattended recovery degrades to
+    "pop a UAC prompt and hope somebody is sitting there". Reported at startup
+    and in /api/oracle/status so the answer to "will this self-heal?" is a fact
+    you can read, not an assumption."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def _wait_for_game_exit(timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -209,6 +223,9 @@ class OracleHealthMonitor:
             # close the corpse first) and because it is the state that silently
             # starves every port worker of live candidates.
             "game_wedged": False,
+            # Surfaced so the dashboard can show "auto-recovery will need a UAC
+            # click" instead of silently promising self-healing it can't do.
+            "elevated": is_elevated(),
         }
         self._stop = threading.Event()
         self._thread = None
@@ -224,6 +241,19 @@ class OracleHealthMonitor:
     def start(self):
         if self._thread and self._thread.is_alive():
             return
+        # Say up front whether unattended recovery can actually complete. A
+        # non-elevated dashboard CANNOT kill a wedged (elevated) PD2, so the
+        # auto-recovery it advertises will stall on a UAC prompt -- far better
+        # to announce that at boot than to discover it mid-incident.
+        if self._auto_recover:
+            if is_elevated():
+                print("  [oracle] auto-recovery armed (dashboard is elevated)", flush=True)
+            else:
+                print("  [oracle] auto-recovery armed but the dashboard is NOT "
+                      "elevated -- PD2 self-elevates, so closing a wedged game "
+                      "will need a UAC prompt. Start via "
+                      "fun-doc/start-dashboard.ps1 for unattended recovery.",
+                      flush=True)
         self._stop.clear()
         self.check_once()  # synchronous first check -- no stale-gate window
         self._thread = threading.Thread(
