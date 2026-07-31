@@ -558,3 +558,80 @@ def test_count_runs_filters(storage_repo):
     assert repo.count_runs(provider="claude") == 1
     assert repo.count_runs(provider="gemini") == 1
     assert repo.count_runs(program_path="/nope/missing.dll") == 0
+
+
+# ---------------------------------------------------------------------------
+# Pending PORT candidates
+#
+# Backs the oracle monitor's need-predicate ("does anything actually want the
+# live oracle right now?"). Gating that on a LIVE worker alone deadlocks: a
+# dead oracle makes port workers exit, and once the last one is gone the
+# predicate goes false and recovery refuses forever. Measured 2026-07-30 --
+# 70 minutes down, zero recovery attempts, 53,188 candidates still queued.
+# ---------------------------------------------------------------------------
+
+_TERMINAL = ("proven_live", "harness_failed", "stateful_skip")
+
+
+def test_pending_port_counts_null_status(storage_repo):
+    """NULL means never attempted, and NOT IN never matches NULL in SQL -- so
+    without an explicit null check a brand-new binary reads as "no work"."""
+    repo = storage_repo
+    repo.upsert_function(_sample_function())
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=100) == 1
+
+
+def test_pending_port_excludes_terminal_statuses(storage_repo):
+    repo = storage_repo
+    repo.upsert_function(_sample_function(addr="00400000"))
+    repo.upsert_function(_sample_function(addr="00400010"))
+    repo.update_function_fields("/test/foo.dll", "00400000", port_status="proven_live")
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=100) == 1
+
+
+def test_pending_port_includes_non_terminal_statuses(storage_repo):
+    """`oracle_unavailable` is deliberately non-terminal: it is a verdict
+    about the ORACLE, not the function, and is re-admitted the moment
+    FUNDOC_LIVE_PROVE flips back on. It must still count as pending work --
+    it is precisely the work waiting on the oracle we want to recover."""
+    repo = storage_repo
+    repo.upsert_function(_sample_function())
+    repo.update_function_fields("/test/foo.dll", "00400000",
+                                port_status="oracle_unavailable")
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=100) == 1
+
+
+def test_pending_port_all_terminal_means_zero(storage_repo):
+    """The gate must still be able to say "no". On a machine with no port
+    work left, the dashboard must not launch a game on its own."""
+    repo = storage_repo
+    repo.upsert_function(_sample_function())
+    repo.update_function_fields("/test/foo.dll", "00400000", port_status="proven_live")
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=100) == 0
+
+
+def test_pending_port_limit_makes_it_an_exists_probe(storage_repo):
+    """limit=1 is the 45s-poll path: counting all matching rows takes ~100ms
+    on the live DB and trips the slow-query log every poll; the probe is
+    ~8ms. Callers only need "is it > 0"."""
+    repo = storage_repo
+    for i in range(5):
+        repo.upsert_function(_sample_function(addr=f"0040{i:04d}"))
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=1) == 1
+    assert repo.count_pending_port_candidates(_TERMINAL, limit=100) == 5
+
+
+def test_pending_port_filters_by_program(storage_repo):
+    repo = storage_repo
+    repo.upsert_function(_sample_function())
+    assert repo.count_pending_port_candidates(
+        _TERMINAL, program_path="/test/foo.dll", limit=100) == 1
+    assert repo.count_pending_port_candidates(
+        _TERMINAL, program_path="/other/bar.dll", limit=100) == 0
+
+
+def test_pending_port_empty_terminal_set_counts_everything(storage_repo):
+    repo = storage_repo
+    repo.upsert_function(_sample_function())
+    repo.update_function_fields("/test/foo.dll", "00400000", port_status="proven_live")
+    assert repo.count_pending_port_candidates([], limit=100) == 1

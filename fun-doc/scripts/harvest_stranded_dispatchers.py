@@ -133,26 +133,88 @@ def tagged(program, tag):
     return {f["name"]: f["address"] for f in r.get("functions", [])}
 
 
+def _reads_reg(instr, reg):
+    """Does this instruction READ `reg` (as a source or a memory base)?
+
+    Reading is what identifies an input register; WRITING says nothing. That
+    distinction is the whole bug fixed on 2026-07-30 -- see classify().
+    """
+    instr = instr.strip()
+    if re.search(rf"\[\s*{reg}\b", instr, re.I):
+        return True                                  # memory base: [ECX], [EAX+8]
+    m = re.match(r"^([A-Z]+)\s+(.+)$", instr, re.I)
+    if not m:
+        return False
+    op, rest = m.group(1).upper(), m.group(2)
+    parts = [p.strip() for p in rest.split(",")]
+    # `XOR EAX,EAX` / `SUB EAX,EAX` ZERO the register. They mention it twice but
+    # consume no incoming value, so they are not evidence of an input. This has
+    # to be tested BEFORE the second-operand rule below, which would otherwise
+    # match the duplicated register and report a read.
+    if op in ("XOR", "SUB") and len(parts) == 2 and \
+            re.match(rf"^{reg}$", parts[0], re.I) and \
+            re.match(rf"^{reg}$", parts[1], re.I):
+        return False
+    # Second operand is always a source.
+    if len(parts) > 1 and re.match(rf"^{reg}$", parts[1], re.I):
+        return True
+    # These read their first operand as well as (maybe) writing it.
+    if op in ("CMP", "TEST", "PUSH", "DEC", "INC", "NEG", "NOT", "IMUL", "MUL",
+              "DIV", "IDIV", "SAR", "SHR", "SHL", "AND", "OR", "XOR", "ADD",
+              "SUB", "ADC", "SBB"):
+        if parts and re.match(rf"^{reg}$", parts[0], re.I):
+            # XOR EAX,EAX / SUB EAX,EAX are idioms that ZERO the register --
+            # they read it only nominally and are not evidence of an input.
+            if op in ("XOR", "SUB") and len(parts) > 1 and \
+                    re.match(rf"^{reg}$", parts[1], re.I):
+                return False
+            return True
+    return False
+
+
 def classify(address_hex, program, argc):
-    """(class, reason). Class D = register-explicit: the arg arrives in EAX and
-    the body uses it with no preceding stack load."""
+    """(class, reason). Class D = register-explicit: the arg arrives in EAX.
+
+    THE INPUT REGISTER IS THE ONE THE FUNCTION *READS*, NOT THE ONE IT WRITES.
+
+    The original test asked whether the first instruction "touches" EAX, via a
+    regex that matched `MOV EAX, ...`. But in
+
+        MOV EAX, dword ptr [ECX]      ; UNITS_GetUnitLevel
+
+    EAX is the DESTINATION and ECX is the argument -- that is a textbook
+    __fastcall prologue. Classifying it as class D handed the thunk the wrong
+    input register, and the game access-violated on 2026-07-30 with a constant
+    `ecx=0x0000000A`; the stack's return address resolved to
+    UNITS_GetUnitLevelDispatch::Thunk+0xb, which is what identified it.
+
+    So: find the first of ECX/EAX that is genuinely READ (as a source operand
+    or a memory base) before the prologue loads anything off the stack.
+      * ECX read first  -> __fastcall, which is class A here (the generated
+                           thunk is declared __fastcall and the compiler puts
+                           arg 1 in ECX for us).
+      * EAX read first  -> class D, the register-explicit EAX ABI
+                           (STATS_GetTableValue64: `CMP EAX,0x40`).
+    """
     d = _get("disassemble_function", address=address_hex, program=program)
     ins = d.get("instructions") or []
     if not ins:
         return None, "no disassembly"
     head = [i.get("instruction", "") for i in ins[:6]]
-    # A stack load into a register in the prologue => normal stack args.
+
     loads_stack = any(re.search(r"MOV\s+E?[A-D]X,\s*(dword ptr\s*)?\[E(SP|BP)", h, re.I)
                       for h in head)
-    touches_eax_first = bool(re.match(r"(DEC|INC|CMP|TEST|MOV|AND|OR|XOR|SUB|ADD)\s+EAX\b",
-                                      head[0], re.I))
-    if argc >= 1 and touches_eax_first and not loads_stack:
-        return "D", "EAX-input, no stack load"
-    if not loads_stack and argc >= 1 and not touches_eax_first:
-        # Can't tell: may be fastcall (ECX/EDX) which IS class A here, or an
-        # unusual register ABI. Don't guess.
-        return None, "no stack load and no EAX use -- ABI unclear"
-    return "A", "stack args"
+    if loads_stack:
+        return "A", "stack args"
+    if argc < 1:
+        return "A", "no register input to misread"
+
+    for h in head:
+        if _reads_reg(h, "ECX"):
+            return "A", f"ECX-input (__fastcall): {h.strip()!r} reads ECX"
+        if _reads_reg(h, "EAX"):
+            return "D", f"EAX-input (register-explicit): {h.strip()!r} reads EAX"
+    return None, "no stack load and no ECX/EAX read -- ABI unclear"
 
 
 _RET_N = re.compile(r"^RET\s*(0x[0-9a-f]+|\d+)?\s*$", re.I)

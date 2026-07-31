@@ -52,6 +52,46 @@
   .live-dot.connected { background:var(--set); animation:pulse 2s infinite; }
   .live-dot.disconnected { background:var(--red-light); }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+
+  /* ---- dependency health strip ----
+     One dot per connection a worker can die on. Added 2026-07-30: before
+     this the header carried a single dot that reported the BROWSER's
+     socket.io link, which stays cheerfully green while Ghidra, the oracle,
+     the provider and the store are all dead. Green/amber/red/grey =
+     ok/degraded/down/unknown. */
+  .health-strip { display:flex; align-items:center; gap:.5rem; padding:.1rem .45rem;
+    border:1px solid var(--border-dark,#3a3a3a); border-radius:4px; background:rgba(0,0,0,.18); }
+  .hs-item { display:flex; align-items:center; gap:.28rem; position:relative; cursor:default; }
+  .hs-item.actionable { cursor:pointer; }
+  .hs-dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); flex:none;
+    transition:background .2s ease; }
+  .hs-dot.ok { background:var(--set,#78c78c); }
+  /* Only the bad states pulse. A strip where everything pulses is a strip
+     you stop reading. */
+  .hs-dot.degraded { background:var(--gold,#c7b377); animation:pulse 2s infinite; }
+  .hs-dot.down { background:var(--red-light,#e06c6c); animation:pulse 1.2s infinite; }
+  .hs-dot.unknown { background:var(--text-muted); }
+  .hs-label { font-family:var(--font-mono); font-size:.56rem; letter-spacing:.4px;
+    text-transform:uppercase; color:var(--text-muted); }
+  .hs-item.bad .hs-label { color:var(--text-secondary); }
+  /* Tooltip: CSS-only so it cannot get out of sync with the data that
+     rendered the dot. */
+  .hs-tip { display:none; position:absolute; top:calc(100% + 8px); left:-8px; z-index:200;
+    min-width:230px; max-width:340px; padding:.5rem .6rem; border-radius:5px;
+    background:var(--bg-darkest,#141414); border:1px solid var(--border-dark,#3a3a3a);
+    box-shadow:0 6px 18px rgba(0,0,0,.55); white-space:normal; }
+  .hs-item:hover .hs-tip { display:block; }
+  .hs-tip .t { font-size:.66rem; color:var(--text-primary); font-weight:600; margin-bottom:.2rem; }
+  .hs-tip .d { font-size:.62rem; color:var(--text-secondary); line-height:1.45; }
+  .hs-tip .e { font-family:var(--font-mono); font-size:.56rem; color:var(--text-muted); margin-top:.3rem; }
+  .hs-tip .a { font-size:.58rem; color:var(--gold,#c7b377); margin-top:.35rem; }
+
+  /* ---- worker roster restore bar ---- */
+  .roster-bar { max-height:0; overflow:hidden; display:flex; align-items:center; gap:.6rem;
+    background:linear-gradient(90deg,rgba(120,150,199,.16),rgba(120,150,199,.04));
+    border-bottom:1px solid transparent; padding:0 1rem;
+    transition:max-height .2s ease, border-color .2s ease; }
+  .roster-bar.active { max-height:52px; padding:.5rem 1rem; border-bottom-color:#7896c7; }
   .header .spacer { flex:1; }
   .header-info { color:var(--text-muted); font-size:.72rem; font-family:var(--font-mono); }
 
@@ -105,7 +145,13 @@
   .worker-pane.finished { border-color:var(--text-muted); opacity:.8; }
   .worker-pane.quota_paused { border-color:var(--rare); }
   .worker-pane-header { padding:.25rem .5rem; background:linear-gradient(180deg,var(--bg-light),var(--bg-medium)); border-bottom:1px solid var(--border-dark); border-radius:6px 6px 0 0; display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; font-size:.65rem; }
-  .worker-pane-header .wp-title { font-family:var(--font-mono); color:var(--text-primary); font-weight:600; white-space:nowrap; }
+  .worker-pane-header .wp-title { font-family:var(--font-mono); color:var(--text-primary); font-weight:600; white-space:nowrap; display:flex; align-items:center; gap:.3rem; }
+  .worker-pane-header .wp-title .wp-binary { color:var(--text-primary); font-weight:700; }
+  .worker-pane-header .wp-title .wp-mode { font-size:.56rem; font-weight:600; text-transform:uppercase; letter-spacing:.5px; border-radius:3px; padding:0 4px; line-height:1.5; }
+  .worker-pane-header .wp-title .wp-mode.mode-doc { color:var(--magic); border:1px solid var(--magic); }
+  .worker-pane-header .wp-title .wp-mode.mode-prove { color:var(--crafted); border:1px solid var(--crafted); }
+  .worker-pane-header .wp-title .wp-mode.mode-globals { color:var(--set); border:1px solid var(--set); }
+  .worker-pane-header .wp-title .wp-provider { color:var(--text-secondary); font-weight:400; }
   .worker-pane-header .wp-title .wp-id { color:var(--text-muted); font-weight:400; }
   .worker-pane-header .wp-status { font-family:var(--font-mono); color:var(--text-muted); font-size:.6rem; flex:1; min-width:0; }
   .worker-pane-header .wp-status .wp-current { color:var(--gold); }
@@ -350,7 +396,23 @@
 <body>
   <header class="header">
     <span class="header-logo">Fun-Doc Command Center</span>
-    <span><span class="live-dot" id="liveDot"></span><span class="mono" id="liveTxt" style="font-size:.62rem;color:var(--text-muted)">offline</span></span>
+    <!-- DEPENDENCY HEALTH STRIP. Every connection a worker can die on, in
+         header order of "how early it kills you". Populated from
+         /api/health/all; the Dashboard dot additionally folds in this
+         browser's own socket.io link, which is the only one the server
+         cannot observe for us. -->
+    <div class="health-strip" id="healthStrip">
+      <div class="hs-item" id="hs-dashboard"><span class="hs-dot unknown"></span><span class="hs-label">dash</span>
+        <div class="hs-tip"><div class="t">Dashboard</div><div class="d">connecting&hellip;</div></div></div>
+      <div class="hs-item" id="hs-ghidra"><span class="hs-dot unknown"></span><span class="hs-label">ghidra</span>
+        <div class="hs-tip"><div class="t">Ghidra</div><div class="d">connecting&hellip;</div></div></div>
+      <div class="hs-item" id="hs-oracle"><span class="hs-dot unknown"></span><span class="hs-label">oracle</span>
+        <div class="hs-tip"><div class="t">Oracle + Game</div><div class="d">connecting&hellip;</div></div></div>
+      <div class="hs-item" id="hs-provider"><span class="hs-dot unknown"></span><span class="hs-label">provider</span>
+        <div class="hs-tip"><div class="t">Provider</div><div class="d">connecting&hellip;</div></div></div>
+      <div class="hs-item" id="hs-store"><span class="hs-dot unknown"></span><span class="hs-label">store</span>
+        <div class="hs-tip"><div class="t">Store</div><div class="d">connecting&hellip;</div></div></div>
+    </div>
     <!-- FOCUS: which binary this dashboard is showing. Everything (tags/maps/rollup) is per-binary.
          Click the button: the picker drops down right below it (each binary's remaining work). -->
     <div class="focus-wrap" id="focusWrap">
@@ -408,6 +470,18 @@
     <span class="tb-msg" id="oracleBarMsg">Checking oracle status&hellip;</span>
     <button class="btn go tb-btn" id="oracleBarBtn" onclick="oracleBarAction()">Relaunch</button>
     <button class="tb-dismiss" title="Dismiss" onclick="document.getElementById('oracleBar').classList.remove('active')">&times;</button>
+  </div>
+
+  <!-- WORKER ROSTER restore offer. Shown when a previous session left workers
+       behind (crash, restart, or a dependency outage that stopped them).
+       Explicitly one-click, never automatic: a crash-looping dashboard that
+       silently re-spawned six LLM workers per cycle is exactly the failure
+       auto-restore was retired to avoid. -->
+  <div class="roster-bar" id="rosterBar">
+    <span class="tb-icon">&#8635;</span>
+    <span class="tb-msg" id="rosterBarMsg">&nbsp;</span>
+    <button class="btn go tb-btn" id="rosterBarBtn" onclick="restoreRoster()">Restore</button>
+    <button class="tb-dismiss" title="Dismiss (forgets the roster)" onclick="dismissRoster()">&times;</button>
   </div>
 
   <!-- SETTINGS slide-out (queue config: good@, cold, debug, handoff, audit, provider models) -->
@@ -1177,6 +1251,111 @@
     if(mode==="detect") startGlobalsTyping(); else loadTypes();
   }
 
+  // ---------- dependency health strip ----------
+  // Five dots, one per connection a worker can die on. The server owns four
+  // of them (/api/health/all); the browser owns `socketOk`, because the
+  // server obviously cannot observe whether THIS page can still reach it.
+  //
+  // Precedence matters: a disconnected socket means every other dot is stale,
+  // so it wins over whatever the last payload said.
+  let _socketOk = false;
+  let _lastHealth = null;
+
+  function _setDot(id, state, title, detail, endpoint, actionText){
+    const el = document.getElementById(id); if(!el) return;
+    const dot = el.querySelector(".hs-dot"), tip = el.querySelector(".hs-tip");
+    dot.className = "hs-dot " + (state || "unknown");
+    el.classList.toggle("bad", state === "down" || state === "degraded");
+    el.classList.toggle("actionable", !!actionText);
+    tip.innerHTML =
+      `<div class="t">${escHtml(title)}</div>` +
+      `<div class="d">${escHtml(detail || "")}</div>` +
+      (endpoint ? `<div class="e">${escHtml(endpoint)}</div>` : "") +
+      (actionText ? `<div class="a">${escHtml(actionText)}</div>` : "");
+  }
+
+  function renderHealthStrip(h){
+    if(h) _lastHealth = h;
+    const subs = (_lastHealth && _lastHealth.subsystems) || {};
+
+    // Dashboard: the socket link AND the server's elevation status. Both can
+    // independently make the dashboard useless, so the worse one wins.
+    const d = subs.dashboard || {};
+    if(!_socketOk){
+      _setDot("hs-dashboard", "down", "Dashboard",
+              "This page has lost its socket.io link to the dashboard. Every "
+              + "other indicator below is stale until it reconnects.", null, null);
+    } else {
+      _setDot("hs-dashboard", d.state || "unknown", "Dashboard",
+              d.detail || "connected", null, null);
+    }
+    const g = subs.ghidra || {};
+    _setDot("hs-ghidra", g.state || "unknown", "Ghidra",
+            g.detail || "", g.endpoint,
+            g.state === "down" ? "Launching automatically when no Ghidra process exists." : null);
+    const o = subs.oracle || {};
+    _setDot("hs-oracle", o.state || "unknown", "Oracle + Game",
+            o.detail || "", o.endpoint,
+            o.action === "relaunch_oracle" ? "Click to relaunch now" : null);
+    const p = subs.provider || {};
+    _setDot("hs-provider", p.state || "unknown", "Provider", p.detail || "", null, null);
+    const s = subs.store || {};
+    _setDot("hs-store", s.state || "unknown", "Store", s.detail || "", null, null);
+  }
+
+  async function refreshHealth(){
+    try{
+      const r = await fetch("/api/health/all");
+      if(!r.ok) return;
+      renderHealthStrip(await r.json());
+    }catch(e){ /* transient; the socket dot already reports a dead link */ }
+  }
+
+  // Clicking the oracle dot when it is not green triggers the same relaunch
+  // the slide-out bar offers -- the dot is where your eye already is.
+  document.getElementById("hs-oracle").addEventListener("click", ()=>{
+    const o = (_lastHealth && _lastHealth.subsystems && _lastHealth.subsystems.oracle) || {};
+    if(o.action === "relaunch_oracle") oracleBarAction();
+  });
+
+  // ---------- worker roster restore ----------
+  let _rosterOffer = null;
+  async function checkRoster(){
+    try{
+      const r = await fetch("/api/worker/roster"); if(!r.ok) return;
+      const j = await r.json();
+      _rosterOffer = j.offer || null;
+      const bar = document.getElementById("rosterBar");
+      if(!_rosterOffer){ bar.classList.remove("active"); return; }
+      const ws = _rosterOffer.workers || [];
+      const modes = {}; ws.forEach(w=>{ const m=w.mode||"functions"; modes[m]=(modes[m]||0)+1; });
+      const desc = Object.keys(modes).sort().map(m=>`${modes[m]} ${m}`).join(", ");
+      const bins = [...new Set(ws.map(w=>_shortBin(w.binary)).filter(Boolean))];
+      const where = bins.length>3 ? `${bins.length} binaries` : bins.join(", ");
+      document.getElementById("rosterBarMsg").innerHTML =
+        `<b>${ws.length} worker(s)</b> from a previous session (${escHtml(desc)}` +
+        (where?` on ${escHtml(where)}`:"") + `) &mdash; ${escHtml(_rosterOffer.source)}.`;
+      bar.classList.add("active");
+    }catch(e){ /* non-fatal */ }
+  }
+  async function restoreRoster(){
+    const btn = document.getElementById("rosterBarBtn");
+    btn.disabled = true; btn.textContent = "Restoring…";
+    try{
+      const r = await fetch("/api/worker/roster/restore", {method:"POST"});
+      const j = await r.json();
+      flash(`restored ${j.count||0} worker(s)` + (j.errors&&j.errors.length?` (${j.errors.length} skipped)`:""));
+      if(j.errors && j.errors.length) console.warn("roster restore skipped:", j.errors);
+      document.getElementById("rosterBar").classList.remove("active");
+      refreshAll();
+    }catch(e){ flash("restore failed"); }
+    finally{ btn.disabled = false; btn.textContent = "Restore"; }
+  }
+  async function dismissRoster(){
+    document.getElementById("rosterBar").classList.remove("active");
+    try{ await fetch("/api/worker/roster/dismiss", {method:"POST"}); }catch(e){}
+  }
+
   // ---------- D2Debugger oracle / live-game health bar ----------
   // Renders whatever the last oracle_health / oracle_relaunch_progress push
   // said. A relaunch in progress always wins the display over a plain "down"
@@ -1256,7 +1435,17 @@
   let _focusedWorkerId = null;
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const shortAddr = a => a ? ('0x' + String(a).replace(/^0x/,'')) : '';
-  function getOrCreatePane(id, provider, binary){
+  const MODE_LABELS = { functions:'Doc', port:'Prove', globals:'Globals' };
+  const MODE_CLASS  = { functions:'mode-doc', port:'mode-prove', globals:'mode-globals' };
+  function paneTitleHTML(binary, mode, provider, id){
+    const bin = binary ? String(binary).split(/[\\/]/).pop() : '';
+    const parts = [];
+    if(bin) parts.push(`<span class="wp-binary">${esc(bin)}</span>`);
+    if(mode) parts.push(`<span class="wp-mode ${MODE_CLASS[mode]||'mode-doc'}">${esc(MODE_LABELS[mode]||mode)}</span>`);
+    parts.push(`<span class="wp-provider">${esc(provider||'worker')} <span class="wp-id">#${esc(id)}</span></span>`);
+    return parts.join('');
+  }
+  function getOrCreatePane(id, provider, binary, mode){
     if(!id) return null;
     if(workerPanes[id]) return workerPanes[id];
     const grid = document.getElementById("workerCards");
@@ -1265,8 +1454,8 @@
     pane.className = "worker-pane running"; pane.id = `wp-${id}`;
     pane.innerHTML =
       `<div class="worker-pane-header">`+
-        `<span class="wp-title" id="wp-title-${id}">${esc(provider||'worker')} <span class="wp-id">#${esc(id)}</span></span>`+
-        `<span class="wp-status" id="wp-status-${id}">${esc((binary||'').split('/').pop()||'')}</span>`+
+        `<span class="wp-title" id="wp-title-${id}">${paneTitleHTML(binary, mode, provider, id)}</span>`+
+        `<span class="wp-status" id="wp-status-${id}"></span>`+
         `<span class="wp-alert" id="wp-alert-${id}"></span>`+
         `<div class="wp-actions">`+
           `<button class="btn icon-btn" onclick="focusWorker('${id}')" id="wp-focus-${id}" title="Focus worker"><span class="icon-focus"></span></button>`+
@@ -1351,8 +1540,8 @@
     const running = w.filter(x=>['starting','running','stopping'].includes(x.status)).length;
     if(hint) hint.textContent = `${running} running / ${w.length} total`;
     w.forEach(x=>{
-      const p = getOrCreatePane(x.id, x.provider, x.binary);
-      const titleEl = document.getElementById(`wp-title-${x.id}`); if(titleEl && x.provider) titleEl.innerHTML = `${esc(x.provider)} <span class="wp-id">#${esc(x.id)}</span>`;
+      const p = getOrCreatePane(x.id, x.provider, x.binary, x.mode);
+      const titleEl = document.getElementById(`wp-title-${x.id}`); if(titleEl) titleEl.innerHTML = paneTitleHTML(x.binary, x.mode, x.provider, x.id);
       if(['finished','stopped'].includes(x.status)){ markPaneFinished(x.id, x.status); return; }
       const cls = x.status==='stopping' ? 'stopping' : x.status==='quota_paused' ? 'quota_paused' : 'running';
       p.element.className = 'worker-pane ' + cls + (_focusedWorkerId===String(x.id)||_focusedWorkerId===x.id?' focused':'') + (p.element.classList.contains('timeout')?' timeout':'');
@@ -1392,8 +1581,20 @@
   // ---------- socket (live-dot + streaming worker output + push refresh) ----------
   try {
     socket=io();
-    socket.on("connect",()=>{ document.getElementById("liveDot").className="live-dot connected"; document.getElementById("liveTxt").textContent="live"; socket.emit("request_worker_status"); checkOracleStatus(); });
-    socket.on("disconnect",()=>{ document.getElementById("liveDot").className="live-dot disconnected"; document.getElementById("liveTxt").textContent="offline"; });
+    socket.on("connect",()=>{
+      _socketOk=true; renderHealthStrip(); refreshHealth();
+      socket.emit("request_worker_status"); checkOracleStatus(); checkRoster();
+    });
+    socket.on("disconnect",()=>{
+      // Every server-owned dot is stale from here on; renderHealthStrip's
+      // socket precedence makes that visible rather than leaving four
+      // reassuring green dots on a page talking to nothing.
+      _socketOk=false; renderHealthStrip();
+    });
+    // Push-driven strip updates, so a dependency dying shows up immediately
+    // instead of on the next 10s poll.
+    socket.on("ghidra_health", ()=>refreshHealth());
+    socket.on("ghidra_launch_progress", ()=>refreshHealth());
     let confTimer;   // debounce: workers emit conf_changed per documented/proven item
     socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
     let wsTimer;
@@ -1423,8 +1624,11 @@
     socket.on("scan_error",d=>setScanStatus(`scan error: ${d.error||'unknown'}`,"err"));
     // canonical-types load progress
     // D2Debugger oracle health / relaunch progress (see oracle_health.py)
-    socket.on("oracle_health", renderOracleBar);
-    socket.on("oracle_relaunch_progress", renderOracleBar);
+    socket.on("oracle_health", h=>{ renderOracleBar(h); refreshHealth(); });
+    socket.on("oracle_relaunch_progress", h=>{ renderOracleBar(h); refreshHealth(); });
+    // A worker stopping is how a roster becomes restorable, and a worker
+    // starting is how an offer becomes irrelevant. Re-check on both.
+    socket.on("worker_status", ()=>checkRoster());
     socket.on("types_load_started", ()=>{ document.getElementById("typesBarMsg").textContent="Loading canonical types…"; });
     socket.on("types_load_progress", d=>{ if(d && d.text) document.getElementById("typesBarMsg").textContent=d.text; });
     socket.on("types_load_done", d=>{
@@ -1508,6 +1712,15 @@
 
   // load the binary list first (sets the focus), then render everything for it
   loadBinaries().then(refreshAll);
+
+  // Dependency health: rendered immediately (so the strip is never blank on a
+  // page that hasn't got its socket yet) and polled independently of the
+  // socket. The poll is the backstop -- pushes from oracle_health /
+  // ghidra_health carry the fast path, but a dependency that dies while the
+  // socket is also down would otherwise never update.
+  renderHealthStrip(); refreshHealth(); checkRoster();
+  setInterval(refreshHealth, 10000);
+  setInterval(checkRoster, 60000);
 </script>
 </body>
 </html>

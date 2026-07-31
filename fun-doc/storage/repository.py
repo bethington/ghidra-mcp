@@ -27,6 +27,7 @@ from sqlalchemy import (
     func,
     insert,
     select,
+    true as sql_true,
     update,
 )
 from sqlalchemy.engine import Engine
@@ -280,6 +281,59 @@ class Repository:
             q = q.where(self.t_workflow.c.binary_name == binary_name)
         if queue_status is not None:
             q = q.where(self.t_workflow.c.queue_status == queue_status)
+        with self._engine.connect() as conn:
+            return int(conn.execute(q).scalar() or 0)
+
+    def count_pending_port_candidates(
+        self,
+        terminal_statuses: Iterable[str],
+        *,
+        program_path: Optional[str] = None,
+        limit: int = 1,
+    ) -> int:
+        """How many rows still have unresolved PORT work.
+
+        Exists so the oracle monitor can answer "does anything actually want
+        the live oracle right now?" without materializing state. The obvious
+        alternative -- calling select_port_candidates -- needs the entire
+        {key: func} dict in memory, which on D2Client alone is tens of
+        thousands of rows on a 45-second poll.
+
+        `limit` caps the underlying scan: the caller almost always only needs
+        "is it > 0", and an EXISTS-shaped query beats counting 60K rows to
+        learn the same thing. Pass a larger limit only when the exact number
+        is displayed.
+
+        Deliberately approximate. It applies only the port_status terminal
+        filter, not the full eligibility cascade (library detection, protected
+        set, pinning). It therefore OVER-counts, which is the safe direction:
+        the consequence of a false positive is that the oracle is kept alive
+        when it did not strictly need to be, versus a false negative letting
+        the fleet stall -- which is the failure this whole change exists to
+        prevent.
+        """
+        terminal = [s for s in terminal_statuses if s]
+        c = self.t_workflow.c
+        # NULL is the common case (never attempted) and NOT IN never matches
+        # NULL in SQL, so the null check has to be explicit or brand-new
+        # binaries read as "no work".
+        if terminal:
+            # NULL is the common case (never attempted) and NOT IN never
+            # matches NULL in SQL, so the null check has to be explicit or a
+            # brand-new binary reads as "no work".
+            cond = c.port_status.is_(None) | c.port_status.notin_(terminal)
+        else:
+            # Degenerate but must not silently mean "only NULL counts": an
+            # empty terminal set means nothing is resolved, so everything is
+            # pending. Over-counting is the safe direction here -- a false
+            # positive keeps a game alive unnecessarily, a false negative
+            # disarms oracle recovery.
+            cond = sql_true()
+        if program_path is not None:
+            cond = cond & (c.program_path == program_path)
+        q = select(func.count()).select_from(
+            select(c.id).where(cond).limit(limit).subquery()
+        )
         with self._engine.connect() as conn:
             return int(conn.execute(q).scalar() or 0)
 

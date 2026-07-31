@@ -136,3 +136,40 @@ def test_baseline_survives_a_save_for_reuse(queue_file):
     assert fd._CONFIG_BASELINE_KEY in q           # re-armed, not consumed
     assert fd._CONFIG_BASELINE_KEY not in json.loads(
         queue_file.read_text(encoding="utf-8"))   # still never on disk
+
+
+def test_save_priority_queue_preserves_the_worker_roster(tmp_path, monkeypatch):
+    """save_priority_queue used to STRIP `dashboard_active_workers` on every
+    write -- that, not the restore call site, is where auto-restore was
+    actually retired. _persist_active_workers wrote the roster and this
+    deleted it microseconds later, so restore_workers() always found nothing.
+
+    The roster must now survive, because it is no longer an auto-start: the
+    dashboard reads it and offers a one-click restore banner instead. Guard
+    against the strip being reinstated -- it would make the whole restore
+    feature a silent no-op with no error anywhere.
+    """
+    import fun_doc
+
+    qfile = tmp_path / "priority_queue.json"
+    qfile.write_text(json.dumps({"config": {}, "meta": {}, "pinned": []}))
+    monkeypatch.setattr(fun_doc, "PRIORITY_QUEUE_FILE", qfile)
+
+    roster = [{"provider": "minimax", "count": 12, "mode": "port",
+               "binary": "/Mods/PD2-S12/D2Client.dll", "continuous": True}]
+    fun_doc.save_priority_queue({
+        "config": {},
+        "meta": {
+            "dashboard_active_workers": roster,
+            "dashboard_last_roster": {"workers": roster, "captured_at": "2026-07-30T21:00:00"},
+        },
+        "pinned": [],
+    })
+
+    meta = json.loads(qfile.read_text())["meta"]
+    assert meta.get("dashboard_active_workers") == roster, (
+        "the live roster must survive the write"
+    )
+    assert meta.get("dashboard_last_roster", {}).get("workers") == roster, (
+        "the sticky roster must survive the write"
+    )

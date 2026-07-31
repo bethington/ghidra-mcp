@@ -27,6 +27,7 @@ Standalone (imports nothing from fun_doc), like port_pipeline.py.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import http.client
 import json
@@ -34,7 +35,17 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import time
 import urllib.parse
+
+# Windows spawns a console for every child process unless told not to, and
+# these helpers run on a POLL: is_game_running fires every 45s, _pid_alive on
+# every in-flight check. Each one flashed a console window on the desktop.
+# CREATE_NO_WINDOW suppresses it; it is 0 on non-Windows so the flag is inert
+# there.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 from pathlib import Path
 
 # --- D2MOO side (the reimpl provider + prover live in the D2MOO repo) ---
@@ -68,10 +79,112 @@ def _int(v) -> int:
         return int(v, 16)         # bare hex "6fd51250" (fun_doc's address convention)
 
 
-def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
+_RET_RE = re.compile(r"^RET(?:\s+0x([0-9a-fA-F]+))?$")
+
+
+def detect_stack_cleanup(program, address):
+    """Bytes the CALLEE pops on return, read from the disassembly.
+
+    Returns 0 for a bare `RET` (CALLER cleans -- cdecl), a positive byte count
+    for `RET n` (callee cleans -- stdcall/fastcall/thiscall), or None when the
+    answer isn't unambiguous (no RET found, or several RETs disagreeing).
+
+    THE DISASSEMBLY IS THE AUTHORITY. This is the same rule the shadow manifest
+    already lives by (CLAUDE.md: "arity from `RET n`" -- a wrong count on a
+    callee-cleans convention skews ESP and access-violates the game). The live
+    prove path never applied it: `translate_layout_to_spec` took the calling
+    convention from the LLM-drafted `param_layout` alone, which knows only
+    which REGISTERS hold inputs, not who cleans the stack.
+    """
+    try:
+        d = _ghidra_get_json(
+            "/disassemble_function?" + urllib.parse.urlencode(
+                {"address": address, "program": program})
+        )
+    except Exception:
+        return None
+    widths = set()
+    for ins in (d or {}).get("instructions", []):
+        m = _RET_RE.match(str(ins.get("instruction", "")).strip())
+        if m:
+            widths.add(int(m.group(1), 16) if m.group(1) else 0)
+    if len(widths) != 1:
+        return None                      # no RET, or an inconsistent tail
+    return widths.pop()
+
+
+def resolve_callconv(name, address, program, argc, declared="stdcall"):
+    """(callconv, note) for a spec, with the DISASSEMBLY overriding `declared`.
+
+    THE single place this correction lives. It was originally inlined in
+    translate_layout_to_spec only, and the other three spec builders
+    (run_synth_prove / run_synth2_prove / run_delegate_prove) kept their
+    hardcoded `"callconv": "stdcall"`. Measured 2026-07-31: of 282 written
+    specs exactly ONE carried the correction, while `marshal_fault` grew
+    152 -> 236 overnight. The fix was real and simply wasn't on the paths
+    producing most of the faults.
+
+    That is the same failure CLAUDE.md records for `_write_spec` -- "five call
+    sites once wrote their own, which is how four of five would miss a fix like
+    this". Route every spec's convention through here.
+
+    Returns `declared` unchanged when the disassembly is unreadable or
+    ambiguous: never guess, and never make things worse than the status quo.
+    """
+    if program is None:
+        return declared, None
+    actual = detect_stack_cleanup(program, address)
+    if actual is None:
+        return declared, None
+    expected = _expected_cleanup(declared, argc)
+    if actual == 0 and expected > 0:
+        return "cdecl", (f"disassembly shows a bare RET with {argc} stack arg(s): "
+                         f"callee does not clean -> cdecl, not {declared}")
+    if actual != expected:
+        # Report but do NOT rewrite the arity here: these callers build a
+        # fixed-shape probe spec, so the honest signal is a warning plus the
+        # unchanged convention. translate_layout_to_spec, which owns a real
+        # drafted layout, refuses outright instead.
+        return declared, (f"WARNING: {name} declared {argc} arg(s) as {declared} "
+                          f"(callee should pop {expected}) but the disassembly "
+                          f"ends in RET 0x{actual:x} -- probable arity mismatch")
+    return declared, None
+
+
+def _expected_cleanup(callconv: str, argc: int) -> int:
+    """Bytes a callee-cleans convention must pop for `argc` 32-bit slots."""
+    if callconv == "stdcall":
+        return 4 * argc
+    if callconv in ("fastcall", "thiscall"):
+        # First two dwords arrive in ECX/EDX (one for thiscall) and are not on
+        # the stack. thiscall marshals through the fastcall path here.
+        return 4 * max(0, argc - 2)
+    return 0                             # cdecl: caller cleans
+
+
+def translate_layout_to_spec(name: str, address, param_layout: dict,
+                             program=None) -> dict:
     """fun-doc register `param_layout` -> D2MOO oracle spec (callconv/args/
     ret/compare + the original's absolute `addr`). Raises UnsupportedLiveABI for
-    register ABIs the v1 marshaller can't express."""
+    register ABIs the v1 marshaller can't express.
+
+    When `program` is supplied the drafted convention is CROSS-CHECKED against
+    the callee's actual stack cleanup (see detect_stack_cleanup). Without that
+    check every stack-argument function was declared `stdcall` unconditionally
+    -- "D2 default for stack args" -- and a cdecl callee then had NOBODY clean
+    its arguments: `D2Oracle_Call` casts to the declared convention, so a
+    stdcall cast emits a call that expects the callee to pop, and a cdecl
+    callee does not. ESP leaks 4*argc per call.
+
+    Whether that leak faults depends on whether the enclosing frame's epilogue
+    restores ESP from EBP or is ESP-relative, which is why it showed up as a
+    strong tendency rather than a law. Measured 2026-07-31: 79% of
+    `marshal_fault` functions end in a bare RET (cdecl) against 41% of the
+    functions that proved live -- and `marshal_fault` is TERMINAL, so each one
+    retired a function on an ABI verdict the ABI did not actually support.
+    The oracle has accepted "cdecl" since it was written (ParseCallConv in
+    D2Debugger.LiveDispatch.cpp); this translator simply never emitted it.
+    """
     inputs = param_layout.get("inputs", [])
     outputs = param_layout.get("outputs", [])
     # The model sometimes emits a malformed layout where an input/output entry
@@ -141,6 +254,38 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
         else:
             args.append({"id": i["name"], "kind": "i32"})
     compare = (["ret"] if outputs else []) + [b["name"] for b in outbufs]
+
+    # ---- disassembly cross-check (see docstring) -------------------------
+    # Skipped for the register-explicit path: `orig_regs` calls the original
+    # through a hand-asm register stub with no stack args at all, so the
+    # callee's RET width says nothing about how we invoke it.
+    cleanup_note = None
+    if program is not None and not orig_regs:
+        actual = detect_stack_cleanup(program, address)
+        if actual is not None:
+            expected = _expected_cleanup(callconv, len(args))
+            if actual == 0 and expected > 0:
+                # Callee does not pop, but we were about to promise it would.
+                # This is the fix that matters: emit the convention the oracle
+                # has always accepted instead of leaking ESP on every call.
+                cleanup_note = (f"disassembly shows a bare RET with {len(args)} stack "
+                                f"arg(s): callee does not clean -> cdecl, not {callconv}")
+                callconv = "cdecl"
+            elif actual != expected:
+                # Neither convention explains the observed cleanup, so the
+                # DRAFTED ARITY is wrong. Refusing here is not conservatism:
+                # calling with the wrong slot count on a callee-cleans
+                # convention skews ESP for the rest of the chain and
+                # access-violates the GAME (CLAUDE.md records eip=0x00000140
+                # from exactly this). Better an unsupported_abi verdict than a
+                # crashed process.
+                raise UnsupportedLiveABI(
+                    f"{name}: drafted {len(args)} arg(s) as {callconv} implies the callee "
+                    f"pops {expected} bytes, but the disassembly ends in "
+                    f"RET 0x{actual:x} ({actual} bytes = {actual // 4} stack arg(s)). "
+                    f"The disassembly is the authority -- the layout's arity is wrong. "
+                    f"Re-draft with {actual // 4} stack argument(s).")
+
     spec = {
         "name": name,
         "addr": _int(address),
@@ -151,6 +296,10 @@ def translate_layout_to_spec(name: str, address, param_layout: dict) -> dict:
     }
     if orig_regs:
         spec["orig_regs"] = orig_regs
+    if cleanup_note:
+        # Carried into the spec file so a later reader can see WHY the
+        # convention differs from what the layout implied.
+        spec["callconv_source"] = cleanup_note
     return spec
 
 
@@ -170,6 +319,13 @@ def _fail(stage: str, msg: str, output: str = "") -> dict:
 #                             (self-healed when possible; see build_provider_attributed)
 #   oracle_unreachable     -- :8790 was down before we started
 #   oracle_died_during     -- :8790 was alive, this function's vectors killed it
+#   bad_target             -- the original's address isn't mapped executable in the
+#                             running game (module not loaded, or not at Ghidra's
+#                             image base). ENVIRONMENTAL: nothing was called, so it
+#                             is not a verdict about the function. Split out of
+#                             marshal_fault 2026-07-30 -- it had been arriving as
+#                             "handler-exception" and retiring D2Client functions
+#                             whose reimpl never ran (104 of them).
 #   marshal_fault          -- SEH-caught fault inside the oracle (bad ABI/pointer)
 #   mismatch               -- real divergence: orig != reimpl on >=1 vector
 #   prove_timeout / prove  -- prover subprocess timeout / unclassified
@@ -203,6 +359,97 @@ _MSVC_ERR_LINE_RE = re.compile(r"error [A-Z]+\d+.*")
 _DUP_SYMBOL_RE = re.compile(
     r"(\w+)\.obj\s*:\s*error LNK2005:\s*(\S+)\s+already defined in\s+(\w+)\.obj")
 
+# LNK2019/LNK2001 (unresolved external) is the THIRD MSBuild error shape, and the
+# one that did the most damage. It names neither `candidates\X.cpp(line,col)` nor
+# an .obj -- just the .vcxproj -- so _CANDIDATE_ERR_RE finds no offender,
+# _DUP_SYMBOL_RE does not match, and every one of these fell through to the
+# blanket unattributed `build_provider` verdict. `live_prove_failed` is TERMINAL,
+# so whichever function happened to be proving got permanently retired for a
+# link error caused by somebody ELSE's candidate.
+#
+# Measured 2026-07-31 over 523 live_prove_failed rows: 126 were exactly this --
+# the unresolved symbol was "referenced in" a function that was NOT the one under
+# test -- traced to just 35 distinct offending candidates (top 15 = 67%). e.g.
+# `x_ismbbtype` retired because `_BINK_CheckVideoFrameReady@4` was unresolved in
+# `_BINKW32_ProcessFrameWriteAsync@4`, a function it has nothing to do with.
+#
+# The referring function is the attribution key: its name maps to the candidate
+# file that declared the call it cannot link.
+_UNRESOLVED_SYM_RE = re.compile(
+    r"error LNK(?:2019|2001):\s*unresolved external symbol\s+(\S+)"
+    r"(?:\s+referenced in function\s+(\"[^\"]+\"|\S+))?")
+
+
+def _undecorate(sym: str) -> str:
+    """Best-effort MSVC symbol -> plain function name.
+
+      _Foo@8                    -> Foo     (stdcall)
+      _Foo                      -> Foo     (cdecl)
+      @Foo@4                    -> Foo     (FASTCALL -- leading @, not _)
+      ?Foo@@YGHPAXH0@Z          -> Foo     (C++ mangled)
+      "int __stdcall Foo(...)"  -> Foo     (already-undecorated, quoted)
+
+    The fastcall form is easy to miss and fails silently: `@Foo@4`.split("@")[0]
+    is the EMPTY STRING, so every fastcall referrer attributed to an offender
+    named "" -- which then out-sorted every real candidate. Caught 2026-07-31
+    when 34 of 125 collateral rows blamed a nameless offender.
+    """
+    s = (sym or "").strip().strip('"')
+    if s.startswith("?"):
+        m = re.match(r"\?([A-Za-z_]\w*)@", s)
+        return m.group(1) if m else s
+    if "(" in s:                      # undecorated prototype form
+        m = re.search(r"([A-Za-z_]\w*)\s*\(", s)
+        return m.group(1) if m else s
+    return s.lstrip("_@").split("@")[0]
+
+
+def _find_unresolved_symbol_offender(out: str, current_name: str):
+    """Attribute an LNK2019/LNK2001 unresolved-external failure.
+
+    Returns None when nothing is attributable (leave it to the generic
+    build_provider bucket). Otherwise (stage, detail, quarantine_name):
+
+      * quarantine_name set  -> the referring function belongs to a SIBLING
+        candidate, i.e. this build is broken by somebody else's draft and the
+        function under test is collateral. Quarantine the sibling (move, not
+        delete) and retry, exactly as the duplicate-symbol path does.
+      * quarantine_name None -> the referring function IS current_name, so our
+        own draft calls something that does not exist. That is a real defect in
+        this candidate; stage 'build_candidate' feeds it to the fix loop.
+    """
+    refs = _UNRESOLVED_SYM_RE.findall(out or "")
+    if not refs:
+        return None
+    own, siblings = [], {}
+    for symbol, referrer in refs:
+        if not referrer:
+            continue
+        fn = _undecorate(referrer)
+        if not fn:
+            continue                  # truncated/unparseable decoration
+        if fn == current_name:
+            own.append(symbol)
+        elif (CANDIDATES_DIR / f"{fn}.cpp").exists():
+            # Only attribute to a file that actually exists -- the referring
+            # function may live in provider runtime code we must never touch.
+            siblings.setdefault(fn, []).append(symbol)
+    if own:
+        # Our own draft is (also) broken -- fix ours first regardless of any
+        # sibling, since healing a sibling would not make this candidate link.
+        return ("build_candidate",
+                f"unresolved external symbol(s) {', '.join(sorted(set(own))[:5])} "
+                f"referenced in {current_name} -- the draft calls something the "
+                f"provider does not define", None)
+    if siblings:
+        offender = max(siblings, key=lambda k: len(siblings[k]))
+        syms = ", ".join(sorted(set(siblings[offender]))[:5])
+        return ("build_provider_unresolved_symbol",
+                f"candidate {offender}.cpp references undefined symbol(s) {syms}, "
+                f"failing the shared provider link for every other candidate "
+                f"(including {current_name}, which is collateral)", offender)
+    return None
+
 
 def _classify_prove_failure(out: str) -> tuple:
     """(failure_stage, detail) from prover output. Call check_oracle_alive
@@ -210,6 +457,13 @@ def _classify_prove_failure(out: str) -> tuple:
     o = out or ""
     if "not reachable" in o or "refused" in o.lower() or "ConnectionRefused" in o:
         return "oracle_unreachable", "D2Debugger :8790 unreachable"
+    # Checked BEFORE handler-exception: the oracle's bad-target gate now rejects an
+    # unmapped call target up front instead of letting the call fault into SEH, and
+    # this is the one failure that must never be read as an ABI verdict.
+    if "bad-target" in o or "module not loaded in the game process" in o:
+        detail = next((ln.strip() for ln in o.splitlines() if "bad-target" in ln
+                       or "module not loaded in the game process" in ln), "")
+        return "bad_target", (detail[:400] or "original target not mapped in the running game")
     if "handler-exception" in o:
         return "marshal_fault", ("SEH fault inside the oracle handler -- usually a wrong "
                                  "callconv/slot-count (check RET n) or a bad pointer arg")
@@ -261,6 +515,164 @@ def _find_duplicate_symbol_offender(out: str, current_name: str):
     return None
 
 
+_BUILD_LOCK_TIMEOUT = float(os.environ.get("FUNDOC_PROVIDER_BUILD_LOCK_TIMEOUT", "1800"))
+_INFLIGHT_DIR = Path(tempfile.gettempdir()) / "fundoc_provider_inflight"
+# How long a candidate stays protected from another worker's heal loop. See
+# inflight_candidates for why an age bound is required and not just PID liveness.
+_INFLIGHT_TTL_SEC = float(os.environ.get("FUNDOC_INFLIGHT_TTL_SEC", "1800"))
+
+
+@contextlib.contextmanager
+def _provider_build_lock(timeout: float = None):
+    """Serialize the shared-provider build across threads AND processes.
+
+    ALL candidates/*.cpp link into ONE provider DLL, built in ONE CMake tree
+    (`build-1.13c`) whose candidate glob is CONFIGURE_DEPENDS. Until 2026-07-31
+    nothing serialized that, while the dashboard routinely runs SIX port
+    workers at once. The resulting races are exactly the failure pattern seen
+    in the data:
+
+      * worker A configures; CMake re-globs and sweeps in worker B's
+        just-written candidate, so A's build fails on B's code and A is
+        retired with a `build_provider` verdict about a file it never wrote;
+      * A's heal loop then removes or quarantines B.cpp *while B is still
+        proving it*, so B fails too;
+      * and two `cmake --build` runs against one tree produce arbitrary
+        MSBuild failures on their own.
+
+    Deliberately scoped to the BUILD, not the whole prove: drafting is the
+    slow part (LLM calls, minutes) and stays fully parallel, while the build
+    critical section is short. This keeps ~all the fleet's throughput and
+    removes the race.
+
+    Unlike port_pipeline._interprocess_lock's 5s fail-open ceiling -- fine for
+    appending a vector file, useless for a build that legitimately runs for
+    minutes -- this waits a long time and says so loudly if it ever gives up.
+    """
+    timeout = _BUILD_LOCK_TIMEOUT if timeout is None else timeout
+    lock_dir = Path(tempfile.gettempdir()) / "fundoc_provider_build_lock"
+    f = None
+    acquired = False
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        f = open(lock_dir / "provider_build.lock", "a+")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    print(f"[build-lock] WARNING: could not acquire the provider "
+                          f"build lock within {int(timeout)}s -- proceeding UNLOCKED. "
+                          f"Concurrent builds can misattribute failures.", flush=True)
+                    break
+                time.sleep(0.5)
+        yield acquired
+    except Exception as e:
+        print(f"[build-lock] locking unavailable ({e}) -- proceeding unlocked", flush=True)
+        yield False
+    finally:
+        if f is not None:
+            try:
+                if acquired:
+                    if os.name == "nt":
+                        import msvcrt
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            f.close()
+
+
+def mark_candidate_inflight(name: str) -> None:
+    """Record that THIS process is actively proving `name`.
+
+    Read by the heal loop, which must never quarantine or delete a candidate
+    another live worker is mid-prove on -- doing so fails that worker for a
+    file that was removed out from under it, turning one bad candidate into
+    two terminal verdicts.
+    """
+    try:
+        _INFLIGHT_DIR.mkdir(parents=True, exist_ok=True)
+        (_INFLIGHT_DIR / f"{name}.inflight").write_text(str(os.getpid()), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def clear_candidate_inflight(name: str) -> None:
+    try:
+        (_INFLIGHT_DIR / f"{name}.inflight").unlink()
+    except OSError:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=_NO_WINDOW)
+            return str(pid) in out.stdout
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def inflight_candidates() -> set:
+    """Candidate names currently owned by a LIVE worker process.
+
+    A marker is honoured only while BOTH hold:
+
+      * its owning PID is alive -- a force-killed dashboard must not leave a
+        broken candidate permanently un-healable;
+      * it is younger than _INFLIGHT_TTL_SEC -- the owner is a long-lived
+        dashboard process, so PID-liveness alone would keep every marker it
+        ever wrote valid forever. The TTL is what makes success, failure,
+        exception and crash all self-clean without threading a try/finally
+        through all five prove entry points.
+
+    A prove is minutes; the TTL is deliberately several times that, so it
+    expires stale claims without ever expiring a live one.
+    """
+    names = set()
+    try:
+        entries = list(_INFLIGHT_DIR.glob("*.inflight"))
+    except OSError:
+        return names
+    now = time.time()
+    for p in entries:
+        try:
+            pid = int((p.read_text(encoding="utf-8") or "0").strip() or 0)
+            age = now - p.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        if pid == os.getpid():
+            continue                      # our own claim never blocks us
+        if age < _INFLIGHT_TTL_SEC and _pid_alive(pid):
+            names.add(p.stem)
+        else:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    return names
+
+
 def build_provider_attributed(current_name: str, *, config: str = "Release",
                               max_heal: int = 4) -> dict:
     """Build + stage the reimpl provider with FAILURE ATTRIBUTION and SELF-HEALING.
@@ -280,17 +692,30 @@ def build_provider_attributed(current_name: str, *, config: str = "Release",
     _find_duplicate_symbol_offender) get the same attribution+heal treatment where
     it's safe, and a distinct 'build_provider_duplicate_symbol' stage (instead of
     the old unattributed blanket 'build_provider') where it isn't.
-    Returns {ok, stage, detail, healed:[names]}."""
+    Serialized by _provider_build_lock: the tree is shared and the fleet runs
+    several port workers at once. Returns {ok, stage, detail, healed:[names]}."""
+    with _provider_build_lock():
+        return _build_provider_attributed_locked(current_name, config=config,
+                                                 max_heal=max_heal)
+
+
+def _build_provider_attributed_locked(current_name: str, *, config: str,
+                                      max_heal: int) -> dict:
     healed: list = []
     build_dir = str(D2MOO_REPO / "build-1.13c")
+    # Candidates other LIVE workers are mid-prove on. Healing must route
+    # around these: deleting one fails its owner for a file that vanished
+    # underneath it, converting one broken candidate into two terminal
+    # verdicts.
+    protected = inflight_candidates()
     for _round in range(max_heal + 1):
         # reconfigure first: CONFIGURE_DEPENDS re-globs candidates + regens the .def
         subprocess.run(["cmake", "-S", str(D2MOO_REPO), "-B", build_dir],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, creationflags=_NO_WINDOW)
         proc = subprocess.run(
             ["cmake", "--build", build_dir, "--config", config,
              "--target", "D2MOO_ReimplProvider"],
-            capture_output=True, text=True)
+            capture_output=True, text=True, creationflags=_NO_WINDOW)
         out = proc.stdout + proc.stderr
         if proc.returncode == 0:
             built = os.path.join(build_dir, "source", "D2Debugger", config,
@@ -315,6 +740,13 @@ def build_provider_attributed(current_name: str, *, config: str = "Release",
             dup = _find_duplicate_symbol_offender(out, current_name)
             if dup is not None:
                 stage, detail, quarantine_name = dup
+                if quarantine_name and quarantine_name in protected:
+                    # Owned by a live worker -- see the `healable` guard below.
+                    return {"ok": False, "stage": "build_provider_cascade",
+                            "detail": (f"shared provider build broken by "
+                                       f"{quarantine_name}, currently being proved by "
+                                       f"another worker -- {current_name} is collateral"),
+                            "healed": healed}
                 if quarantine_name:
                     print(f"[build-heal] quarantining duplicate-symbol candidate "
                           f"{quarantine_name}.cpp (collided with {current_name}, "
@@ -323,9 +755,40 @@ def build_provider_attributed(current_name: str, *, config: str = "Release",
                     healed.append(quarantine_name)
                     continue
                 return {"ok": False, "stage": stage, "detail": detail, "healed": healed}
+            # LNK2019/LNK2001: the shape that produced 126 collateral
+            # retirements because nothing here could attribute it.
+            unres = _find_unresolved_symbol_offender(out, current_name)
+            if unres is not None:
+                stage, detail, quarantine_name = unres
+                if quarantine_name and quarantine_name in protected:
+                    # Owned by a live worker -- see the `healable` guard below.
+                    return {"ok": False, "stage": "build_provider_cascade",
+                            "detail": (f"shared provider build broken by "
+                                       f"{quarantine_name}, currently being proved by "
+                                       f"another worker -- {current_name} is collateral"),
+                            "healed": healed}
+                if quarantine_name:
+                    print(f"[build-heal] quarantining candidate {quarantine_name}.cpp "
+                          f"(unresolved external symbol poisoning the shared provider "
+                          f"link; {current_name} was collateral)")
+                    quarantine_candidate(quarantine_name, detail)
+                    healed.append(quarantine_name)
+                    continue
+                return {"ok": False, "stage": stage, "detail": detail, "healed": healed}
             return {"ok": False, "stage": "build_provider",
                     "detail": errs or out[-500:], "healed": healed}
-        for n in siblings:
+        healable = [n for n in siblings if n not in protected]
+        if not healable:
+            # Every offender belongs to a live worker. Removing one would fail
+            # ITS owner for a file that disappeared mid-prove; better to report
+            # this build as collateral (non-terminal -- see
+            # fun_doc._prove_failure_is_environmental) and let the owner finish.
+            return {"ok": False, "stage": "build_provider_cascade",
+                    "detail": (f"shared provider build broken by candidate(s) "
+                               f"{', '.join(sorted(siblings))}, currently being proved by "
+                               f"another worker -- {current_name} is collateral"),
+                    "healed": healed}
+        for n in healable:
             print(f"[build-heal] removing broken sibling candidate {n}.cpp "
                   f"(it was poisoning the shared provider build)")
             remove_candidate(n)
@@ -356,7 +819,16 @@ def resolvable_globals() -> list:
     return sorted(set(_GLOBAL_NAME_RE.findall(text)))
 
 
-def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> str:
+def _prompt_module(program) -> str:
+    """The owning DLL to name in a draft prompt. Falls back to an explicit
+    'unknown module' rather than a plausible-looking default -- a wrong module
+    name in the prompt is worse than an absent one, because the model will act
+    on it."""
+    return module_name_for_program(program) or "unknown module"
+
+
+def build_live_draft_prompt(func_name: str, address, decompiled_text: str,
+                            program=None) -> str:
     globals_list = resolvable_globals()
     try:
         example = LIVE_EXAMPLE.read_text(encoding="utf-8")
@@ -384,7 +856,11 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
         "read the SAME global from the running game via the injected resolver D2MOO_Resolve -- NOT a "
         "hardcoded address, NOT an extern.")
     parts.append("")
-    parts.append(f"Function: {func_name} at {addr}   (D2Common.dll)")
+    # The module comes from the CALLER's program, never a literal. This line said
+    # "(D2Common.dll)" unconditionally, so every D2Client draft was told it was
+    # documenting a D2Common function -- which also steers the model toward
+    # D2Common-flavoured resolve names (2026-07-30).
+    parts.append(f"Function: {func_name} at {addr}   ({_prompt_module(program)})")
     parts.append("")
     parts.append("## Decompiled source (the spec -- includes the plate comment)")
     parts.append("```")
@@ -478,7 +954,8 @@ def build_live_draft_prompt(func_name: str, address, decompiled_text: str) -> st
     return "\n".join(parts)
 
 
-def build_handle_draft_prompt(func_name: str, address, decompiled_text: str) -> str:
+def build_handle_draft_prompt(func_name: str, address, decompiled_text: str,
+                              program=None) -> str:
     """Draft prompt for a LIVE-POINTER GETTER (classify_function 'shadow_leaf'):
     the function takes a pointer to a heap-allocated live game object (unit/record/
     struct) + optional scalar args, and reads fields. Proven by calling BOTH the
@@ -501,7 +978,7 @@ def build_handle_draft_prompt(func_name: str, address, decompiled_text: str) -> 
         "by calling BOTH the ORIGINAL and YOUR reimpl with the SAME captured live pointer and comparing "
         "the result, so reproduce the decompiled field reads EXACTLY -- every offset, cast, width, branch.")
     p.append("")
-    p.append(f"Function: {func_name} at {addr}   (D2Common.dll)")
+    p.append(f"Function: {func_name} at {addr}   ({_prompt_module(program)})")  # see build_live_draft_prompt
     p.append("")
     p.append("## Decompiled source (the spec)")
     p.append("```")
@@ -702,15 +1179,16 @@ def run_synth_prove(reimpl_cpp: str, name: str, address, *, program: str, ret: s
     gspec = _gate_spec(gates)
     if gspec:
         parg["gates"] = gspec
-    spec = {"name": name, "addr": _int(address), "callconv": "stdcall",
+    _cc, _ccnote = resolve_callconv(name, address, program, 1)
+    if _ccnote:
+        print(f"  [callconv] {name}: {_ccnote}", flush=True)
+    spec = {"name": name, "addr": _int(address), "callconv": _cc,
             "ret": ret if ret in ("u8", "i8", "u16", "i16", "u32", "i32") else "u32",
             "args": [parg],
             "compare": ["ret"],
             "vectors": [{}]}
     write_candidate(reimpl_cpp, name)
-    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
-    spec_path = VECTORS_DIR / f"{name}.spec.json"
-    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    spec_path = _write_spec(spec, name, program)
     if build:
         b = build_provider_attributed(name)
         if not b["ok"]:
@@ -742,14 +1220,15 @@ def run_synth2_prove(reimpl_cpp: str, name: str, address, *, program: str, ret: 
     gspec = _gate_spec(gates)
     if gspec:
         parg["gates"] = gspec
-    spec = {"name": name, "addr": _int(address), "callconv": "stdcall",
+    _cc, _ccnote = resolve_callconv(name, address, program, 1)
+    if _ccnote:
+        print(f"  [callconv] {name}: {_ccnote}", flush=True)
+    spec = {"name": name, "addr": _int(address), "callconv": _cc,
             "ret": ret if ret in ("u8", "i8", "u16", "i16", "u32", "i32") else "u32",
             "args": [parg],
             "compare": ["ret"], "vectors": [{}]}
     write_candidate(reimpl_cpp, name)
-    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
-    spec_path = VECTORS_DIR / f"{name}.spec.json"
-    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    spec_path = _write_spec(spec, name, program)
     if build:
         b = build_provider_attributed(name)
         if not b["ok"]:
@@ -793,13 +1272,18 @@ def run_delegate_prove(reimpl_cpp: str, name: str, address, *, program: str, ret
     npass = 0
     orig_vals = set()
     last = None
+    # Resolved ONCE, outside the sweep: every vector calls the same function,
+    # so the convention cannot change per-index and re-deriving it would cost
+    # one Ghidra round-trip per probe.
+    _cc, _ccnote = resolve_callconv(name, address, program, 1)
+    if _ccnote:
+        print(f"  [callconv] {name}: {_ccnote}", flush=True)
     for i in idxs:
         parg = {"id": "p", "kind": "synth", "bytes": 256,
                 "gates": base_gates + [{"depth": 0, "off": arg_off, "imm": i, "w": 4}]}
-        spec = {"name": name, "addr": _int(address), "callconv": "stdcall", "ret": rr,
+        spec = {"name": name, "addr": _int(address), "callconv": _cc, "ret": rr,
                 "args": [parg], "compare": ["ret"], "vectors": [{}]}
-        sp = VECTORS_DIR / f"{name}.spec.json"
-        sp.write_text(json.dumps(spec) + "\n", encoding="utf-8")
+        sp = _write_spec(spec, name, program)
         r = _invoke_prove(sp, build=False)
         last = r
         if r.get("ok"):
@@ -849,9 +1333,7 @@ def run_handle_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
     spec["vectors"] = ([{k: case.get(k, 0) for k in scalar_ids} for case in input_sets]
                        if scalar_ids else [{} for _ in range(HANDLE_ONLY_VECTORS)])
     write_candidate(reimpl_cpp, name)
-    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
-    spec_path = VECTORS_DIR / f"{name}.spec.json"
-    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    spec_path = _write_spec(spec, name, program)
     if build:
         # attributed + self-healing build: a broken SIBLING candidate is healed
         # instead of failing THIS (possibly correct) reimpl; our own compile
@@ -1083,6 +1565,9 @@ def remove_candidate(name: str) -> None:
             p.unlink()
         except OSError:
             pass
+    # The file is gone, so the in-flight claim must go with it -- a stale claim
+    # would protect a candidate that no longer exists from ever being healed.
+    clear_candidate_inflight(name)
 
 
 QUARANTINE_DIR = CANDIDATES_DIR / "_quarantine"
@@ -1109,6 +1594,8 @@ def quarantine_candidate(name: str, reason: str) -> None:
             f.write(f"{ts}\t{name}\t{reason}\n")
     except OSError:
         pass
+    # Out of the glob path, so it is no longer in flight for anyone.
+    clear_candidate_inflight(name)
 
 
 def write_candidate(reimpl_cpp: str, name: str) -> Path:
@@ -1136,20 +1623,55 @@ def write_candidate(reimpl_cpp: str, name: str) -> Path:
         body = f"// D2MOO_REIMPL_EXPORT: {name}\n{body}"
     path = CANDIDATES_DIR / f"{name}.cpp"
     path.write_text(body, encoding="utf-8")
+    # Claim it before any other worker's heal loop can see it. From here until
+    # the prove finishes, a concurrent build that trips over this file reports
+    # collateral instead of deleting it out from under us.
+    mark_candidate_inflight(name)
     return path
+
+
+def _preflight_spec_target(spec_path: Path) -> dict:
+    """bad_target failure for a spec whose module+rva isn't mapped live, else None.
+
+    Sits in front of EVERY prove path (all five run_* functions funnel through
+    _invoke_prove), so a base mistake is reported as `bad_target` -- environmental,
+    re-queued -- rather than discovered as an SEH fault the taxonomy reads as a
+    wrong ABI. Silent on anything it can't judge: this gate exists to remove a
+    false NEGATIVE and must never invent a false one of its own."""
+    try:
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    module, rva = spec.get("module"), spec.get("rva")
+    if not module or not isinstance(rva, int):
+        return None
+    body = _oracle_json("/asset/peek", {"module": module, "rva": rva, "count": 1})
+    if not isinstance(body, dict) or not body.get("ok") or int(body.get("got") or 0) > 0:
+        return None
+    addr = spec.get("addr")
+    where = f" (Ghidra 0x{addr:08x})" if isinstance(addr, int) else ""
+    return _fail("bad_target",
+                 f"bad-target: {module}+0x{rva:x}{where} is not mapped in the running "
+                 f"game -- module not loaded, or not at Ghidra's image base. Nothing "
+                 f"was called; this is NOT a verdict about the function.")
 
 
 def _invoke_prove(spec_path: Path, *, build: bool, timeout: int = 900) -> dict:
     """Run prove_candidate.py --spec and map its result to run_harness's shape."""
     if not PROVE_SCRIPT.exists():
         return _fail("config", f"prover not found: {PROVE_SCRIPT}")
+    bad = _preflight_spec_target(spec_path)
+    if bad:
+        print(f"[port_live_prove] {bad['failure_detail']}", file=sys.stderr)
+        return bad
     # --json emits the raw per-vector oracle result (incl. the coverage "probe"),
     # which we parse back out for branch-coverage analysis without a second call.
     cmd = [sys.executable, str(PROVE_SCRIPT), "--spec", str(spec_path), "--url", ORACLE_URL, "--json"]
     if build:
         cmd.append("--build")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              creationflags=_NO_WINDOW)
     except subprocess.TimeoutExpired:
         return _fail("prove", f"prove_candidate.py timed out after {timeout}s")
     out = proc.stdout + proc.stderr
@@ -1201,6 +1723,270 @@ def _extract_oracle_json(out: str):
                     break
         else:
             return None
+
+
+# ---------------------------------------------------------------------------
+# LIVE IDENTITY: module + RVA, never a Ghidra absolute address (2026-07-30).
+#
+# Every spec built here used to carry only "addr": the Ghidra absolute address.
+# The oracle took it literally, which is sound ONLY for a module that loaded at
+# its preferred base. D2Common (0x6fd50000) and D2Game (0x6fc20000) do. D2Client
+# does NOT -- the live process maps it at 0x03600000 and leaves Ghidra's
+# 0x6fab0000 unmapped -- so the oracle `call`ed unmapped memory, faulted, and
+# returned "handler-exception", which _classify_prove_failure files as
+# `marshal_fault`: "wrong callconv/slot-count or a bad pointer arg". That verdict
+# is terminal, so 104 D2Client functions were retired without their reimpl ever
+# executing once (including a zero-arg void setter, for which no ABI theory
+# applies). Specs now carry module+rva so the oracle adds the RUNTIME base.
+# ---------------------------------------------------------------------------
+_IMAGE_BASE_CACHE: dict = {}
+
+
+def _ghidra_get_json(path: str):
+    """GET a Ghidra REST endpoint, returning the decoded payload or None."""
+    u = urllib.parse.urlparse(GHIDRA_HTTP)
+    conn = http.client.HTTPConnection(u.hostname, u.port or 8089, timeout=15)
+    try:
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return None
+        body = json.loads(resp.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return None
+    finally:
+        conn.close()
+    # /get_metadata answers {"result": "<json string>"} through the 6.0.0 envelope.
+    if isinstance(body, dict) and isinstance(body.get("result"), str):
+        try:
+            return json.loads(body["result"])
+        except ValueError:
+            return None
+    return body
+
+
+def module_name_for_program(program) -> str:
+    """'/Mods/PD2-S12/D2Client.dll' -> 'D2Client.dll' (the name GetModuleHandleA
+    wants). Empty when the caller has no program -- callers must treat that as
+    "cannot resolve", never as a default module: a hardcoded 'D2Common.dll'
+    default in exactly this position is what wrote every non-D2Common proof's tag
+    to the wrong binary for the whole project history (2026-07-27)."""
+    if not program:
+        return ""
+    return str(program).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def ghidra_image_base(program):
+    """Ghidra's image base for `program`, or None. Cached per program: it is a
+    property of the loaded binary and cannot change under us."""
+    module = module_name_for_program(program)
+    if not module:
+        return None
+    if module in _IMAGE_BASE_CACHE:
+        return _IMAGE_BASE_CACHE[module]
+    meta = _ghidra_get_json(
+        "/get_metadata?program=" + urllib.parse.quote(str(program), safe=""))
+    base = None
+    if isinstance(meta, dict):
+        raw = meta.get("base_address") or meta.get("image_base")
+        if raw is not None:
+            try:
+                base = int(str(raw), 16)
+            except ValueError:
+                base = None
+    if base is not None:
+        _IMAGE_BASE_CACHE[module] = base
+    return base
+
+
+def stamp_live_identity(spec: dict, program) -> dict:
+    """Add "module"+"rva" to a spec so the oracle resolves against the RUNTIME
+    base. "addr" is left in place for back-compat with an older D2Debugger and as
+    a diagnostic; the oracle prefers module+rva when both are present.
+
+    LOUD on failure, per the loud-failures rule: a spec that silently falls back
+    to absolute-only is the pre-fix behaviour, and its failure mode is a false
+    verdict about a function, so say so on stderr rather than degrade quietly."""
+    module = module_name_for_program(program)
+    base = ghidra_image_base(program)
+    addr = spec.get("addr")
+    if not module or base is None or not isinstance(addr, int):
+        print(f"[port_live_prove] WARNING: cannot stamp live identity for "
+              f"{spec.get('name')!r} (module={module!r} image_base={base!r} "
+              f"addr={addr!r}) -- the oracle will fall back to the absolute "
+              f"address, which is WRONG for any relocated module",
+              file=sys.stderr)
+        return spec
+    if addr < base:
+        print(f"[port_live_prove] WARNING: {spec.get('name')!r} addr 0x{addr:08x} is "
+              f"below {module}'s image base 0x{base:08x} -- not stamping module+rva",
+              file=sys.stderr)
+        return spec
+    spec["module"] = module
+    spec["rva"] = addr - base
+    return spec
+
+
+def _oracle_json(path: str, payload=None):
+    """One request to the oracle; None on any failure (caller decides what that
+    means -- an unreachable oracle is a separate environmental case)."""
+    u = urllib.parse.urlparse(ORACLE_URL)
+    conn = http.client.HTTPConnection(u.hostname, u.port or 8790, timeout=10)
+    try:
+        if payload is None:
+            conn.request("GET", path)
+        else:
+            conn.request("POST", path, json.dumps(payload),
+                         {"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return None
+        return json.loads(resp.read().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return None
+    finally:
+        conn.close()
+
+
+def oracle_live_bases() -> dict:
+    """{module_lower: live_base} from GET /modules; {} if the route is absent
+    (an older D2Debugger) or the oracle is unreachable."""
+    body = _oracle_json("/modules")
+    if not isinstance(body, dict) or not body.get("ok"):
+        return {}
+    out = {}
+    for entry in body.get("modules") or []:
+        name, base = entry.get("name"), entry.get("base")
+        if isinstance(name, str) and isinstance(base, int):
+            out[name.lower()] = base
+    return out
+
+
+def oracle_supports_module_rva():
+    """True/False when the oracle answered, None when it didn't.
+
+    An oracle without `specModuleRva` IGNORES the module+rva we stamp and falls
+    back to the absolute address -- correct only for a module at its preferred
+    base. Proving a RELOCATED module against such a build is what produced 104
+    false terminal verdicts, so check_live_target refuses that combination
+    outright rather than let it look like an ABI failure again."""
+    body = _oracle_json("/status")
+    if not isinstance(body, dict) or not body.get("ok"):
+        return None
+    return bool(body.get("specModuleRva"))
+
+
+def live_bytes_differ_from_ghidra(program, addr, module, rva, length: int = 16):
+    """True when the live module's bytes at +rva differ from Ghidra's at addr.
+
+    An independent relocation detector that needs NO live base, so it works even
+    against an oracle without GET /modules. If the module really were at its
+    Ghidra image base, the two reads would be byte-identical; a relocated module
+    differs in every absolute operand (Ghidra's `mov eax,[0x6fbcc4d4]` reads back
+    as `mov eax,[0x0371c4d4]` when D2Client sits at 0x03600000).
+
+    Returns None when either side can't be read -- and note the one blind spot:
+    code with no absolute operands is identical either way, so False is "no
+    evidence of relocation", not proof of its absence.
+
+    Worth its own keep beyond the base question: a difference also means the
+    Ghidra program is not the binary the game actually loaded, which makes any
+    proof against it meaningless. (Both PD2 programs here have an
+    `executable_path` under ProjectD2_backup, while the game runs ProjectD2.)
+    """
+    body = _oracle_json("/asset/peek",
+                        {"module": module, "rva": rva, "count": max(1, length // 4)})
+    if not isinstance(body, dict) or not body.get("ok"):
+        return None
+    vals = body.get("vals") or []
+    if len(vals) < max(1, length // 4):
+        return None
+    live = b"".join(int(v & 0xFFFFFFFF).to_bytes(4, "little") for v in vals)
+    meta = _ghidra_get_json(
+        f"/read_memory?address=0x{addr:x}&length={len(live)}&program="
+        + urllib.parse.quote(str(program), safe=""))
+    if not isinstance(meta, dict):
+        return None
+    data = meta.get("data")
+    if not isinstance(data, list) or len(data) != len(live):
+        return None
+    return bytes(int(b) & 0xFF for b in data) != live
+
+
+def check_live_target(program, address) -> tuple:
+    """Pre-flight: is `address` reachable in the RUNNING game? (ok, detail).
+
+    Three cheap questions, all BEFORE any draft or build -- so a wrong base costs
+    one HTTP round-trip instead of an LLM draft, an adversarial-vector call, a
+    cmake+msbuild cycle and a false terminal verdict:
+
+      1. Is module+rva mapped at all?
+      2. If the module is RELOCATED, does this oracle actually honour module+rva?
+         An older build would silently use the (wrong) absolute address.
+      3. Failing a definitive answer to (2) -- an oracle without GET /modules --
+         do the live bytes even match Ghidra's? A difference is evidence the
+         absolute address is not this function.
+
+    A non-answer from the oracle returns ok=True: an unreachable oracle is a
+    separate, already-handled environmental case and must not surface here as a
+    bad target."""
+    module = module_name_for_program(program)
+    base = ghidra_image_base(program)
+    try:
+        addr = _int(address)
+    except (TypeError, ValueError):
+        return True, ""
+    if not module or base is None or addr < base:
+        return True, ""            # can't judge -> don't block
+    rva = addr - base
+
+    live = oracle_live_bases().get(module.lower())
+    supports = None
+    if live is not None and live != base:
+        supports = oracle_supports_module_rva()
+        if supports is False:
+            return False, (
+                f"bad-target: {module} is RELOCATED (live 0x{live:08x} != Ghidra "
+                f"0x{base:08x}) and this D2Debugger predates module+rva spec support "
+                f"(no specModuleRva in /status) -- it would call the absolute address "
+                f"0x{addr:08x}, which is not this function. Rebuild D2Debugger and "
+                f"relaunch. Nothing was tested.")
+    elif live is None:
+        # No GET /modules -> an oracle that predates module+rva. Fall back to the
+        # byte comparison, which needs no live base. Without this the pre-relaunch
+        # window still produced false ABI verdicts on a relocated module.
+        if oracle_supports_module_rva() is False:
+            differ = live_bytes_differ_from_ghidra(program, addr, module, rva)
+            if differ:
+                return False, (
+                    f"bad-target: the live bytes at {module}+0x{rva:x} do not match "
+                    f"Ghidra's at 0x{addr:08x}, so the module is relocated (or is a "
+                    f"different build) -- and this D2Debugger predates module+rva spec "
+                    f"support, so it would call 0x{addr:08x} regardless. Rebuild "
+                    f"D2Debugger and relaunch. Nothing was tested.")
+    body = _oracle_json("/asset/peek", {"module": module, "rva": rva, "count": 1})
+    if not isinstance(body, dict) or not body.get("ok"):
+        return True, ""
+    if int(body.get("got") or 0) > 0:
+        return True, ""
+    return False, (f"bad-target: {module}+0x{rva:x} (Ghidra 0x{addr:08x}) is not mapped "
+                   f"in the running game -- the module is either not loaded or not at "
+                   f"Ghidra's image base 0x{base:08x}. Nothing was tested.")
+
+
+def _write_spec(spec: dict, name: str, program) -> "Path":
+    """Stamp the live identity onto `spec` and write it to VECTORS_DIR.
+
+    THE ONLY place a spec reaches disk. Five call sites used to write their own
+    (run_synth_prove / run_synth2_prove / run_delegate_prove / run_handle_prove /
+    run_live_prove), which is precisely how a whole prove path can miss a
+    cross-cutting fix: keeping one writer means module+rva can never be stamped
+    onto four of five specs."""
+    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp_live_identity(spec, program)
+    spec_path = VECTORS_DIR / f"{name}.spec.json"
+    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    return spec_path
 
 
 def _ghidra_post(path: str, data: dict) -> dict:
@@ -1443,7 +2229,7 @@ def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
     abort_class=True stamps the spec with a safety/envelope annotation (the
     function's out-of-range path is FATAL -- see abi_static.detect_abort_path)
     and flags the registry row so V1 adversarial sweeps skip it."""
-    spec = translate_layout_to_spec(name, address, param_layout)
+    spec = translate_layout_to_spec(name, address, param_layout, program=program)
     spec["vectors"] = [dict(case) for case in input_sets]  # {name:val} == oracle vector
     if abort_class:
         spec["safety"] = ("ABORT CLASS: the original's out-of-range path is fatal "
@@ -1452,9 +2238,7 @@ def run_live_prove(reimpl_cpp: str, name: str, address, param_layout: dict,
         spec["abort_class"] = True
 
     write_candidate(reimpl_cpp, name)
-    VECTORS_DIR.mkdir(parents=True, exist_ok=True)
-    spec_path = VECTORS_DIR / f"{name}.spec.json"
-    spec_path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    spec_path = _write_spec(spec, name, program)
 
     if build:
         b = build_provider_attributed(name)   # attributed + self-healing (see docstring)
