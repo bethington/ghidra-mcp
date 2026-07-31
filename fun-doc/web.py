@@ -146,6 +146,10 @@ class WorkerManager:
     # working on before it fell over", which survives the stop that erases the
     # live roster. It is an OFFER, never an auto-start.
     LAST_ROSTER_META_KEY = "dashboard_last_roster"
+    # Survives a restart so a deliberate pause is not silently forgotten (and,
+    # more importantly, so the fleet can come back PAUSED rather than either
+    # lost or spending tokens before anyone has looked at it).
+    PAUSE_META_KEY = "dashboard_paused"
 
     def __init__(self, state_file, bus, socketio, load_queue, save_queue,
                  dashboard_port=5000):
@@ -186,6 +190,11 @@ class WorkerManager:
         # down so a paused fleet does not relaunch the game underneath you.
         self._paused = threading.Event()
         self._pause_reason = None
+        # 'operator' pauses stay until a human resumes; 'dependency'
+        # pauses lift themselves when the dependency returns. Without the
+        # distinction an outage pause would need a human to un-stick it,
+        # or an operator pause would silently un-pause itself.
+        self._pause_source = None
         self._bus.on("provider_timeout", self._handle_provider_timeout)
         # Every runs.jsonl row (drafts, retries, sub-step results) refreshes the
         # owning worker's heartbeat. Without this, a PORT candidate that spends
@@ -209,6 +218,16 @@ class WorkerManager:
         # auto_recover_needed gates unattended relaunch on "something actually
         # wants the live oracle" -- see port_work_pending for why that is no
         # longer the same question as "a port worker is running".
+        # Adopt a persisted pause before the monitors come up. If the last run
+        # ended paused, this run starts paused -- including auto-recovery, which
+        # would otherwise relaunch the game during the restart it was paused for.
+        _persisted_pause = self.load_pause_state()
+        if _persisted_pause:
+            self._pause_reason = _persisted_pause.get("reason") or "paused before restart"
+            self._pause_source = _persisted_pause.get("source") or "operator"
+            self._paused.set()
+            print(f"  Fleet is PAUSED from the previous run: {self._pause_reason}", flush=True)
+
         self._oracle_monitor = OracleHealthMonitor(
             bus=self._bus, auto_recover_needed=self._oracle_wanted,
         )
@@ -656,12 +675,21 @@ class WorkerManager:
         from event_log import log_event
 
         while not self._watchdog_stop.wait(HEARTBEAT_INTERVAL_SEC):
+            # Ride the watchdog's existing cadence rather than adding a thread.
+            # Never fatal: a broken dependency probe must not take the watchdog
+            # down with it, or a stalled worker stops being reaped too.
+            try:
+                self._sync_dependency_pause()
+            except Exception as e:
+                print(f"  dependency-pause check failed: {e}", flush=True)
             now = datetime.now()
             heartbeats = []
             kill_requests = []
             zombies = []
             with self._lock:
                 for worker_id, worker in self._workers.items():
+                    # "paused" is deliberate parking, not a stall -- it is
+                    # excluded here for the same reason quota_paused is.
                     if worker.get("status") not in ("starting", "running", "stopping", "quota_paused"):
                         continue
                     thread = worker.get("thread")
@@ -902,6 +930,13 @@ class WorkerManager:
         """Start workers from `specs` (default: the boot-time offer).
 
         Explicit call only -- nothing invokes this at boot.
+
+        If the fleet is currently PAUSED, the restored workers start and then
+        park immediately without touching a candidate. That is what makes
+        restore-on-boot safe: auto-restore was retired because a crash-looping
+        dashboard would respawn six LLM workers every cycle, and coming back
+        paused honours that exactly -- nothing spends a token until a human
+        clicks Resume.
         """
         if specs is None:
             offer = self.load_restore_offer()
@@ -1106,10 +1141,16 @@ class WorkerManager:
     # the monitor relaunching the game, because the need-predicate is "port
     # worker running OR candidates queued" and the queue is rarely empty.
 
-    def pause_workers(self, reason=None):
+    def pause_workers(self, reason=None, source="operator"):
         with self._lock:
             self._pause_reason = reason or "paused by operator"
+            self._pause_source = source
             self._paused.set()
+        # Snapshot the roster HERE too. Start/stop were the only capture points,
+        # and a pause->restart never goes through the stop path -- so without
+        # this the fleet you paused is exactly the fleet you cannot get back.
+        self._persist_active_workers()
+        self._persist_pause_state()
         self._emit_status()
         try:
             from event_log import log_event
@@ -1121,7 +1162,9 @@ class WorkerManager:
     def resume_workers(self):
         with self._lock:
             self._pause_reason = None
+            self._pause_source = None
             self._paused.clear()
+        self._persist_pause_state()
         self._emit_status()
         try:
             from event_log import log_event
@@ -1134,7 +1177,84 @@ class WorkerManager:
         return self._paused.is_set()
 
     def pause_state(self):
-        return {"paused": self._paused.is_set(), "reason": self._pause_reason}
+        return {
+            "paused": self._paused.is_set(),
+            "reason": self._pause_reason,
+            "source": self._pause_source,
+            # Drained == every live worker has actually reached its parking
+            # spot. Pausing is a REQUEST; this is the acknowledgement, and it is
+            # what makes "safe to restart now" an observable fact rather than a
+            # guess about how long a provider call might still run.
+            "drained": self.pause_drained(),
+            "workers": len(self._workers),
+        }
+
+    def pause_drained(self):
+        if not self._paused.is_set():
+            return False
+        with self._lock:
+            live = [w for w in self._workers.values()
+                    if w.get("status") in ("starting", "running", "stopping", "paused")]
+            return all(w.get("status") == "paused" for w in live)
+
+    def _persist_pause_state(self):
+        try:
+            queue = self._load_queue()
+            meta = dict(queue.get("meta") or {})
+            if self._paused.is_set():
+                meta[self.PAUSE_META_KEY] = {
+                    "reason": self._pause_reason,
+                    "source": self._pause_source,
+                    "at": datetime.now().isoformat(),
+                }
+            else:
+                meta.pop(self.PAUSE_META_KEY, None)
+            queue["meta"] = meta
+            self._save_queue(queue)
+        except Exception as e:
+            # Loud, never fatal: a pause that fails to persist still holds for
+            # THIS process, and silence here is what would make the restart
+            # quietly come back running.
+            print(f"  Pause-state persist failed: {e}", flush=True)
+
+    def load_pause_state(self):
+        """The persisted pause, if the last run ended paused."""
+        try:
+            meta = self._load_queue().get("meta") or {}
+        except Exception:
+            return None
+        st = meta.get(self.PAUSE_META_KEY)
+        return st if isinstance(st, dict) else None
+
+    # How many consecutive Ghidra-down polls before the fleet parks itself.
+    # Ghidra is the one HARD dependency of every lane -- no decompile, no work
+    # of any kind -- unlike the oracle, which only gates the LIVE lane and is
+    # already handled by PortOracleBackoff without starving static work.
+    GHIDRA_AUTOPAUSE_AFTER = 3
+
+    def _sync_dependency_pause(self):
+        """Park the fleet while Ghidra is gone; lift it when Ghidra returns.
+
+        Only ever touches a pause it OWNS (source == "dependency"). An operator
+        pause must never be auto-resumed out from under the person who set it,
+        and a dependency pause must never need a human to un-stick it.
+        """
+        try:
+            st = self._ghidra_monitor.get_state()
+        except Exception:
+            return
+        reachable = st.get("reachable")
+        down_streak = int(st.get("consecutive_down") or 0)
+
+        if self._paused.is_set():
+            if (self._pause_source == "dependency" and reachable):
+                print("  Ghidra is back -- resuming the fleet", flush=True)
+                self.resume_workers()
+            return
+        # `reachable is None` means "not probed yet" -- never a reason to park.
+        if reachable is False and down_streak >= self.GHIDRA_AUTOPAUSE_AFTER:
+            self.pause_workers(
+                f"Ghidra unreachable for {down_streak} polls", source="dependency")
 
     def _oracle_wanted(self):
         """Does anything actually want the live oracle right now?
@@ -4432,6 +4552,10 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "restored": result["restored"],
             "count": len(result["restored"]),
             "errors": result["errors"],
+            # Restored INTO a pause: the workers are up but parked, waiting on
+            # Resume. Surfaced so the banner can say so rather than implying
+            # work has started.
+            "paused": worker_mgr.is_paused(),
         })
 
     @app.route("/api/worker/pause", methods=["POST"])
@@ -4442,7 +4566,23 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         oracle auto-recovery stands down so the game is left alone.
         """
         data = request.get_json(silent=True) or {}
-        return jsonify({"ok": True, **worker_mgr.pause_workers(data.get("reason"))})
+        result = worker_mgr.pause_workers(data.get("reason"),
+                                          source=data.get("source") or "operator")
+        # drain=true blocks until every worker has actually PARKED, so a caller
+        # about to restart the process knows nothing is mid-candidate. Bounded:
+        # an in-flight provider call can legitimately run several minutes, and
+        # waiting forever would just move the hang somewhere else.
+        if data.get("drain"):
+            import time as _t
+            deadline = _t.time() + float(data.get("drain_timeout") or 600)
+            while _t.time() < deadline and not worker_mgr.pause_drained():
+                _t.sleep(1.0)
+            result["drained"] = worker_mgr.pause_drained()
+            if not result["drained"]:
+                result["warning"] = ("workers still finishing their current candidate; "
+                                     "restarting now orphans it (non-terminal, re-admitted "
+                                     "on the next pass)")
+        return jsonify({"ok": True, **result})
 
     @app.route("/api/worker/resume", methods=["POST"])
     def post_worker_resume():

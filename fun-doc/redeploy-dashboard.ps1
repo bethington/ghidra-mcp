@@ -44,8 +44,26 @@
     dashboard that predates /api/admin/restart cannot restart itself and that
     prompt is otherwise pure overhead.
 
+.PARAMETER Pause
+    Pause the worker fleet and WAIT for it to drain before restarting, then let
+    the new instance come back paused. Use this for a code deploy while workers
+    are running: without it the restart kills whatever candidate each worker
+    happened to be mid-way through.
+
+    The pause persists across the restart, so the fleet returns PARKED rather
+    than either lost or immediately spending tokens. Click Resume (or POST
+    /api/worker/resume) when ready.
+
+.PARAMETER DrainTimeoutSec
+    How long to wait for workers to park. Default 600. An in-flight provider
+    call routinely runs several minutes; past the timeout the restart proceeds
+    anyway and the orphaned candidate is re-admitted on the next pass.
+
 .EXAMPLE
     ./fun-doc/redeploy-dashboard.ps1
+
+.EXAMPLE
+    ./fun-doc/redeploy-dashboard.ps1 -Pause
 
 .EXAMPLE
     ./fun-doc/redeploy-dashboard.ps1 -InstallTask
@@ -58,13 +76,38 @@ param(
     [int]$Port = 5000,
     [int]$TimeoutSec = 180,
     [switch]$Force,
-    [switch]$InstallTask
+    [switch]$InstallTask,
+    [switch]$Pause,
+    [int]$DrainTimeoutSec = 600
 )
 
 $ErrorActionPreference = 'Stop'
 $FunDoc = $PSScriptRoot
 $Launcher = Join-Path $FunDoc 'start-dashboard.ps1'
 $Base = "http://127.0.0.1:$Port"
+
+function Invoke-PauseAndDrain {
+    # Best-effort: an unreachable dashboard is exactly the case -Force handles,
+    # and refusing to redeploy because the pause call failed would be worse than
+    # redeploying without it.
+    try {
+        $body = @{ reason = 'dashboard redeploy'; drain = $true;
+                   drain_timeout = $DrainTimeoutSec } | ConvertTo-Json
+        Write-Host "[pause] parking workers (up to ${DrainTimeoutSec}s)..."
+        $r = Invoke-RestMethod -Uri "$Base/api/worker/pause" -Method POST `
+                -Body $body -ContentType 'application/json' `
+                -TimeoutSec ($DrainTimeoutSec + 30)
+        if ($r.drained) {
+            Write-Host "[pause] all workers parked -- safe to restart."
+        } else {
+            Write-Warning "[pause] drain timed out; a candidate may be orphaned (non-terminal, re-admitted next pass)."
+        }
+    } catch {
+        Write-Warning "[pause] could not pause before restart: $($_.Exception.Message)"
+    }
+}
+
+if ($Pause) { Invoke-PauseAndDrain }
 
 function Test-Elevated {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
