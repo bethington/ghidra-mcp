@@ -6,6 +6,145 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### fun-doc: live-prove ABI detection + shared-build failure attribution
+
+**Only 15% of `live_prove_failed` verdicts were about the function.** Measured
+2026-07-31 over 523 terminal rows:
+
+| n | share | cause |
+| --- | --- | --- |
+| 152 | 29% | `marshal_fault` / SEH — ABI |
+| 126 | 24% | unresolved symbol from **another** candidate — collateral |
+| 78 | 15% | genuine semantic mismatch |
+| 58 | 11% | compile error (own draft) |
+| 37 | 7% | unresolved symbol in own draft |
+| 24 | 5% | duplicate symbol — collateral |
+
+`live_prove_failed` is TERMINAL, so 150 functions were permanently retired for
+build failures that were not theirs, their reimpl never executed once.
+
+**Root cause: no locking.** Every `candidates/*.cpp` links into ONE provider
+DLL built in ONE CMake tree with a `CONFIGURE_DEPENDS` glob, and the dashboard
+routinely runs six port workers at once with nothing serializing them. Worker A
+configures, CMake sweeps in worker B's just-written candidate, A fails on code
+it never wrote — and A's heal loop then deletes B.cpp *while B is still proving
+it*, so both retire. `_provider_build_lock` now serializes the build (the
+drafting, which dominates wall-clock, stays parallel), and an in-flight
+registry stops any worker healing a candidate another live worker owns.
+
+**LNK2019 was unattributable.** `build_provider_attributed` heals compile
+errors naming `candidates\X.cpp` and LNK2005 duplicate symbols, but an
+unresolved-external names only the `.vcxproj` — so it matched no attributor and
+fell through to a blanket verdict. `_find_unresolved_symbol_offender` reads
+"referenced in function F", maps F to its candidate, and quarantines the real
+offender. 126 victims traced to 35 offending candidates (top 15 = 67%).
+Attributed-collateral stages are now non-terminal, so the function is re-queued
+rather than retired — the same principle as `bad_target`.
+
+**`cdecl` was never emitted.** `translate_layout_to_spec` took the calling
+convention from the LLM-drafted `param_layout`, which knows which registers
+hold inputs but not who cleans the stack, and defaulted every stack-argument
+function to `stdcall`. `D2Oracle_Call` casts to the declared convention, so a
+cdecl callee declared stdcall means *nobody* pops — ESP leaks 4×argc per call.
+Whether that faults depends on the enclosing epilogue, which is why it showed
+up as a tendency rather than a law: **79% of `marshal_fault` functions end in a
+bare RET against 41% of live-proven ones**. The oracle has accepted `cdecl`
+since it was written (`ParseCallConv`); the translator simply never emitted it.
+The convention is now read from the disassembly, and a `RET n` that contradicts
+the drafted arity is *refused* rather than called — a wrong slot count on a
+callee-cleans convention skews ESP and access-violates the game.
+
+Repair for the existing data:
+`fun-doc/scripts/requeue_collateral_build_failures.py` (dry-run default).
+
+### fun-doc: dependency health monitoring + unattended recovery
+
+**An oracle outage stopped a six-worker prove fleet for 70 minutes and nothing
+recovered it.** Measured 2026-07-30: `consecutive_down: 94`,
+`game_running: false`, `relaunch_stage: null` — *zero* recovery attempts. Three
+correct-in-isolation decisions deadlocked each other:
+
+1. `_maybe_auto_recover` was reachable only via `game_wedged`, which requires
+   `running and not reachable`. A game that fully **exited** had no unattended
+   path back at all.
+2. The need-predicate was "a port worker is running". A dead oracle makes port
+   workers drain into `oracle_unavailable` and exit, so once the last one went
+   the predicate went false and recovery refused with *"nothing needs the
+   oracle right now"*.
+3. Recovery gave up permanently after 3 attempts.
+
+The waste was measurable: `ce0c6ae1` burned 50 of 52 candidates against the
+dead oracle (96%), `9b7d7928` 78 of 100.
+
+**Recovery** (`oracle_health.py`) now triggers on a dead game as well as a
+wedged one, and the need-predicate widened to "a port worker is running **or**
+unresolved port candidates exist" — the durable fact rather than its transient
+consequence. The 3-attempt cap became a *burst*: past it the interval doubles
+to a 30-minute floor and retries continue indefinitely, so an overnight stall
+self-heals instead of waiting for a human, while a permanently broken launcher
+settles at ~2 attempts/hour rather than looping.
+
+**Ghidra** got a monitor at all (`ghidra_health.py`, new). It also emits the
+`ghidra_health` bus event that `audit/rules.yaml`'s `ghidra_offline_sustained`
+rule has been keyed on since Phase 1 — **no production code had ever emitted
+it**, so that rule had never fired in its life. Restore policy is narrower than
+the oracle's by design: launch only when no Ghidra process exists, never kill a
+running one (that risks unsaved programs and stranded shared-server checkouts).
+Two traps it avoids, both live on the dev box: process detection matches
+`ghidra.GhidraClassLoader` rather than a bare `*ghidra*` glob, which would
+false-match this repo's own VSCode Java language server; and install resolution
+prefers the root observed on the running process, because `GHIDRA_INSTALL_DIR`
+pointed at a nonexistent path and `try_launch_ghidra`'s fallback list then
+reached a *different version* that does exist.
+
+**Worker roster** now survives the stop that erases it. `save_priority_queue`
+was *stripping* `dashboard_active_workers` on every write — that, not the
+restore call site, is where auto-restore was really retired, and it is why the
+restart had nothing to offer. The roster is kept and surfaced as a one-click
+banner; auto-restore stays retired, so a crash-looping dashboard can never
+silently re-spawn the fleet.
+
+**PORT workers** stop burning candidates on a dead oracle
+(`PortOracleBackoff`): after 3 consecutive `oracle_unavailable` they wait for
+the oracle instead, heartbeating through `on_idle` so the watchdog does not
+stall-kill them. Capped, so static-harness work is never starved.
+
+**Dashboard** gained a 5-dot header strip (Dashboard · Ghidra · Oracle+Game ·
+Provider · Store) behind `/api/health/all`. The dot that was there before
+reported the *browser's socket.io link*, which stays green while every
+dependency is dead. Degradations also fire a native Windows toast
+(`notify.py`, edge-triggered and rate-limited), and
+`install-scheduled-task.ps1` registers the dashboard to start elevated at logon
+with **no UAC prompt** — which the self-elevating script cannot do.
+
+### `analyze_global_completeness`: an untyped global can never band COMPLETE_80
+
+**A global with no type could reach exactly 80.0 and band `COMPLETE_80`.** The
+core axis budget is name(25) + comment(25) + type(20) + bytes(15) = 85, so an
+untyped global that was perfect on every *other* core axis landed on precisely
+the lowest band floor. It was then counted as documented by the `Complete`
+property map, by fun-doc's `effective_score >= Target` draft gate, and by every
+dashboard rollup — for a value whose width and interpretation are still unknown.
+The type is the one axis you cannot read around: a good name and a good plate
+comment describe what the bytes *mean*, not how many of them there are or how to
+interpret them.
+
+`scoreGlobalCompletenessAt` now clamps both `score` and `effective_score` to
+`GLOBAL_UNTYPED_CEILING` (79.0) whenever the `untyped` issue is present — no
+defined data, or an `undefined*` type, the same bar `set_global` already enforces
+at write time. It is applied as a **ceiling on the finished score, not another
+deduction**, so a poor untyped global keeps its lower score rather than being
+inflated. The response carries `score_ceiling` / `score_ceiling_reason` so a
+caller can see why it stopped at 79 instead of guessing.
+
+Clamping the score rather than only suppressing the band is deliberate: the band
+is not the only consumer. fun-doc's assess pass tallies `at_target` off
+`effective_score` directly, so a band-only fix would have left untyped globals
+counted at Target while showing no band.
+
+Covered by `com.xebyte.offline.GlobalCompletenessTypeGateTest`, which sweeps the
+whole 0-100 range and asserts no gated score bands.
+
 ### fun-doc: pending vectors are namespaced by binary and their append is locked
 
 **Golden-vector staging files were keyed on the function name alone, so different
