@@ -173,7 +173,7 @@
         "compact",
         "program"
       ],
-      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale \u00e2\u20ac\u201d the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale \u00e2\u20ac\u201d the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are \u00e2\u20ac\u201d apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
     },
     {
       "path": "/analyze_struct_field_usage",

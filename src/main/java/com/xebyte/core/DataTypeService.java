@@ -3913,7 +3913,31 @@ public class DataTypeService {
     private static final double GAX_NAME = 25, GAX_COMMENT = 25, GAX_TYPE = 20,
                                 GAX_BYTES = 15, GAX_ENUM = 8, GAX_STRUCT = 7;
 
-    private static String globalBandForScore(double eff) {
+    /**
+     * Hard ceiling for a global that still carries no real type (no defined
+     * data, or an {@code undefined*} type — the same bar {@code set_global}
+     * enforces at write time).
+     *
+     * <p>The core budget is name(25) + comment(25) + type(20) + bytes(15) = 85,
+     * so an untyped global with a perfect name, plate comment and byte
+     * formatting landed on exactly 80.0 and banded {@code COMPLETE_80}. That
+     * claimed "documented" for a value whose width and interpretation are still
+     * unknown, which is the one axis you cannot read around. A global is never
+     * 80% complete without a type, so both the raw and effective scores are
+     * clamped one point below the band floor — every downstream consumer (the
+     * {@code Complete} band map, fun-doc's {@code effective_score >= Target}
+     * draft gate, the dashboard rollups) then agrees without needing its own
+     * copy of the rule.
+     */
+    public static final double GLOBAL_UNTYPED_CEILING = 79.0;
+
+    /** Clamp a global completeness score to {@link #GLOBAL_UNTYPED_CEILING}
+     *  when the type axis is unsatisfied. Pure; offline-testable. */
+    public static double applyGlobalTypeGate(double score, boolean untyped) {
+        return untyped ? Math.min(score, GLOBAL_UNTYPED_CEILING) : score;
+    }
+
+    public static String globalBandForScore(double eff) {
         if (eff >= 100.0) return "COMPLETE_100";
         if (eff >= 95.0) return "COMPLETE_95";
         if (eff >= 90.0) return "COMPLETE_90";
@@ -4043,10 +4067,23 @@ public class DataTypeService {
         raw = Math.max(0.0, Math.min(100.0, raw));
         eff = Math.max(0.0, Math.min(100.0, eff));
 
+        // Type gate: no real type => cannot be considered 80% complete. See
+        // GLOBAL_UNTYPED_CEILING. Applied after the per-axis clamp so it acts
+        // as a ceiling on the finished score, not as another deduction.
+        boolean untyped = issues.contains("untyped");
+        if (untyped) {
+            raw = applyGlobalTypeGate(raw, true);
+            eff = applyGlobalTypeGate(eff, true);
+        }
+
         out.put("score", raw);
         out.put("effective_score", eff);
         out.put("band", globalBandForScore(eff));
         out.put("fully_documented", eff >= 100.0);
+        if (untyped) {
+            out.put("score_ceiling", GLOBAL_UNTYPED_CEILING);
+            out.put("score_ceiling_reason", "untyped");
+        }
         out.put("axes", axesOut);
         out.put("missing", missing);
         out.put("deductions", breakdown);
@@ -4056,7 +4093,7 @@ public class DataTypeService {
     }
 
     @McpTool(path = "/analyze_global_completeness", method = "GET",
-            description = "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
+            description = "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
             category = "datatype")
     public Response analyzeGlobalCompleteness(
             @Param(value = "address", paramType = "address",
