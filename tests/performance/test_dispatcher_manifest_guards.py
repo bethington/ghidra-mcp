@@ -309,3 +309,86 @@ def test_void_reimpl_is_deferred_to_manual_review(monkeypatch):
     e, why = harvest.build_entry("F", _row(), "D2Common.dll",
                                  {"F": _sig(argc=1, is_void=True)})
     assert e is None and "class B" in why
+
+
+# --- class D vs fastcall: the input register is the one that is READ ---------
+#
+# The 2026-07-30 crash. classify() asked whether the prologue "touches" EAX via
+# a regex matching `MOV EAX, ...`, so
+#
+#     MOV EAX, dword ptr [ECX]        ; UNITS_GetUnitLevel
+#
+# read as "EAX-input" -- but EAX is the DESTINATION and the argument is in ECX.
+# That is a __fastcall prologue. Two entries got class D (the register-explicit
+# EAX ABI), the thunk was handed the wrong input register, and the game
+# access-violated with a constant ecx=0x0000000A. What identified it was the
+# crash log's stack dump: a return address resolved, via the patch PDB, to
+# UNITS_GetUnitLevelDispatch::Thunk+0xb.
+#
+# Writes tell you nothing about inputs. Only reads do.
+
+def _cls(monkeypatch, *instructions, argc=1):
+    monkeypatch.setattr(harvest, "_get", lambda *a, **k: {"instructions": _ins(*instructions)})
+    return harvest.classify("0x1000", "D2Common.dll", argc)
+
+
+def test_mov_eax_from_ecx_is_fastcall_not_class_d(monkeypatch):
+    """The exact crash. Must be class A (__fastcall puts arg 1 in ECX)."""
+    cls, why = _cls(monkeypatch, "MOV EAX,dword ptr [ECX]", "CMP EAX,0x2", "RET")
+    assert cls == "A", f"regressed to {cls}: {why}"
+    assert "ECX" in why
+
+
+def test_cmp_eax_is_genuine_class_d(monkeypatch):
+    """STATS_GetTableValue64 really does read EAX -- it must stay class D, or
+    the fix would break the ten working class D dispatchers."""
+    cls, why = _cls(monkeypatch, "CMP EAX,0x40", "JC 0x1234", "XOR EAX,EAX", "RET")
+    assert cls == "D" and "EAX" in why
+
+
+def test_test_eax_is_genuine_class_d(monkeypatch):
+    """The DATATBLS_*TxtRecord / SKILLS_* family all open with TEST EAX,EAX."""
+    cls, _ = _cls(monkeypatch, "TEST EAX,EAX", "JZ 0x1234", "RET")
+    assert cls == "D"
+
+
+def test_eax_as_memory_base_is_class_d(monkeypatch):
+    cls, _ = _cls(monkeypatch, "MOV EAX,dword ptr [EAX + 0x2c]", "RET")
+    assert cls == "D"
+
+
+def test_stack_load_still_wins(monkeypatch):
+    cls, why = _cls(monkeypatch, "MOV EAX,dword ptr [ESP + 0x4]", "RET 0x4")
+    assert cls == "A" and "stack" in why
+
+
+def test_xor_eax_eax_is_not_an_eax_input(monkeypatch):
+    """Zeroing idiom -- it nominally reads EAX but is not evidence of an input,
+    so it must not be mistaken for the register-explicit ABI."""
+    cls, why = _cls(monkeypatch, "XOR EAX,EAX", "MOV EAX,dword ptr [ECX]", "RET")
+    assert cls == "A", f"got {cls}: {why}"
+
+
+def test_ecx_read_wins_over_later_eax_read(monkeypatch):
+    """First genuine read decides. ECX first => fastcall."""
+    cls, why = _cls(monkeypatch, "MOV EAX,dword ptr [ECX]", "TEST EAX,EAX", "RET")
+    assert cls == "A" and "ECX" in why
+
+
+def test_unclear_abi_is_still_refused(monkeypatch):
+    cls, why = _cls(monkeypatch, "PUSH EBX", "MOV EBX,EDI", "RET")
+    assert cls is None and "unclear" in why
+
+
+@pytest.mark.parametrize("instr,reg,expected", [
+    ("MOV EAX,dword ptr [ECX]", "ECX", True),
+    ("MOV EAX,dword ptr [ECX]", "EAX", False),   # destination only
+    ("CMP EAX,0x40", "EAX", True),
+    ("MOV EAX,ECX", "ECX", True),
+    ("MOV EAX,ECX", "EAX", False),
+    ("XOR EAX,EAX", "EAX", False),               # zeroing idiom
+    ("PUSH EAX", "EAX", True),
+    ("MOV EAX,0x10", "EAX", False),
+])
+def test_reads_reg_distinguishes_reads_from_writes(instr, reg, expected):
+    assert harvest._reads_reg(instr, reg) is expected

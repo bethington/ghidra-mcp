@@ -256,6 +256,27 @@ _SAFE_CALL_RE = re.compile(
 # handle-proven: passing a live captured game object would CORRUPT it. `==` excluded.
 _PTR_WRITE_RE = re.compile(r"(?:->\s*\w+|\]|\*\s*\([^;{}]*\)|\*\s*\w+)\s*=(?!=)")
 
+# Any use of a pointer LOADED OUT OF the passed object -- the one thing a
+# mutator_leaf must never do. _DEEP_DEREF_RE does NOT cover this: it matches the
+# cast-double-deref form `*(T *)(*p)` only, and sails straight past `p->a->b`
+# (caught by test_mutator_leaf_rejects_deep_deref_SAFETY, which failed on the
+# first cut of this gate).
+#
+# Why it matters: a synth object is filled with byte[o] = (o*13+0x37), so every
+# "pointer" read out of it is garbage. Dereferencing one faults inside the
+# oracle and takes the bridge -- and the game -- down with it. That is the
+# oracle_died_during failure mode, and it costs a game relaunch every time.
+#
+# `->field[...]` is included deliberately. A pointer-field index and an
+# array-member index are indistinguishable in decompiled C (`p->a[i]` is both),
+# so this over-refuses rather than risk the fault. Wrongly refusing costs one
+# unproven function; wrongly accepting costs the running game.
+_MUTATOR_UNSAFE_DEREF_RE = re.compile(
+    r"->\s*\w+\s*(?:\[[^\]]*\])?\s*->"   # p->a->b   /  p->a[i]->b
+    r"|\*\s*\(?\s*\w+\s*->"              # *p->a     /  *(p->a)
+    r"|->\s*\w+\s*\["                    # p->a[i]   (pointer-field index, ambiguous)
+)
+
 
 def _has_delegate_call(body):
     """True if `body` calls any function that is NOT control-flow / an abort helper
@@ -399,6 +420,59 @@ def classify_function(decompiled_text, variables=None):
             and not _DAT_GLOBAL_RE.search(text) and not _NAMED_GLOBAL_RE.search(text)
             and not _has_delegate_call(body) and not _PTR_WRITE_RE.search(body)):
         return "shadow_leaf"
+
+    # MUTATOR LEAF (2026-07-30, state-diff capability) -- the exact mirror of
+    # shadow_leaf above: same shape (one pointer param, struct/cast access, no
+    # globals, no delegate) except it WRITES through the pointer instead of only
+    # reading. shadow_leaf's no-write gate exists because handle-proving a mutator
+    # would corrupt the real captured game object; a mutator is instead proved
+    # against a SYNTHETIC scratch object (oracle arg kind "synth"), which the
+    # oracle allocates fresh and identical for the original and the reimpl, and
+    # is judged on the bytes each leaves behind.
+    #
+    # This class was unreachable until the oracle's buffer readback was widened
+    # from 8 bytes to the full region (D2Debugger.LiveDispatch.cpp, 2026-07-30):
+    # a mutation past offset 8 was simply invisible to the comparison, which is
+    # what "no comparable output" always actually meant.
+    #
+    # SAFETY -- the deep-deref gate is REQUIRED, not stylistic. A synth object is
+    # filled with the pattern byte[o] = (o*13+0x37); those bytes are NOT valid
+    # pointers. A function that loads a pointer out of the object and writes
+    # THROUGH it would dereference garbage and fault inside the oracle, taking
+    # the bridge (and the game) with it -- the oracle_died_during failure mode.
+    # Two-level mutators need the nested synth2 layout instead, so they stay out.
+    # GATE CALIBRATION (measured, not assumed). Mirroring shadow_leaf's gates
+    # exactly matched ZERO of 19 real ptr-writing mutators sampled from the
+    # D2Client backlog. The blockers were, in order: touches a global (17/19),
+    # calls something (16/19), more than one pointer param (11/19). Two of those
+    # three gates were cargo-culted from a READ-ONLY class and do not apply here:
+    #
+    #   - multiple pointer params: fine. The oracle takes up to 8 arg slots and
+    #     every one of them can be its own synth buffer, so an N-pointer mutator
+    #     is no harder to isolate than a 1-pointer one.
+    #   - NAMED globals (g_*/_g_*): fine. Exactly like global_leaf, the reimpl
+    #     reaches them through D2MOO_Resolve at runtime, so both sides read the
+    #     same live global. Only an UNNAMED DAT_<addr> is a genuine blocker --
+    #     the resolver has no name for it.
+    #
+    # The other two gates are load-bearing SAFETY and stay:
+    #   - no delegate call: the documented crash mechanism behind the whole
+    #     void-return guard (STAT_ImportStateFlagsFromBuffer's "wild frees
+    #     in-process under synthetic args"). A callee handed a synth pointer can
+    #     free/walk it and take the game down.
+    #   - no deep deref: synth bytes are not valid pointers (see above).
+    #
+    # Even calibrated this only reaches ~10% of the sampled mutators; the
+    # delegate-calling majority needs a call-through reimpl, which is the next
+    # capability, not this one. Claiming otherwise would be overselling it.
+    if (total_ptr_params >= 1
+            and (struct_access or scalar_ptr_params or cast_deref_ptr_params)
+            and _PTR_WRITE_RE.search(body)
+            and not _DEEP_DEREF_RE.search(body)
+            and not _MUTATOR_UNSAFE_DEREF_RE.search(body)
+            and not _DAT_GLOBAL_RE.search(text)
+            and not _has_delegate_call(body)):
+        return "mutator_leaf"
 
     # NAMED-GLOBAL TABLE GETTER (before the ->/deep-deref guards): a function that
     # reads a NAMED global (g_*/_g_*), takes NO live-object pointer param (only scalar/
@@ -1186,6 +1260,17 @@ def select_port_candidates(funcs, conformance_protected, active_binary=None,
         # selection WHILE the oracle is down (else it churns the same fns every
         # pass). Re-admitted the moment FUNDOC_LIVE_PROVE=1 so it proves when the
         # game is back. See fun_doc.process_port_candidate global_leaf branch.
+        # capability_pending (2026-07-30): classified into a class the pipeline
+        # CAN prove, but whose oracle-side capability is not deployed yet.
+        # NON-terminal -- never lost -- but excluded from selection while the
+        # capability is off, or it churns the same functions every pass. Every
+        # one is re-admitted the moment the flag flips. Exactly the
+        # oracle_unavailable pattern below, for a build dependency instead of a
+        # process one.
+        if (not include_terminal and func.get("port_status") == "capability_pending"
+                and os.environ.get("FUNDOC_MUTATOR_LEAF") != "1"):
+            continue
+
         if (not include_terminal and func.get("port_status") == "oracle_unavailable"
                 and os.environ.get("FUNDOC_LIVE_PROVE") != "1"):
             continue

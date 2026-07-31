@@ -73,17 +73,26 @@ class TestClassifyFunction:
         """
         assert pp.classify_function(text) == "shadow_leaf"
 
-    def test_struct_pointer_that_writes_is_stateful(self):
+    def test_struct_pointer_that_writes_is_never_shadow_leaf(self):
         # The shadow_leaf gate REQUIRES read-only (no write through the pointer):
         # handle-proving a mutator would corrupt the live captured game object.
-        # A struct pointer that is written through stays "stateful".
+        # That safety property is unchanged and is what this test guards.
+        #
+        # The VERDICT changed on 2026-07-30 (was: "stateful"). This shape is now
+        # mutator_leaf -- provable against a fresh SYNTHETIC object rather than a
+        # live captured one, so the corruption hazard above simply does not
+        # apply to its route. The invariant that matters is that it must never
+        # reach the handle path, so assert that directly instead of asserting the
+        # old "unprovable" verdict, which was only ever true because the synth
+        # route did not exist yet.
         text = """
         void __fastcall SetDamageBonus(CalcDamageBonusByLevel_MonsterData *pMonsterData, int v)
         {
             pMonsterData->bDamageBonusEnabled = v;
         }
         """
-        assert pp.classify_function(text) == "stateful"
+        assert pp.classify_function(text) != "shadow_leaf"
+        assert pp.classify_function(text) == "mutator_leaf"
 
     def test_global_reference_is_stateful(self):
         text = "int Foo(void) { return DAT_006fd123 + 1; }"
@@ -606,3 +615,117 @@ class TestMigratePendingVectors:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# mutator_leaf (2026-07-30, state-diff capability)
+#
+# The mirror of shadow_leaf: same shape, but WRITES through the pointer. Proved
+# against a fresh synthetic object per call and judged on the bytes left behind,
+# which only became possible once the oracle's buffer readback was widened from
+# 8 bytes to the full region.
+#
+# The two gates that look like style but are SAFETY:
+#   - no delegate call  (a callee handed a synth pointer can free/walk it and
+#     take the game down -- the documented void-return-guard crash mechanism)
+#   - no deep deref     (synth bytes are not valid pointers)
+# ---------------------------------------------------------------------------
+
+def _mut(body, params="int *pOut, int nVal"):
+    return "void __fastcall FN(%s)\n{\n%s\n}\n" % (params, body)
+
+
+def test_mutator_leaf_basic_pointer_writer():
+    assert pp.classify_function(
+        _mut("  pOut->field = nVal;\n  pOut->other = 1;")) == "mutator_leaf"
+
+
+def test_mutator_leaf_allows_multiple_pointer_params():
+    """The oracle takes up to 8 arg slots and each can be its own synth buffer,
+    so an N-pointer mutator is no harder to isolate than a 1-pointer one.
+    Mirroring shadow_leaf's one-pointer gate matched 0 of 19 real mutators."""
+    assert pp.classify_function(
+        _mut("  pOut->a = nVal;\n  pB->b = nVal;", "int *pOut, int *pB, int nVal")
+    ) == "mutator_leaf"
+
+
+def test_mutator_leaf_allows_named_globals():
+    """A named global is reachable via D2MOO_Resolve at runtime, exactly as in
+    global_leaf, so both sides read the same live global."""
+    assert pp.classify_function(
+        _mut("  pOut->field = g_dwSomething;")) == "mutator_leaf"
+
+
+def test_mutator_leaf_rejects_unnamed_dat_global():
+    """DAT_<addr> has no resolver name -- genuinely unprovable."""
+    assert pp.classify_function(
+        _mut("  pOut->field = DAT_6fbc1234;")) != "mutator_leaf"
+
+
+def test_mutator_leaf_rejects_delegate_call_SAFETY():
+    """A callee handed a synth pointer can free or walk it in-process. This is
+    the crash mechanism behind the whole void-return guard -- never relax it."""
+    assert pp.classify_function(
+        _mut("  pOut->field = nVal;\n  SomeOtherFunction(pOut);")) != "mutator_leaf"
+
+
+def test_mutator_leaf_rejects_deep_deref_SAFETY():
+    """synth fills the object with byte[o]=(o*13+0x37); those are not valid
+    pointers, so writing THROUGH one loaded from the object faults the oracle."""
+    assert pp.classify_function(
+        _mut("  pOut->inner->field = nVal;")) != "mutator_leaf"
+
+
+def test_read_only_getter_still_shadow_leaf_not_mutator():
+    """The no-write gate on shadow_leaf must keep winning for pure readers --
+    handle-proving a mutator would corrupt the real captured game object."""
+    assert pp.classify_function(
+        "int __fastcall FN(int *pUnit)\n{\n  return pUnit->field;\n}\n") == "shadow_leaf"
+
+
+def test_mutator_leaf_rejects_pointer_field_index_SAFETY():
+    """`p->a[i]` is a pointer-field index and an array-member index at the same
+    time in decompiled C. Over-refuse: a wrong refusal costs one unproven
+    function, a wrong acceptance faults the oracle and takes the game down."""
+    assert pp.classify_function(
+        _mut("  pOut->buf[2] = nVal;")) != "mutator_leaf"
+
+
+def test_mutator_leaf_rejects_deref_of_loaded_pointer_SAFETY():
+    assert pp.classify_function(
+        _mut("  *pOut->target = nVal;")) != "mutator_leaf"
+
+
+# ---------------------------------------------------------------------------
+# Non-terminal routing for environment/capability refusals (2026-07-30).
+#
+# The recurring bug this whole area keeps hitting: a verdict about the
+# ENVIRONMENT (provider down, oracle down, capability not deployed) recorded as
+# a TERMINAL verdict about the FUNCTION. Each occurrence silently retired
+# functions that were never actually unprovable.
+# ---------------------------------------------------------------------------
+
+def test_capability_pending_is_not_terminal():
+    assert "capability_pending" not in pp._PORT_TERMINAL_STATUSES
+
+
+def test_capability_pending_excluded_while_capability_is_off(monkeypatch):
+    """Excluded while the flag is off, or it churns the same functions every
+    pass -- but never retired."""
+    monkeypatch.delenv("FUNDOC_MUTATOR_LEAF", raising=False)
+    funcs = {"p::a": {"address": "a", "name": "Pending", "program": "p",
+                      "program_name": "D2Client.dll", "effective_score": 95,
+                      "port_status": "capability_pending"}}
+    assert port_pipeline_select(funcs) == []
+
+
+def test_capability_pending_readmitted_when_capability_turns_on(monkeypatch):
+    monkeypatch.setenv("FUNDOC_MUTATOR_LEAF", "1")
+    funcs = {"p::a": {"address": "a", "name": "Pending", "program": "p",
+                      "program_name": "D2Client.dll", "effective_score": 95,
+                      "port_status": "capability_pending"}}
+    assert [c["func"]["name"] for c in port_pipeline_select(funcs)] == ["Pending"]
+
+
+def port_pipeline_select(funcs):
+    return pp.select_port_candidates(funcs, set(), limit=10)

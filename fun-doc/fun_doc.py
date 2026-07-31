@@ -3946,12 +3946,23 @@ def save_priority_queue(queue):
             # Re-arm: what we just wrote is this caller's new "unchanged" state,
             # so a later save from the same dict compares against the right thing.
             queue[_CONFIG_BASELINE_KEY] = copy.deepcopy(cfg)
-            # Drop any lingering dashboard_active_workers meta — workers no
-            # longer auto-restore across restarts, so persisting a snapshot
-            # only serves to confuse future readers.
-            meta = queue.get("meta")
-            if isinstance(meta, dict) and "dashboard_active_workers" in meta:
-                meta.pop("dashboard_active_workers", None)
+            # NOTE (2026-07-30): this used to strip `dashboard_active_workers`
+            # on every write. That is where worker auto-restore was really
+            # retired -- not at the restore call site, which still ran at boot,
+            # but here: WorkerManager._persist_active_workers wrote the roster
+            # and this deleted it microseconds later, so restore_workers()
+            # always found an empty list.
+            #
+            # The roster is now KEPT, because it is no longer an auto-start.
+            # Nothing calls restore_workers() at boot any more; the dashboard
+            # reads the roster via load_restore_offer() and renders a one-click
+            # banner. Auto-restore stays retired -- a crash-looping dashboard
+            # must never silently re-spawn six LLM workers per cycle -- but
+            # "what was this machine working on before it fell over" is now
+            # answerable instead of erased.
+            #
+            # This mattered: on 2026-07-30 an oracle outage stopped all six
+            # prove workers, and the restart had nothing to offer.
             # Serialize a view WITHOUT the private baseline; it never hits disk.
             payload = {k: v for k, v in queue.items() if k != _CONFIG_BASELINE_KEY}
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -5824,6 +5835,52 @@ _PROVIDER_HEALTH = {"consecutive_timeouts": 0}
 _PROVIDER_HEALTH_LOCK = threading.Lock()
 
 
+# Worker stop plumbing (2026-07-30). `stop_flag` used to be consulted ONLY
+# between candidates, so "stop" meant "stop after the current function finishes"
+# -- and a port candidate is an LLM draft + a bounded fix loop + a CMake build +
+# a prove subprocess, i.e. 10-30 minutes. Every restart in this session paid it,
+# and a stop that takes half an hour is indistinguishable from a hung worker.
+#
+# Registering the flag by worker_id lets the layers that actually block (above
+# all the provider subprocess, which owns the overwhelming majority of the wall
+# clock) observe it directly and bail immediately.
+_worker_stop_flags: dict = {}
+_worker_stop_lock = threading.Lock()
+
+
+def register_worker_stop_flag(worker_id, flag):
+    if not worker_id or flag is None:
+        return
+    with _worker_stop_lock:
+        _worker_stop_flags[worker_id] = flag
+
+
+def unregister_worker_stop_flag(worker_id):
+    with _worker_stop_lock:
+        _worker_stop_flags.pop(worker_id, None)
+
+
+def worker_stop_requested(worker_id=None):
+    """True when this worker has been asked to stop.
+
+    Falls back to the ambient worker id so deep call sites (the provider
+    watchdog) don't need it threaded through their signatures.
+    """
+    if worker_id is None:
+        try:
+            worker_id = get_worker_id()
+        except Exception:
+            return False
+    if not worker_id:
+        return False
+    with _worker_stop_lock:
+        flag = _worker_stop_flags.get(worker_id)
+    try:
+        return bool(flag is not None and flag.is_set())
+    except Exception:
+        return False
+
+
 def _breaker_threshold():
     try:
         return max(2, int(os.environ.get("FUNDOC_PROVIDER_BREAKER_TIMEOUTS", "8")))
@@ -5890,6 +5947,12 @@ def register_worker_subprocess(worker_id, proc):
         return
     with _subprocess_registry_lock:
         _subprocess_registry.setdefault(worker_id, set()).add(proc)
+
+
+def get_worker_subprocesses(worker_id):
+    """Snapshot of a worker's live provider subprocesses (for stop/kill paths)."""
+    with _subprocess_registry_lock:
+        return list(_subprocess_registry.get(worker_id) or ())
 
 
 def unregister_worker_subprocess(worker_id, proc):
@@ -6268,6 +6331,7 @@ def _invoke_provider_with_watchdog(
     )
     started_at = time.time()
     kill_reason = None
+    stop_requested = False
     try:
         while True:
             try:
@@ -6275,6 +6339,14 @@ def _invoke_provider_with_watchdog(
                 break
             except queue.Empty:
                 if not worker.is_alive():
+                    break
+                # STOP RESPONSIVENESS: this loop is where a worker spends most of
+                # its life, so it is the one place a stop request has to be seen
+                # for "stop" to mean anything on a human timescale. Checked once
+                # per second, same cadence as the deadlines below.
+                if worker_stop_requested(parent_worker_id):
+                    stop_requested = True
+                    kill_reason = "worker stop requested"
                     break
                 now = time.time()
                 elapsed = now - started_at
@@ -6293,6 +6365,20 @@ def _invoke_provider_with_watchdog(
                     )
                 if kill_reason:
                     break
+
+        if result_msg is None and worker.is_alive() and stop_requested:
+            # A stop is not a provider fault: it must not count toward the
+            # circuit breaker, must not be logged as a timeout, and must not
+            # let the caller's retry loop start another session.
+            print(f"  [{effective_provider}] worker stop requested — "
+                  f"terminating session after {int(time.time() - started_at)}s",
+                  flush=True)
+            _terminate_process_tree(worker.pid)
+            worker.join(timeout=5)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(timeout=5)
+            return (None, {"tool_calls": 0, "tool_calls_known": True, "stopped": True})
 
         if result_msg is None and worker.is_alive():
             streak = note_provider_session(timed_out=True)
@@ -8498,6 +8584,15 @@ def _prove_failure_is_environmental(fstage):
       oracle_unreachable -- the oracle was already down when we started, so the
         function was never actually tested. Unambiguously environmental.
 
+      bad_target -- the original's address is not mapped in the running game
+        (its module isn't loaded, or isn't at Ghidra's image base). The oracle
+        refuses to call it, so NOTHING about the reimpl was exercised. This is
+        the most expensive lesson in this function's history: until 2026-07-30 a
+        bad target arrived as an SEH "handler-exception" and was filed as
+        `marshal_fault` -- a terminal ABI verdict -- which retired 104 D2Client
+        functions whose reimpl never executed once, because D2Client loads at
+        0x03600000 live and not at Ghidra's 0x6fab0000.
+
       oracle_died_during -- ambiguous by construction: "alive before, dead
         after" is equally true of a bad proof vector crashing the embedded
         oracle AND of somebody closing the game mid-prove. Disambiguate on the
@@ -8509,7 +8604,28 @@ def _prove_failure_is_environmental(fstage):
                            function's vectors killed it. A real finding; stays
                            terminal.
     """
-    if fstage == "oracle_unreachable":
+    if fstage in ("oracle_unreachable", "bad_target"):
+        return True
+    # COLLATERAL BUILD FAILURES (2026-07-31). All candidates link into ONE
+    # provider DLL, so a draft that references an undefined symbol -- or
+    # redefines one -- fails the link for every OTHER candidate too. Both
+    # stages below are only ever assigned when the offender was positively
+    # attributed to a DIFFERENT candidate (see
+    # port_live_prove._find_unresolved_symbol_offender /
+    # _find_duplicate_symbol_offender): the function under test compiled fine
+    # and its reimpl never executed.
+    #
+    # Measured over 523 live_prove_failed rows: 150 were exactly this -- 126
+    # unresolved-symbol, 24 duplicate-symbol -- from 35 offending candidates.
+    # Filing them terminal retired 150 functions for somebody else's defect.
+    # Identical in principle to bad_target: a verdict about the ENVIRONMENT
+    # must not be recorded as a verdict about the function.
+    #
+    # Note the deliberate asymmetry with `build_candidate`, which stays
+    # terminal -- that one IS this draft's own compile error.
+    if fstage in ("build_provider_unresolved_symbol",
+                  "build_provider_duplicate_symbol",
+                  "build_provider_cascade"):
         return True
     if fstage != "oracle_died_during":
         return False
@@ -8520,6 +8636,24 @@ def _prove_failure_is_environmental(fstage):
         # Can't tell -> keep the conservative (terminal) verdict rather than
         # silently re-queueing something that may genuinely crash the oracle.
         return False
+
+
+def _environmental_reason(fstage, fdetail=""):
+    """Human-readable cause for an environmental prove failure.
+
+    Kept honest per stage: every environmental re-queue used to record "oracle
+    down", which is simply false for a bad_target (the oracle is fine -- the
+    ADDRESS is wrong) and sends the next reader looking at the game process
+    instead of the module base."""
+    if fstage == "bad_target":
+        return (fdetail or "the original's address is not mapped in the running game "
+                           "(module not loaded, or not at Ghidra's image base)")
+    if fstage in ("build_provider_unresolved_symbol",
+                  "build_provider_duplicate_symbol",
+                  "build_provider_cascade"):
+        return (fdetail or "another candidate broke the shared provider link; this "
+                           "function's own reimpl compiled and was never executed")
+    return "oracle down"
 
 
 def _persist_port_transcript(func_name, address, lane, attempt, text, meta):
@@ -10674,6 +10808,17 @@ def main():
             orphan_reaper.reap_orphans()
         except Exception as e:  # noqa: BLE001
             print(f"  [orphan-reaper] sweep skipped: {e}", flush=True)
+
+        # Close console windows our own tooling orphaned (a force-killed
+        # dashboard, a declined UAC, a crashed .bat). After a launch the
+        # desktop should show the GAME and the D2Debugger, not a drift of
+        # dead shells. Strictly attributed -- see console_cleanup for what it
+        # refuses to touch -- and never fatal.
+        try:
+            import console_cleanup
+            console_cleanup.sweep_on_launch()
+        except Exception as e:  # noqa: BLE001
+            print(f"  [console-cleanup] sweep skipped: {e}", flush=True)
 
         bus = get_bus()
         app, socketio = create_app(STATE_FILE, event_bus=bus, dashboard_port=args.web_port)
@@ -12941,12 +13086,26 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         except Exception:
             model = None
 
+    # PRE-DRAFT TARGET CHECK (2026-07-30). Ask the cheapest question first: is this
+    # address even reachable in the running game? A wrong module base used to be
+    # discovered only after a full draft + adversarial-vector call + cmake/msbuild
+    # cycle + prove -- and then be misread as an ABI verdict. One HTTP round-trip
+    # here replaces all of that, and re-queues instead of retiring.
+    _ok, _why = plp.check_live_target(program, address)
+    if not _ok:
+        update_function_state(key, {
+            "port_status": "oracle_unavailable",
+            "port_failure_stage": "bad_target",
+            "port_last_result": f"bad_target: {_why} -- function never tested, re-queued"})
+        _log("bad_target", failure_stage="bad_target", detail=_why, requeued=True)
+        return "oracle_unavailable"
+
     bus_emit("port_drafted", {
         "key": key, "name": func_name, "address": address, "worker_id": worker_id,
         "program": Path(program).name, "program_path": program, "status": "drafting (live)",
     })
 
-    prompt = plp.build_live_draft_prompt(func_name, address, decompiled)
+    prompt = plp.build_live_draft_prompt(func_name, address, decompiled, program=program)
     _globs = []   # verified resolvable globals; the resolve-name gate below needs this
     try:
         import abi_static
@@ -13008,6 +13167,20 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
                                        provider=provider, complexity_tier="complex",
                                        use_tools=False)
+            # A stop request abandons the candidate immediately and writes NO
+            # verdict: the function was never judged, so recording one would
+            # retire it for an operator action (2026-07-30).
+            #
+            # It must ALSO drop its staged candidate. Every candidates/*.cpp
+            # compiles into the ONE shared provider DLL, so a half-drafted,
+            # non-compiling candidate left behind by a stop breaks the build for
+            # EVERY other function until a human removes it (2026-07-30: stopping
+            # 7 workers stranded 3 such files and the next prove failed to build
+            # at all). The abandon path owns its own cleanup.
+            if (meta or {}).get("stopped"):
+                plp.remove_candidate(func_name)
+                _log("worker_stopped")
+                return "stopped"
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked",
                                             "port_last_result": "quota_paused"})
@@ -13215,6 +13388,18 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         text, meta = invoke_claude(fix_prompt, model=model, max_turns=max_turns,
                                    provider=provider, complexity_tier="complex",
                                    use_tools=False)
+        # A stop request abandons the candidate immediately and writes NO
+        # verdict: the function was never judged, so recording one would
+        # retire it for an operator action (2026-07-30). It must ALSO drop its
+        # staged candidate: run_live_prove has already written candidates/<fn>.cpp,
+        # every candidate compiles into the ONE shared provider DLL, and a
+        # half-drafted non-compiling file breaks the build for EVERY other
+        # function until a human removes it (2026-07-30: stopping 7 workers
+        # stranded 3 such files and the next prove could not build at all).
+        if (meta or {}).get("stopped"):
+            plp.remove_candidate(func_name)
+            _log("worker_stopped")
+            return "stopped"
         if (meta or {}).get("quota_paused"):
             break
         # PROVIDER hiccup (timeout/empty) is not a bad reimpl -- retry the fix
@@ -13304,7 +13489,8 @@ def process_global_leaf_live(program, address, func_name, decompiled, *,
         update_function_state(key, {
             "port_status": "oracle_unavailable", "port_attempts": attempts,
             "port_failure_stage": fstage,
-            "port_last_result": f"{fstage}: oracle down, function never tested -- re-queued"})
+            "port_last_result": f"{fstage}: {_environmental_reason(fstage, fdetail)} "
+                                f"-- function never tested, re-queued"})
         _log("oracle_unavailable", failure_stage=fstage, requeued=True)
         return "oracle_unavailable"
     update_function_state(key, {
@@ -13997,7 +14183,17 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         except Exception:
             model = None
 
-    prompt = plp.build_handle_draft_prompt(func_name, address, decompiled)
+    # PRE-DRAFT TARGET CHECK -- same gate as process_global_leaf_live; see there.
+    _ok, _why = plp.check_live_target(program, address)
+    if not _ok:
+        update_function_state(key, {
+            "port_status": "oracle_unavailable",
+            "port_failure_stage": "bad_target",
+            "port_last_result": f"bad_target: {_why} -- function never tested, re-queued"})
+        _log("bad_target", failure_stage="bad_target", detail=_why, requeued=True)
+        return "oracle_unavailable"
+
+    prompt = plp.build_handle_draft_prompt(func_name, address, decompiled, program=program)
     _globs = []   # verified resolvable globals; the resolve-name gate below needs this
     try:
         import abi_static
@@ -14161,6 +14357,20 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
                                        provider=provider, complexity_tier="complex",
                                        use_tools=False)
+            # A stop request abandons the candidate immediately and writes NO
+            # verdict: the function was never judged, so recording one would
+            # retire it for an operator action (2026-07-30).
+            #
+            # It must ALSO drop its staged candidate. Every candidates/*.cpp
+            # compiles into the ONE shared provider DLL, so a half-drafted,
+            # non-compiling candidate left behind by a stop breaks the build for
+            # EVERY other function until a human removes it (2026-07-30: stopping
+            # 7 workers stranded 3 such files and the next prove failed to build
+            # at all). The abandon path owns its own cleanup.
+            if (meta or {}).get("stopped"):
+                plp.remove_candidate(func_name)
+                _log("worker_stopped")
+                return "stopped"
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 _log("blocked", reason="quota_paused")
@@ -14281,6 +14491,20 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
             text, meta = invoke_claude(prompt, model=model, max_turns=max_turns,
                                        provider=provider, complexity_tier="complex",
                                        use_tools=False)
+            # A stop request abandons the candidate immediately and writes NO
+            # verdict: the function was never judged, so recording one would
+            # retire it for an operator action (2026-07-30).
+            #
+            # It must ALSO drop its staged candidate. Every candidates/*.cpp
+            # compiles into the ONE shared provider DLL, so a half-drafted,
+            # non-compiling candidate left behind by a stop breaks the build for
+            # EVERY other function until a human removes it (2026-07-30: stopping
+            # 7 workers stranded 3 such files and the next prove failed to build
+            # at all). The abandon path owns its own cleanup.
+            if (meta or {}).get("stopped"):
+                plp.remove_candidate(func_name)
+                _log("worker_stopped")
+                return "stopped"
             if (meta or {}).get("quota_paused"):
                 update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
                 return "blocked"
@@ -14391,7 +14615,8 @@ def process_handle_leaf_live(program, address, func_name, decompiled, *,
         update_function_state(key, {
             "port_status": "oracle_unavailable", "port_attempts": attempts,
             "port_failure_stage": fstage,
-            "port_last_result": f"{fstage}: oracle down, function never tested -- re-queued"})
+            "port_last_result": f"{fstage}: {_environmental_reason(fstage, fdetail)} "
+                                f"-- function never tested, re-queued"})
         _log("oracle_unavailable", failure_stage=fstage, requeued=True)
         return "oracle_unavailable"
     update_function_state(key, {
@@ -14604,12 +14829,31 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             r"^\s*void\s+(?:__\w+\s+)?\w+\s*\(", _sig_hdr.splitlines()[-1] if _sig_hdr.splitlines() else "", re.M)) \
             or bool(re.search(r"\bvoid\s+(?:__\w+\s+)?" + re.escape(func_name) + r"\s*\(", _sig_hdr))
         if _void_return_needs_hard_skip(_is_void_ret, pp._has_delegate_call(_sig_body)):
+            # The REFUSAL is correct and stays: this shape must never run under
+            # synthetic args (the documented "wild frees in-process" mechanism --
+            # measured 2026-07-30, the functions landing here are things like
+            # FreeGameSessionData, DestroyAURGNObject, DestructGameObject).
+            #
+            # What was wrong was the DESTINATION. It wrote terminal stateful_skip,
+            # so a safety refusal about the SYNTHETIC path was recorded as "this
+            # function is out of scope, forever" -- and 40% of a sampled batch were
+            # leaf/mutator_leaf shapes with no remaining route to battletested.
+            #
+            # A void-return delegate mutator is in fact the ideal SHADOW candidate:
+            # in the live game it receives REAL objects (no synthetic pointer to
+            # free), and it is judged on divergence counters rather than on
+            # synthesized state. So hand it to the shadow pipeline, which is the
+            # documented Class-D strategy, instead of dead-ending it. Still
+            # selector-terminal for THIS worker -- the shadow batch builder owns it
+            # from here (and include_terminal=True re-admits it).
+            _note_shadow_backlog(program, address, func_name, "void_delegate_mutator")
             update_function_state(key, {
-                "port_status": "stateful_skip",
-                "port_last_result": "void-return delegate/subroutine call, no comparable "
-                                    "output -- out of scope until state-diff capture exists"})
-            _log("void_mutator_skip")
-            return "stateful_skip"
+                "port_status": "shadow_leaf_pending",
+                "port_last_result": "void-return delegate/subroutine call: unsafe under "
+                                    "synthetic args (wild-free hazard) -- queued for "
+                                    "shadow-first, where the game supplies real objects"})
+            _log("void_mutator_shadow_defer")
+            return "shadow_leaf_pending"
     except Exception:
         pass
 
@@ -14810,6 +15054,56 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                                     "port_last_result": f"stateful: {skip_reason}"})
         _log("stateful_skip", classification=classification, reason=skip_reason)
         return "stateful_skip"
+    if classification == "mutator_leaf":
+        # Writes through a pointer param, no delegate, no deep deref (see
+        # port_pipeline.classify_function for why those two gates are safety,
+        # not style). Proved by handing BOTH implementations a fresh identical
+        # SYNTHETIC object and diffing the bytes each leaves behind -- the same
+        # Class B machinery the out-param writers already use, which is why this
+        # routes to the existing live lane rather than a new one.
+        #
+        # HARD GATE -- opt-in, default OFF. This class REQUIRES the widened
+        # oracle buffer readback (D2Debugger.LiveDispatch.cpp, 2026-07-30).
+        # Against an OLD oracle only the first 8 bytes of the object are
+        # compared, so a mutator writing past offset 8 would "pass" on bytes
+        # nobody looked at and get written back to proven_functions.jsonl as a
+        # FALSE PROOF -- strictly worse than never trying, and expensive to
+        # detect later. The oracle is an injected DLL loaded at game launch, so
+        # nothing in this process can tell which build is live; that makes this
+        # an explicit deploy handshake rather than something to auto-detect.
+        # Set FUNDOC_MUTATOR_LEAF=1 only AFTER relaunching the game on a
+        # D2Debugger.dll built at or after 2026-07-30.
+        if os.environ.get("FUNDOC_MUTATOR_LEAF") != "1":
+            # NON-terminal. "The capability isn't deployed yet" is a statement
+            # about the ORACLE BUILD, not about the function -- filing it as
+            # terminal stateful_skip would permanently retire functions that
+            # become provable the moment the new D2Debugger is running. (That is
+            # precisely the mistake this session spent its time undoing; I do not
+            # get to re-introduce it for my own feature.) The selector excludes
+            # capability_pending while the flag is off and re-admits every one of
+            # them when it goes on -- same shape as the oracle_unavailable gate.
+            update_function_state(key, {
+                "port_status": "capability_pending",
+                "port_last_result": "mutator_leaf: needs the widened-readback oracle "
+                                    "(set FUNDOC_MUTATOR_LEAF=1 after relaunching the game "
+                                    "on a D2Debugger built 2026-07-30 or later)"})
+            _log("capability_pending", classification=classification,
+                 reason="mutator_oracle_not_deployed")
+            return "capability_pending"
+        if os.environ.get("FUNDOC_LIVE_PROVE") != "1":
+            update_function_state(key, {
+                "port_status": "oracle_unavailable",
+                "port_last_result": "mutator_leaf: deferred -- live oracle down (retried when up)"})
+            _log("oracle_unavailable", classification=classification,
+                 reason="live_prove_disabled")
+            return "oracle_unavailable"
+        _log("mutator_route", classification=classification)
+        return process_global_leaf_live(
+            program, address, func_name, decompiled,
+            provider=provider, model=model, worker_id=worker_id,
+            max_fix_attempts=max_fix_attempts,
+            static_abi=static_abi, abort_class=abort_class)
+
     if classification == "global_leaf":
         # Reads NAMED globals -> not statically provable, but provable LIVE against
         # the running game via the D2MOO resolver. Needs the live oracle
@@ -14980,6 +15274,14 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             prompt, model=model, max_turns=max_turns, provider=provider,
             complexity_tier="complex", use_tools=False,
         )
+        # A stop request abandons the candidate immediately and writes NO
+        # verdict: the function was never judged, so recording one would
+        # retire it for an operator action (2026-07-30). No candidate cleanup is
+        # needed here, unlike the live/handle lanes: this stop fires BEFORE
+        # pp.write_draft, so nothing has been staged yet.
+        if (meta or {}).get("stopped"):
+            _log("worker_stopped")
+            return "stopped"
         if (meta or {}).get("quota_paused"):
             update_function_state(key, {"port_status": "blocked", "port_last_result": "quota_paused"})
             _log("blocked", reason="quota_paused")
@@ -15063,6 +15365,14 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
             fix_prompt, model=model, max_turns=max_turns, provider=provider,
             complexity_tier="complex", use_tools=False,
         )
+        # A stop request abandons the candidate immediately and writes NO
+        # verdict: the function was never judged, so recording one would
+        # retire it for an operator action (2026-07-30). No candidate cleanup is
+        # needed here, unlike the live/handle lanes: this stop fires BEFORE
+        # pp.write_draft, so nothing has been staged yet.
+        if (meta or {}).get("stopped"):
+            _log("worker_stopped")
+            return "stopped"
         if (meta or {}).get("quota_paused"):
             update_function_state(key, {
                 "port_status": "blocked", "port_attempts": attempts,
@@ -15115,25 +15425,69 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
         except Exception as e:  # module/env not available -- never fail the candidate
             _log("live_prove_skip", reason=f"import failed: {e}")
         if plp is not None:
-            try:
-                live = plp.run_live_prove(
-                    header, symbol, address, spec["param_layout"], spec["input_sets"],
-                    program=program
-                )
-                oracle_spec = live.get("spec")  # for shadow_promote.py below (WS-6c)
-                live_status = "proven_live" if live["ok"] else "live_prove_failed"
-                bus_emit("port_live_prove_result", {
-                    "key": key, "name": func_name, "ok": live["ok"], "worker_id": worker_id,
-                    "passed": live.get("passed"), "total": live.get("total"),
-                })
-                _log("live_prove", ok=live["ok"], passed=live.get("passed"),
-                     total=live.get("total"), output=(live.get("output") or "")[-1000:])
-            except plp.UnsupportedLiveABI as e:
-                live_status = "unsupported_abi"
-                _log("live_prove_skip", reason=str(e))
-            except Exception as e:
-                live_status = "error"
-                _log("live_prove_error", error=str(e))
+            # `header` is an OpenD2 STATIC-harness draft (`namespace D2Lib { inline
+            # ... }`) built for pp.write_draft/run_harness above -- it has no
+            # extern-C symbol, so write_candidate's build-poison guard rejects it
+            # on every single call. Before 2026-07-30 this block passed `header`
+            # straight to run_live_prove unconditionally, which meant WS-6b's
+            # "additive" live proof NEVER once succeeded from the static drafting
+            # lane (confirmed live: 100% of completed attempts hit write_candidate's
+            # "not a provider reimpl" ValueError, silently swallowed into a per-
+            # candidate `live_prove_error` log line that nothing aggregates) --
+            # every plain-leaf candidate that reached here got zero real shot at
+            # proven_live, for as long as WS-6b has existed. Only global_leaf/
+            # handle_leaf (which draft their OWN extern-C version via
+            # build_live_draft_prompt/build_handle_draft_prompt) ever produced a
+            # live proof. Fix: draft a SEPARATE provider-shaped reimpl here too --
+            # reusing the same live-draft prompt/parser those lanes already use --
+            # instead of reusing the static draft. One extra bounded LLM call,
+            # spent only on candidates that already passed the static harness.
+            live_reimpl, live_layout, live_inputs = None, None, None
+            if plp._is_provider_reimpl(header):
+                # Rare, but free: the model happened to draft extern-C style
+                # even for the static prompt. No need to redraft.
+                live_reimpl, live_layout, live_inputs = header, spec["param_layout"], spec["input_sets"]
+            else:
+                try:
+                    live_prompt = plp.build_live_draft_prompt(
+                        func_name, address, decompiled, program=program)
+                    ltext, lmeta = invoke_claude(
+                        live_prompt, model=model, max_turns=max_turns, provider=provider,
+                        complexity_tier="complex", use_tools=False,
+                    )
+                    if (lmeta or {}).get("stopped"):
+                        _log("worker_stopped")
+                        return "stopped"
+                    if not (lmeta or {}).get("quota_paused") and not (lmeta or {}).get("timed_out"):
+                        live_reimpl, live_layout, live_inputs = plp.parse_live_response(ltext or "")
+                        if not live_reimpl and (lmeta or {}).get("reasoning_text"):
+                            live_reimpl, live_layout, live_inputs = plp.parse_live_response(
+                                lmeta["reasoning_text"] + (ltext or ""))
+                    if not live_reimpl:
+                        _log("live_prove_skip", reason="live redraft did not parse "
+                             "(static draft is not provider-compatible)")
+                except Exception as e:
+                    _log("live_redraft_error", error=str(e))
+            if live_reimpl:
+                try:
+                    live = plp.run_live_prove(
+                        live_reimpl, symbol, address, live_layout, live_inputs,
+                        program=program
+                    )
+                    oracle_spec = live.get("spec")  # for shadow_promote.py below (WS-6c)
+                    live_status = "proven_live" if live["ok"] else "live_prove_failed"
+                    bus_emit("port_live_prove_result", {
+                        "key": key, "name": func_name, "ok": live["ok"], "worker_id": worker_id,
+                        "passed": live.get("passed"), "total": live.get("total"),
+                    })
+                    _log("live_prove", ok=live["ok"], passed=live.get("passed"),
+                         total=live.get("total"), output=(live.get("output") or "")[-1000:])
+                except plp.UnsupportedLiveABI as e:
+                    live_status = "unsupported_abi"
+                    _log("live_prove_skip", reason=str(e))
+                except Exception as e:
+                    live_status = "error"
+                    _log("live_prove_error", error=str(e))
 
     # WS-6c: OPT-IN shadow-dispatcher promotion (D2COMMON_FULL_SHADOW_PLAN.md).
     # A function that just passed CONF_LIVE (the one-shot oracle proof above) can
@@ -15185,6 +15539,111 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
     })
     _log("harness_failed", attempts=attempts, output=(harness["output"] or "")[-2000:])
     return "harness_failed"
+
+
+class PortOracleBackoff:
+    """Stops a PORT worker burning fresh candidates against a dead oracle.
+
+    Measured 2026-07-30, the night the oracle died with six workers up:
+
+        ce0c6ae1 (binkw32)   52 processed, 50 `oracle_unavailable`  (96% waste)
+        e6847b8c (D2Common)  50 processed, 30 `oracle_unavailable`  (60%)
+        9b7d7928 (BH)       100 processed, 78 `oracle_unavailable`  (78%)
+
+    Nothing was permanently lost -- `oracle_unavailable` is non-terminal and
+    re-admitted the moment FUNDOC_LIVE_PROVE flips back on (see
+    port_pipeline.select_port_candidates). What WAS lost is hours of wall
+    clock: each of those candidates paid a full pipeline cycle (decompile
+    fetch, classification, a state write) to re-learn a fact already known
+    after the first one.
+
+    So after a short run of them, stop feeding the live lane and wait.
+
+    Deliberately NOT a blanket "pause the worker". During that same outage
+    e6847b8c still produced 11 shadow_leaf_pending and 3 proven_pending_review
+    from the STATIC harness -- starving that to protect the live lane just
+    trades one waste for another. Hence `max_wait`: when it expires we resume
+    regardless, so static work keeps flowing through a long outage.
+    """
+
+    def __init__(self, worker_id, stop_flag, on_idle=None,
+                 after=None, max_wait=None, oracle_probe=None, sleep=None):
+        self.worker_id = worker_id
+        self.stop_flag = stop_flag
+        self.on_idle = on_idle
+        self.after = int(
+            after if after is not None
+            else os.environ.get("FUNDOC_PORT_ORACLE_BACKOFF_AFTER", "3")
+        )
+        self.max_wait = float(
+            max_wait if max_wait is not None
+            else os.environ.get("FUNDOC_PORT_ORACLE_MAX_WAIT", "900")
+        )
+        self._probe = oracle_probe
+        self._sleep = sleep or time.sleep
+        self.streak = 0
+
+    def _check_oracle(self):
+        if self._probe is not None:
+            return self._probe()
+        from port_live_prove import check_oracle_alive
+        return check_oracle_alive()
+
+    def note(self, result):
+        """Record one candidate outcome. True once the streak trips."""
+        if result == "oracle_unavailable":
+            self.streak += 1
+        else:
+            self.streak = 0
+        return self.streak >= self.after
+
+    def wait_for_oracle(self):
+        """Block until the oracle answers, the cap expires, or stop is set.
+
+        Returns True only if the oracle actually came back. Heartbeats through
+        `on_idle` throughout: without it the WorkerManager watchdog cannot
+        tell a deliberate wait from a hung worker, which is the exact
+        false-kill that took worker 18e96b51 at the 900s threshold.
+        """
+        streak = self.streak
+        print(f"  [port-worker {self.worker_id}] {streak} consecutive "
+              f"oracle_unavailable -- pausing the live lane and waiting up to "
+              f"{int(self.max_wait)}s for the oracle instead of burning "
+              f"candidates on a dead one", flush=True)
+        bus_emit("port_oracle_backoff", {
+            "worker_id": self.worker_id, "streak": streak,
+            "max_wait_sec": self.max_wait,
+        })
+        waited = 0.0
+        while waited < self.max_wait:
+            if self.stop_flag.is_set():
+                return False
+            if self.on_idle:
+                try:
+                    self.on_idle()
+                except Exception:
+                    pass
+            # Short slices so a stop request is observed promptly rather than
+            # after a full poll interval.
+            for _ in range(15):
+                if self.stop_flag.is_set():
+                    return False
+                self._sleep(1)
+                waited += 1
+            try:
+                if self._check_oracle():
+                    print(f"  [port-worker {self.worker_id}] oracle is back -- "
+                          "resuming the live lane", flush=True)
+                    bus_emit("port_oracle_resumed", {"worker_id": self.worker_id})
+                    self.streak = 0
+                    return True
+            except Exception:
+                pass
+        print(f"  [port-worker {self.worker_id}] oracle still down after "
+              f"{int(self.max_wait)}s -- resuming anyway so static harness "
+              "work is not starved", flush=True)
+        self.streak = 0
+        return False
 
 
 def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
@@ -15242,6 +15701,12 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
     if conformance_protected is None:
         conformance_protected = load_conformance_protected()
 
+    # Make this pass's stop_flag visible to the layers that actually block --
+    # above all _invoke_provider_with_watchdog, which owns most of the wall
+    # clock. Without this, stop is only observed between candidates and a stop
+    # request waits out a full draft+fix+build+prove cycle.
+    register_worker_stop_flag(worker_id, stop_flag)
+
     def _log_pass_done():
         try:
             from event_log import log_event
@@ -15298,6 +15763,34 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 _pass_log("battletest_promote_error", error=str(e))
             except Exception:
                 pass
+
+    # ---- oracle-outage backoff ------------------------------------------
+    # Measured 2026-07-30, the night the oracle died with six workers up:
+    #   ce0c6ae1 (binkw32)  52 processed, 50 `oracle_unavailable`  (96% waste)
+    #   e6847b8c (D2Common) 50 processed, 30 `oracle_unavailable`  (60%)
+    #   9b7d7928 (BH)      100 processed, 78 `oracle_unavailable`  (78%)
+    #
+    # Nothing was permanently lost -- `oracle_unavailable` is non-terminal and
+    # re-admitted the moment FUNDOC_LIVE_PROVE flips back on. What WAS lost is
+    # hours of wall clock and a full pipeline cycle per candidate (decompile
+    # fetch, classification, a state write) to re-learn a fact we already knew
+    # after the first one: the oracle is down.
+    #
+    # So: after a short run of them, stop feeding fresh candidates into the
+    # live path and wait for the oracle instead. Deliberately NOT a blanket
+    # "pause the worker" -- during that same outage e6847b8c still produced 11
+    # shadow_leaf_pending and 3 proven_pending_review from the STATIC harness,
+    # and starving that to protect the live lane would trade one waste for
+    # another. Hence the wait is capped: when it expires we resume regardless,
+    # so static work keeps flowing even through a long outage.
+    _backoff = PortOracleBackoff(worker_id=worker_id, stop_flag=stop_flag,
+                                 on_idle=on_idle)
+
+    def _note_result_for_oracle_backoff(result):
+        return _backoff.note(result)
+
+    def _wait_for_oracle():
+        return _backoff.wait_for_oracle()
 
     def _process_one(cand, processed):
         func = cand["func"]
@@ -15391,9 +15884,21 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 summary["stopped_reason"] = "count_reached"
                 break
             result, processed = _process_one(cand, processed)
+            if result == "stopped":
+                summary["stopped_reason"] = "user_stop"
+                break
             if result == "blocked":
                 summary["stopped_reason"] = "blocked"
                 break
+            if _note_result_for_oracle_backoff(result):
+                # Bounded pass: wait once for the oracle rather than spending
+                # the remaining budget converting fresh candidates into
+                # oracle_unavailable rows. If it does not come back we keep
+                # going -- static-harness candidates are still real work.
+                _wait_for_oracle()
+                if stop_flag.is_set():
+                    summary["stopped_reason"] = "user_stop"
+                    break
             if provider_circuit_open():
                 summary["stopped_reason"] = "provider_unhealthy"
                 _log_provider_unhealthy()
@@ -15402,6 +15907,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
         summary["processed"] = processed
         if summary["stopped_reason"] is None:
             summary["stopped_reason"] = "count_reached" if processed >= count else "exhausted"
+        unregister_worker_stop_flag(worker_id)
         _log_pass_done()
         return summary
 
@@ -15434,10 +15940,27 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
                 summary["stopped_reason"] = "user_stop"
                 break
             result, processed = _process_one(cand, processed)
+            if result == "stopped":
+                summary["stopped_reason"] = "user_stop"
+                drained_this_round = False
+                break
             if result == "blocked":
                 summary["stopped_reason"] = "blocked"
                 drained_this_round = False
                 break
+            if _note_result_for_oracle_backoff(result):
+                # Continuous pass: this is the loop that ran all night. Wait
+                # here instead of draining the pool, then break to re-select
+                # so the freshly re-admitted oracle_unavailable rows (which
+                # select_port_candidates skips while FUNDOC_LIVE_PROVE is off)
+                # come back into the next round.
+                came_back = _wait_for_oracle()
+                if stop_flag.is_set():
+                    summary["stopped_reason"] = "user_stop"
+                    drained_this_round = False
+                    break
+                if came_back:
+                    break
             if provider_circuit_open():
                 summary["stopped_reason"] = "provider_unhealthy"
                 _log_provider_unhealthy()
@@ -15452,6 +15975,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
     summary["processed"] = processed
     if summary["stopped_reason"] is None:
         summary["stopped_reason"] = "stop_flag"
+    unregister_worker_stop_flag(worker_id)
     _log_pass_done()
     return summary
 
