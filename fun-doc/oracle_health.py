@@ -203,8 +203,25 @@ def kill_game(timeout: float = 20.0, allow_elevate: bool = True) -> bool:
     return _wait_for_game_exit(max(timeout, 60.0))
 
 
+def _fetch_crash(consume: bool = True):
+    """The D2Debugger fault observer's latest record, or None.
+
+    Reported at the MOMENT of the fault (see D2Debugger.crash.cpp) rather than
+    inferred later from a stopped oracle -- by which point the faulting address,
+    the registers and which candidate was being proven are all gone.
+    """
+    try:
+        resp = _oracle_get("/crash" + ("?consume=1" if consume else ""))
+    except Exception:
+        return None
+    if not isinstance(resp, dict):
+        return None
+    crash = resp.get("crash")
+    return crash if isinstance(crash, dict) else None
+
+
 def _dismiss_diablo_error_dialog() -> bool:
-    """Best-effort dismissal of a "Diablo II Error" dialog -- both the transient
+    """Best-effort dismissal of a "Diablo II Error"/"Exception" dialog -- both the transient
     startup one documented in LOOP_PLAYBOOK.md (a lingering lock from a crashed
     prior instance) and the terminal "Halt / Unrecoverable internal error <addr>"
     box a bad proof vector can produce. Win32 EnumWindows + WM_CLOSE, no pywin32
@@ -220,7 +237,12 @@ def _dismiss_diablo_error_dialog() -> bool:
                 buf = ctypes.create_unicode_buffer(length + 1)
                 user32.GetWindowTextW(hwnd, buf, length + 1)
                 title = buf.value.lower()
-                if "diablo ii" in title and "error" in title:
+                # MEASURED 2026-07-31: the box that actually appears is titled
+                # "Diablo II Exception" ("UNHANDLED EXCEPTION: ACCESS_VIOLATION
+                # (c0000005)"). Requiring the word "error" meant this never
+                # matched it, so the one dialog that hard-blocks the game was
+                # the one dialog never dismissed.
+                if "diablo ii" in title and ("error" in title or "exception" in title):
                     found.append(hwnd)
             return True
 
@@ -463,6 +485,15 @@ class OracleHealthMonitor:
             os.environ.pop("FUNDOC_LIVE_PROVE", None)
             os.environ.pop("FUNDOC_SHADOW_PROMOTE", None)
 
+        # A fault the observer caught. Polled while the oracle still answers,
+        # because that is the window in which the record can still be collected
+        # -- once the process dies only the on-disk copy survives.
+        if reachable:
+            try:
+                self._report_crash_if_any()
+            except Exception as e:
+                print(f"[oracle_health] crash poll failed: {e}", flush=True)
+
         # Edge-triggered desktop notification. Level-triggered would re-toast
         # every 45s poll for the whole outage, which trains you to dismiss
         # them unread -- the same end state as sending nothing.
@@ -489,6 +520,37 @@ class OracleHealthMonitor:
             # would throw away a working oracle and every restored shadow mode.
             self._maybe_enter_game(snapshot)
         return snapshot
+
+    def _report_crash_if_any(self):
+        """Surface a D2 fault immediately: event, log line, desktop toast.
+
+        `consume=1`, so each crash reports exactly once no matter how often we
+        poll. The durable copy lives on disk under
+        conformance/behavioral/crashes/ and is never removed.
+        """
+        crash = _fetch_crash(consume=True)
+        if not crash:
+            return
+        where = crash.get("module") or "?"
+        rva = crash.get("rva") or "?"
+        name = crash.get("codeName") or crash.get("code") or "fault"
+        proving = crash.get("proving")
+
+        # LOUD. A silent crash report is the same as no crash report.
+        print(f"[oracle_health] D2 FAULT: {name} at {where}+{rva}"
+              + (f" while proving {proving}" if proving else ""), flush=True)
+        self._log_event("d2_exception", **{
+            k: crash.get(k) for k in
+            ("code", "codeName", "module", "rva", "address", "origin", "proving")
+        })
+        try:
+            import notify
+            body = f"{name} in {where}+{rva}"
+            if proving:
+                body += f"\nwhile proving {proving}"
+            notify.notify("D2 crashed", body)
+        except Exception:
+            pass
 
     def _gameplay_hits_total(self):
         """Sum of dispatcher hit counters, or None if unreadable.
