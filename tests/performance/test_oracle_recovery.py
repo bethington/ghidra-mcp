@@ -23,6 +23,7 @@ driven with injected probes, and nothing here launches a game or touches
 :8790.
 """
 
+import itertools
 import sys
 import time
 from pathlib import Path
@@ -66,6 +67,17 @@ def _monitor(monkeypatch, *, reachable, game_running, needed=True,
 
     monkeypatch.setattr(m, "relaunch", _fake_relaunch)
     m.relaunch_calls = calls
+
+    # The frame probe is an EXTERNAL call too -- it HTTPs :8790 -- and leaving
+    # it unstubbed broke this module's "nothing here touches :8790" contract
+    # the moment FROZEN detection landed. On a CI runner the read fails, so it
+    # returns None and the tests pass; on a developer box with the game
+    # actually running it returns a real counter, and back-to-back check_once()
+    # calls read it flat and declared a healthy oracle FROZEN. A climbing
+    # counter is the honest default for a monitor these tests are calling
+    # healthy. Tests about freezing live in test_frozen_game.py.
+    frames = itertools.count(1000, 500)
+    monkeypatch.setattr(oracle_health, "_present_count", lambda: next(frames))
     return m
 
 
