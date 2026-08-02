@@ -124,6 +124,20 @@ def build_metadata(schema: str | None = None) -> MetaData:
         Column("port_draft_path", String),
         Column("port_last_result", String),
         Column("port_failure_stage", String),
+        # falsifiability axis (migration 0007) — mechanical contradiction
+        # checks between documentation claims and disassembly ground truth
+        # (falsify.py). Status: unchecked | passed | contradicted |
+        # unfalsifiable. A 'contradicted' row keeps its findings blob (the
+        # counterexample) and stays selector-eligible past the score gate.
+        Column("falsify_status", String),
+        Column("falsify_checked_at", DateTime(timezone=True)),
+        Column("falsify_findings", JSON),
+        Column("falsify_source", String),
+        # audit tool-call persistence (migration 0007) — stamped by the audit
+        # stage since it landed but dropped silently until the columns existed
+        # (the both-lists trap, same shape as port_failure_stage).
+        Column("audit_tool_calls", Integer),
+        Column("audit_tool_calls_known", Boolean),
         # timestamps
         Column("created_at", DateTime(timezone=True)),
         Column("updated_at", DateTime(timezone=True)),

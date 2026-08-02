@@ -1120,6 +1120,20 @@ _STATE_DIRECT_FIELDS = (
     # absence is why classifying 234 terminal rows by cause needed a
     # reconstruction from logs/runs.jsonl.
     "port_failure_stage",
+    # Falsifiability axis (migration 0007, falsify.py) -- unchecked | passed |
+    # contradicted | unfalsifiable, plus the findings blob (the contradicted
+    # function's counterexample -- kept, never erased, per the CONF_REFUTED
+    # lesson) and which lane produced it (worker | sweep | cross_version).
+    # falsify_checked_at is timestamp-special-cased below, not listed here.
+    "falsify_status",
+    "falsify_findings",
+    "falsify_source",
+    # Audit tool-call persistence (migration 0007) -- stamped by the audit
+    # stage on every audited function since the audit landed, but absent from
+    # BOTH field lists (the same trap as port_failure_stage) so it was dropped
+    # silently and survived only in runs.jsonl.
+    "audit_tool_calls",
+    "audit_tool_calls_known",
 )
 
 
@@ -1179,6 +1193,8 @@ def _state_func_to_row(func_key, rec):
         out["last_audited_at"] = _parse_state_ts(rec["last_audited"])
     if "last_escalated" in rec:
         out["last_escalated_at"] = _parse_state_ts(rec["last_escalated"])
+    if "falsify_checked_at" in rec:
+        out["falsify_checked_at"] = _parse_state_ts(rec["falsify_checked_at"])
     # `attempts` in state.json is the inline run-history list; the workflow
     # row tracks the count + last-event hot pointers instead. The list
     # itself goes to the runs table via record_run() at append time.
@@ -1242,6 +1258,9 @@ def _row_to_state_func(row):
     if row.get("last_escalated_at") is not None:
         v = row["last_escalated_at"]
         out["last_escalated"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("falsify_checked_at") is not None:
+        v = row["falsify_checked_at"]
+        out["falsify_checked_at"] = v.isoformat() if hasattr(v, "isoformat") else v
     # Don't reconstruct the inline `attempts` list from the runs table here —
     # it's expensive (one query per function) and most callers only need the
     # count. Provide an empty list as a safe default; consumers that need the
@@ -3522,8 +3541,11 @@ def compute_priority(func):
     """
     score = func.get("score", 0)
 
-    # Skip already-documented
-    if score >= 90:
+    # Skip already-documented — UNLESS the falsifier holds a mechanical
+    # contradiction against it. A 100-scoring function carrying a known-false
+    # claim is exactly the one that must come back (score measures hygiene,
+    # not truth).
+    if score >= 90 and func.get("falsify_status") != "contradicted":
         return 0
 
     caller_count = func.get("caller_count", 0)
@@ -3614,6 +3636,11 @@ DEFAULT_QUEUE_CONFIG = {
     # Minimum score delta to skip audit. If the worker gained >= this many
     # points, audit is skipped (the worker did well enough). Lower = more audits.
     "audit_min_delta": 5,
+    # Falsify stage (falsify.py): mechanical doc-vs-disassembly contradiction
+    # checks after every doc pass. Model-free, ~2 HTTP GETs per function —
+    # default ON. Tier-1 findings force the audit pass (overriding both skip
+    # gates) and mark the function contradicted/DOC_REFUTED.
+    "falsify_enabled": True,
     # Pre-refresh top candidates' scores when a worker starts. Skipped when:
     # - This flag is False
     # - No active_binary is set (would touch every binary Ghidra has)
@@ -3677,6 +3704,14 @@ PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
 # rebuild.
 _PROPAGATION_CONFIDENCE_THRESHOLD = float(
     os.environ.get("FUN_DOC_PROPAGATION_CONFIDENCE_THRESHOLD", "0.5")
+)
+
+# ROI bonus the selector adds to a function whose falsify_status is
+# 'contradicted' (falsify.py found a mechanical doc-vs-disassembly
+# contradiction). Sized to outrank ordinary fixable work (roi typically
+# < ~400) while staying far below the 1M cold-start lane.
+_FALSIFY_CONTRADICTED_BONUS = float(
+    os.environ.get("FUN_DOC_FALSIFY_CONTRADICTED_BONUS", "500")
 )
 
 
@@ -3749,6 +3784,7 @@ def build_worker_config_snapshot(queue, primary_provider):
         "audit_provider": _role_provider(cfg.get("audit_provider")),
         "globals_audit_provider": _role_provider(cfg.get("globals_audit_provider")),
         "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
+        "falsify_enabled": bool(cfg.get("falsify_enabled", True)),
         "complexity_handoff_provider": _role_provider(
             cfg.get("complexity_handoff_provider")
         ),
@@ -4115,7 +4151,17 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         last_processed = func.get("last_processed")
         needs_scoring = require_scored and last_processed is None
 
-        if score >= good_enough and not is_pinned and not needs_scoring:
+        # Falsifiability carve-out: a contradicted function stays eligible
+        # past the score gate. The completeness score is computed FROM the
+        # documentation (hygiene), so it cannot see a false claim — the
+        # falsifier's tier-1 finding is a mechanical contradiction with the
+        # disassembly, and the function carrying it is the highest-information
+        # work in the queue regardless of its score. Cleared when a later
+        # falsify pass upgrades the status to 'passed'.
+        is_contradicted = func.get("falsify_status") == "contradicted"
+
+        if score >= good_enough and not is_pinned and not needs_scoring \
+                and not is_contradicted:
             continue
 
         consecutive_fails = func.get("consecutive_fails", 0)
@@ -4223,8 +4269,11 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             roi = 1_000_000  # Cold-start lane: surface unscored funcs first
             readiness = 1.0
         else:
-            if fixable <= 0 and not is_pinned:
-                # Already scored, nothing concrete to fix — leave it alone
+            if fixable <= 0 and not is_pinned and not is_contradicted:
+                # Already scored, nothing concrete to fix — leave it alone.
+                # (A contradicted function often has fixable == 0 precisely
+                # BECAUSE the score can't see the false claim — don't let the
+                # hygiene metric veto the truth metric.)
                 continue
             # Bottom-up call-graph traversal: readiness is used as a
             # PRIMARY sort key (not a ROI multiplier) so that:
@@ -4238,6 +4287,12 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             roi = fixable * (1 + callers / 10)
             if score < good_enough and fixable > 0:
                 roi += (good_enough - score) * 2
+
+        if is_contradicted:
+            # A known-wrong claim outranks ordinary fixable work (bounded so
+            # the cold-start lane still wins). The finding rides in
+            # func["falsify_findings"] for the worker prompt to consume.
+            roi += _FALSIFY_CONTRADICTED_BONUS
 
         partial_runs = func.get("partial_runs", 0)
         if partial_runs >= 3 and not is_pinned:
@@ -4572,7 +4627,7 @@ def drain_done_pinned(state):
     }
 
 
-def auto_dequeue_if_done(func_key, score, source="completed"):
+def auto_dequeue_if_done(func_key, score, source="completed", falsify_status=None):
     """If func_key is currently pinned and score >= good_enough_score, remove
     it from the queue and emit queue_changed. Returns True if dequeued.
 
@@ -4581,8 +4636,14 @@ def auto_dequeue_if_done(func_key, score, source="completed"):
     - process_function on skip-because-already-done (`source="skipped"`)
     - /api/queue/pin when an immediate score check shows the function is
       already above good_enough (`source="pin_check"`)
+
+    A `falsify_status` of 'contradicted' vetoes the dequeue: the score is a
+    hygiene metric and cannot see a mechanically false claim — a pinned
+    function holding a tier-1 falsify finding is not done at ANY score.
     """
     if score is None:
+        return False
+    if falsify_status == "contradicted":
         return False
     try:
         queue = load_priority_queue()
@@ -8528,6 +8589,134 @@ def _rescore_and_sync(func, address, program):
     return None, None
 
 
+# ── Falsifiability stage helpers (falsify.py) ──────────────────────────────
+# The falsify pass runs mechanical, model-free doc-vs-disassembly checks after
+# a documentation pass. Tier-1 findings (mechanical certainty: declared
+# convention vs the callee's actual RET n, documented params vs the live
+# signature, ...) carry consequences: DOC_REFUTED, plate flags, selector
+# re-entry, and a FORCED audit pass seeded with the contradictions. Tier-2
+# findings are report-only. All best-effort — never fatal to a run, always
+# loud on failure.
+
+def _falsify_bundle(program, address):
+    """Assemble falsify.py's check bundle from live Ghidra state.
+
+    Returns None (loudly) when the endpoints fail — the stage then reports
+    'error', never a false 'passed'. Two GETs; /get_function_documentation
+    carries name/convention/return/params/plate in one call.
+    """
+    try:
+        doc = ghidra_get(
+            "/get_function_documentation",
+            params={"address": f"0x{address}", "program": program},
+        )
+        if not isinstance(doc, dict) or doc.get("error") or "function_name" not in doc:
+            print(f"  [falsify] bundle unavailable @ 0x{address}: {str(doc)[:120]}")
+            return None
+        dis = ghidra_get(
+            "/disassemble_function",
+            params={"address": f"0x{address}", "program": program},
+        )
+        params = doc.get("parameters")
+        return {
+            "program": program,
+            "address": f"0x{address}",
+            "name": doc.get("function_name") or "",
+            "calling_convention": doc.get("calling_convention") or "",
+            "return_type": doc.get("return_type") or "",
+            "params": params if isinstance(params, list) else [],
+            "plate": doc.get("plate_comment") or "",
+            "disasm_text": disasm_text(dis),
+            "prototype": "",
+        }
+    except Exception as e:  # noqa: BLE001
+        print(f"  [falsify] bundle fetch failed @ 0x{address}: {e}")
+        return None
+
+
+def _run_falsify_pass(func_key, func, program, address, source="worker"):
+    """Run the falsify checks against the CURRENT Ghidra state and persist the
+    verdict everywhere it lives: func fields -> SQL, DOC_REFUTED tag +
+    `Falsify` property + plate flags -> Ghidra (falsify.sync_to_ghidra, the
+    single writer all lanes share), and falsify_start/falsify_complete on the
+    bus.
+
+    Returns (outcome, findings): outcome in ('passed', 'contradicted',
+    'error'); findings is a list of falsify.Finding. 'error' means the checks
+    could not run — callers must treat it as no-information, never as a pass.
+    """
+    try:
+        import falsify
+    except Exception as e:  # noqa: BLE001
+        print(f"  [falsify] module unavailable: {e}")
+        return "error", []
+    bus_emit("falsify_start", {"key": func_key, "source": source})
+    bundle = _falsify_bundle(program, address)
+    if bundle is None:
+        bus_emit("falsify_complete", {"key": func_key, "outcome": "error"})
+        return "error", []
+    try:
+        findings = falsify.run_checks(bundle)
+        status = falsify.status_for(findings)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [falsify] checks failed @ 0x{address}: {e}")
+        bus_emit("falsify_complete", {"key": func_key, "outcome": "error"})
+        return "error", []
+
+    tier1_n = len([f for f in findings if f.tier == 1])
+    tier2_n = len(findings) - tier1_n
+    if status == "contradicted":
+        print(f"  [falsify] CONTRADICTED — {tier1_n} tier-1 finding(s):")
+        for f in findings:
+            if f.tier == 1:
+                print(f"    [{f.check_id}] {f.claim} — but {f.evidence}")
+    else:
+        extra = f" ({tier2_n} tier-2 for review)" if tier2_n else ""
+        print(f"  [falsify] passed — no mechanical contradictions{extra}")
+
+    func["falsify_status"] = status
+    func["falsify_checked_at"] = datetime.now().isoformat()
+    func["falsify_findings"] = [f.to_dict() for f in findings]
+    func["falsify_source"] = source
+    try:
+        update_function_state(func_key, func)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [falsify] state persist failed (non-fatal): {e}")
+    falsify.sync_to_ghidra(program, f"0x{address}", status, findings, source)
+    bus_emit(
+        "falsify_complete",
+        {
+            "key": func_key,
+            "outcome": status,
+            "tier1": tier1_n,
+            "tier2": tier2_n,
+            "checks": sorted({f.check_id for f in findings}),
+        },
+    )
+    return status, findings
+
+
+def _falsify_prompt_block(findings):
+    """The seeded section for a findings-forced audit prompt. Tier-1 only —
+    these are mechanical facts, and the auditor's first job is to make the
+    documentation stop contradicting them."""
+    lines = [
+        "## CONTRADICTIONS FOUND (mechanically derived from the disassembly"
+        " — fix these FIRST)",
+        "The checks below compared the documentation against disassembly facts"
+        " (RET immediates, register reads, memory writes). The DISASSEMBLY IS"
+        " THE AUTHORITY — correct the documentation to match it, never the"
+        " other way around.",
+        "",
+    ]
+    for f in findings:
+        if f.tier == 1:
+            lines.append(f"- [{f.check_id}]")
+            lines.append(f"  CLAIM:    {f.claim}")
+            lines.append(f"  EVIDENCE: {f.evidence}")
+    return "\n".join(lines)
+
+
 def _note_shadow_backlog(program, address, func_name, reason):
     """Append a shadow-first deferral to D2MOO's shadow_leaf_backlog.jsonl —
     the build list for the next shadow-dispatcher batch. Deduplicates by
@@ -9050,6 +9239,10 @@ def process_function(
     audit_score_after = None
     audit_tool_calls = None
     audit_tool_calls_known = None
+    falsify_outcome = None       # "passed" | "contradicted" | "error" | None
+    falsify_tier1_count = None
+    falsify_tier2_count = None
+    falsify_check_ids = None
     run_log_written = False
 
     def _log_run_once(logged_result, *, score_after=None, reason=None, error=None):
@@ -9136,6 +9329,10 @@ def process_function(
             "audit_score_after": audit_score_after,
             "audit_tool_calls": audit_tool_calls,
             "audit_tool_calls_known": audit_tool_calls_known,
+            "falsify_outcome": falsify_outcome,
+            "falsify_tier1_count": falsify_tier1_count,
+            "falsify_tier2_count": falsify_tier2_count,
+            "falsify_check_ids": falsify_check_ids,
             "input_tokens": meta.get("input_tokens"),
             "output_tokens": meta.get("output_tokens"),
             "output": output[:5000] if output else None,
@@ -9158,13 +9355,22 @@ def process_function(
             try:
                 import port_live_prove as _plp
                 from pathlib import Path as _P
-                if audit_score_after is not None and audit_score_after >= 95:
-                    _lvl = "DOC_VERIFIED"   # cleared the verify/audit pass
+                # Falsifiability gates the trust axis: a contradicted function
+                # is never promoted (its DOC_REFUTED tag + findings blob are
+                # the record), and DOC_VERIFIED additionally requires having
+                # SURVIVED falsification — a high audit score alone is still
+                # just the hygiene metric restated.
+                if falsify_outcome == "contradicted":
+                    _lvl = None
+                elif (audit_score_after is not None and audit_score_after >= 95
+                        and falsify_outcome == "passed"):
+                    _lvl = "DOC_VERIFIED"   # cleared audit AND falsification
                 elif final_score is not None and final_score >= 80:
                     _lvl = "DOC_REVIEWED"   # good_enough documentation
                 else:
                     _lvl = "DOC_DRAFT"      # first-pass, below threshold
-                _plp.set_doc_level(address, _lvl, program=_P(program).name)
+                if _lvl:
+                    _plp.set_doc_level(address, _lvl, program=_P(program).name)
             except Exception:
                 pass
 
@@ -10330,16 +10536,51 @@ def process_function(
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 
+    # ── Falsify stage (pre-audit) ───────────────────────────────────────
+    # Mechanical doc-vs-disassembly contradiction checks (falsify.py) against
+    # the state this run just wrote. Model-free and cheap (two GETs). Tier-1
+    # findings FORCE the audit stage below (seeded with the contradictions)
+    # and carry consequences via _run_falsify_pass: DOC_REFUTED tag, plate
+    # flags, falsify_status=contradicted (which keeps the function selector-
+    # eligible past the score gate). Tier-2 findings are report-only.
+    if config_snapshot is not None:
+        falsify_enabled = bool(config_snapshot.get("falsify_enabled", True))
+    else:
+        falsify_cfg = (
+            cfg
+            if "falsify_enabled" in cfg
+            else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
+        )
+        falsify_enabled = bool(falsify_cfg.get("falsify_enabled", True))
+
+    falsify_findings = []
+    if (
+        falsify_enabled
+        and result in ("completed", "partial")
+        and mode not in ("VERIFY",)
+    ):
+        falsify_outcome, falsify_findings = _run_falsify_pass(
+            func_key, func, program, address, source="worker"
+        )
+        if falsify_outcome in ("passed", "contradicted"):
+            falsify_tier1_count = len([f for f in falsify_findings if f.tier == 1])
+            falsify_tier2_count = len(falsify_findings) - falsify_tier1_count
+            falsify_check_ids = sorted({f.check_id for f in falsify_findings})
+
     # ── Audit stage ─────────────────────────────────────────────────────
     # If configured, run a second provider to review and fix gaps.
     # Only fires when: audit_provider is set, worker result was usable,
     # score gain was below the min-delta threshold, and the function isn't
-    # already at the good-enough score.
+    # already at the good-enough score — UNLESS the falsify stage found a
+    # tier-1 contradiction, which overrides BOTH skip gates: the skips
+    # exist because "the score is fine" / "the worker made progress", and
+    # a mechanically false claim is invisible to the score by construction.
     audit_score_before = None
     audit_score_after = None
-    audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
+    audit_outcome = None  # "skipped_good_enough" | "skipped_delta" | "ran" | "forced_findings" | None
     audit_tool_calls = None
     audit_tool_calls_known = None
+    force_audit = any(f.tier == 1 for f in falsify_findings)
     if config_snapshot is not None:
         # Frozen snapshot: audit policy was decided at worker start. Even if
         # the dashboard dropdown moves mid-run, this worker keeps its original
@@ -10370,26 +10611,33 @@ def process_function(
         else:
             good_enough = audit_cfg.get("good_enough_score", 80)
 
-        if new_score >= good_enough:
+        if new_score >= good_enough and not force_audit:
             audit_outcome = "skipped_good_enough"
             print(
                 f"  [audit] skipped — score {new_score}% already >= good_enough {good_enough}%"
             )
-        elif worker_diff >= audit_min_delta:
+        elif worker_diff >= audit_min_delta and not force_audit:
             audit_outcome = "skipped_delta"
             print(
                 f"  [audit] skipped — worker gained {worker_diff:.0f}% (>= minΔ {audit_min_delta})"
             )
         else:
-            print(
-                f"\n  [audit] {audit_provider}: reviewing (worker Δ{worker_diff:.0f}% < minΔ {audit_min_delta})"
-            )
+            if force_audit:
+                print(
+                    f"\n  [audit] {audit_provider}: FORCED — falsify found "
+                    f"{falsify_tier1_count} tier-1 contradiction(s)"
+                )
+            else:
+                print(
+                    f"\n  [audit] {audit_provider}: reviewing (worker Δ{worker_diff:.0f}% < minΔ {audit_min_delta})"
+                )
             bus_emit(
                 "audit_start",
                 {
                     "key": func_key,
                     "provider": audit_provider,
                     "worker_delta": worker_diff,
+                    "forced_by_findings": force_audit,
                 },
             )
 
@@ -10403,6 +10651,13 @@ def process_function(
             audit_prompt = build_fix_prompt(
                 audit_func_name, address, audit_data, program=program
             )
+            # Seed a findings-forced audit with the concrete contradictions —
+            # the auditor's first job is making the documentation stop
+            # contradicting the disassembly, not chasing score points.
+            if force_audit:
+                audit_prompt = (
+                    _falsify_prompt_block(falsify_findings) + "\n\n" + audit_prompt
+                )
             # Inject tool block for non-Gemini providers
             if audit_provider != "gemini":
                 audit_prompt = _inject_tool_block(audit_prompt)
@@ -10425,7 +10680,7 @@ def process_function(
                     },
                 )
             else:
-                audit_outcome = "ran"
+                audit_outcome = "forced_findings" if force_audit else "ran"
                 print(
                     f"  [audit] FIX | {audit_provider} | {len(audit_prompt):,} chars | score: {new_score}%"
                 )
@@ -10529,6 +10784,59 @@ def process_function(
                     else False
                 )
                 update_function_state(func_key, func)
+
+                # Persist an audit run row. The runs-table `audit` branch in
+                # repository.record_run was dead code until now — all 48K+
+                # rows were run_kind='doc' because nothing ever called it.
+                # (record_run bumps audit_count to the same value the stamp
+                # above wrote, so the two writes agree, not double-count.)
+                if audit_outcome != "quota_paused":
+                    try:
+                        _repo = _get_storage_repo()
+                        if _repo is not None:
+                            _ppath = func.get("program") or (
+                                func_key.split("::", 1)[0] if "::" in func_key else ""
+                            )
+                            _delta = (
+                                audit_score_after - audit_score_before
+                                if (audit_score_after is not None
+                                    and audit_score_before is not None)
+                                else None
+                            )
+                            _repo.record_run(_ppath, str(address), {
+                                "run_kind": "audit",
+                                "mode": "FIX",
+                                "provider": audit_provider,
+                                "model": audit_model,
+                                "function_name": func_name,
+                                "score_before": audit_score_before,
+                                "score_after": audit_score_after,
+                                "delta": _delta,
+                                "tool_calls": audit_tool_calls,
+                                "outcome": audit_outcome,
+                            })
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  [audit] run-row persist failed (non-fatal): {e}")
+
+                # Re-run the falsify checks after a findings-forced audit: if
+                # the auditor fixed the contradiction, the verdict upgrades to
+                # 'passed' — which removes DOC_REFUTED, strips the plate
+                # flags, and lets the selector retire the function normally.
+                if force_audit and audit_outcome == "forced_findings":
+                    _re_outcome, _re_findings = _run_falsify_pass(
+                        func_key, func, program, address, source="worker"
+                    )
+                    if _re_outcome in ("passed", "contradicted"):
+                        falsify_outcome = _re_outcome
+                        falsify_tier1_count = len(
+                            [f for f in _re_findings if f.tier == 1]
+                        )
+                        falsify_tier2_count = (
+                            len(_re_findings) - falsify_tier1_count
+                        )
+                        falsify_check_ids = sorted(
+                            {f.check_id for f in _re_findings}
+                        )
 
     # Track partial_runs for requeue deprioritization
     if result == "partial":
@@ -10636,9 +10944,13 @@ def process_function(
             )
 
     # Auto-dequeue on successful completion if the user explicitly queued this
-    # function and it reached the good-enough threshold.
+    # function and it reached the good-enough threshold. The falsify verdict
+    # vetoes: a contradicted function is not done at any score.
     if result == "completed":
-        auto_dequeue_if_done(func_key, new_score, source="completed")
+        auto_dequeue_if_done(
+            func_key, new_score, source="completed",
+            falsify_status=func.get("falsify_status"),
+        )
 
     # Recovery-pass one-shot: mark functions that finished a complexity-forced
     # recovery pass so the selector doesn't re-pick them on every cycle. These

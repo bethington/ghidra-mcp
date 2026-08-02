@@ -119,6 +119,13 @@ _DIRECT_FIELDS = {
     "name_source",
     "name_source_binary",
     "name_confidence",
+    # falsifiability axis (migration 0007, falsify.py)
+    "falsify_status",
+    "falsify_findings",
+    "falsify_source",
+    # audit tool-call persistence (migration 0007)
+    "audit_tool_calls",
+    "audit_tool_calls_known",
 }
 
 # Renamed columns (state key → DB column).
@@ -128,6 +135,7 @@ _RENAMED_FIELDS = {
     "last_escalated": "last_escalated_at",
     "decompile_timeout_at": "decompile_timeout_at",
     "library_code_at": "library_code_at",
+    "falsify_checked_at": "falsify_checked_at",
 }
 
 

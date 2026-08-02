@@ -752,3 +752,88 @@ def test_not_a_function_bypassed_by_pin():
     assert _keys(select_candidates(state, _queue())) == []
     result = select_candidates(state, _queue(pinned=["a::data"]))
     assert _keys(result) == ["a::data"]
+
+
+# ---------------------------------------------------------------------------
+# Rule 14: falsifiability carve-outs (falsify.py, migration 0007).
+# The completeness score is a hygiene metric computed FROM the documentation,
+# so it cannot see a false claim — a 'contradicted' falsify_status must keep
+# the function eligible past every score-based retire gate.
+# ---------------------------------------------------------------------------
+
+def test_contradicted_function_stays_eligible_above_good_enough():
+    """score >= good_enough normally retires; a tier-1 falsify contradiction
+    vetoes the retirement — the 100-scoring wrong function must come back."""
+    state = _state(
+        **{
+            "a::wrong": {
+                "score": 100,
+                "fixable": 0,
+                "falsify_status": "contradicted",
+            },
+            "a::done": {"score": 100, "fixable": 0},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::wrong"]
+
+
+def test_contradicted_function_outranks_ordinary_work():
+    """The contradicted bonus puts known-wrong claims ahead of ordinary
+    fixable work (highest information value in the queue)."""
+    state = _state(
+        **{
+            "a::ordinary": {"score": 40, "fixable": 30, "caller_count": 10},
+            "a::wrong": {
+                "score": 95,
+                "fixable": 0,
+                "falsify_status": "contradicted",
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result)[0] == "a::wrong"
+
+
+def test_passed_falsify_status_does_not_bypass_retire_gate():
+    """Only 'contradicted' carves out — 'passed' functions retire normally."""
+    state = _state(
+        **{
+            "a::clean": {
+                "score": 95,
+                "fixable": 0,
+                "falsify_status": "passed",
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+
+
+def test_contradicted_does_not_bypass_failure_safety_valves():
+    """consecutive_fails / stagnation guards still apply to contradicted
+    functions — a contradiction is not a license for an infinite retry loop."""
+    state = _state(
+        **{
+            "a::stuck": {
+                "score": 95,
+                "fixable": 0,
+                "falsify_status": "contradicted",
+                "consecutive_fails": 3,
+            },
+            "a::stagnant": {
+                "score": 95,
+                "fixable": 0,
+                "falsify_status": "contradicted",
+                "stagnation_runs": 3,
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+
+
+def test_auto_dequeue_vetoed_by_contradiction():
+    """auto_dequeue_if_done must not drop a pinned function that holds a
+    tier-1 falsify finding, at any score."""
+    from fun_doc import auto_dequeue_if_done
+
+    assert auto_dequeue_if_done("a::1", 100, falsify_status="contradicted") is False
