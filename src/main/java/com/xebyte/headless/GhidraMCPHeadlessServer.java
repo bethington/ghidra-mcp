@@ -431,7 +431,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             "/check_connection", "/configure_analyzer",
             "/delete_project", "/exit_ghidra", "/get_current_address",
             "/get_current_function", "/get_version", "/health",
-            "/list_projects", "/mcp/schema", "/move_file", "/move_folder",
+            "/list_projects", "/mcp/schema",
             "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
             "/server/admin/terminate_checkout", "/server/admin/users",
             "/server/checkouts", "/server/connect", "/server/disconnect",
@@ -481,22 +481,15 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         // --- Project Organization ---
-        // Note: /create_folder and /delete_file are NOT registered here because
-        // they are already registered via @McpTool annotations on
-        // ProgramScriptService.{createFolder,deleteFile} which the
-        // AnnotationScanner picks up. Re-registering them manually causes
-        // "cannot add context to list" on headless startup (see #180).
-        // /move_file and /move_folder have no annotation, so they stay manual.
-
-        safeContext("/move_file", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.moveFile(params.get("filePath"), params.get("destFolder")));
-        });
-
-        safeContext("/move_folder", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.moveFolder(params.get("sourcePath"), params.get("destPath")));
-        });
+        // Note: /create_folder, /delete_file, /move_file and /move_folder are
+        // NOT registered here because they are already registered via @McpTool
+        // annotations on ProgramScriptService.{createFolder,deleteFile,
+        // moveFile,moveFolder} which the AnnotationScanner picks up.
+        // Re-registering them manually causes "cannot add context to list" on
+        // headless startup (see #180). Those shared implementations reach
+        // ProjectData through ProgramProvider.getProject(), which
+        // HeadlessProgramProvider overrides -- that override is what keeps them
+        // working without a PluginTool.
 
         // --- Server Endpoints ---
 

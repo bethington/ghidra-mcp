@@ -68,8 +68,13 @@ public final class ManualToolDescriptors {
         add(m, "/list_projects", "GET", "project", "List available Ghidra projects", "searchDir");
         add(m, "/mcp/health", "GET", "utility", "HTTP server health: pool stats, uptime, memory, active request count");
         add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata");
-        add(m, "/move_file", "POST", "project", "Move a file to another project folder", "filePath", "destFolder");
-        add(m, "/move_folder", "POST", "project", "Move a folder to another location", "sourcePath", "destPath");
+        // /move_file and /move_folder used to live here: manually routed in the
+        // headless server, absent from the GUI/FrontEnd server entirely, and so
+        // present in tests/endpoints.json but missing from the live /mcp/schema
+        // that the bridge discovers from. They are now @McpTool methods on
+        // ProgramScriptService.{moveFile,moveFolder}, which registers them in
+        // every mode. Do not re-add them here -- double registration throws
+        // "cannot add context to list" on headless startup (see #180).
         add(m, "/open_project", "POST", "headless", "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params.", "path", "headless", "program");
         add(m, "/project/info", "GET", "project", "Get detailed project info including running tools and open programs");
         add(m, "/server/admin/set_permissions", "POST", "server", "Set user permissions on a repository", "repo", "user", "accessLevel");
