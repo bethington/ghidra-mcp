@@ -1,0 +1,953 @@
+"""falsify.py -- mechanical, model-free contradiction checks: doc vs disassembly.
+
+WHY THIS EXISTS
+---------------
+`analyze_function_completeness` asks "is documentation present and well-formed?"
+Every one of its ~30 deduction categories is computed FROM the documentation, so
+no observation about the binary can ever lower the score -- a confidently wrong
+plate scores 100. `doc_lint.py` opened this front with one check (library code
+wearing a domain prefix); this module is the check FAMILY, comparing what the
+documentation CLAIMS (name, prototype, calling convention, plate) against what
+the binary SHOWS (disassembly-derived ABI, memory writes, callees).
+
+Falsifiability is the second axis, orthogonal to completeness: completeness
+forces claims to exist, this module checks whether they are true. The CONF_
+ladder (conf_ladder.py) is the dynamic version of the same idea for reimpls;
+these checks are its static, proof-free sibling for documentation.
+
+FINDINGS ARE TIERED, exactly like doc_lint:
+
+  Tier 1 -- mechanical certainty. The disassembly states a fact (`RET 0x8` is a
+           fact the compiler emitted) and the documentation contradicts it.
+           These carry consequences: DOC_REFUTED, forced audit, re-queue.
+  Tier 2 -- a real contradiction signal that wants human/audit review before
+           any consequence. Report-only.
+
+Every check follows the confidence-guard rule: when the ground truth is
+ambiguous (multiple RET immediates, approximate ESP tracking, varargs, a CALL
+that clobbers the return register), the check returns NO finding rather than a
+weak one. "UNDETERMINED -- inspect by hand, do not guess" (audit_stdcall_argc).
+
+CHECKS
+------
+  param_mismatch (T1/T2)          plate-documented params vs live signature
+  convention_contradiction (T1)   declared callconv vs derive_abi()'s synthesis
+  arity_contradiction (T1)        declared argc vs the callee's actual RET n
+  return_contradiction (T2)       plate/prototype return claims vs return paths
+  name_verb_contradiction (T2)    reader-verb names that write globals, and
+                                  writer-verb names that write nothing
+  library_domain_prefix (T1/T2)   doc_lint's rule, corpus-level only
+  phantom_callee (T2, OFF)        plate Algorithm names callees that don't exist
+
+Architecture is doc_lint's: PURE check functions over a pre-fetched bundle,
+a thin I/O layer (`collect_bundle`), and a CLI. Standalone -- imports nothing
+from fun_doc (same rule as conf_ladder.py), so fun_doc may import it freely.
+
+USAGE
+-----
+    python falsify.py --program /Mods/PD2-S12/D2Common.dll
+    python falsify.py --folder /Mods/PD2-S12 --json report.json
+    python falsify.py --program <p> --enable phantom_callee
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from abi_static import derive_abi, parse_disasm  # noqa: E402
+from plate_scaffold import (  # noqa: E402
+    _PARAM_MD, _PARAM_PLAIN, _sec, parse_function_plate,
+)
+
+GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
+
+TIER_MECHANICAL = 1   # disassembly fact vs documentation claim -- certain
+TIER_REVIEW = 2       # real signal, wants review before consequences
+
+
+@dataclass
+class Finding:
+    check_id: str
+    tier: int
+    program: str
+    address: str
+    function: str
+    claim: str       # what the documentation asserts
+    evidence: str    # what the binary shows
+    detail: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# --------------------------------------------------------------------------- #
+# shared ground-truth helpers (pure)
+# --------------------------------------------------------------------------- #
+
+_CC_RE = re.compile(r"(?:__)?(cdecl|stdcall|fastcall|thiscall)", re.I)
+
+_AUTO_NAME_RE = re.compile(r"^(FUN_|thunk_FUN_|Ordinal_|thunk_Ordinal_|SUB_|LAB_)")
+# Signature params Ghidra invented rather than a human asserted.
+_AUTO_PARAM_RE = re.compile(r"^(param_\d+|in_[A-Z]{2,3}\d*|unaff_\w+|extraout_\w+)$")
+
+# plate_scaffold emits orphaned prose as "name: (implicit / not in signature) - desc";
+# those lines are deliberately NOT claims about the formal signature.
+_IMPLICIT_TYPE_RE = re.compile(r"implicit", re.I)
+
+# Return-register datum-width classification, ported from
+# scripts/audit_ret_widths.py (see its docstrings for the MOVZX-vs-MOVSX and
+# datum-vs-write-width rationale -- the 166,565-false-divergence lesson).
+_W8 = re.compile(r"^(MOV|XOR|OR|AND|ADD|SUB|SETN?[A-Z]{1,2})\s+AL\b", re.I)
+_W16 = re.compile(r"^(MOV|XOR|OR|AND|ADD|SUB)\s+AX\b", re.I)
+_W32 = re.compile(
+    r"^(MOV|MOVZX|MOVSX|XOR|OR|AND|ADD|SUB|SBB|NEG|IMUL|LEA|POP|INC|DEC|SHL|SHR|SAR|NOT|CDQ)\s+EAX\b",
+    re.I)
+
+# Instructions whose first operand being a memory ref means a MEMORY WRITE.
+_MEM_WRITE_MNEMONICS = frozenset({
+    "MOV", "ADD", "SUB", "AND", "OR", "XOR", "INC", "DEC", "NOT", "NEG",
+    "SHL", "SHR", "SAR",
+})
+_ABS_DST_RE = re.compile(r"\[\s*(0x[0-9a-fA-F]+)\s*\]")
+
+_FLOAT_RET_RE = re.compile(r"^(float|double|long\s+double)\b", re.I)
+
+
+def _declared_cc(bundle: dict) -> Optional[str]:
+    m = _CC_RE.search(bundle.get("calling_convention") or "")
+    return m.group(1).lower() if m else None
+
+
+def _ret_pops(parsed: list) -> set:
+    """Set of RET immediates (0 for bare RET). Every return path must agree
+    before any check treats the value as fact -- the calling convention is a
+    property of the function, not of the path (audit_stdcall_argc)."""
+    pops = set()
+    for _, mn, ops in parsed:
+        if mn.startswith("RET"):
+            s = ops.strip()
+            pops.add(int(s, 0) if re.match(r"^(0x[0-9a-fA-F]+|\d+)$", s) else 0)
+    return pops
+
+
+def _rebuilt_lines(parsed: list) -> list:
+    """'MN OPS' strings for the width regexes, which match instruction text."""
+    return [f"{mn} {ops}".strip() for _, mn, ops in parsed]
+
+
+def _observed_ret_width(parsed: list) -> Optional[int]:
+    """Narrowest return-register datum width across return paths, or None.
+    Port of audit_ret_widths.observed_ret_width over parse_disasm output."""
+    lines = _rebuilt_lines(parsed)
+    widths = []
+    for idx, cur in enumerate(lines):
+        if not re.match(r"^RET\b", cur, re.I):
+            continue
+        for j in range(idx - 1, -1, -1):
+            t = lines[j]
+            if re.match(r"^(RET|JMP)\b", t, re.I):
+                break                       # previous path ends here
+            mz = re.match(r"^MOVZX\s+EAX,\s*(byte|word)\s+ptr\b", t, re.I)
+            if mz:
+                widths.append(8 if mz.group(1).lower() == "byte" else 16)
+                break
+            if _W32.match(t):
+                widths.append(32)
+                break
+            if _W16.match(t):
+                widths.append(16)
+                break
+            if _W8.match(t):
+                widths.append(8)
+                break
+    return min(widths) if widths else None
+
+
+def _abs_global_writes(parsed: list) -> list:
+    """Absolute-address memory writes: [(ins_addr, global_addr), ...]."""
+    out = []
+    for addr, mn, ops in parsed:
+        if mn not in _MEM_WRITE_MNEMONICS:
+            continue
+        dst = ops.split(",", 1)[0]
+        m = _ABS_DST_RE.search(dst)
+        if m:
+            out.append((addr, int(m.group(1), 16)))
+    return out
+
+
+def _has_any_mem_write(parsed: list) -> bool:
+    """Any write through memory that is NOT a local (ESP/EBP-relative)."""
+    for _, mn, ops in parsed:
+        if mn not in _MEM_WRITE_MNEMONICS:
+            continue
+        dst = ops.split(",", 1)[0]
+        if "[" in dst and "ESP" not in dst.upper() and "EBP" not in dst.upper():
+            return True
+    return False
+
+
+def _doc_param_lines(plate: str) -> list:
+    """[(name, type)] the plate's Parameters section asserts about the formal
+    signature (implicit/orphaned-prose lines excluded)."""
+    parsed = parse_function_plate(plate or "")
+    body = _sec(parsed["sections"], "Parameters") or ""
+    out = []
+    for ln in body.splitlines():
+        m = _PARAM_PLAIN.match(ln) or _PARAM_MD.match(ln)
+        if not m:
+            continue
+        nm, ty = m.group(1), m.group(2).strip()
+        if _IMPLICIT_TYPE_RE.search(ty):
+            continue
+        out.append((nm, ty))
+    return out
+
+
+def _plate_return_type(plate: str) -> Optional[str]:
+    """The type token the plate's Returns section asserts, or None."""
+    parsed = parse_function_plate(plate or "")
+    body = _sec(parsed["sections"], "Returns") or ""
+    ln = next((l for l in body.splitlines() if l.strip()), "")
+    if not ln:
+        return None
+    m = re.match(r"\s*([A-Za-z_][\w\s\*]*?)\s*(?::|$)", ln)
+    return m.group(1).strip() if m else None
+
+
+def _mk(bundle: dict, check_id: str, tier: int, claim: str, evidence: str,
+        **detail) -> Finding:
+    return Finding(check_id=check_id, tier=tier,
+                   program=bundle.get("program", ""),
+                   address=str(bundle.get("address", "")),
+                   function=bundle.get("name", ""),
+                   claim=claim, evidence=evidence, detail=detail)
+
+
+# --------------------------------------------------------------------------- #
+# checks (pure -- bundle in, findings out)
+# --------------------------------------------------------------------------- #
+
+def check_param_mismatch(bundle: dict) -> List[Finding]:
+    """F1: the plate documents parameters the signature does not have.
+
+    Tier 1 only when the plate documents MORE params than the signature holds
+    (a count contradiction -- the claimed parameter cannot exist). Same-count
+    name drift is tier 2: it may be a rename the plate hasn't caught up with,
+    which is staleness, not certainly a false claim.
+    """
+    params = bundle.get("params")
+    if params is None:
+        return []
+    doc_params = _doc_param_lines(bundle.get("plate") or "")
+    if not doc_params:
+        return []
+    sig_names = [str(p.get("name") or "") for p in params]
+    sig_ci = {n.lower() for n in sig_names if n}
+    missing = [nm for nm, _ in doc_params if nm.lower() not in sig_ci]
+    if not missing:
+        return []
+    if len(doc_params) > len(sig_names):
+        tier = TIER_MECHANICAL
+        why = (f"signature has {len(sig_names)} parameter(s) "
+               f"({', '.join(sig_names) or 'none'})")
+    else:
+        tier = TIER_REVIEW
+        why = ("signature names differ "
+               f"({', '.join(sig_names) or 'none'}) -- possible rename drift")
+    return [_mk(bundle, "param_mismatch", tier,
+                claim=f"plate documents {len(doc_params)} parameter(s) "
+                      f"including {', '.join(missing)}",
+                evidence=why,
+                documented=[nm for nm, _ in doc_params],
+                signature=sig_names, missing=missing)]
+
+
+def check_convention(bundle: dict) -> List[Finding]:
+    """F2: declared calling convention vs the disassembly's cleanup behavior.
+
+    This is the exact defect class that leaked 4*argc bytes of ESP per call in
+    port_live_prove (a bare RET with stack args is cdecl; declaring it stdcall
+    means nobody pops). `RET 0x8` is a fact the compiler emitted; the declared
+    convention gets no vote.
+    """
+    cc = _declared_cc(bundle)
+    if not cc:
+        return []
+    parsed = parse_disasm(bundle.get("disasm_text") or "")
+    if not parsed:
+        return []
+    pops = _ret_pops(parsed)
+    if len(pops) != 1:
+        return []                    # no RET, or paths disagree -- undetermined
+    obs = next(iter(pops))
+    out: List[Finding] = []
+    if cc == "cdecl" and obs:
+        out.append(_mk(bundle, "convention_contradiction", TIER_MECHANICAL,
+                       claim="declared __cdecl (caller cleans the stack)",
+                       evidence=f"function ends in RET 0x{obs:x} -- the callee "
+                                f"cleans {obs} byte(s); callee-cleans is not cdecl",
+                       declared=cc, ret_bytes=obs))
+    elif cc in ("stdcall", "fastcall", "thiscall") and obs == 0:
+        argc = len(bundle.get("params") or [])
+        stack_argc = {"stdcall": argc,
+                      "fastcall": max(0, argc - 2),
+                      "thiscall": max(0, argc - 1)}[cc]
+        if stack_argc > 0:
+            out.append(_mk(bundle, "convention_contradiction", TIER_MECHANICAL,
+                           claim=f"declared __{cc} with {stack_argc} stack "
+                                 f"argument(s) (callee must clean {4 * stack_argc} bytes)",
+                           evidence="function ends in a bare RET -- the caller "
+                                    "cleans, which is the cdecl shape; nobody pops "
+                                    "the declared stack args",
+                           declared=cc, declared_stack_args=stack_argc,
+                           ret_bytes=0))
+    return out
+
+
+def check_arity(bundle: dict) -> List[Finding]:
+    """F3: declared parameter count vs the callee's actual stack cleanup.
+
+    stdcall: RET n where n = 4*argc; fastcall: 4*max(0, argc-2) (ECX/EDX carry
+    the first two); thiscall: 4*max(0, argc-1) (this in ECX). A wrong count on
+    a callee-cleans convention skews ESP and access-violates the process
+    (eip=0x140, 2026-07-30) -- which is why this is tier 1.
+    """
+    cc = _declared_cc(bundle)
+    if cc not in ("stdcall", "fastcall", "thiscall"):
+        return []
+    params = bundle.get("params")
+    if params is None:
+        return []
+    if "..." in (bundle.get("prototype") or ""):
+        return []                    # varargs -- cleanup is caller business
+    parsed = parse_disasm(bundle.get("disasm_text") or "")
+    if not parsed:
+        return []
+    pops = _ret_pops(parsed)
+    if len(pops) != 1:
+        return []
+    obs = next(iter(pops))
+    argc = len(params)
+    exp = {"stdcall": 4 * argc,
+           "fastcall": 4 * max(0, argc - 2),
+           "thiscall": 4 * max(0, argc - 1)}[cc]
+    if obs == exp:
+        return []
+    if obs == 0 and exp > 0:
+        return []                    # bare-RET shape: convention_contradiction owns it
+    real_stack = obs // 4
+    return [_mk(bundle, "arity_contradiction", TIER_MECHANICAL,
+                claim=f"declared __{cc} with {argc} parameter(s) "
+                      f"(callee should pop {exp} bytes)",
+                evidence=f"RET 0x{obs:x} pops {obs} bytes -> "
+                         f"{real_stack} real stack slot(s)",
+                declared_argc=argc, expected_bytes=exp, observed_bytes=obs,
+                real_stack_slots=real_stack)]
+
+
+def check_return(bundle: dict) -> List[Finding]:
+    """F4 (tier 2): return-contract contradictions.
+
+    (a) void prototype but the plate documents a returned value (or inverse);
+    (b) non-void prototype but no path writes the return register before RET.
+    (b) is guarded hard: leaf only (a CALL sets EAX invisibly), integer-family
+    return only (float returns ride ST0), and RETs must exist.
+    """
+    rt = (bundle.get("return_type") or "").strip()
+    out: List[Finding] = []
+    plate_rt = _plate_return_type(bundle.get("plate") or "")
+    if plate_rt:
+        rt_void = rt.lower() == "void"
+        plate_void = plate_rt.lower() == "void"
+        if rt_void and not plate_void:
+            out.append(_mk(bundle, "return_contradiction", TIER_REVIEW,
+                           claim=f"plate Returns documents '{plate_rt}'",
+                           evidence="prototype return type is void",
+                           plate_return=plate_rt, prototype_return=rt))
+        elif not rt_void and rt and plate_void:
+            out.append(_mk(bundle, "return_contradiction", TIER_REVIEW,
+                           claim="plate Returns documents void",
+                           evidence=f"prototype return type is '{rt}'",
+                           plate_return=plate_rt, prototype_return=rt))
+    if rt and rt.lower() not in ("void", "undefined") and not _FLOAT_RET_RE.match(rt):
+        parsed = parse_disasm(bundle.get("disasm_text") or "")
+        if (parsed and len(parsed) >= 3
+                and not any(mn == "CALL" for _, mn, _ in parsed)
+                and any(mn.startswith("RET") for _, mn, _ in parsed)
+                and _observed_ret_width(parsed) is None):
+            out.append(_mk(bundle, "return_contradiction", TIER_REVIEW,
+                           claim=f"prototype declares a '{rt}' return value",
+                           evidence="no return path writes EAX/AX/AL before RET "
+                                    "(leaf function, no calls) -- the declared "
+                                    "return value is never produced",
+                           prototype_return=rt))
+    return out
+
+
+_READER_VERB_RE = re.compile(
+    r"^(?:[A-Z][A-Z0-9]*_)?(Get|Is|Has|Query|Peek|Lookup|Count|Find)(?=[A-Z0-9_])")
+_WRITER_VERB_RE = re.compile(
+    r"^(?:[A-Z][A-Z0-9]*_)?(Set|Write|Store)(?=[A-Z0-9_])")
+# Tokens that legitimize a write inside a reader (caching getters, lazy init).
+_READER_MITIGATION_RE = re.compile(
+    r"(Cache|Init|Ensure|Alloc|Create|Update|Load|Register|Or(Create|Init|Load))",
+    re.I)
+
+
+def check_name_verb(bundle: dict) -> List[Finding]:
+    """F5 (tier 2): the name's verb contradicts the function's observable
+    side effects.
+
+    Reader-verb names (Get/Is/Has/...) that WRITE absolute globals, and
+    writer-verb names (Set/Write/Store) that write no non-local memory at all.
+    Writes through pointer params are invisible to the global-write scan, so
+    out-param getters are exempt automatically; writer-verb checks skip any
+    function that delegates (a CALL may do the write).
+    """
+    name = bundle.get("name") or ""
+    if not name or _AUTO_NAME_RE.match(name):
+        return []
+    parsed = parse_disasm(bundle.get("disasm_text") or "")
+    if not parsed:
+        return []
+    out: List[Finding] = []
+    if _READER_VERB_RE.match(name) and not _READER_MITIGATION_RE.search(name):
+        writes = _abs_global_writes(parsed)
+        if writes:
+            addrs = sorted({f"0x{g:08x}" for _, g in writes})
+            out.append(_mk(bundle, "name_verb_contradiction", TIER_REVIEW,
+                           claim=f"name '{name}' promises a read-only accessor",
+                           evidence=f"writes {len(addrs)} global(s): "
+                                    f"{', '.join(addrs[:4])}"
+                                    + (" ..." if len(addrs) > 4 else ""),
+                           verb=_READER_VERB_RE.match(name).group(1),
+                           written_globals=addrs))
+    elif _WRITER_VERB_RE.match(name):
+        has_calls = any(mn == "CALL" for _, mn, _ in parsed)
+        if not has_calls and not _has_any_mem_write(parsed):
+            out.append(_mk(bundle, "name_verb_contradiction", TIER_REVIEW,
+                           claim=f"name '{name}' promises a mutation",
+                           evidence="no non-local memory write and no call "
+                                    "anywhere in the function",
+                           verb=_WRITER_VERB_RE.match(name).group(1)))
+    return out
+
+
+_PREFIXED_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+_[A-Za-z][A-Za-z0-9_]+)\b")
+
+
+def check_phantom_callee(bundle: dict) -> List[Finding]:
+    """F7 (tier 2, disabled by default): the plate's Algorithm/summary names
+    module-prefixed functions the function does not actually call.
+
+    Only module-prefixed names (`DATATBLS_GetRecord`) are matched -- bare
+    PascalCase words are far too ambiguous. Only Algorithm + summary are
+    scanned: 'Used by' / provenance sections legitimately mention callers.
+    """
+    callees = bundle.get("callees")
+    if callees is None:
+        return []
+    name = bundle.get("name") or ""
+    parsed = parse_function_plate(bundle.get("plate") or "")
+    text = "\n".join(filter(None, [parsed.get("summary", ""),
+                                   _sec(parsed["sections"], "Algorithm") or ""]))
+    if not text:
+        return []
+    callee_ci = {str(c).lower() for c in callees}
+    mentioned = {m.group(1) for m in _PREFIXED_NAME_RE.finditer(text)}
+    phantom = sorted(m for m in mentioned
+                     if m.lower() not in callee_ci and m != name)
+    if not phantom:
+        return []
+    return [_mk(bundle, "phantom_callee", TIER_REVIEW,
+                claim=f"plate describes calling {', '.join(phantom[:5])}"
+                      + (" ..." if len(phantom) > 5 else ""),
+                evidence=f"actual callees: {', '.join(sorted(callees)[:8]) or 'none'}",
+                phantom=phantom, callees=sorted(callees))]
+
+
+ALL_CHECKS = {
+    "param_mismatch": check_param_mismatch,
+    "convention_contradiction": check_convention,
+    "arity_contradiction": check_arity,
+    "return_contradiction": check_return,
+    "name_verb_contradiction": check_name_verb,
+    "phantom_callee": check_phantom_callee,
+}
+DEFAULT_DISABLED = frozenset({"phantom_callee"})
+
+
+def enabled_check_ids(enable: Iterable[str] = (), disable: Iterable[str] = ()) -> list:
+    ids = [c for c in ALL_CHECKS if c not in DEFAULT_DISABLED or c in set(enable or ())]
+    return [c for c in ids if c not in set(disable or ())]
+
+
+def run_checks(bundle: dict, enabled: Optional[Iterable[str]] = None) -> List[Finding]:
+    """All findings for one function. A broken check prints loudly and is
+    skipped -- it must never take the worker (or the sweep) down with it."""
+    ids = list(enabled) if enabled is not None else enabled_check_ids()
+    out: List[Finding] = []
+    for cid in ids:
+        fn = ALL_CHECKS.get(cid)
+        if fn is None:
+            continue
+        try:
+            out.extend(fn(bundle))
+        except Exception as e:  # noqa: BLE001 - loud, never silent, never fatal
+            print(f"[falsify] check {cid} failed on "
+                  f"{bundle.get('program')}@{bundle.get('address')}: {e}",
+                  file=sys.stderr)
+    return out
+
+
+def tier1(findings: Iterable[Finding]) -> List[Finding]:
+    return [f for f in findings if f.tier == TIER_MECHANICAL]
+
+
+def summarize(findings: Iterable[Finding]) -> dict:
+    fs = list(findings)
+    return {
+        "tier1": len([f for f in fs if f.tier == TIER_MECHANICAL]),
+        "tier2": len([f for f in fs if f.tier == TIER_REVIEW]),
+        "check_ids": sorted({f.check_id for f in fs}),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# doc_lint bridge (corpus-level check F6)
+# --------------------------------------------------------------------------- #
+
+def doclint_findings(recs, stats) -> List[Finding]:
+    """doc_lint defects -> Findings. doc_lint tier 1 (curated LIB_* tag --
+    stored ground truth) maps to mechanical; tier 2 (heuristic detector) to
+    review. Corpus-level only: the calibration needs the whole corpus, so the
+    per-function worker stage does not run this -- the sweep does."""
+    import doc_lint  # local, lazy: keeps falsify importable without it
+    defects = doc_lint.find_defects(recs, stats)
+    out = []
+    for d in defects:
+        out.append(Finding(
+            check_id="library_domain_prefix",
+            tier=TIER_MECHANICAL if d.tier == 1 else TIER_REVIEW,
+            program=d.program, address=d.address, function=d.name,
+            claim=f"name '{d.name}' claims the {d.prefix}_ game subsystem",
+            evidence=f"classified as library/runtime code [{d.library_reason}]",
+            detail={"prefix": d.prefix, "library_reason": d.library_reason,
+                    "doclint_tier": d.tier}))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Ghidra write-back (single writer -- the worker stage, the sweep and the
+# cross-version harvester all route through here, so status -> tag/property
+# mapping cannot drift between lanes; same rule as conf_ladder).
+# --------------------------------------------------------------------------- #
+
+FALSIFY_PROPERTY_MAP = "Falsify"
+DOC_REFUTED_TAG = "DOC_REFUTED"
+
+VALID_STATUSES = ("unchecked", "passed", "contradicted", "unfalsifiable")
+
+_SYNC_FAILURES = 0
+_SYNC_MAX_FAILURES = 10
+
+_FLAG_PREFIX = "[AUDIT falsify:"
+# One flag paragraph: "[AUDIT falsify:<check> <date>] ..." up to a blank line.
+_FLAG_BLOCK_RE = re.compile(
+    r"^\[AUDIT falsify:[^\n]*(?:\n(?!\s*\n)[^\n]*)*\n?\s*\n?", re.M)
+
+
+def status_for(findings: Iterable[Finding], checks_ran: bool = True) -> str:
+    """Verdict from one run's findings. 'Can't be checked' is NOT 'passed'
+    (the CONF_BLOCKED rule): a run where no check could reach a conclusion
+    reports unfalsifiable, not a clean bill."""
+    fs = list(findings)
+    if not checks_ran:
+        return "unchecked"
+    if any(f.tier == TIER_MECHANICAL for f in fs):
+        return "contradicted"
+    return "passed"
+
+
+def flag_marker(check_id: str) -> str:
+    return f"{_FLAG_PREFIX}{check_id}"
+
+
+def finding_flag_text(f: Finding, date: str) -> str:
+    """The idempotent plate note for one finding. Keyed by its marker;
+    fun_doc._ghidra_audit_flag-compatible (prefix-in-plate = already flagged).
+    Tier-1 wording states a fact; tier-2 wording asks for review."""
+    if f.tier == TIER_MECHANICAL:
+        return (f"{flag_marker(f.check_id)} {date}] CONTRADICTION (mechanical): "
+                f"{f.claim} -- but {f.evidence}. Fix the documentation to match "
+                f"the disassembly; the disassembly is the authority.")
+    return (f"{flag_marker(f.check_id)} {date}] REVIEW: {f.claim} -- but "
+            f"{f.evidence}. Judgement call; verify before acting.")
+
+
+def flag_finding(program: str, address: str, f: Finding,
+                 date: Optional[str] = None) -> str:
+    """Idempotently prepend ONE finding's plate note without touching the
+    verdict machinery — for lanes that record evidence but don't own the
+    falsify_status (e.g. the cross-version disagreement harvester, whose
+    tier-2 findings are report-only by design). Returns 'flagged' |
+    'already-flagged' | 'error:<msg>'."""
+    prog = program.rsplit("/", 1)[-1]
+    a = address if str(address).startswith("0x") else "0x" + str(address)
+    if date is None:
+        import datetime as _dt
+        date = _dt.date.today().isoformat()
+    try:
+        cur = _get("/get_comment", address=a, program=prog)
+        plate = (cur.get("plate") if isinstance(cur, dict) else "") or ""
+        if flag_marker(f.check_id) in plate:
+            return "already-flagged"
+        body = finding_flag_text(f, date) + ("\n\n" + plate if plate else "")
+        _post("/set_comment",
+              {"address": a, "comment": body, "type": "plate"}, program=prog)
+        return "flagged"
+    except Exception as e:  # noqa: BLE001
+        print(f"[falsify] flag WARN @ {a} ({prog}): {e}", file=sys.stderr)
+        return f"error:{e}"
+
+
+def strip_falsify_flags(plate: str) -> str:
+    """Remove every falsify flag paragraph from a plate (used when a function
+    re-passes after a fix). Leaves all other content untouched."""
+    if not plate or _FLAG_PREFIX not in plate:
+        return plate
+    return _FLAG_BLOCK_RE.sub("", plate).lstrip("\n")
+
+
+def compact_record(status: str, findings: Iterable[Finding], source: str,
+                   date: str) -> dict:
+    """The Falsify property-map value: compact on purpose (the full findings
+    blob lives in SQL; the map is for a human in CodeBrowser)."""
+    fs = list(findings)
+    rec = {"status": status, "source": source, "date": date,
+           "tier1": len([f for f in fs if f.tier == TIER_MECHANICAL]),
+           "tier2": len([f for f in fs if f.tier == TIER_REVIEW]),
+           "checks": sorted({f.check_id for f in fs})}
+    return rec
+
+
+def sync_to_ghidra(program: str, address: str, status: str,
+                   findings: Iterable[Finding], source: str,
+                   date: Optional[str] = None) -> bool:
+    """Project a falsify verdict onto Ghidra: DOC_REFUTED tag (contradicted
+    adds it, passed removes it), the `Falsify` property record, and idempotent
+    plate flags for tier-1 findings (cleared again on a later pass).
+
+    Best-effort, never raises, loud on failure (a silently-swallowed
+    write-back is how the wrong-binary bug went unnoticed). Circuit breaker
+    mirrors fun_doc's conf-rung sync: after _SYNC_MAX_FAILURES consecutive
+    failures the process stops paying HTTP timeouts.
+
+    `program` may be a project path or bare name; writes send it IN THE QUERY
+    STRING -- body-only `program` silently targets the active program.
+    """
+    global _SYNC_FAILURES
+    if status not in VALID_STATUSES:
+        print(f"[falsify] refusing to sync unknown status '{status}'",
+              file=sys.stderr)
+        return False
+    if status in ("unchecked", "unfalsifiable"):
+        return True                       # no Ghidra-side claim either way
+    if _SYNC_FAILURES >= _SYNC_MAX_FAILURES:
+        return False
+    fs = list(findings)
+    prog = program.rsplit("/", 1)[-1]
+    a = address if str(address).startswith("0x") else "0x" + str(address)
+    if date is None:
+        import datetime as _dt
+        date = _dt.date.today().isoformat()
+    try:
+        # 1) DOC_REFUTED tag -- mutually consistent with the verdict.
+        if status == "contradicted":
+            resp = _post("/add_function_tag",
+                         {"function": a, "tags": DOC_REFUTED_TAG},
+                         program=prog)
+        else:
+            resp = _post("/remove_function_tag",
+                         {"function": a, "tags": DOC_REFUTED_TAG},
+                         program=prog)
+        if isinstance(resp, dict) and resp.get("error"):
+            raise RuntimeError(f"tag write failed: {str(resp)[:160]}")
+
+        # 2) Falsify property record (lazy map creation on first use).
+        rec = json.dumps(compact_record(status, fs, source, date),
+                         separators=(",", ":"))
+        body = {"map": FALSIFY_PROPERTY_MAP, "address": a, "value": rec}
+        p = _post("/set_property", body, program=prog)
+        if isinstance(p, dict) and not p.get("success") and "No property map" in str(p):
+            _post("/create_property_map",
+                  {"name": FALSIFY_PROPERTY_MAP, "type": "string"}, program=prog)
+            _post("/set_property", body, program=prog)
+
+        # 3) Plate flags: add one per tier-1 finding; strip all when passed.
+        cur = _get("/get_comment", address=a, program=prog)
+        plate = cur.get("plate") if isinstance(cur, dict) else ""
+        plate = plate or ""
+        if status == "contradicted":
+            new_plate = plate
+            for f in tier1(fs):
+                if flag_marker(f.check_id) not in new_plate:
+                    new_plate = finding_flag_text(f, date) + \
+                        ("\n\n" + new_plate if new_plate else "")
+            if new_plate != plate:
+                _post("/set_comment",
+                      {"address": a, "comment": new_plate, "type": "plate"},
+                      program=prog)
+        elif _FLAG_PREFIX in plate:
+            _post("/set_comment",
+                  {"address": a, "comment": strip_falsify_flags(plate),
+                   "type": "plate"}, program=prog)
+
+        _SYNC_FAILURES = 0
+        return True
+    except Exception as e:  # noqa: BLE001 - must never take a worker down
+        _SYNC_FAILURES += 1
+        print(f"[falsify] write-back WARN: sync {status} @ {a} ({prog}): {e}",
+              file=sys.stderr)
+        return False
+
+
+# --------------------------------------------------------------------------- #
+# I/O layer
+# --------------------------------------------------------------------------- #
+
+def _post(path: str, data: dict, **params):
+    """POST with `program` (and anything else) in the QUERY string --
+    @Param(value="program") defaults to ParamSource.QUERY; a body-only
+    program is ignored and the write leaks to the active program."""
+    url = f"{GHIDRA}{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(
+        url, data=json.dumps(data).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        raw = r.read().decode("utf-8", "replace")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _get(path: str, **params):
+    url = f"{GHIDRA}{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    last = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=300) as r:
+                raw = r.read().decode("utf-8", "replace")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return raw
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < 2:
+                time.sleep(0.3 * (attempt + 1))
+    raise last
+
+
+def _items(resp, key: str) -> list:
+    """Items out of a 6.0.0 list envelope. Mirrors conformance_dashboard."""
+    if isinstance(resp, dict):
+        v = resp.get(key)
+        if isinstance(v, list):
+            return v
+    if isinstance(resp, str):
+        return [ln for ln in resp.splitlines() if ln.strip()]
+    return []
+
+
+def render_disasm(resp) -> str:
+    """'addr: instruction' lines from /disassemble_function (the format
+    parse_disasm expects). Mirrors fun_doc.disasm_text without importing it."""
+    out = []
+    for ins in _items(resp, "instructions"):
+        if isinstance(ins, dict):
+            out.append(f"{ins.get('address', '')}: {ins.get('instruction', '')}")
+    return "\n".join(out)
+
+
+def collect_bundle(program: str, address: str, with_callees: bool = False) -> dict:
+    """One function's claims + ground truth, from a live Ghidra instance.
+
+    /get_function_documentation carries name/prototype pieces/plate/params in a
+    single call; /disassemble_function supplies the ground truth. Callees are
+    fetched only when phantom_callee is enabled (extra round-trip)."""
+    a = address if str(address).startswith("0x") else "0x" + str(address)
+    doc = _get("/get_function_documentation", address=a, program=program)
+    if not isinstance(doc, dict) or doc.get("error"):
+        raise RuntimeError(f"get_function_documentation failed for {a}: {doc}")
+    dis = _get("/disassemble_function", address=a, program=program)
+    bundle = {
+        "program": program,
+        "address": a,
+        "name": doc.get("function_name") or "",
+        "calling_convention": doc.get("calling_convention") or "",
+        "return_type": doc.get("return_type") or "",
+        "params": doc.get("parameters") if isinstance(doc.get("parameters"), list) else [],
+        "plate": doc.get("plate_comment") or "",
+        "disasm_text": render_disasm(dis),
+        "prototype": "",
+    }
+    if with_callees:
+        resp = _get("/get_function_callees", name=bundle["name"], program=program)
+        bundle["callees"] = [
+            (c.get("name") if isinstance(c, dict) else str(c))
+            for c in _items(resp, "callees")
+        ]
+    return bundle
+
+
+def list_programs(folder: str) -> List[str]:
+    resp = _get("/list_project_files", folder=folder)
+    files = resp.get("files", []) if isinstance(resp, dict) else []
+    return [f["path"] for f in files
+            if f.get("content_type") == "Program" and not f["name"].endswith(".0")]
+
+
+def scan_program_verdicts(program: str, enabled: list, limit: int = 0,
+                          pause_every: int = 0, pause_secs: float = 0.0) -> list:
+    """Per-function verdicts for every custom-named function in one program:
+    [(address, name, status, [Finding, ...]), ...]. Auto-named functions carry
+    no claims to falsify and are skipped. A function whose bundle fetch fails
+    reports status 'error' (no information — never a pass).
+
+    pause_every/pause_secs insert a sleep every N functions so a long sweep
+    doesn't monopolize Ghidra's HTTP threads (inventory_scorer's chunk rule).
+    """
+    fns = _items(_get("/list_functions", program=program, limit=200000), "functions")
+    out = []
+    with_callees = "phantom_callee" in enabled
+    scanned = 0
+    for f in fns:
+        name = (f.get("name") or "") if isinstance(f, dict) else ""
+        addr = str(f.get("address") or "") if isinstance(f, dict) else ""
+        if not name or not addr or _AUTO_NAME_RE.match(name):
+            continue
+        try:
+            bundle = collect_bundle(program, addr, with_callees=with_callees)
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! {program}@{addr} ({name}): {e}", file=sys.stderr)
+            out.append((addr, name, "error", []))
+            continue
+        findings = run_checks(bundle, enabled)
+        out.append((addr, name, status_for(findings), findings))
+        scanned += 1
+        if limit and scanned >= limit:
+            break
+        if pause_every and scanned % pause_every == 0 and pause_secs:
+            time.sleep(pause_secs)
+    return out
+
+
+def scan_program(program: str, enabled: list, limit: int = 0) -> List[Finding]:
+    """Findings only (CLI report shape); see scan_program_verdicts."""
+    findings: List[Finding] = []
+    for _, _, _, fs in scan_program_verdicts(program, enabled, limit=limit):
+        findings.extend(fs)
+    return findings
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+def _print_report(findings: List[Finding]) -> None:
+    by_check: Dict[str, List[Finding]] = defaultdict(list)
+    for f in findings:
+        by_check[f.check_id].append(f)
+    t1 = len(tier1(findings))
+    print(f"\n=== FINDINGS: {len(findings)} total "
+          f"({t1} tier-1 mechanical, {len(findings) - t1} tier-2 review) ===")
+    for cid, group in sorted(by_check.items(), key=lambda kv: -len(kv[1])):
+        print(f"\n  {cid}  x{len(group)}")
+        for f in sorted(group, key=lambda x: (x.tier, x.program, x.function))[:15]:
+            prog = f.program.rsplit("/", 1)[-1]
+            print(f"    [T{f.tier}] {prog:20} {f.address:>10}  {f.function}")
+            print(f"          claim:    {f.claim}")
+            print(f"          evidence: {f.evidence}")
+        if len(group) > 15:
+            print(f"    ... and {len(group) - 15} more")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument("--folder", help="sweep every Program in this project folder")
+    g.add_argument("--program", help="single program path")
+    ap.add_argument("--json", help="write the full report here")
+    ap.add_argument("--enable", action="append", default=[],
+                    metavar="CHECK", help="enable a default-off check")
+    ap.add_argument("--disable", action="append", default=[],
+                    metavar="CHECK", help="disable a check")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="max functions per program (0 = all)")
+    ap.add_argument("--no-doclint", action="store_true",
+                    help="skip the corpus-level library_domain_prefix check")
+    args = ap.parse_args()
+
+    bad = [c for c in args.enable + args.disable if c not in ALL_CHECKS
+           and c != "library_domain_prefix"]
+    if bad:
+        ap.error(f"unknown check(s): {', '.join(bad)} "
+                 f"(known: {', '.join(ALL_CHECKS)}, library_domain_prefix)")
+    enabled = enabled_check_ids(args.enable, args.disable)
+
+    programs = [args.program] if args.program else list_programs(args.folder)
+    print(f"# scanning {len(programs)} program(s), checks: {', '.join(enabled)}",
+          file=sys.stderr)
+
+    findings: List[Finding] = []
+    for p in programs:
+        try:
+            r = scan_program(p, enabled, limit=args.limit)
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! {p}: {e}", file=sys.stderr)
+            continue
+        findings.extend(r)
+        print(f"  {p:44} {len(r):5} finding(s)", file=sys.stderr)
+
+    # Corpus-level doc_lint check (needs cross-program calibration).
+    if not args.no_doclint and "library_domain_prefix" not in args.disable:
+        try:
+            import doc_lint
+            recs = []
+            for p in programs:
+                recs.extend(doc_lint.collect(p))
+            findings.extend(doclint_findings(recs, doc_lint.calibrate(recs)))
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! library_domain_prefix sweep failed: {e}", file=sys.stderr)
+
+    _print_report(findings)
+
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump({
+                "scanned_programs": programs,
+                "checks": enabled,
+                "summary": summarize(findings),
+                "findings": [f.to_dict() for f in findings],
+            }, fh, indent=2)
+        print(f"\nwrote {args.json}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
