@@ -656,8 +656,8 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 - `delete_file` - Delete a file from the project
 - `delete_project` - Delete a Ghidra project
 - `list_projects` - List available Ghidra projects
-- `move_file` - Move a file to another project folder
-- `move_folder` - Move a folder to another location
+- `move_file` - Move a program file to a different folder in the project, preserving analysis and documentation
+- `move_folder` - Move a project folder and everything under it into another folder
 - `project_info` - Get detailed project info including running tools and open programs
 
 ### Headless Project & Program Lifecycle

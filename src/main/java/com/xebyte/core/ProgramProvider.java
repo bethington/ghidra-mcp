@@ -77,6 +77,22 @@ public interface ProgramProvider {
     }
 
     /**
+     * Get the project this provider is serving programs from.
+     *
+     * <p>GUI providers reach the project through their PluginTool, so the
+     * default is null and callers fall back to the tool. Headless providers
+     * own a Project directly and should override this — without it, project
+     * -level tools (move/create/delete) would be GUI-only, which is exactly
+     * the regression that converting {@code /move_file} to an {@code @McpTool}
+     * would otherwise have introduced.
+     *
+     * @return The active project, or null if this provider has no direct handle
+     */
+    default ghidra.framework.model.Project getProject() {
+        return null;
+    }
+
+    /**
      * Get a program by name, falling back to current program if name is null or empty.
      *
      * @param name The program name (may be null)

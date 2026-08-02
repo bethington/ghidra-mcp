@@ -1500,6 +1500,191 @@ public class ProgramScriptService {
         }
     }
 
+    /**
+     * Resolve the active project across GUI, FrontEnd and headless modes.
+     *
+     * <p>GUI/FrontEnd reach it through the PluginTool; headless has no tool at
+     * all and answers via {@link ProgramProvider#getProject()}. Project-level
+     * tools must go through here rather than {@code getToolFromProvider()},
+     * which returns null headless and would make them GUI-only.
+     */
+    private ghidra.framework.model.Project resolveProject() {
+        PluginTool tool = getToolFromProvider();
+        if (tool != null && tool.getProject() != null) {
+            return tool.getProject();
+        }
+        return programProvider.getProject();
+    }
+
+    /** True if any open program is backed by the given project file path. */
+    private boolean isProgramOpenForPath(String filePath) {
+        for (Program prog : programProvider.getAllOpenPrograms()) {
+            ghidra.framework.model.DomainFile df = prog.getDomainFile();
+            if (df != null && df.getPathname().equalsIgnoreCase(filePath)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @McpTool(path = "/move_file", method = "POST",
+             description = "Move a program file to a different folder in the project, preserving all "
+                         + "analysis and documentation. Refuses when the program has unsaved changes "
+                         + "-- call save_program first -- rather than discarding them. A program that "
+                         + "is open but clean is closed, moved, then reopened at its new path.",
+             category = "project")
+    public Response moveFile(
+            @Param(value = "filePath", source = ParamSource.BODY,
+                   description = "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll") String filePath,
+            @Param(value = "destFolder", source = ParamSource.BODY,
+                   description = "Destination project folder path, e.g. /Mods/PD2-S12") String destFolder) {
+        ghidra.framework.model.Project project = resolveProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+        if (filePath == null || filePath.trim().isEmpty()) {
+            return Response.err("filePath parameter is required");
+        }
+        if (destFolder == null || destFolder.trim().isEmpty()) {
+            return Response.err("destFolder parameter is required");
+        }
+        // Containment: a move is a delete from one scope plus a create in
+        // another, so BOTH ends must sit inside GHIDRA_MCP_PROJECT_FOLDER.
+        // Checking only the source would let a caller relocate a scoped file
+        // straight out of scope. No-op when no scope is set (default).
+        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)
+                || !SecurityConfig.getInstance().isPathInProjectScope(destFolder)) {
+            return Response.err("Access denied: path is outside the configured project scope.");
+        }
+
+        try {
+            ghidra.framework.model.ProjectData projectData = project.getProjectData();
+            ghidra.framework.model.DomainFile domainFile = projectData.getFile(filePath);
+            if (domainFile == null) {
+                return Response.err("File not found: " + filePath);
+            }
+            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destFolder);
+            if (dest == null) {
+                return Response.err("Destination folder not found: " + destFolder);
+            }
+            ghidra.framework.model.DomainFolder parent = domainFile.getParent();
+            if (parent != null && parent.getPathname().equals(dest.getPathname())) {
+                return Response.ok(JsonHelper.mapOf(
+                        "success", true, "moved", false,
+                        "reason", "already in destination folder",
+                        "filePath", domainFile.getPathname()));
+            }
+            if (dest.getFile(domainFile.getName()) != null) {
+                return Response.err("Destination already contains a file named " + domainFile.getName()
+                        + " -- rename or remove it first");
+            }
+            // Never move on top of unsaved work. moveTo() would either fail or
+            // strand edits the caller still believes are pending, and saving on
+            // their behalf is equally wrong: an unreviewed autosave is not a
+            // side effect "move" should have. Refuse, and say what to do.
+            if (domainFile.isChanged()) {
+                return Response.err("Program has unsaved changes: call save_program "
+                        + "(or close_program) before moving " + filePath);
+            }
+
+            boolean wasOpen = isProgramOpenForPath(filePath);
+            if (wasOpen) {
+                // Ghidra refuses to move a file that is open in a tool. It is
+                // clean (checked above), so save=false discards nothing.
+                closeProgram(filePath, false);
+                // The close can swap the DomainFile instance out from under us.
+                domainFile = projectData.getFile(filePath);
+                if (domainFile == null) {
+                    return Response.err("File vanished while closing it: " + filePath);
+                }
+            }
+            // moveTo returns the RELOCATED DomainFile. The receiver keeps
+            // reporting its old pathname, so reading getPathname() off it
+            // reports a destination the file is not at -- measured live: a
+            // successful move to /Mods/PD2-S12 still answered
+            // "to": "/Vanilla/1.00/D2Server.dll". Anything chaining on that
+            // path then operates on a file that no longer exists there.
+            ghidra.framework.model.DomainFile movedFile = domainFile.moveTo(dest);
+            String newPath = movedFile != null ? movedFile.getPathname()
+                    : dest.getPathname() + "/" + domainFile.getName();
+            boolean reopened = false;
+            if (wasOpen) {
+                reopened = openProgramFromProject(newPath, false) instanceof Response.Ok;
+            }
+            return Response.ok(JsonHelper.mapOf(
+                    "success", true, "moved", true,
+                    "from", filePath, "to", newPath,
+                    "was_open", wasOpen, "reopened", reopened));
+        } catch (Exception e) {
+            return Response.err("Failed to move file: " + e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/move_folder", method = "POST",
+             description = "Move a project folder (and everything under it) into another folder. "
+                         + "Refuses to move a folder into itself or into its own descendant, which "
+                         + "would orphan the subtree.",
+             category = "project")
+    public Response moveFolder(
+            @Param(value = "sourcePath", source = ParamSource.BODY,
+                   description = "Project folder path to move, e.g. /Vanilla/1.00") String sourcePath,
+            @Param(value = "destPath", source = ParamSource.BODY,
+                   description = "Destination parent folder path, e.g. /Mods") String destPath) {
+        ghidra.framework.model.Project project = resolveProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+        if (sourcePath == null || sourcePath.trim().isEmpty()) {
+            return Response.err("sourcePath parameter is required");
+        }
+        if (destPath == null || destPath.trim().isEmpty()) {
+            return Response.err("destPath parameter is required");
+        }
+        if (!SecurityConfig.getInstance().isPathInProjectScope(sourcePath)
+                || !SecurityConfig.getInstance().isPathInProjectScope(destPath)) {
+            return Response.err("Access denied: path is outside the configured project scope.");
+        }
+
+        try {
+            ghidra.framework.model.ProjectData projectData = project.getProjectData();
+            ghidra.framework.model.DomainFolder source = projectData.getFolder(sourcePath);
+            if (source == null) {
+                return Response.err("Source folder not found: " + sourcePath);
+            }
+            if (source.getParent() == null) {
+                return Response.err("Cannot move the project root folder");
+            }
+            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destPath);
+            if (dest == null) {
+                return Response.err("Destination folder not found: " + destPath);
+            }
+            // A folder cannot become its own ancestor. Ghidra's own error for
+            // this is opaque, and the subtree is unreachable afterwards, so
+            // catch it here where we can say what actually went wrong.
+            String sourcePrefix = source.getPathname().endsWith("/")
+                    ? source.getPathname() : source.getPathname() + "/";
+            if (dest.getPathname().equals(source.getPathname())
+                    || dest.getPathname().startsWith(sourcePrefix)) {
+                return Response.err("Cannot move " + source.getPathname()
+                        + " into itself or its own descendant " + dest.getPathname());
+            }
+            if (dest.getFolder(source.getName()) != null) {
+                return Response.err("Destination already contains a folder named " + source.getName());
+            }
+            // Same trap as move_file: moveTo returns the RELOCATED folder and
+            // the receiver keeps reporting its old pathname. Report the handle
+            // Ghidra hands back, never the one we called through.
+            ghidra.framework.model.DomainFolder movedFolder = source.moveTo(dest);
+            String newPath = movedFolder != null ? movedFolder.getPathname()
+                    : dest.getPathname() + "/" + source.getName();
+            return Response.ok(JsonHelper.mapOf(
+                    "success", true, "moved", true,
+                    "from", sourcePath, "to", newPath));
+        } catch (Exception e) {
+            return Response.err("Failed to move folder: " + e.getMessage());
+        }
+    }
+
     private void closeOpenProgramForFile(PluginTool tool, String filePath) {
         if (programProvider instanceof MultiToolProgramProvider mtp) {
             mtp.closeProgramByPath(filePath);

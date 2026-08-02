@@ -254,8 +254,12 @@ class TestJavaArchitecture(unittest.TestCase):
             "/delete_project",
             "/health",
             "/list_projects",
-            "/move_file",
-            "/move_folder",
+            # /move_file and /move_folder used to be listed here. They were
+            # hand-routed headless-only while tests/endpoints.json advertised
+            # them globally, so a FrontEnd-mode /mcp/schema never served them
+            # and every bridge call 404'd. They are now @McpTool methods on
+            # ProgramScriptService, i.e. `annotated`, and must NOT come back
+            # to this set -- see ProjectMoveEndpointsOfflineTest.
         }
 
         self.assertEqual(gui - headless - annotated, gui_only_expected)

@@ -1955,7 +1955,7 @@
         "filePath",
         "destFolder"
       ],
-      "description": "Move a file to another project folder"
+      "description": "Move a program file to a different folder in the project, preserving analysis and documentation. Refuses on unsaved changes; closes, moves and reopens a program that is open but clean."
     },
     {
       "path": "/move_folder",
@@ -1965,7 +1965,7 @@
         "sourcePath",
         "destPath"
       ],
-      "description": "Move a folder to another location"
+      "description": "Move a project folder and everything under it into another folder. Refuses to move a folder into itself or its own descendant."
     },
     {
       "path": "/open_program",

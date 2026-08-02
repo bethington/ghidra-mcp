@@ -822,8 +822,15 @@ public class HeadlessProgramProvider implements ProgramProvider {
     /**
      * Get the current project.
      *
+     * <p>Also satisfies {@link ProgramProvider#getProject()}, which is how the
+     * shared {@code @McpTool} project endpoints in {@code com.xebyte.core}
+     * reach ProjectData without a PluginTool. Keep it public and keep the
+     * signature — dropping it would silently make {@code /move_file},
+     * {@code /move_folder} and friends GUI-only again.
+     *
      * @return The current project, or null if none set
      */
+    @Override
     public Project getProject() {
         return project;
     }
