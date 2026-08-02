@@ -323,7 +323,19 @@ mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
 - The provider client wrappers (minimax / gemini / claude / codex invocation paths)
 - `priority_queue.json`'s `config.provider_models` — the benchmark tests whatever model table is live
 
-**Status.** The fast tier's 5 archetype functions (CRC-16, state machine, strlen, struct mutator, recursion) are authored and ship as `Benchmark.dll`; the `--mock` path (reads pre-captured fixtures under `fixtures/`) is the only driver that works today. The `--real` path — which would invoke fun-doc against `Benchmark.dll` in Ghidra for real — is stubbed pending (1) install of VC6 SP6 to match D2 1.13d's toolchain (modern MSVC is the current placeholder), (2) a dedicated Ghidra project hosting `Benchmark.dll`, (3) a reset script that restores a pristine `.gzf` between suites. See `fun-doc/benchmark/README.md` for the full design and rollout plan.
+**Status.** The fast tier's 5 archetype functions (CRC-16, state machine, strlen, struct mutator, recursion) are authored and ship as `Benchmark.dll`. The `--mock` path (pre-captured fixtures under `fixtures/`) is what `--compare` runs against.
+
+**All three blockers on the `--real` path are cleared as of 2026-08-02** — this section previously listed them as pending, so do not plan around that:
+
+1. **VC6 SP6 is installed** (`C:\VC6`, and vendored at `fun-doc/benchmark/tools/vc6/`). `python build.py --toolchain vc6sp6` builds with VC6 `cl.exe` + VS2003 `link.exe` and produces a PE that matches D2Common.dll exactly on every characteristic the mixed toolchain was chosen for: **linker 7.10, image base 0x6FD50000, OS 4.00, subsystem 4.00, Rich header present** — verified field by field against the shipped D2Common.dll.
+2. **The Ghidra project exists** — `/testing/benchmark/Benchmark.dll` + `BenchmarkDebug.exe`.
+3. **The reset exists** — `tools/setup/ghidra.py::reset_benchmark_fixture`, run automatically by `deploy`.
+
+Note `extract_truth.py` derives ground truth from the C sources plus `truth/*.yaml`, NOT from the compiled binary, so swapping toolchains does not move the answer key (verified: 9 functions, 0 entries changed). Rebuilding changes the binary under test, not what it is scored against.
+
+One operational gotcha when refreshing the fixture by hand: `reset_benchmark_fixture` deletes and re-imports, and the delete fails with `Benchmark.dll is in use` if any consumer still holds the domain file — including one that `/list_open_programs` does NOT report and `/close_program` returns `closed_count: 0` for. Run it through `deploy` (which restarts Ghidra first) rather than calling it against a long-running instance.
+
+See `fun-doc/benchmark/README.md` for the full design and rollout plan.
 
 ## Auditing
 
