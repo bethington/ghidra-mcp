@@ -354,6 +354,63 @@ public final class NamingConventions {
         return null;
     }
 
+    /**
+     * Bookmark category written by Ghidra's Function ID analyzer on a match.
+     * Note it is "Function ID Analyzer", not "Function ID" — filtering on the
+     * shorter string silently matches nothing.
+     */
+    public static final String FID_BOOKMARK_CATEGORY = "Function ID Analyzer";
+
+    /**
+     * Pull the library function name out of a Function ID bookmark comment.
+     *
+     * Comments look like {@code "Library Function - Single Match,  _qsort"} or
+     * {@code "Library Function - Multiple Matches, Different  _printf"}; the
+     * name is always the final whitespace-delimited token.
+     *
+     * @return the matched library name, or null if the comment carries none.
+     */
+    public static String extractFidName(String bookmarkComment) {
+        if (bookmarkComment == null) return null;
+        String trimmed = bookmarkComment.trim();
+        if (trimmed.isEmpty()) return null;
+        String[] parts = trimmed.split("\\s+");
+        String last = parts[parts.length - 1];
+        return last.isEmpty() ? null : last;
+    }
+
+    /** Compare names ignoring the leading-underscore decoration FID carries. */
+    private static String canonicalName(String name) {
+        if (name == null) return "";
+        int i = 0;
+        while (i < name.length() && name.charAt(i) == '_') i++;
+        return name.substring(i).toLowerCase();
+    }
+
+    /**
+     * Whether {@code newName} would bury a Function ID identification under a
+     * module prefix.
+     *
+     * Function ID recognises statically-linked library code and records what it
+     * actually is. Layering a subsystem prefix on top of that asserts something
+     * the evidence contradicts, and because cross-version hash propagation
+     * copies names to every binary sharing a function hash — and CRT is
+     * byte-identical everywhere — one such name spreads corpus-wide. Measured
+     * before this gate existed: 143 FID-identified functions had been renamed
+     * this way, including {@code ___acrt_locale_free_numeric} to
+     * {@code DATATBLS_FreeUnitResourceArray}, a name asserting D2 units and
+     * resource arrays that appear nowhere in that function.
+     *
+     * Demangling a mangled FID name is an improvement, not an override, so a
+     * FID name starting with '?' never triggers this.
+     */
+    public static boolean overridesFidName(String newName, String fidName) {
+        if (newName == null || fidName == null || fidName.isEmpty()) return false;
+        if (fidName.startsWith("?")) return false;           // mangled -> demangled
+        if (extractModulePrefix(newName) == null) return false;
+        return !canonicalName(newName).equals(canonicalName(fidName));
+    }
+
     /** Extract the UPPERCASE_ module prefix, or null if the name has none. */
     public static String extractModulePrefix(String name) {
         if (name == null || !MODULE_PREFIX.matcher(name).matches()) return null;

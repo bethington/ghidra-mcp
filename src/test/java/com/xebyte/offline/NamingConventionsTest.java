@@ -713,6 +713,48 @@ public class NamingConventionsTest extends TestCase {
         assertNull(NamingConventions.extractModulePrefix("2D_DrawSprite"));
     }
 
+    // ---------- Function ID gate ----------
+
+    public void testExtractFidNameFromBookmarkComment() {
+        assertEquals("_qsort", NamingConventions.extractFidName(
+                "Library Function - Single Match,  _qsort"));
+        // Multiple-match comments carry a trailing qualifier before the name.
+        assertEquals("_printf", NamingConventions.extractFidName(
+                "Library Function - Multiple Matches, Different  _printf"));
+        assertEquals("___vcrt_freefls@4", NamingConventions.extractFidName(
+                "Library Function - Single Match,  ___vcrt_freefls@4"));
+        assertNull(NamingConventions.extractFidName(null));
+        assertNull(NamingConventions.extractFidName("   "));
+    }
+
+    /**
+     * The measured contamination shape: FID says the function is
+     * {@code ___acrt_locale_free_numeric}; the rename asserts D2 units and
+     * resource arrays that appear nowhere in it.
+     */
+    public void testOverridesFidNameRejectsSubsystemPrefix() {
+        assertTrue(NamingConventions.overridesFidName(
+                "DATATBLS_FreeUnitResourceArray", "___acrt_locale_free_numeric"));
+        assertTrue(NamingConventions.overridesFidName(
+                "DATATBLS_PrintFormattedString", "_vsprintf"));
+        assertTrue(NamingConventions.overridesFidName("SBH_AllocBlock", "___sbh_alloc_block"));
+    }
+
+    public void testOverridesFidNameAllowsLegitimateRenames() {
+        // Keeping the canonical name, with or without FID's underscores.
+        assertFalse(NamingConventions.overridesFidName("_qsort", "_qsort"));
+        assertFalse(NamingConventions.overridesFidName("qsort", "_qsort"));
+        // No module prefix at all -- a plain descriptive rename is not this gate's business.
+        assertFalse(NamingConventions.overridesFidName("FreeLocaleNumeric",
+                "___acrt_locale_free_numeric"));
+        // Demangling a mangled FID name is an improvement, not an override.
+        assertFalse(NamingConventions.overridesFidName("CRT_TypeInfoDtor",
+                "??1type_info@@UAE@XZ"));
+        // Nothing to override when FID never matched.
+        assertFalse(NamingConventions.overridesFidName("DATATBLS_CompileTable", null));
+        assertFalse(NamingConventions.overridesFidName("DATATBLS_CompileTable", ""));
+    }
+
     public void testDigitPrefixNameDoesNotWarnAboutUnderscores() {
         // `Install` is a tier-1 verb and `BootstrapHook` supplies the specifier,
         // so the only thing that could reject this name is the prefix bug.
