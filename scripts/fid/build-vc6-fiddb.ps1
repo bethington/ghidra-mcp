@@ -59,9 +59,13 @@ param(
     [string]$GhidraDir = 'F:\ghidra_12.1.2_PUBLIC',
     [string]$Vc6Lib    = 'C:\VC6\VC98\LIB',
     [string[]]$Libs    = @('LIBCMT', 'LIBC'),
+    # Staging project for the imported .obj programs -- ~531 MB, scratch only,
+    # deliberately NOT in the repo. Only the resulting .fidb is committed.
     [string]$ProjectDir  = 'C:\tmp\fidproj',
     [string]$ProjectName = 'vc6fid',
-    [string]$OutFidb   = 'C:\tmp\vc6_vc98.fidb',
+    # Lands next to this script so the database is a committed project asset
+    # rather than something that evaporates with the temp folder.
+    [string]$OutFidb   = "$PSScriptRoot\vc6_vc98.fidb",
     [string]$LanguageId = 'x86:LE:32:default',
     [string]$CompilerSpec = 'windows',
     [switch]$SkipImport

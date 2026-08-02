@@ -31,10 +31,19 @@ SAFETY
   the query string, and a body-only `program` silently retargets the write at
   whatever program happens to be active.
 
+THE 2026-08-02 RUN IS COMMITTED
+------------------------------
+`fid_restore_2026-08-02.json`, beside this script, is the journal of the run
+that restored all 143 contaminated names across 21 binaries. It is kept in the
+repo rather than in a temp folder because it is the only record of what those
+functions used to be called, and the only way to reverse the change:
+
+    python restore_fid_names.py --undo fid_restore_2026-08-02.json --apply
+
 USAGE
     python restore_fid_names.py --report C:\\tmp\\doc_lint_fid.json
     python restore_fid_names.py --report ... --apply
-    python restore_fid_names.py --undo C:\\tmp\\fid_restore_journal.json --apply
+    python restore_fid_names.py --undo fid_restore_2026-08-02.json --apply
 """
 from __future__ import annotations
 

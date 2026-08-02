@@ -351,7 +351,7 @@ When explicitly configured, documentation is stored in `re_kb.functions` on a us
 
 Q1-Q6 design decisions are locked in; design rationale lives in commit history. Migration `003_function_doc_archive.sql` applies to the selected BSim database. Archive exchange is disabled by default; set `RE_KB_ARCHIVE_URL` for fun-doc and `GHIDRA_MCP_ARCHIVE_URL` for the Java service to opt in.
 
-**BSim signature backfill** is a one-shot Ghidra script — `C:\tmp\ghidra_recovery_scripts\Backfill_BSimSignatures.java` — run per binary from CodeBrowser to populate the `bsim_signature` column and unlock tier-2 LSH similarity matching. Tier 1 (opcode hash) works without it.
+**BSim signature backfill** is a one-shot Ghidra script — `ghidra_scripts/recovery/Backfill_BSimSignatures.java` — run per binary from CodeBrowser to populate the `bsim_signature` column and unlock tier-2 LSH similarity matching. Tier 1 (opcode hash) works without it.
 
 ## Documentation
 
