@@ -548,6 +548,8 @@
                 </select></label>
               <label class="settings-label" title="Skip audit if the worker's score gain >= this value">
                 <span>Min&Delta;</span><input type="number" class="worker-input" id="auditMinDeltaInput" min="0" max="100" onchange="saveQueueConfig()" style="width:48px"></label>
+              <label class="settings-label" title="Mechanical doc-vs-disassembly contradiction checks after every doc pass (falsify.py). Tier-1 findings force the audit and mark the function DOC_REFUTED">
+                <span>Falsify</span><input type="checkbox" id="falsifyEnabledInput" onchange="saveQueueConfig()"></label>
               <label class="settings-label" title="Second-provider review for the GLOBALS lane, separate from the per-function audit above (the two lanes cost very different amounts per item). A reviewed global is one an INDEPENDENT provider re-checked against its real uses and left with no blocking issues — this is what fills the Globals bar's reviewed count. Must differ from the documenting provider; a matching choice disables review rather than faking it. Off = no review, and the count honestly stays 0.">
                 <span>Glob review&rarr;</span>
                 <select class="header-select" id="globAuditProviderInput" onchange="saveQueueConfig()">
@@ -662,6 +664,23 @@
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
           <table class="inv gtbl"><thead><tr><th>Global</th><th>Type</th><th title="Completeness band from the 6-axis scorer. Blank = never scored.">BAND</th><th title="Confirmed by an independent review pass">&#10003;</th></tr></thead>
           <tbody id="globBody"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VERIFICATION: the truth axis, orthogonal to the completeness (hygiene)
+         bars above. Falsify = mechanical doc-vs-disassembly contradiction
+         checks (falsify.py); Audit = the LLM second pass. A contradicted
+         function carries a mechanically false claim regardless of its score. -->
+    <div class="panel" style="margin-top:.8rem">
+      <div class="panel-header inv-head"><h2 style="margin:0">Verification &mdash; Falsifiability</h2>
+        <span class="hint" id="falsifyHint" title="Completeness measures presence &amp; form (hygiene); this panel measures whether the claims survive mechanical checks against the disassembly.">truth axis</span>
+      </div>
+      <div class="panel-content">
+        <div id="falsifyStats" style="font-size:.66rem;color:var(--text-secondary);margin-bottom:.5rem">loading&hellip;</div>
+        <div style="max-height:260px;overflow-y:auto">
+          <table class="inv"><thead><tr><th>Function</th><th>Binary</th><th title="Completeness score — note a contradicted function can score 100">Score</th><th>Findings</th></tr></thead>
+          <tbody id="falsifyBody"></tbody></table>
         </div>
       </div>
     </div>
@@ -1168,6 +1187,7 @@
     if(g("auditProviderInput")) g("auditProviderInput").value = cfg.audit_provider || "off";
     if(g("globAuditProviderInput")) g("globAuditProviderInput").value = cfg.globals_audit_provider || "off";
     if(g("auditMinDeltaInput")) g("auditMinDeltaInput").value = cfg.audit_min_delta!=null ? cfg.audit_min_delta : 5;
+    if(g("falsifyEnabledInput")) g("falsifyEnabledInput").checked = cfg.falsify_enabled!==false;
     // provider models grid: keep the 5 header cells, rebuild the provider rows
     const grid = g("modelsGrid");
     while(grid.children.length > 5) grid.removeChild(grid.lastChild);
@@ -1212,6 +1232,7 @@
       audit_provider: v("auditProviderInput","off")==="off" ? null : v("auditProviderInput","off"),
       globals_audit_provider: v("globAuditProviderInput","off")==="off" ? null : v("globAuditProviderInput","off"),
       audit_min_delta: parseInt(v("auditMinDeltaInput",5)) || 5,
+      falsify_enabled: g("falsifyEnabledInput") ? g("falsifyEnabledInput").checked : true,
       provider_models: collectProviderModels(),
       provider_max_turns: collectProviderMaxTurns(),
     };
@@ -1232,8 +1253,57 @@
     // only came back on the next worker_status socket push.
     const ls=document.getElementById("lastSync");
     if(ls) ls.textContent=`last sync ${s.last_sync||'-'}`;
-    loadPins(); loadInv(); loadGlobals();
+    loadPins(); loadInv(); loadGlobals(); loadFalsify();
     checkTypes();
+  }
+
+  // ---------- Verification panel: falsifiability verdict map + run tallies ----------
+  async function loadFalsify(){
+    const statsEl=document.getElementById("falsifyStats"),
+          bodyEl=document.getElementById("falsifyBody"),
+          hintEl=document.getElementById("falsifyHint");
+    if(!statsEl) return;
+    let summary=null, runStats=null, findings=null;
+    try{ summary=await (await fetch("/api/falsify/summary")).json(); }catch(e){}
+    try{ const st=await (await fetch("/api/stats")).json(); runStats=(st&&st.run_stats)||null; }catch(e){}
+    try{ findings=await (await fetch("/api/falsify/findings?status=contradicted&limit=50")).json(); }catch(e){}
+    if(!summary || summary.error){
+      statsEl.textContent="falsify summary unavailable"+(summary&&summary.detail?" — "+summary.detail:"");
+      return;
+    }
+    const t=summary.totals||{};
+    const parts=[
+      `<b style="color:var(--rare)">${(t.contradicted||0).toLocaleString()}</b> contradicted`,
+      `<b>${(t.passed||0).toLocaleString()}</b> passed`,
+      `<b>${(t.unchecked||0).toLocaleString()}</b> unchecked`,
+    ];
+    if(t.unfalsifiable) parts.push(`${t.unfalsifiable.toLocaleString()} unfalsifiable`);
+    // Run-level tallies (audit block was computed-but-unrendered since the
+    // classic dashboard was removed; surface both verification stages here).
+    if(runStats&&runStats.falsify&&runStats.falsify.checked){
+      const f=runStats.falsify;
+      parts.push(`runs: ${f.checked} checked / ${f.contradicted} contradicted (${f.tier1_findings} tier-1)`);
+    }
+    if(runStats&&runStats.audit&&runStats.audit.ran){
+      const a=runStats.audit;
+      parts.push(`audit: ${a.ran} ran (${a.forced||0} forced) &middot; ${a.improved}&uarr; ${a.regressed}&darr; &middot; ${a.skipped_good+a.skipped_delta} skipped`);
+    }
+    statsEl.innerHTML=parts.join(" &middot; ");
+    if(hintEl&&findings&&!findings.error) hintEl.textContent=`${findings.count||0} contradicted shown`;
+    if(!findings||findings.error||!(findings.functions||[]).length){
+      bodyEl.innerHTML='<tr><td colspan="4" class="none" style="color:var(--text-muted)">no contradicted functions — run the worker or scripts/falsify_sweep.py</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML=(findings.functions||[]).map(f=>{
+      const checks=(f.findings||[]).map(x=>
+        `<span class="badge" title="[T${x.tier}] ${escHtml(x.claim)} — but ${escHtml(x.evidence)}" `+
+        `style="border-color:${x.tier===1?'var(--rare)':'var(--text-muted)'};color:${x.tier===1?'var(--rare)':'var(--text-secondary)'}">`+
+        `${escHtml(x.check_id)}</span>`).join(" ");
+      return `<tr><td class="fn" title="${escHtml(f.address)}">${escHtml(f.name||f.address)}</td>`+
+        `<td style="color:var(--text-muted)">${escHtml((f.program||'').split('/').pop())}</td>`+
+        `<td>${f.score!=null?f.score+'%':'-'}</td>`+
+        `<td>${checks}</td></tr>`;
+    }).join("");
   }
 
   // ---------- canonical D2MOO types: session-cached check + slide-out bar ----------
@@ -1699,6 +1769,10 @@
     socket.on("ghidra_launch_progress", ()=>refreshHealth());
     let confTimer;   // debounce: workers emit conf_changed per documented/proven item
     socket.on("conf_changed",()=>{ clearTimeout(confTimer); confTimer=setTimeout(refreshAll,1500); });
+    // Verification panel refresh: a falsify verdict just landed (worker stage
+    // or post-audit recheck). Debounced — a busy worker fleet emits often.
+    let falsifyTimer;
+    socket.on("falsify_complete",()=>{ clearTimeout(falsifyTimer); falsifyTimer=setTimeout(loadFalsify,1200); });
     let wsTimer;
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));

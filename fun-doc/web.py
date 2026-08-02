@@ -2498,6 +2498,13 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         "provider_timeout",
         "oracle_health",
         "oracle_relaunch_progress",
+        # Verification stages: the audit events were computed-but-never-
+        # bridged since the classic dashboard was removed; falsify events are
+        # the second verification axis (mechanical contradiction checks).
+        "audit_start",
+        "audit_complete",
+        "falsify_start",
+        "falsify_complete",
     ]:
         bus.on(evt, bridge(evt))
 
@@ -2800,6 +2807,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "zero_delta": 0,
             "audit": {
                 "ran": 0,
+                "forced": 0,
                 "improved": 0,
                 "regressed": 0,
                 "no_change": 0,
@@ -2809,6 +2817,16 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "today_improved": 0,
                 "today_skipped_good": 0,
                 "today_skipped_delta": 0,
+            },
+            "falsify": {
+                "checked": 0,
+                "passed": 0,
+                "contradicted": 0,
+                "errors": 0,
+                "tier1_findings": 0,
+                "tier2_findings": 0,
+                "today_checked": 0,
+                "today_contradicted": 0,
             },
             "today": {"runs": 0, "success_rate": 0, "avg_delta": 0, "by_provider": {}},
             "globals_today": {"runs": 0, "completed": 0, "skipped": 0, "failed": 0, "renames": 0},
@@ -2875,6 +2893,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
 
         # Audit tracking
         audit_ran = 0
+        audit_forced = 0
         audit_improved = 0
         audit_regressed = 0
         audit_no_change = 0
@@ -2885,6 +2904,16 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         today_audit_improved = 0
         today_audit_skipped_good = 0
         today_audit_skipped_delta = 0
+
+        # Falsify tracking (falsify.py's mechanical contradiction checks)
+        falsify_checked = 0
+        falsify_passed = 0
+        falsify_contradicted = 0
+        falsify_errors = 0
+        falsify_tier1 = 0
+        falsify_tier2 = 0
+        today_falsify_checked = 0
+        today_falsify_contradicted = 0
 
         is_today = {}  # cache per-log today check
 
@@ -2942,10 +2971,13 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 bp["failed"] += 1
                 failure_modes[result] += 1
 
-            # Audit outcome
+            # Audit outcome ("forced_findings" = falsify tier-1 findings
+            # overrode the skip gates; still an audit that ran)
             ao = l.get("audit_outcome")
-            if ao == "ran":
+            if ao in ("ran", "forced_findings"):
                 audit_ran += 1
+                if ao == "forced_findings":
+                    audit_forced += 1
                 if l_today:
                     today_audit_ran += 1
                 ab = l.get("audit_score_before")
@@ -2967,6 +2999,24 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 audit_skipped_delta += 1
                 if l_today:
                     today_audit_skipped_delta += 1
+
+            # Falsify outcome (final verdict for the run — post-audit recheck
+            # already folded in by fun_doc)
+            fo = l.get("falsify_outcome")
+            if fo in ("passed", "contradicted", "error"):
+                falsify_checked += 1
+                if l_today:
+                    today_falsify_checked += 1
+                if fo == "passed":
+                    falsify_passed += 1
+                elif fo == "contradicted":
+                    falsify_contradicted += 1
+                    if l_today:
+                        today_falsify_contradicted += 1
+                else:
+                    falsify_errors += 1
+                falsify_tier1 += l.get("falsify_tier1_count") or 0
+                falsify_tier2 += l.get("falsify_tier2_count") or 0
 
             fkey = f"{l.get('program', '')}::{l.get('address', '')}"
             func_results[fkey]["name"] = l.get("function", "")
@@ -3059,6 +3109,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             "zero_delta": zero_delta,
             "audit": {
                 "ran": audit_ran,
+                "forced": audit_forced,
                 "improved": audit_improved,
                 "regressed": audit_regressed,
                 "no_change": audit_no_change,
@@ -3068,6 +3119,16 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 "today_improved": today_audit_improved,
                 "today_skipped_good": today_audit_skipped_good,
                 "today_skipped_delta": today_audit_skipped_delta,
+            },
+            "falsify": {
+                "checked": falsify_checked,
+                "passed": falsify_passed,
+                "contradicted": falsify_contradicted,
+                "errors": falsify_errors,
+                "tier1_findings": falsify_tier1,
+                "tier2_findings": falsify_tier2,
+                "today_checked": today_falsify_checked,
+                "today_contradicted": today_falsify_contradicted,
             },
             "today": today_stats,
         }
@@ -3689,6 +3750,13 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
     except Exception as _e:
         print(f"  (conformance blueprint not registered: {_e})", flush=True)
 
+    try:
+        from falsify_api import falsify_bp
+        if "falsify" not in app.blueprints:
+            app.register_blueprint(falsify_bp)
+    except Exception as _e:
+        print(f"  (falsify blueprint not registered: {_e})", flush=True)
+
     @app.route("/api/stats")
     def api_stats():
         return jsonify(get_stats_snapshot())
@@ -4068,6 +4136,13 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                         jsonify({"error": "audit_min_delta must be int 0-100"}),
                         400,
                     )
+            if "falsify_enabled" in data:
+                if not isinstance(data["falsify_enabled"], bool):
+                    return (
+                        jsonify({"error": "falsify_enabled must be a boolean"}),
+                        400,
+                    )
+                cfg["falsify_enabled"] = data["falsify_enabled"]
             if "provider_max_turns" in data:
                 provider_max_turns = data["provider_max_turns"]
                 if not isinstance(provider_max_turns, dict):

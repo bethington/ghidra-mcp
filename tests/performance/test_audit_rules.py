@@ -154,7 +154,7 @@ def _queue_entries(tmp_path) -> list[dict]:
 def test_seed_rules_all_report_mode():
     """Phase 1 contract: no rule graduates above `report` yet."""
     rules = _load_seed_rules()
-    assert len(rules) == 6
+    assert len(rules) == 7
     for rule in rules:
         assert rule.get("mode") == "report", f"{rule['id']} is not at report mode"
 
@@ -451,6 +451,66 @@ def test_provider_timeout_cluster_respects_window(tmp_path):
 
     # One fresh timeout — total 3, but 2 are outside the 1h window.
     watcher._bus.emit("provider_timeout", {"provider": "minimax"})
+
+    watcher._tick()
+    assert _queue_entries(tmp_path) == []
+
+
+# -- refutation_cluster ---------------------------------------------------
+
+
+def test_refutation_cluster_fires_after_ten_in_window(tmp_path):
+    """Ten falsify tier-1 refutations in 30 min = a systemic doc producer
+    (prompt/scorer regression), not ten coincidences."""
+    rules = [_rule_by_id(_load_seed_rules(), "refutation_cluster")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    for i in range(10):
+        clock.advance(minutes=1)
+        watcher._bus.emit("falsify_complete",
+                          {"key": f"/p::{i}", "outcome": "contradicted",
+                           "tier1": 1})
+
+    watcher._tick()
+    entries = _queue_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["signature"] == "refutation_cluster"
+    assert entries[0]["context"]["count"] == 10
+
+
+def test_refutation_cluster_ignores_passed_outcomes(tmp_path):
+    """Only contradicted verdicts count — a healthy fleet emits
+    falsify_complete constantly with outcome=passed."""
+    rules = [_rule_by_id(_load_seed_rules(), "refutation_cluster")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    for i in range(20):
+        clock.advance(minutes=1)
+        watcher._bus.emit("falsify_complete",
+                          {"key": f"/p::{i}", "outcome": "passed", "tier1": 0})
+
+    watcher._tick()
+    assert _queue_entries(tmp_path) == []
+
+
+def test_refutation_cluster_respects_window(tmp_path):
+    rules = [_rule_by_id(_load_seed_rules(), "refutation_cluster")]
+    clock = Clock(_t(0))
+    watcher, _reg, _sink, _c = _make_watcher(tmp_path, rules=rules, clock=clock)
+    watcher._subscribe()
+
+    # Nine old refutations, then a 2h gap, then one fresh — never 10 in-window.
+    for i in range(9):
+        watcher._bus.emit("falsify_complete",
+                          {"key": f"/p::{i}", "outcome": "contradicted",
+                           "tier1": 1})
+    clock.advance(hours=2)
+    watcher._bus.emit("falsify_complete",
+                      {"key": "/p::fresh", "outcome": "contradicted", "tier1": 1})
 
     watcher._tick()
     assert _queue_entries(tmp_path) == []
