@@ -31,8 +31,12 @@ algorithm_synonyms:
   - magic number
 
 weights:
-  name: 0.25
-  signature: 0.25
-  plate: 0.20
-  algorithm: 0.15
-  locals: 0.15
+  name: 0.225
+  signature: 0.225
+  plate: 0.18
+  algorithm: 0.135
+  locals: 0.135
+  # Mechanical contradiction checks (falsify.py's benchmark analog): the
+  # doc must not CLAIM things that are provably false — a plate documenting
+  # a nonexistent parameter, or a void/non-void return contradiction.
+  falsifiability: 0.10

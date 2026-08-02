@@ -425,6 +425,89 @@ def _score_locals(captured: dict, truth: dict) -> dict[str, Any]:
     }
 
 
+# ---------- Falsifiability dimension ----------
+#
+# The benchmark analog of fun-doc's falsify.py: mechanical contradiction
+# checks between what the documentation CLAIMS and what is verifiably true.
+# The other five dimensions reward being right; this one penalizes claiming
+# things that are provably wrong — a plate can score well on similarity while
+# documenting a parameter that does not exist. Self-contained on purpose
+# (scorer.py imports nothing from fun-doc); the check *semantics* mirror
+# falsify.py's F1/F3/F4.
+
+_PLATE_PARAM_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*(.+?)\s+-{1,2}\s+\S")
+_PLATE_SECTION_RE = re.compile(
+    r"^[ \t]*(Algorithm|Parameters|Returns|Special Cases|Magic Numbers|Source|"
+    r"Notes?)\s*:", re.I | re.M)
+
+
+def _plate_section(plate: str, name: str) -> str:
+    hits = [(m.start(), m.end(), m.group(1)) for m in _PLATE_SECTION_RE.finditer(plate or "")]
+    for i, (_s, e, n) in enumerate(hits):
+        if n.lower().startswith(name.lower()):
+            end = hits[i + 1][0] if i + 1 < len(hits) else len(plate)
+            return plate[e:end]
+    return ""
+
+
+def _score_falsifiability(captured: dict, truth: dict) -> dict[str, Any]:
+    """Fraction of applicable contradiction checks the captured doc survives.
+
+    Checks (None = not applicable, skipped):
+      plate_params_exist   every plate-documented param is in the signature
+      arity_vs_truth       captured doesn't declare MORE params than truth has
+                           (fewer is incompleteness — hygiene, not a lie)
+      plate_return_consistent  plate Returns void-ness matches the prototype
+      return_family_vs_truth   captured void-ness matches truth void-ness
+    """
+    plate = captured.get("plate") or ""
+    cap_params = captured.get("parameters") or []
+    checks: dict[str, Optional[bool]] = {}
+
+    doc_params = [m.group(1) for m in
+                  (_PLATE_PARAM_RE.match(ln)
+                   for ln in _plate_section(plate, "Parameters").splitlines())
+                  if m and "implicit" not in m.group(2).lower()]
+    if doc_params:
+        sig_ci = {str(p.get("name") or "").lower() for p in cap_params}
+        checks["plate_params_exist"] = all(n.lower() in sig_ci for n in doc_params)
+    else:
+        checks["plate_params_exist"] = None
+
+    truth_params = truth.get("parameters")
+    checks["arity_vs_truth"] = (
+        len(cap_params) <= len(truth_params)
+        if truth_params is not None else None)
+
+    ret_ln = next((l for l in _plate_section(plate, "Returns").splitlines()
+                   if l.strip()), "")
+    m = re.match(r"\s*([A-Za-z_][\w\s\*]*?)\s*(?::|$)", ret_ln)
+    plate_ret = m.group(1).strip() if m else None
+    cap_ret = (captured.get("return_type") or "").strip()
+    if plate_ret and cap_ret:
+        checks["plate_return_consistent"] = (
+            (plate_ret.lower() == "void") == (cap_ret.lower() == "void"))
+    else:
+        checks["plate_return_consistent"] = None
+
+    truth_ret = (truth.get("return_type") or "").strip()
+    if cap_ret and truth_ret:
+        checks["return_family_vs_truth"] = (
+            (cap_ret.lower() == "void") == (truth_ret.lower() == "void"))
+    else:
+        checks["return_family_vs_truth"] = None
+
+    applicable = {k: v for k, v in checks.items() if v is not None}
+    score = (sum(1 for v in applicable.values() if v) / len(applicable)
+             if applicable else 1.0)
+    return {
+        "score": round(score, 3),
+        "checks": {k: v for k, v in checks.items()},
+        "applicable": len(applicable),
+        "failed": sorted(k for k, v in applicable.items() if not v),
+    }
+
+
 # ---------- Top-level ----------
 
 
@@ -461,14 +544,19 @@ def score_function(captured: dict, truth: dict) -> dict[str, Any]:
     dim_plate = _score_plate(captured, truth)
     dim_alg = _score_algorithm(captured, truth)
     dim_locals = _score_locals(captured, truth)
+    dim_falsify = _score_falsifiability(captured, truth)
 
-    # Apply weights. Default weights if yaml didn't override.
+    # Apply weights. Default weights if yaml didn't override. NOTE: a truth
+    # entry with an explicit `weights` block that omits `falsifiability`
+    # scores it at weight 0 (opt-out) — the fast-tier truth YAMLs carry it
+    # explicitly.
     weights = truth.get("weights") or {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.20,
-        "algorithm": 0.15,
-        "locals": 0.15,
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.10,
     }
     total_weight = sum(weights.values()) or 1.0
     quality = (
@@ -477,6 +565,7 @@ def score_function(captured: dict, truth: dict) -> dict[str, Any]:
         + weights.get("plate", 0.0) * dim_plate["score"]
         + weights.get("algorithm", 0.0) * dim_alg["score"]
         + weights.get("locals", 0.0) * dim_locals["score"]
+        + weights.get("falsifiability", 0.0) * dim_falsify["score"]
     ) / total_weight
 
     return {
@@ -487,6 +576,7 @@ def score_function(captured: dict, truth: dict) -> dict[str, Any]:
             "plate": dim_plate,
             "algorithm": dim_alg,
             "locals": dim_locals,
+            "falsifiability": dim_falsify,
         },
         "weights": weights,
     }

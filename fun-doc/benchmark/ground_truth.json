@@ -50,11 +50,12 @@
         "CRC-16/CCITT-FALSE"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "compute_gcd": {
@@ -101,11 +102,12 @@
         "modulo recursion"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "get_stat_list_flags": {
@@ -142,11 +144,12 @@
         "offset accessor"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "get_stat_list_layer": {
@@ -181,11 +184,12 @@
         "offset accessor"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "get_stat_list_owner_guid": {
@@ -223,11 +227,12 @@
         "offset accessor"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "get_stat_list_prev_link": {
@@ -266,11 +271,12 @@
         "validated accessor"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "stat_list_add": {
@@ -329,11 +335,12 @@
         "magic number"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "advance_parser_state": {
@@ -379,11 +386,12 @@
         "FSM"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     },
     "compute_str_len": {
@@ -425,11 +433,12 @@
         "pointer walk"
       ],
       "weights": {
-        "name": 0.25,
-        "signature": 0.25,
-        "plate": 0.2,
-        "algorithm": 0.15,
-        "locals": 0.15
+        "name": 0.225,
+        "signature": 0.225,
+        "plate": 0.18,
+        "algorithm": 0.135,
+        "locals": 0.135,
+        "falsifiability": 0.1
       }
     }
   }

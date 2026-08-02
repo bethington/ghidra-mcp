@@ -72,8 +72,10 @@ def test_crc16_semantic_overlay_merged(ground_truth):
     assert fn["algorithm_tag"] == "CRC-16-CCITT"
     assert "XMODEM CRC" in fn.get("algorithm_synonyms", [])
     assert "CRC-16" in fn["canonical_plate"]
-    assert fn["weights"]["name"] == 0.25
-    assert fn["weights"]["signature"] == 0.25
+    # Rebalanced when the falsifiability dimension landed (x0.9 + 0.10).
+    assert fn["weights"]["name"] == 0.225
+    assert fn["weights"]["signature"] == 0.225
+    assert fn["weights"]["falsifiability"] == 0.10
 
 
 def test_dllmain_not_scored(ground_truth):
