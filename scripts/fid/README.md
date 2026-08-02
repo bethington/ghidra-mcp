@@ -14,33 +14,57 @@ fires, no LLM should be naming that function at all.
 | `vc6_vc98_build_report.txt` | The populate run's own report: 1,100 functions visited, 1,030 added, 70 excluded (43 hash-too-short, 19 duplicate, 6 thunk, 2 unnamed). |
 | `build-vc6-fiddb.ps1` | Rebuilds the database from any static-library directory. |
 | `CountFidMatches.java` | Counts FID matches in a program, so a database's value can be measured rather than assumed. |
+| `ReportFidCoverage.java` | Splits coverage into authored vs library code on `Benchmark.dll`, where we wrote every game function. Reports library coverage AND false positives against our own code — the check that makes the D2 results trustworthy. |
 
-## Read this before building another database
+## What it actually buys — measured
 
-**The VC6 database was measured to buy essentially nothing.** Controlled A/B on
-fresh imports, stock databases versus stock plus this one:
+Controlled A/B on fresh imports, stock databases versus stock plus this one:
+
+| Binary | Stock | Stock + VC6 db | Delta |
+| --- | --- | --- | --- |
+| `Benchmark.dll` (links **our** LIBCMT) | 12 | **87** | **+75** |
+| `D2Common.dll` | 175 | 176 | +1 |
+| `D2Client.dll` | 216 | 216 | +0 |
+
+On the benchmark — the one binary here with **known ground truth**, because we
+wrote every game function in it — `ReportFidCoverage.java` gives:
 
 ```
-D2Common.dll   175 -> 176 FID matches   (+1)
-D2Client.dll   216 -> 216 FID matches   (+0)
+authored=9   authored_falsely_claimed=0
+library=94   library_identified=87   library_missed=7   coverage_pct=92
 ```
 
-Ghidra already ships VC6-era coverage as
-`Ghidra/Features/FunctionID/data/vsOlder_x86.fidbf`, alongside
-vs2012/2015/2017/2019. Those files are `.fidbf` — **packed** — so searching for
-`*.fidb` finds nothing and invents a coverage gap that does not exist. That is
-exactly the mistake that produced this database.
+92% of the runtime identified, and **zero false claims against our own code**.
+Two of the 7 misses (`RtlUnwind`, `entry`) are an ntdll thunk and a
+linker-generated stub, so neither is LIBCMT code — real coverage is ~95%.
 
-The corollary is the useful part: **the low corpus-wide match rate (4,325 of
-70,146 functions) is not a database gap.** Do not build a UCRT database
-expecting a different outcome — `vs2019_x86.fidbf` already covers BH.dll and
-ProjectDiablo.dll. FID hashing needs near-exact code equality, so inlined and
-differently-optimised CRT cannot match whatever is loaded. PD2_EXT.dll is mostly
-CRT and still matches only 184 of 468 (39%) for that reason.
+That is the result that justifies trusting this tooling on the D2 binaries,
+where no ground truth exists to check against.
 
-The tooling is kept because the machinery is correct and reusable for a
-toolchain Ghidra genuinely does not ship, and because the headless traps it
-encodes are expensive to rediscover.
+## Why D2 sees no benefit — and why that is the interesting part
+
+An earlier revision of this file read the D2 numbers as "the database buys
+nothing" and declared extending FID coverage a dead avenue. **That was wrong.**
+It generalised from two binaries to a conclusion the benchmark flatly refutes.
+
+The database is not redundant with Ghidra's stock `vsOlder_x86.fidbf` — stock
+finds only 12 of 151 functions in a binary built by this exact toolchain. D2
+gains nothing for an entirely different reason: **D2's statically-linked CRT is
+not this LIBCMT.** Same observation, different cause, and the cause is
+actionable in a way "it's redundant" never was.
+
+Untested leads, in rough order of likelihood:
+
+1. **A different VC6 service pack.** FID hashes need near-exact code equality,
+   so an SP5-vs-SP6 `.obj` will not match even for identical source.
+2. **A different CRT variant.** The measured runs used `-Libs LIBCMT` only;
+   `LIBC.LIB` was never built. Note D2 *does* link a multithreaded CRT — its
+   restored names include `__mtinitlocks` and `__lock_file2` — which argues for
+   an SP-level difference over a single-threaded lib.
+
+If either lands, expect the same order of improvement on the game binaries that
+the benchmark shows: roughly 7×, which would take a large slice of D2's ~66,000
+unidentified functions out of scope in one step.
 
 ## Measuring a database before trusting it
 
