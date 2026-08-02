@@ -5,29 +5,40 @@
 .DESCRIPTION
     Builds a Function ID database from a set of static libraries.
 
-    MEASURED RESULT FOR VC6, READ THIS BEFORE RUNNING IT: essentially zero
-    gain. Controlled A/B on fresh imports, stock databases vs stock + this one:
+    MEASURED RESULT: this database WORKS, dramatically, on any binary that
+    links the same LIBCMT.LIB it was built from. Controlled A/B on fresh
+    imports, stock databases vs stock + this one:
 
-        D2Common.dll   175 -> 176 FID matches   (+1)
-        D2Client.dll   216 -> 216 FID matches   (+0)
+        Benchmark.dll   12 -> 87 FID matches   (+75, a 7x jump)
+        D2Common.dll   175 -> 176              (+1)
+        D2Client.dll   216 -> 216              (+0)
 
-    The premise this script was written on was wrong. Ghidra DOES ship VC6-era
-    coverage -- `Ghidra/Features/FunctionID/data/vsOlder_x86.fidbf`, alongside
-    vs2012/2015/2017/2019. They are `.fidbf` (packed), so a search for `*.fidb`
-    misses them, which is how the gap was imagined in the first place. The 1,030
-    LIBCMT signatures this produces are ~99% already present.
+    On the benchmark binary -- compiled by this toolchain and statically linking
+    this LIBCMT -- coverage of non-authored functions is 92% (87 of 94), with
+    ZERO false claims against the 9 hand-written functions. Of the 7 misses,
+    `RtlUnwind` is an ntdll import thunk and `entry` is linker-generated, so
+    neither is LIBCMT code at all.
 
-    The corollary matters more than the script: the low FID match rate (4,325 of
-    70,146 functions corpus-wide) is NOT a database gap, so do not expect a UCRT
-    build to pay off either -- vs2019_x86.fidbf already covers the modern mod
-    DLLs. Where FID misses statically-linked CRT it is because FID hashing needs
-    near-exact code equality and inlined or differently-optimised variants
-    cannot match, no matter which library is loaded. PD2_EXT.dll is mostly CRT
-    and still matches only 184 of 468 (39%) for exactly that reason.
+    READ THE D2 NUMBERS CORRECTLY. An earlier revision of this header concluded
+    from them that the database "buys nothing" and that extending FID coverage
+    was a dead avenue. That was wrong -- it generalised from the wrong binaries.
+    The database is NOT redundant with Ghidra's stock `vsOlder_x86.fidbf`: stock
+    finds only 12 of 151 functions in a binary built by this exact toolchain. It
+    adds nothing to D2Common/D2Client for a different reason entirely -- **D2's
+    statically-linked CRT is not this LIBCMT**. Same observation, completely
+    different cause, and the cause is the actionable part: identify the CRT
+    variant Blizzard actually linked and rebuild against that.
 
-    Kept because the machinery is correct and reusable for a toolchain Ghidra
-    genuinely does not ship (anything non-Microsoft, or a bespoke SDK), and
-    because the headless traps below are expensive to rediscover.
+    Untested candidates for it: a different VC6 service pack, or LIBC.LIB
+    (single-threaded) rather than LIBCMT.LIB. The -Libs default below includes
+    LIBC so this can be tried; the runs above used `-Libs LIBCMT` only.
+    Note D2 does use a multithreaded CRT (its restored names include
+    `__mtinitlocks` and `__lock_file2`), which argues for an SP-level or build
+    difference over a single-threaded lib.
+
+    Measure any new database with ReportFidCoverage.java against Benchmark.dll
+    before trusting it -- that is the only binary here with known ground truth.
+
 
     THREE STAGES, all headless and re-runnable:
       1. Import  -- each .lib is a COFF archive; Ghidra imports every .obj
