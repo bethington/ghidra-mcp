@@ -14,84 +14,104 @@ program:
   compiler: "windows"
   # Counts assume /run_analysis has been called on the imported binary.
   # The runner does this in _bench_ensure_full_analysis before assertions.
-  function_count_min: 250              # observed 319 post-analysis
-  symbol_count_min: 1500               # observed 2357 post-analysis
-  string_count_min: 50
+  # Retargeted 2026-08-02 for the VC6 SP6 + VS2003 build (build.py
+  # --toolchain vc6sp6). The previous figures described the MSVC 2022
+  # stand-in, which emitted roughly twice the code for the same sources.
+  function_count_min: 140              # observed 151 post-analysis
+  symbol_count_min: 700                # observed 805 post-analysis
+  string_count_min: 50                 # observed 108
   segments:
     - name: "Headers"
     - name: ".text"
     - name: ".rdata"
     - name: ".data"
 
-# User-authored functions in src/*.c. Names use the C-style export-mangling
-# Ghidra applies after /run_analysis (compiled as __stdcall, so the @N suffix
-# is the byte count of args). CRT-runtime helpers (FUN_*, ___scrt_*) are
-# intentionally not asserted — they vary across compilers/versions.
+# User-authored functions in src/*.c. CRT-runtime helpers are intentionally not
+# asserted — they vary across compilers/versions.
+#
+# ADDRESSES ARE VC6-SPECIFIC. The vc6sp6 toolchain links at /BASE:0x6FD50000
+# (matching D2Common.dll) rather than the 0x10000000 default, so every address
+# here moved when the toolchain switched, and the function LAYOUT changed too
+# (compute_gcd went from +0x130 to +0x50). Re-derive from build/Benchmark.map
+# after any toolchain change; do not assume a fixed delta.
+#
+# The structural counts below are also VC6 observations, not source facts:
+# VC6 /O2 emits markedly tighter code than MSVC 2022 did for the same C.
+# calc_crc16 is 26 instructions here against 80+ before, because the modern
+# compiler unrolled the CRC loop and VC6 does not.
 functions:
-  - address: "0x10001000"
+  - address: "0x6fd51000"
     name: "calc_crc16"
-    return_type_contains: "ushort"
+    # return_type_contains dropped: VC6's signature recovers as
+    # `undefined calc_crc16(int, uint)`, so the old "ushort" assertion cannot
+    # hold. The C source still returns unsigned short — this is a decompiler
+    # recovery difference, not a behaviour change.
     param_count: 2
-    basic_block_count: 5
-    cyclomatic_complexity: 3
-    instruction_count_min: 80
-    xref_count_to_min: 3
+    basic_block_count: 10
+    cyclomatic_complexity: 5
+    instruction_count_min: 20                  # observed 26 (was 80+ under MSVC 2022)
+    xref_count_to_min: 3                       # observed 4
     is_thunk: false
     decompile_must_be_nonempty: true
     decompile_contains: ["0x1021", "0xffff"]
     immediate_values_contains: [4129, 65535]   # 0x1021, 0xFFFF — CRC-16/CCITT signatures
 
-  - address: "0x10001130"
+  - address: "0x6fd51050"
     name: "compute_gcd"
     param_count: 2
     is_thunk: false
     decompile_must_be_nonempty: true
     decompile_contains: ["%"]                  # Euclidean modulo
 
-  - address: "0x10001150"
+  - address: "0x6fd51070"
     name: "get_stat_list_flags"
     param_count: 1
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x10001170"
+  - address: "0x6fd51090"
     name: "get_stat_list_layer"
     param_count: 1
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x10001180"
+  - address: "0x6fd510a0"
     name: "get_stat_list_owner_guid"
     param_count: 1
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x100011a0"
+  - address: "0x6fd510c0"
     name: "get_stat_list_prev_link"
     param_count: 1
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x100011c0"
+  - address: "0x6fd510e0"
     name: "stat_list_add"
     param_count: 4                              # captures the four-arg add-with-flags variant
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x10001210"
+  - address: "0x6fd51130"
     name: "advance_parser_state"
+    param_count: 2
+    basic_block_count: 21                       # switch ladder — the densest of the five
     is_thunk: false
     decompile_must_be_nonempty: true
 
-  - address: "0x100012a0"
+  - address: "0x6fd511b0"
     name: "compute_str_len"
     param_count: 1
     is_thunk: false
     decompile_must_be_nonempty: true
     decompile_contains: ["while", "!="]        # null-terminator scan
 
-  - address: "0x100012bb"
-    name: "dllmain_crt_dispatch"               # Ghidra-canonical CRT helper name
+  # Replaces the old dllmain_crt_dispatch entry: that Ghidra-canonical helper
+  # name does not exist in the VC6 CRT, whose only recognised startup function
+  # is the raw entry point.
+  - address: "0x6fd512a9"
+    name: "entry"
     is_thunk: false
     decompile_must_be_nonempty: true
 
@@ -184,7 +204,7 @@ endpoint_smoke:
 
   # decompile (per-function covers most); bulk form absorbed batch_decompile in 6.0.0
   - endpoint: "/decompile_function"
-    params: { functions: "0x10001000,0x10001130" }
+    params: { functions: "0x6fd51000,0x6fd51050" }
     assert:
       type: "nonempty"
 
@@ -211,13 +231,13 @@ endpoint_smoke:
 
   # xref
   - endpoint: "/get_xrefs_to"
-    params: { address: "0x10001000" }
+    params: { address: "0x6fd51000" }
     assert:
       type: "lines"
       min_lines: 1
 
   - endpoint: "/get_xrefs_from"
-    params: { address: "0x10001210" }
+    params: { address: "0x6fd51130" }
     assert:
       type: "nonempty"
 
@@ -232,8 +252,10 @@ endpoint_smoke:
       contains_keys: ["analyzed", "analyzing"]
 
   # function
+  # entry, not advance_parser_state: under VC6 the parser has ZERO callees, so
+  # the old target would satisfy nothing while appearing to pass a `nonempty`.
   - endpoint: "/get_function_callees"
-    params: { address: "0x10001210" }
+    params: { address: "0x6fd512a9" }
     assert:
       type: "nonempty"
 

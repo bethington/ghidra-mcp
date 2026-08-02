@@ -25,8 +25,14 @@ program:
     - name: ".data"
 
 functions:
-  - address: "0x004019e8"
-    name: "guard_check_icall"
+  # Retargeted 2026-08-02 for the VC6 SP6 build. The previous entry asserted
+  # `guard_check_icall` at 0x004019e8 — a Control Flow Guard helper that MSVC
+  # 2022 emitted and VC6 has no concept of, so it does not exist in this
+  # binary at any address. 0x004019e8 now falls INSIDE `entry`
+  # (0x00401916-0x004019fa), which is why the failure read as a name mismatch
+  # rather than a missing function.
+  - address: "0x00401916"
+    name: "entry"
     is_thunk: false
     decompile_must_be_nonempty: true
 
