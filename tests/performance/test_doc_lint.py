@@ -136,3 +136,57 @@ def test_non_library_domain_function_is_never_a_defect():
     stats = dl.calibrate(recs)
     defects = dl.find_defects(recs, stats)
     assert defects == [], "clean corpus must produce zero findings"
+
+
+# ----------------------------------------------------------------- FID ------
+# Function ID is tier 0: authoritative, and it carries the real name. Its
+# bookmarks survive a rename, which is what makes overwritten names
+# recoverable rather than merely detectable.
+
+def _fid(name, multiple=False):
+    return {"00001000": (name, multiple)}
+
+
+def test_fid_match_outranks_tag_and_heuristic():
+    recs = dl.classify([_fn("DATATBLS_PrintFormattedString", "00001000")], [],
+                       lib_tagged=["DATATBLS_PrintFormattedString"],
+                       fid=_fid("_vsprintf"))
+    assert recs[0].tier == 0
+    assert recs[0].library_reason == "FID"
+    assert recs[0].fid_name == "_vsprintf"
+
+
+def test_fid_defect_ignores_prefix_calibration():
+    """FID needs no calibration -- it already knows the true name, so a module
+    prefix layered over it is wrong on the evidence, not on a statistic."""
+    recs = dl.classify([_fn("DATATBLS_PrintFormattedString", "00001000")], [],
+                       fid=_fid("_vsprintf"))
+    defects = dl.find_defects(recs, {})     # deliberately empty calibration
+    assert [d.name for d in defects] == ["DATATBLS_PrintFormattedString"]
+    assert defects[0].fid_name == "_vsprintf"
+
+
+def test_demangled_fid_name_is_not_a_defect():
+    """`??1type_info@@UAE@XZ` -> `~type_info` is an improvement."""
+    recs = dl.classify([_fn("CRT_TypeInfoDtor", "00001000")], [],
+                       fid=_fid("??1type_info@@UAE@XZ"))
+    assert dl.find_defects(recs, {}) == []
+
+
+def test_ghidra_own_conflict_prefix_is_not_a_defect():
+    recs = dl.classify([_fn("FID_conflict:_memcpy", "00001000")], [],
+                       fid=_fid("_memcpy"))
+    assert dl.find_defects(recs, {}) == []
+
+
+def test_kept_fid_name_is_not_a_defect_despite_underscores():
+    recs = dl.classify([_fn("_qsort", "00001000")], [], fid=_fid("_qsort"))
+    assert dl.find_defects(recs, {}) == []
+    # canonical() must ignore FID's leading-underscore decoration
+    recs = dl.classify([_fn("qsort", "00001000")], [], fid=_fid("_qsort"))
+    assert dl.find_defects(recs, {}) == []
+
+
+def test_norm_addr_reconciles_bookmark_and_listing_forms():
+    assert dl.norm_addr("0x6fdd791b") == dl.norm_addr("6fdd791b")
+    assert dl.norm_addr("1000") == "00001000"

@@ -6,6 +6,7 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.core.clear.ClearFlowAndRepairCmd;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressOutOfBoundsException;
+import ghidra.program.model.listing.Bookmark;
 import ghidra.program.model.address.AddressOverflowException;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
@@ -808,6 +809,17 @@ public class FunctionService {
                 }
                 enforcementWarnings.add(disabledEnforcementWarning(rejection));
             }
+            // ---- Function ID gate --------------------------------------
+            // Refuse to bury an authoritative library identification under a
+            // subsystem prefix. See NamingConventions.overridesFidName.
+            String fidName = fidNameAt(program, targetFunc);
+            if (NamingConventions.overridesFidName(newName, fidName)) {
+                Map<String, Object> rejection = fidOverrideRejection(newName, fidName);
+                if (enforceStrictNaming) {
+                    return Response.ok(rejection);
+                }
+                enforcementWarnings.add(disabledEnforcementWarning(rejection));
+            }
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -855,6 +867,50 @@ public class FunctionService {
 
     public Response renameFunctionByAddress(String functionAddrStr, String newName) {
         return renameFunctionByAddress(functionAddrStr, newName, null, null);
+    }
+
+    /**
+     * The library name Ghidra's Function ID analyzer recorded for this
+     * function, or null if it never matched one.
+     *
+     * Read from the analysis BOOKMARK rather than the symbol, deliberately: the
+     * bookmark survives a rename, so it still answers "what is this really?"
+     * long after somebody has overwritten the name. That property is what makes
+     * the contamination detectable at all.
+     */
+    private static String fidNameAt(Program program, Function function) {
+        if (program == null || function == null) return null;
+        try {
+            for (Bookmark b : program.getBookmarkManager()
+                    .getBookmarks(function.getEntryPoint())) {
+                if (NamingConventions.FID_BOOKMARK_CATEGORY.equals(b.getCategory())) {
+                    return NamingConventions.extractFidName(b.getComment());
+                }
+            }
+        } catch (Exception e) {
+            // A missing bookmark manager must never block a rename.
+            Msg.debug(FunctionService.class, "FID bookmark lookup failed", e);
+        }
+        return null;
+    }
+
+    private static Map<String, Object> fidOverrideRejection(
+            String rejectedName, String fidName) {
+        return JsonHelper.mapOf(
+                "status", "rejected",
+                "error", "fid_override",
+                "issue", "overrides_function_id",
+                "rejected_name", rejectedName,
+                "fid_name", fidName,
+                "message", "Ghidra's Function ID analyzer identified this function as the "
+                        + "library routine '" + fidName + "'. Renaming it to '" + rejectedName
+                        + "' buries that identification under a subsystem prefix, and because "
+                        + "names propagate across binaries by function hash, statically-linked "
+                        + "library code mislabelled once spreads corpus-wide.",
+                "suggestion", "Keep '" + fidName + "'. If a more readable form is wanted, add it "
+                        + "as a secondary label instead of replacing the primary name. Pass "
+                        + "strict_mode=warn to override deliberately."
+        );
     }
 
     private static Map<String, Object> nameQualityRejection(

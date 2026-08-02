@@ -46,12 +46,26 @@ The calibration table is printed with the report. A self-calibrating rule whose
 calibration you cannot inspect is worse than a hand-written list, not better --
 that is how the `CRT_` error would have shipped silently.
 
-FINDINGS ARE TIERED, because the two library signals are not equally good:
+FINDINGS ARE TIERED, because the library signals are not equally good:
 
-  Tier 1 -- the function carries a curated `LIB_*` tag. Ghidra already says it
-           is runtime code; the name contradicts stored ground truth.
-  Tier 2 -- the heuristic detector classified it. Real defects live here too,
-           but it is a judgement call and wants human review.
+  Tier 0 -- Ghidra's Function ID analyzer matched it. Authoritative, and it
+           carries the REAL name, so the fix is mechanical rather than a
+           judgement call. FID bookmarks survive renames, which is what makes
+           this recoverable: the ground truth was never destroyed, only
+           overridden. Measured on this corpus, FID identified 4,325 functions
+           and 143 of them had a module prefix layered over the top --
+           `_vsprintf` became `DATATBLS_PrintFormattedString`, and
+           `___acrt_locale_free_numeric` became `DATATBLS_FreeUnitResourceArray`,
+           a name asserting D2 units and resource arrays that do not exist
+           anywhere in that function.
+  Tier 1 -- a curated `LIB_*` tag. Ghidra says it is runtime code; the name
+           contradicts stored ground truth. No canonical name attached.
+  Tier 2 -- the heuristic detector. Real defects live here too, but it is a
+           judgement call and wants review before acting.
+
+Tier 0 is strictly better than tier 1 and covers binaries tier 1 cannot: BH.dll
+has ZERO `LIB_*` tags but 428 FID matches, and it turned out to hold the largest
+share of the contamination.
 
 USAGE
 -----
@@ -161,6 +175,19 @@ def strip_ref(ref: str) -> str:
     return name
 
 
+def norm_addr(a) -> str:
+    """Bookmarks and function listings disagree on 0x-prefix and width."""
+    a = str(a).lower()
+    if a.startswith("0x"):
+        a = a[2:]
+    return a.lstrip("0").rjust(8, "0")
+
+
+def canonical(name: str) -> str:
+    """Compare names ignoring the leading-underscore decoration FID carries."""
+    return (name or "").lstrip("_").lower()
+
+
 def module_prefix(name: str) -> Optional[str]:
     m = MODULE_PREFIX.match(name or "")
     return m.group(1) if m else None
@@ -175,12 +202,16 @@ class FunctionRec:
     is_library: bool = False
     library_reason: str = ""
     prefix: Optional[str] = None
-    # 1 = curated LIB_* tag (ground truth), 2 = heuristic detector (review).
-    tier: int = 0
+    # 0 = Ghidra Function ID match (authoritative, carries the real name),
+    # 1 = curated LIB_* tag, 2 = heuristic detector (review before acting).
+    tier: int = 9
+    fid_name: Optional[str] = None
+    fid_multiple: bool = False
 
 
 def classify(functions: List[dict], edges: List[dict],
-             lib_tagged: Iterable[str] = ()) -> List[FunctionRec]:
+             lib_tagged: Iterable[str] = (),
+             fid: Optional[Dict[str, tuple]] = None) -> List[FunctionRec]:
     """Build FunctionRecs with library classification and module prefix."""
     callees: Dict[str, List[str]] = defaultdict(list)
     for e in edges:
@@ -190,6 +221,7 @@ def classify(functions: List[dict], edges: List[dict],
             callees[caller].append(callee)
 
     tagged = set(lib_tagged)
+    fid = fid or {}
     out: List[FunctionRec] = []
     for f in functions:
         name = f.get("name") or ""
@@ -197,7 +229,13 @@ def classify(functions: List[dict], edges: List[dict],
                           address=str(f.get("address", "")),
                           callees=callees.get(name, []))
         rec.prefix = module_prefix(name)
-        if name in tagged:
+        hit = fid.get(norm_addr(rec.address))
+        if hit:
+            # Function ID is authoritative AND supplies the correct name, so it
+            # outranks both the curated tag and the heuristic.
+            rec.fid_name, rec.fid_multiple = hit
+            rec.is_library, rec.library_reason, rec.tier = True, "FID", 0
+        elif name in tagged:
             rec.is_library, rec.library_reason, rec.tier = True, "LIB_tag", 1
         else:
             # EH callees are stripped before classification: they prove C++
@@ -233,10 +271,33 @@ def calibrate(recs: Iterable[FunctionRec]) -> Dict[str, dict]:
 
 def find_defects(recs: Iterable[FunctionRec],
                  stats: Dict[str, dict]) -> List[FunctionRec]:
-    """Library-classified functions wearing a domain prefix."""
+    """Library-classified functions wearing a module prefix they should not.
+
+    Tier 0 (FID) does not consult the prefix calibration. Function ID already
+    told us both that the function is library code AND what it is really
+    called, so any module prefix layered over that name is wrong on the
+    evidence -- there is nothing left to estimate. Tiers 1 and 2 still need the
+    calibration, because a tag or a heuristic says only "library", not "and it
+    is named X".
+
+    Renames that merely DEMANGLE a FID name (`??1type_info@@UAE@XZ` ->
+    `~type_info`) are improvements and are not reported; neither is Ghidra's
+    own `FID_conflict:` disambiguation prefix.
+    """
     out = []
     for r in recs:
-        if r.is_library and r.prefix:
+        if not r.is_library:
+            continue
+        if r.tier == 0:
+            if not r.prefix or not r.fid_name:
+                continue
+            if r.name.startswith("FID_conflict:"):
+                continue
+            if r.fid_name.startswith("?"):      # mangled -> demangled is fine
+                continue
+            if canonical(r.name) != canonical(r.fid_name):
+                out.append(r)
+        elif r.prefix:
             s = stats.get(r.prefix)
             if s and s["is_domain"]:
                 out.append(r)
@@ -268,12 +329,41 @@ def lib_tagged_names(program: str) -> List[str]:
     return names
 
 
+def fid_bookmarks(program: str) -> Dict[str, tuple]:
+    """{address -> (fid_name, is_multiple_match)} from Function ID bookmarks.
+
+    Ghidra's Function ID analyzer records every match as an Analysis bookmark
+    whose comment ends with the library name it matched, e.g.
+    "Library Function - Single Match,  _qsort". Crucially the bookmark SURVIVES
+    a later rename -- so this recovers ground truth that a documentation pass
+    overwrote, without re-running any analysis.
+
+    Category is "Function ID Analyzer" (not "Function ID"; filtering on the
+    latter silently returns nothing).
+    """
+    out: Dict[str, tuple] = {}
+    try:
+        bms = _get("/list_bookmarks", program=program).get("bookmarks", [])
+    except Exception:  # noqa: BLE001
+        return out
+    for b in bms:
+        if (b.get("category") or "") != "Function ID Analyzer":
+            continue
+        comment = (b.get("comment") or "").strip()
+        if not comment:
+            continue
+        out[norm_addr(b.get("address"))] = (
+            comment.split()[-1], "Multiple" in comment)
+    return out
+
+
 def collect(program: str) -> List[FunctionRec]:
     fns = _items(_get("/list_functions", program=program), "functions")
     for f in fns:
         f["program"] = program
     edges = _items(_get("/get_full_call_graph", program=program, limit=500000), "edges")
-    recs = classify(fns, edges, lib_tagged_names(program))
+    recs = classify(fns, edges, lib_tagged_names(program),
+                    fid_bookmarks(program))
     for r in recs:
         r.program = program
     return recs
@@ -331,8 +421,10 @@ def main() -> int:
         print(f"\n  {pfx}_  x{len(group)}  in {len(progs)} binary/binaries: "
               f"{', '.join(progs[:6])}{' …' if len(progs) > 6 else ''}")
         for d in sorted(group, key=lambda x: (x.tier, x.name))[:10]:
+            fix = f"  -> should be {d.fid_name}" + (
+                "  (MULTIPLE FID matches)" if d.fid_multiple else "") if d.fid_name else ""
             print(f"      [T{d.tier}] {d.program.rsplit('/',1)[-1]:20} "
-                  f"{d.address:>10}  {d.name}   [{d.library_reason}]")
+                  f"{d.address:>10}  {d.name}{fix}")
         if len(group) > 10:
             print(f"      … and {len(group)-10} more")
 
@@ -345,6 +437,8 @@ def main() -> int:
                 "defects": [{"program": d.program, "name": d.name,
                              "address": d.address, "prefix": d.prefix,
                              "tier": d.tier,
+                             "fid_name": d.fid_name,
+                             "fid_multiple": d.fid_multiple,
                              "reason": d.library_reason} for d in defects],
             }, fh, indent=2)
         print(f"\nwrote {args.json}", file=sys.stderr)
