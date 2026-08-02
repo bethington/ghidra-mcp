@@ -84,11 +84,26 @@ Hybrid — the C source is authoritative for structural data (names, types, sign
 
 ## Toolchain
 
-Empirically matched to D2 1.13d's `D2Common.dll`:
+> **CORRECTION 2026-08-02 — the compiler premise below was wrong.** The Rich
+> header of every shipped D2 binary was re-parsed, and **build 6030 is Visual
+> Studio .NET 2003 SP1 (7.10.6030), not VC6 SP6.** VC6 SP6 is build 8804 — which
+> is what our own `cl.exe` reports (`12.00.8804`). Measured across
+> D2Common / D2Client / D2Game / Fog / Storm: **zero** VC6-compiler objects
+> (`Utc12_*` product IDs) in any of them; every entry is a 710-series product.
+> D2 was compiled *and* linked with VS2003 SP1. It never touched VC6.
+>
+> That means `--toolchain vc6sp6` matches D2's **linker** output (which is why
+> the PE header fields line up exactly) but NOT its compiler, so the generated
+> code idiom differs. Getting VS2003 SP1's `cl.exe` + `LIBCMT.LIB` from the
+> `vs2003-pro` media would make the benchmark genuinely period-correct — and,
+> more importantly, would let a Function ID database actually recognise D2's
+> statically-linked CRT. See `scripts/fid/README.md`.
 
-- Compiler (cl.exe): **Visual C++ 6.0 SP6** (Rich header confirms build 6030)
-- Linker (link.exe): VC 7.1 (OptionalHeader linker version 7.10) — mixed toolchain per Blizzard's known pattern
-- CRT: static (`/MT`) — no MSVCRT import
+Originally believed (compiler line now known to be wrong):
+
+- Compiler (cl.exe): ~~**Visual C++ 6.0 SP6**~~ → **VS2003 SP1 (7.10.6030)**
+- Linker (link.exe): VC 7.1 (OptionalHeader linker version 7.10) — confirmed correct
+- CRT: static (`/MT`) — no MSVCRT import — confirmed correct
 - Flags: `/O2 /GF`, x86 Win32 subsystem
 
 **The period-correct toolchain is live as of 2026-08-02** — `python build.py --toolchain vc6sp6` is the real thing, not a plan. It uses VC6 SP6 `cl.exe` (build 6030) for compilation and VS 2003 `link.exe` (7.10) for linking, from the pinned tree at `tools/vc6/`.
