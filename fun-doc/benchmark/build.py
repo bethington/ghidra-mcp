@@ -1,11 +1,14 @@
 """Build Benchmark.dll from src/*.c.
 
-Walking skeleton uses modern MSVC 2022 (the only toolchain installed on this
-machine today). The real target is MSVC 6.0 SP6 for compilation + VS2003 for
-linking — that's what D2 1.13d was built with, confirmed empirically from
-D2Common.dll's Rich header. Swap in via `--toolchain vc6sp6` once that's
-installed; until then the skeleton proves the pipeline end-to-end with a
-pragmatic stand-in.
+Two toolchains. `vc6sp6` is the period-correct one and it WORKS as of
+2026-08-02 — MSVC 6.0 SP6 cl.exe for compilation plus VS2003 link.exe for
+linking, which is what D2 1.13d was built with (confirmed empirically from
+D2Common.dll's Rich header). Its output matches D2Common.dll on linker version
+7.10, image base 0x6FD50000, OS/subsystem 4.00 and Rich-header presence.
+
+`msvc2022` remains as a stand-in for machines without the pinned VC6 tree, but
+it is no longer "the toolchain installed today" — prefer `--toolchain vc6sp6`
+for anything that cares about compiler idiom or PE provenance.
 
 Outputs (all under fun-doc/benchmark/build/):
   Benchmark.dll   — the compiled 32-bit PE DLL, stripped of PDB

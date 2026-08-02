@@ -91,7 +91,21 @@ Empirically matched to D2 1.13d's `D2Common.dll`:
 - CRT: static (`/MT`) — no MSVCRT import
 - Flags: `/O2 /GF`, x86 Win32 subsystem
 
-Walking skeleton uses modern MSVC 2022 as a placeholder so the pipeline can be proven before we install VC6. Once proven, `build.py` takes a `--toolchain vc6sp6` flag and swaps in `cl.exe` + `link.exe` from a pinned VC6 SP6 install.
+**The period-correct toolchain is live as of 2026-08-02** — `python build.py --toolchain vc6sp6` is the real thing, not a plan. It uses VC6 SP6 `cl.exe` (build 6030) for compilation and VS 2003 `link.exe` (7.10) for linking, from the pinned tree at `tools/vc6/`.
+
+Verified field by field against the shipped D2Common.dll — the output matches on every characteristic the mixed toolchain was chosen for:
+
+| Field | Benchmark.dll | D2Common.dll |
+| --- | --- | --- |
+| Linker version | 7.10 | 7.10 |
+| Image base | 0x6FD50000 | 0x6FD50000 |
+| OS version | 4.00 | 4.00 |
+| Subsystem version | 4.00 | 4.00 |
+| Rich header | present | present |
+
+`--toolchain msvc2022` remains available as the modern stand-in, but it is no longer the default story: it produces linker 14.x and a different Rich header, so anything sensitive to compiler idiom or PE provenance should use `vc6sp6`.
+
+Note that `extract_truth.py` reads the C sources and `truth/*.yaml`, not the binary, so switching toolchains does not move the answer key — 9 functions, 0 entries changed across the swap. The rebuild changes what is analysed, not what it is scored against.
 
 ## Running
 
