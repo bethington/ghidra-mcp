@@ -101,9 +101,20 @@ _AUTO_NAME_RE = re.compile(r"^(FUN_|thunk_FUN_|Ordinal_|thunk_Ordinal_|SUB_|LAB_
 # Signature params Ghidra invented rather than a human asserted.
 _AUTO_PARAM_RE = re.compile(r"^(param_\d+|in_[A-Z]{2,3}\d*|unaff_\w+|extraout_\w+)$")
 
-# plate_scaffold emits orphaned prose as "name: (implicit / not in signature) - desc";
-# those lines are deliberately NOT claims about the formal signature.
-_IMPLICIT_TYPE_RE = re.compile(r"implicit", re.I)
+# A plate line is NOT a claim about the formal signature when it marks itself
+# implicit -- either in the TYPE ("(implicit / not in signature)", what
+# plate_scaffold emits for orphaned prose) or in the DESCRIPTION, where the
+# corpus convention is a trailing "[IMPLICIT]" tag for a register-passed
+# operand. Measured 2026-08-02: `StoreSehContext`'s plate documents
+# "dwExceptionContext: uint - exception context value passed in EAX
+# [IMPLICIT]" -- a correct description of a register input, which the
+# type-only check read as a claim about a nonexistent formal parameter.
+_IMPLICIT_RE = re.compile(r"\bimplicit\b", re.I)
+
+# Return types that assert nothing. Ghidra writes `undefined` when it could not
+# infer a return type at all, so "plate says void, prototype says undefined" is
+# an ABSENCE of information on the prototype side, not a contradiction.
+_UNKNOWN_RET_TYPES = frozenset({"", "undefined", "unknown"})
 
 # Return-register datum-width classification, ported from
 # scripts/audit_ret_widths.py (see its docstrings for the MOVZX-vs-MOVSX and
@@ -208,8 +219,8 @@ def _doc_param_lines(plate: str) -> list:
         m = _PARAM_PLAIN.match(ln) or _PARAM_MD.match(ln)
         if not m:
             continue
-        nm, ty = m.group(1), m.group(2).strip()
-        if _IMPLICIT_TYPE_RE.search(ty):
+        nm, ty, desc = m.group(1), m.group(2).strip(), m.group(3)
+        if _IMPLICIT_RE.search(ty) or _IMPLICIT_RE.search(desc or ""):
             continue
         out.append((nm, ty))
     return out
@@ -262,6 +273,17 @@ def check_param_mismatch(bundle: dict) -> List[Finding]:
         tier = TIER_MECHANICAL
         why = (f"signature has {len(sig_names)} parameter(s) "
                f"({', '.join(sig_names) or 'none'})")
+        # Which side is wrong? If the callee's own cleanup implies at least as
+        # many stack slots as the plate documents, the SIGNATURE is the stale
+        # one -- say so, or the fixer deletes correct prose to satisfy a wrong
+        # prototype (`StoreSehContext`: plate 1 param, signature 0, RET 0x4).
+        parsed = parse_disasm(bundle.get("disasm_text") or "")
+        pops = _ret_pops(parsed) if parsed else set()
+        if len(pops) == 1:
+            obs = next(iter(pops))
+            if obs and obs // 4 >= len(doc_params) > len(sig_names):
+                why += (f", but RET 0x{obs:x} implies {obs // 4} stack slot(s) "
+                        f"-- the SIGNATURE is the stale side, not the plate")
     else:
         tier = TIER_REVIEW
         why = ("signature names differ "
@@ -368,7 +390,11 @@ def check_return(bundle: dict) -> List[Finding]:
     rt = (bundle.get("return_type") or "").strip()
     out: List[Finding] = []
     plate_rt = _plate_return_type(bundle.get("plate") or "")
-    if plate_rt:
+    # An `undefined` prototype return asserts nothing (Ghidra could not infer
+    # one), so it cannot contradict the plate either way -- comparing against
+    # it manufactured findings on functions whose plate was simply ahead of
+    # the prototype.
+    if plate_rt and rt.lower() not in _UNKNOWN_RET_TYPES:
         rt_void = rt.lower() == "void"
         plate_void = plate_rt.lower() == "void"
         if rt_void and not plate_void:
@@ -376,7 +402,7 @@ def check_return(bundle: dict) -> List[Finding]:
                            claim=f"plate Returns documents '{plate_rt}'",
                            evidence="prototype return type is void",
                            plate_return=plate_rt, prototype_return=rt))
-        elif not rt_void and rt and plate_void:
+        elif not rt_void and plate_void:
             out.append(_mk(bundle, "return_contradiction", TIER_REVIEW,
                            claim="plate Returns documents void",
                            evidence=f"prototype return type is '{rt}'",
@@ -435,8 +461,15 @@ def check_name_verb(bundle: dict) -> List[Finding]:
                            verb=_READER_VERB_RE.match(name).group(1),
                            written_globals=addrs))
     elif _WRITER_VERB_RE.match(name):
-        has_calls = any(mn == "CALL" for _, mn, _ in parsed)
-        if not has_calls and not _has_any_mem_write(parsed):
+        # Delegation makes the write invisible here: a CALL, or a TAIL CALL.
+        # An IAT thunk is literally one `JMP dword ptr [0x...]` -- it performs
+        # the mutation through the import and writes nothing itself, which the
+        # CALL-only guard read as "promises a mutation, does nothing"
+        # (measured 2026-08-02 on D2MCPClient's `WriteDataWithSizeVerification`
+        # and `SetGameStateFields`, both pure import thunks).
+        delegates = any(mn == "CALL" or mn.startswith("JMP")
+                        for _, mn, _ in parsed)
+        if not delegates and not _has_any_mem_write(parsed):
             out.append(_mk(bundle, "name_verb_contradiction", TIER_REVIEW,
                            claim=f"name '{name}' promises a mutation",
                            evidence="no non-local memory write and no call "

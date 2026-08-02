@@ -394,3 +394,64 @@ def test_finding_round_trips_to_dict():
     assert d["check_id"] == "convention_contradiction"
     assert d["tier"] == 1
     assert isinstance(d["detail"], dict)
+
+
+# ------------------------------------ false positives found by the corpus ---
+# Every case below is a REAL finding the first whole-corpus dry-run produced
+# (2026-08-02, 4 scannable binaries, 107 findings) that hand-verification
+# against live disassembly showed to be wrong. Tier-1 findings carry
+# consequences, so each of these is a guard, not a preference.
+
+def test_implicit_marker_in_description_is_not_a_signature_claim():
+    """D2MCPClient `StoreSehContext`: the plate documents a REGISTER input and
+    says so ("passed in EAX [IMPLICIT]"). Reading it as a claim about a
+    nonexistent formal parameter was a tier-1 false accusation."""
+    plate = ("Stores SEH context.\n\nParameters:\n"
+             "  dwExceptionContext: uint - exception context value passed in "
+             "EAX [IMPLICIT]\n")
+    b = _bundle(plate=plate, params=[])
+    assert fz.check_param_mismatch(b) == []
+
+
+def test_param_mismatch_names_the_stale_side():
+    """When the callee's own cleanup implies at least as many slots as the
+    plate documents, the SIGNATURE is stale — the evidence has to say so or
+    the fixer deletes correct prose to satisfy a wrong prototype."""
+    plate = ("Stores it.\n\nParameters:\n"
+             "  dwContext: uint - the context dword\n")
+    b = _bundle(plate=plate, params=[], calling_convention="__stdcall",
+                disasm_text=_dis("MOV ECX,dword ptr [ESP + 0x4]", "RET 0x4"))
+    f = fz.check_param_mismatch(b)
+    assert len(f) == 1 and f[0].tier == fz.TIER_MECHANICAL
+    assert "SIGNATURE is the stale side" in f[0].evidence
+
+
+def test_undefined_prototype_return_asserts_nothing():
+    """SmackW32 `SMACK_InitializeDecodeState`: plate correctly says the
+    function returns nothing; Ghidra simply never inferred a return type
+    (`undefined`). An absence of information is not a contradiction."""
+    plate = "Initializes state.\n\nReturns:\n  void: No return value.\n"
+    b = _bundle(return_type="undefined", plate=plate,
+                disasm_text=_dis("MOV EAX,0x1", "RET"))
+    assert fz.check_return(b) == []
+    # ...and the inverse direction is equally uninformative.
+    plate2 = "Reads it.\n\nReturns:\n  uint: the value\n"
+    assert fz.check_return(_bundle(return_type="undefined", plate=plate2,
+                                   disasm_text=_dis("MOV EAX,0x1", "RET"))) == []
+
+
+def test_import_thunk_is_delegation_not_a_broken_setter():
+    """D2MCPClient `WriteDataWithSizeVerification` / `SetGameStateFields` are
+    one-instruction IAT thunks: `JMP dword ptr [0x...]`. The mutation happens
+    through the import — a tail call is delegation exactly like a CALL."""
+    for name in ("WriteDataWithSizeVerification", "SetGameStateFields"):
+        b = _bundle(name=name,
+                    disasm_text=_dis("JMP dword ptr [0x6fa28014]"))
+        assert fz.check_name_verb(b) == [], f"{name} is a thunk, not a defect"
+
+
+def test_real_broken_setter_still_fires_after_the_thunk_guard():
+    """The thunk guard must not disarm the check it guards."""
+    b = _bundle(name="D2CLIENT_SetVideoFlag",
+                disasm_text=_dis("MOV EAX,0x1", "RET"))
+    assert _ids(fz.check_name_verb(b)) == ["name_verb_contradiction"]

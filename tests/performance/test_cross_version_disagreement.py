@@ -136,3 +136,102 @@ def test_flag_finding_tier2_wording_and_idempotency(monkeypatch):
     assert fz.flag_finding("/a/x.dll", "6fd51000", f,
                            date="2026-08-03") == "already-flagged"
     assert len(posts) == 1
+
+
+# ------------------------------- cross-PROGRAM requirement (measured 2026-08-02)
+
+def test_within_binary_clones_are_not_a_disagreement():
+    """The flaw the first live run exposed: BH.dll's lazy-import dispatchers
+    hash identically 29 at a time (the normalized hash rewrites externals to
+    CALL_EXT, so it cannot see WHICH import each thunk resolves). Those are
+    different functions sharing a shape — 883 groups of pure noise on one
+    folder before the cross-program requirement."""
+    rows = {"/Mods/PD2-S12/BH.dll": [
+        _row("BH_DispatchLazyProc", addr="10032000"),
+        _row("DispatchLazyD2Proc", addr="10032030"),
+        _row("DATATBLS_InvokeCachedD2Proc", addr="10032060"),
+    ]}
+    assert cvd.find_disagreements(cvd.group_rows(rows)) == []
+
+
+def test_two_programs_agreeing_internally_still_disagree_across():
+    rows = {
+        "/Vanilla/1.09d/D2Common.dll": [_row("Alpha"), _row("Alpha", addr="2000")],
+        "/Vanilla/1.13c/D2Common.dll": [_row("Beta", addr="3000")],
+    }
+    g = cvd.find_disagreements(cvd.group_rows(rows))
+    assert len(g) == 1
+    assert g[0]["programs"] == ["/Vanilla/1.09d/D2Common.dll",
+                                "/Vanilla/1.13c/D2Common.dll"]
+
+
+def test_same_name_in_both_programs_is_not_a_disagreement():
+    """Two programs, each internally messy but agreeing with each other on the
+    name set, is not a cross-version disagreement."""
+    rows = {
+        "/a/x.dll": [_row("Alpha"), _row("Alpha", addr="2000")],
+        "/b/x.dll": [_row("Alpha", addr="3000")],
+    }
+    assert cvd.find_disagreements(cvd.group_rows(rows)) == []
+
+
+def test_min_programs_knob_can_widen_the_requirement():
+    rows = {
+        "/a/x.dll": [_row("Alpha")],
+        "/b/x.dll": [_row("Beta", addr="2000")],
+    }
+    assert len(cvd.find_disagreements(cvd.group_rows(rows), min_programs=2)) == 1
+    assert cvd.find_disagreements(cvd.group_rows(rows), min_programs=3) == []
+
+
+def test_clone_family_is_dropped():
+    """A shape one binary stamps out 20 times is a clone family: the hash
+    rewrites externals to CALL_EXT so it cannot tell the members apart, and no
+    name difference among them is a claim about anything. Measured: BH.dll
+    contributed 20+ members to several PD2-S12 groups."""
+    rows = {
+        "/M/BH.dll": [_row(f"Thunk{i}", addr=f"1003{i:04x}") for i in range(20)],
+        "/M/ProjectDiablo.dll": [_row("GetD2ClientProc", addr="20000000")],
+    }
+    assert cvd.find_disagreements(cvd.group_rows(rows)) == []
+
+
+def test_one_per_program_match_survives():
+    """The genuine cross-version shape: one function per program."""
+    rows = {
+        "/Vanilla/1.09d/D2Common.dll": [_row("DATATBLS_GetRecord")],
+        "/Vanilla/1.13c/D2Common.dll": [_row("ITEMS_LookupEntry", addr="2000")],
+        "/Vanilla/1.14d/D2Common.dll": [_row("ITEMS_LookupEntry", addr="3000")],
+    }
+    g = cvd.find_disagreements(cvd.group_rows(rows))
+    assert len(g) == 1 and len(g[0]["programs"]) == 3
+
+
+def test_max_per_program_can_be_disabled():
+    rows = {
+        "/M/BH.dll": [_row(f"Thunk{i}", addr=f"1003{i:04x}") for i in range(20)],
+        "/M/Other.dll": [_row("Different", addr="20000000")],
+    }
+    assert cvd.find_disagreements(cvd.group_rows(rows), max_per_program=0)
+
+
+# --------------------------------------------------- consensus / dissent ----
+
+def test_clear_majority_flags_only_the_dissenters():
+    """17 binaries call it Acquire*, one calls it Release* — flag the outlier,
+    not all 18. Flagging the majority buries the actual signal."""
+    rows = {f"/v{i}/x.dll": [_row("AcquireCriticalSectionByIndex")]
+            for i in range(9)}
+    rows["/v9/x.dll"] = [_row("ReleaseCritSectionByIndex")]
+    g = cvd.find_disagreements(cvd.group_rows(rows))[0]
+    assert cvd.consensus_name(g) == "AcquireCriticalSectionByIndex"
+    dissent = cvd.dissenting_members(g)
+    assert [m["name"] for m in dissent] == ["ReleaseCritSectionByIndex"]
+
+
+def test_no_consensus_flags_everyone():
+    """A 50/50 split has no majority — every member is equally suspect."""
+    rows = {"/a/x.dll": [_row("Alpha")], "/b/x.dll": [_row("Beta", addr="2000")]}
+    g = cvd.find_disagreements(cvd.group_rows(rows))[0]
+    assert cvd.consensus_name(g) is None
+    assert len(cvd.dissenting_members(g)) == 2

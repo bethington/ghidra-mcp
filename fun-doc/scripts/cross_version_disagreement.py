@@ -65,6 +65,16 @@ MIN_INSTRUCTIONS = 5
 PAGE = 2000
 CHECK_ID = "cross_version_disagreement"
 
+# A genuine cross-version match contributes ~ONE function per program: D2Common
+# 1.09d has one GetRecord, 1.13c has one. A shape that appears many times
+# inside a SINGLE binary is a clone family -- compiler-stamped lazy-import
+# thunks, inlined CRT helpers -- and the normalized hash cannot tell its
+# members apart because it rewrites external references to `CALL_EXT`. Those
+# members are different functions that merely share a shape, so name
+# differences between them are not disagreements. Measured on /Mods/PD2-S12:
+# BH.dll alone contributed 20+ members to several groups.
+MAX_PER_PROGRAM = 3
+
 # The propagator's name-conflict fallback appends a numeric suffix; `Foo` vs
 # `Foo_2` is that artifact, not a human disagreement.
 _PROPAGATION_SUFFIX_RE = re.compile(r"_\d+$")
@@ -93,25 +103,85 @@ def group_rows(rows_by_program: dict, lib_names_by_program: dict = None) -> dict
     return dict(groups)
 
 
-def find_disagreements(groups: dict) -> list:
-    """Groups where >=2 distinct canonical names exist across programs.
-    Returns [{hash, names: {canonical: count}, members: [...]}] sorted by
-    group size, largest first."""
+def find_disagreements(groups: dict, min_programs: int = 2,
+                       max_per_program: int = None) -> list:
+    """Groups where >=2 distinct PROGRAMS assign different canonical names to
+    byte-identical code.
+
+    The cross-PROGRAM requirement is load-bearing, not a tidiness rule.
+    Measured 2026-08-02 on /Mods/PD2-S12 alone: without it the harvester
+    reported 883 groups, dominated by WITHIN-binary clones -- BH.dll's lazy
+    import dispatchers hash identically 29 at a time because the normalized
+    hash rewrites external references to `CALL_EXT`, so it cannot see WHICH
+    import each thunk resolves. Those are genuinely different functions that
+    merely share a shape, and calling them a naming disagreement is noise.
+    Requiring two programs to disagree restores the actual claim: the SAME
+    code, shipped in two binaries, documented two different ways.
+
+    Returns [{hash, names, programs, members}] sorted by group size.
+    """
+    if max_per_program is None:
+        max_per_program = MAX_PER_PROGRAM
     out = []
     for h, members in groups.items():
         if len(members) < 2:
             continue
-        canon = Counter(canonical_name(n) for _, _, n in members)
-        if len(canon) < 2:
+        # Per-program canonical name sets; a program that internally uses
+        # several names for one shape is a within-binary matter, not this one.
+        by_program: dict = defaultdict(set)
+        counts: Counter = Counter()
+        for p, _a, n in members:
+            by_program[p].add(canonical_name(n))
+            counts[p] += 1
+        if len(by_program) < min_programs:
             continue
+        # Clone family (see MAX_PER_PROGRAM): the hash cannot distinguish the
+        # members, so no name difference among them is a claim about anything.
+        if max_per_program and max(counts.values()) > max_per_program:
+            continue
+        # At least two PROGRAMS must actually differ from each other.
+        distinct_across = {frozenset(v) for v in by_program.values()}
+        if len(distinct_across) < 2:
+            continue
+        canon = Counter(canonical_name(n) for _, _, n in members)
         out.append({
             "hash": h,
             "names": dict(canon.most_common()),
+            "programs": sorted(by_program),
             "members": [{"program": p, "address": a, "name": n}
                         for p, a, n in sorted(members)],
         })
     out.sort(key=lambda g: -len(g["members"]))
     return out
+
+
+# When this share of a group's members agree on one canonical name, that name
+# is the consensus and only the DISSENTERS carry a finding. Without it the
+# harvester flags every member of a 20-binary group -- including the 17 that
+# agree -- which buries the actual outlier (measured on /Mods/PD2-S12: 1,757
+# functions flagged where ~200 are the real signal, e.g. 17 binaries calling a
+# function `AcquireCriticalSectionByIndex` while one calls it *Release*).
+CONSENSUS_SHARE = 0.70
+
+
+def consensus_name(group: dict, share: float = CONSENSUS_SHARE):
+    """The canonical name a clear majority uses, or None when the group has no
+    consensus (then every member is equally suspect and all are flagged)."""
+    names = group.get("names") or {}
+    total = sum(names.values())
+    if not total:
+        return None
+    top, n = max(names.items(), key=lambda kv: kv[1])
+    return top if (n / total) >= share else None
+
+
+def dissenting_members(group: dict, share: float = CONSENSUS_SHARE) -> list:
+    """Members worth flagging: the minority when a consensus exists, else all."""
+    consensus = consensus_name(group, share)
+    if consensus is None:
+        return list(group["members"])
+    return [m for m in group["members"]
+            if canonical_name(m["name"]) != consensus]
 
 
 def finding_for_member(member: dict, group: dict):
@@ -184,7 +254,7 @@ def apply_findings(disagreements: list, checked_at) -> dict:
                 "flagged": 0, "already_flagged": 0, "flag_errors": 0}
     try:
         for g in disagreements:
-            for m in g["members"]:
+            for m in dissenting_members(g):
                 f = finding_for_member(m, g)
                 row = repo.get_function(m["program"], m["address"])
                 if row is not None:
@@ -224,6 +294,14 @@ def main() -> int:
                          "(default: dry-run report only)")
     global MIN_INSTRUCTIONS
     ap.add_argument("--min-instructions", type=int, default=MIN_INSTRUCTIONS)
+    ap.add_argument("--min-programs", type=int, default=2,
+                    help="how many distinct programs must carry the shape "
+                         "before a name difference counts (default 2 — see "
+                         "find_disagreements for why 1 is pure noise)")
+    ap.add_argument("--max-per-program", type=int, default=MAX_PER_PROGRAM,
+                    help="drop a group when any ONE program contributes more "
+                         "than this many members (clone family — the hash "
+                         "cannot tell its members apart). 0 disables.")
     args = ap.parse_args()
     MIN_INSTRUCTIONS = args.min_instructions
 
@@ -232,7 +310,13 @@ def main() -> int:
         for folder in args.folders:
             programs.extend(falsify.list_programs(folder))
     else:
-        from falsify_sweep import all_programs
+        # Sibling module: importable as `falsify_sweep` when scripts/ is on
+        # sys.path (direct invocation) and as `scripts.falsify_sweep` under
+        # `python -m scripts.…`, which is the documented entry point.
+        try:
+            from falsify_sweep import all_programs
+        except ModuleNotFoundError:
+            from scripts.falsify_sweep import all_programs
         programs = all_programs()
 
     mode = "APPLY" if args.apply else "dry-run"
@@ -250,14 +334,21 @@ def main() -> int:
             print(f"  !! {p}: {e}", file=sys.stderr)
 
     groups = group_rows(rows_by_program, lib_by_program)
-    disagreements = find_disagreements(groups)
+    disagreements = find_disagreements(groups, min_programs=args.min_programs,
+                                       max_per_program=args.max_per_program)
 
     total_members = sum(len(g["members"]) for g in disagreements)
+    total_dissent = sum(len(dissenting_members(g)) for g in disagreements)
+    n_consensus = sum(1 for g in disagreements if consensus_name(g))
     print(f"\n=== {len(disagreements)} disagreement group(s), "
-          f"{total_members} function(s) involved ===")
+          f"{total_members} function(s) involved — "
+          f"{total_dissent} DISSENTING (these get flagged; "
+          f"{n_consensus} group(s) have a clear majority) ===")
     for g in disagreements[:20]:
-        names = ", ".join(f"{n} (x{c})" for n, c in g["names"].items())
-        print(f"\n  hash {g['hash'][:16]}...  x{len(g['members'])}: {names}")
+        names = ", ".join(f"{n} (x{c})" for n, c in list(g["names"].items())[:8])
+        progs = ", ".join(p.rsplit("/", 1)[-1] for p in g["programs"][:5])
+        print(f"\n  hash {g['hash'][:16]}...  x{len(g['members'])} across "
+              f"{len(g['programs'])} program(s) [{progs}]: {names}")
         for m in g["members"][:6]:
             print(f"    {m['program'].rsplit('/', 1)[-1]:20} {m['address']:>10}  {m['name']}")
         if len(g["members"]) > 6:
@@ -280,7 +371,14 @@ def main() -> int:
                 "group_count": len(disagreements),
                 "function_count": total_members,
                 "applied": applied,
-                "disagreements": disagreements,
+                "consensus_share": CONSENSUS_SHARE,
+                "dissenting_count": total_dissent,
+                "disagreements": [
+                    {**g,
+                     "consensus": consensus_name(g),
+                     "dissenting": dissenting_members(g)}
+                    for g in disagreements
+                ],
             }, fh, indent=2)
         print(f"\nwrote {args.json}", file=sys.stderr)
     return 0
