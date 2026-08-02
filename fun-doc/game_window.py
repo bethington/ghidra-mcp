@@ -7,29 +7,31 @@ Two visible windows belong to Game.exe, and both shipped with a title bar:
     class 'Diablo II'   style 0x14CB0000   caption + sysmenu      <- the game
     class 'D2Debugger'  style 0x14CF0000   caption + resizable    <- the harness
 
-The renderer is cnc-ddraw (ddraw.ini `renderer=opengl`, and the game had a
-border because that file says `border=true`). cnc-ddraw already exposes
-`border`, `width`, `height`, `posX`, `posY` -- so the geometry was always
-configurable. What it was not is DURABLE: ddraw.ini carries `savesettings=1`,
-so cnc-ddraw rewrites the file on exit and a pinned size or position drifts
-back to whatever the last session happened to leave.
+WIN32 IS THE ONLY LEVER -- there is no renderer config to lean on.
 
-So fun-doc owns the values and writes them into ddraw.ini immediately before
-every launch. `savesettings` is deliberately left alone: enforcement at launch
-makes it irrelevant, and turning it off would silently change behaviour the
-operator may rely on elsewhere.
+This module used to also write geometry into cnc-ddraw's `ddraw.ini`, on the
+belief that cnc-ddraw was the renderer. It never was. The game runs in the GDI
+video mode and presents through `D2Gdi.dll`, measured directly with the
+D2Debugger hook counters (`GET /capture/probe`): `StretchBlt` fires ~25/sec
+with `D2Gdi.dll` as both first and last caller, `BitBlt` zero. `ddraw` was
+merely LOADED, never called -- which is why `ddraw.ini`'s `border=false` never
+did anything, and why every observed border strip actually came from
+`_set_borderless` below.
+
+Since 2026-08-01 the point is moot in a second, harder way: SGD2FreeRes-GDI
+made `ddraw.dll` unnecessary and it was deleted from the game folder, so the
+file has no reader at all. Writing it was removed rather than left as a
+harmless no-op, because a config write that looks like it configures something
+is how a false premise survives -- this one outlived its own disproof by a day.
 
 WHAT IT DOES
 ------------
-1. `apply_ddraw_ini()` -- before launch, rewrite the [ddraw] keys we own.
-   Line-based, so comments and every key we do not own survive untouched.
-2. `apply_layout()` -- after the game is up, enforce the result with Win32:
-      * the GAME window loses WS_CAPTION/WS_THICKFRAME and is moved to the
-        configured spot (belt and braces: it should already be borderless from
-        ddraw.ini, but the config file is advisory and the window is fact);
-      * the D2DEBUGGER window KEEPS its frame -- it is a debug surface you
-        still want to drag, resize and close -- but is placed (and sized) so
-        the layout is reproducible across relaunches.
+`apply_layout()` -- after the game is up, enforce the layout with Win32:
+    * the GAME window loses WS_CAPTION/WS_THICKFRAME and is moved to the
+      configured spot;
+    * the D2DEBUGGER window KEEPS its frame -- it is a debug surface you
+      still want to drag, resize and close -- but is placed (and sized) so
+      the layout is reproducible across relaunches.
 
 CONFIG (priority_queue.json -> config.game_window), all optional:
 
@@ -61,15 +63,11 @@ from __future__ import annotations
 
 import ctypes
 import json
-import os
-import re
 from ctypes import wintypes
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PRIORITY_QUEUE = SCRIPT_DIR / "priority_queue.json"
-DEFAULT_DDRAW_INI = Path(
-    os.environ.get("D2_DDRAW_INI", r"C:\Diablo2\ProjectD2\ddraw.ini"))
 
 # Declare DPI awareness ONCE, at import, before any coordinate is read.
 #
@@ -266,76 +264,6 @@ def debugger_rect(cfg=None, game=None) -> dict:
     return {"x": x, "y": y, "w": w, "h": h}
 
 
-# ------------------------------------------------------------ ddraw.ini ----
-
-def apply_ddraw_ini(cfg=None, path=None) -> dict:
-    """Write the keys we own into [ddraw]. Returns what changed.
-
-    Line-based on purpose: cnc-ddraw's ini is heavily commented and carries
-    many keys that are none of our business (shader, maxfps, hook, vhack...).
-    A configparser round-trip would strip every comment and reorder the file.
-    """
-    cfg = cfg or load_config()
-    path = Path(path or DEFAULT_DDRAW_INI)
-    if not cfg.get("enabled", True):
-        return {"skipped": "game_window.enabled is false"}
-    if not path.exists():
-        return {"error": f"ddraw.ini not found: {path}"}
-
-    g = game_rect(cfg)
-    w, h, x, y = g["w"], g["h"], g["x"], g["y"]
-    want = {
-        "width": str(w),
-        "height": str(h),
-        "windowed": "true",
-        # fullscreen=true would make cnc-ddraw fill the screen and ignore the
-        # pinned size -- the opposite of a fixed-geometry window.
-        "fullscreen": "false",
-        "border": "false" if cfg.get("borderless", True) else "true",
-        "posX": str(x),
-        "posY": str(y),
-    }
-
-    try:
-        original = path.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
-        return {"error": f"could not read {path}: {e}"}
-
-    seen, out = set(), []
-    in_section = False
-    for line in original.splitlines(keepends=True):
-        stripped = line.strip()
-        if stripped.startswith("["):
-            if in_section:
-                # Leaving [ddraw]: emit anything the file never had.
-                for k, v in want.items():
-                    if k not in seen:
-                        out.append(f"{k}={v}\n")
-                        seen.add(k)
-            in_section = stripped.lower() == "[ddraw]"
-            out.append(line)
-            continue
-        m = re.match(r"^(\s*)([A-Za-z_][\w]*)(\s*=\s*)(.*?)(\s*)$", line)
-        if in_section and m and m.group(2) in want:
-            key = m.group(2)
-            seen.add(key)
-            out.append(f"{m.group(1)}{key}{m.group(3)}{want[key]}\n")
-        else:
-            out.append(line)
-    if in_section:
-        for k, v in want.items():
-            if k not in seen:
-                out.append(f"{k}={v}\n")
-
-    new = "".join(out)
-    if new != original:
-        try:
-            path.write_text(new, encoding="utf-8")
-        except OSError as e:
-            return {"error": f"could not write {path}: {e}"}
-    return {"path": str(path), "applied": want, "changed": new != original}
-
-
 # --------------------------------------------------------------- Win32 ----
 
 def _find_windows(class_name: str) -> list:
@@ -395,10 +323,8 @@ def _place(hwnd, x, y, w=None, h=None) -> None:
 def apply_layout(cfg=None) -> dict:
     """Enforce the layout on the LIVE windows. Safe to call repeatedly.
 
-    ddraw.ini is advisory -- it is read at startup and only by the renderer.
-    The window is the fact, so this is what actually guarantees the result,
-    and it is also the only way to place the D2Debugger window (which cnc-ddraw
-    knows nothing about).
+    This is the whole mechanism, not a belt-and-braces second pass: nothing
+    else in the process sets the game window's style or position.
     """
     cfg = cfg or load_config()
     if not cfg.get("enabled", True):
@@ -438,15 +364,17 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--ini", action="store_true", help="write ddraw.ini only")
-    ap.add_argument("--layout", action="store_true", help="apply to live windows only")
+    ap.add_argument("--show", action="store_true",
+                    help="print the resolved config and rects without touching any window")
     args = ap.parse_args()
     cfg = load_config()
     print("config:", json.dumps(cfg))
-    if not args.layout:
-        print("ddraw.ini:", json.dumps(apply_ddraw_ini(cfg), default=str))
-    if not args.ini:
-        print("layout  :", json.dumps(apply_layout(cfg), default=str))
+    if args.show:
+        g = game_rect(cfg)
+        print("game    :", json.dumps(g))
+        print("debugger:", json.dumps(debugger_rect(cfg, g)))
+        return 0
+    print("layout  :", json.dumps(apply_layout(cfg), default=str))
     return 0
 
 

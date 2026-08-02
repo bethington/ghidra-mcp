@@ -5,13 +5,14 @@ Two windows belong to Game.exe and both shipped with a title bar:
     class 'Diablo II'   style 0x14CB0000   caption + sysmenu     <- the game
     class 'D2Debugger'  style 0x14CF0000   caption + resizable   <- the harness
 
-cnc-ddraw already exposed border/width/height/posX/posY, so the geometry was
-always configurable -- but ddraw.ini carries `savesettings=1`, so the renderer
-rewrites the file on exit and any pinned value drifts. fun-doc therefore owns
-the values and writes them in immediately before every launch.
+Win32 is the only lever: the game presents through D2Gdi.dll, so there is no
+renderer config that could place or unframe the window. (A ddraw.ini writer
+lived here until 2026-08-02 on the belief that cnc-ddraw rendered the game; it
+never did, and ddraw.dll is no longer even installed.)
 
-The Win32 half is not tested here (it needs a live game); the geometry maths
-and the ini rewrite are, because those are what silently go wrong.
+The Win32 calls themselves are not tested here -- they need a live game. The
+geometry maths is, because that is what silently goes wrong, plus the
+`enabled: false` escape hatch, which must short-circuit before any Win32 call.
 """
 
 import sys
@@ -121,76 +122,13 @@ def test_debugger_explicit_xy_wins():
     assert (d["x"], d["y"], d["w"], d["h"]) == (5, 6, 100, 200)
 
 
-# ------------------------------------------------------------- ddraw.ini ---
+# --------------------------------------------------------------- enabled ---
 
-_INI = r"""; cnc-ddraw config
-[ddraw]
-; the width
-width=800
-height=600
-fullscreen=true
-windowed=true
-border=true
-shader=Shaders\xbr\xbr-lv2-noblend.glsl
-savesettings=1
-"""
-
-
-def test_ini_rewrites_only_the_keys_we_own(tmp_path):
-    p = tmp_path / "ddraw.ini"
-    p.write_text(_INI, encoding="utf-8")
-    res = gw.apply_ddraw_ini(_cfg(), path=p)
-    assert not res.get("error")
-    out = p.read_text(encoding="utf-8")
-    assert "border=false" in out
-    assert "fullscreen=false" in out, "fullscreen would ignore the pinned size"
-    assert "width=1068" in out and "height=600" in out
-    assert "posX=746" in out and "posY=780" in out
-    # Foreign keys and comments survive -- a configparser round-trip would
-    # strip every comment and reorder the file.
-    assert "shader=Shaders" in out
-    assert "; cnc-ddraw config" in out
-    assert "; the width" in out
-    assert "savesettings=1" in out, "savesettings is deliberately left alone"
-
-
-def test_ini_adds_missing_keys(tmp_path):
-    p = tmp_path / "ddraw.ini"
-    p.write_text("[ddraw]\nwidth=800\n", encoding="utf-8")
-    gw.apply_ddraw_ini(_cfg(), path=p)
-    out = p.read_text(encoding="utf-8")
-    for key in ("border", "posX", "posY", "fullscreen", "windowed", "height"):
-        assert f"{key}=" in out
-
-
-def test_ini_is_idempotent(tmp_path):
-    p = tmp_path / "ddraw.ini"
-    p.write_text(_INI, encoding="utf-8")
-    gw.apply_ddraw_ini(_cfg(), path=p)
-    first = p.read_text(encoding="utf-8")
-    res = gw.apply_ddraw_ini(_cfg(), path=p)
-    assert res["changed"] is False
-    assert p.read_text(encoding="utf-8") == first
-
-
-def test_ini_missing_file_is_reported_not_raised(tmp_path):
-    res = gw.apply_ddraw_ini(_cfg(), path=tmp_path / "nope.ini")
-    assert "error" in res
-
-
-def test_disabled_skips_everything(tmp_path):
-    p = tmp_path / "ddraw.ini"
-    p.write_text(_INI, encoding="utf-8")
-    res = gw.apply_ddraw_ini(_cfg(enabled=False), path=p)
+def test_disabled_skips_the_layout():
+    """`enabled: false` must return before any Win32 call, not after."""
+    res = gw.apply_layout(_cfg(enabled=False))
     assert "skipped" in res
-    assert p.read_text(encoding="utf-8") == _INI
-
-
-def test_borderless_false_keeps_the_frame(tmp_path):
-    p = tmp_path / "ddraw.ini"
-    p.write_text(_INI, encoding="utf-8")
-    gw.apply_ddraw_ini(_cfg(borderless=False), path=p)
-    assert "border=true" in p.read_text(encoding="utf-8")
+    assert "game" not in res
 
 
 # ---------------------------------------------------------------- config ---

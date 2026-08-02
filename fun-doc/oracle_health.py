@@ -919,18 +919,12 @@ class OracleHealthMonitor:
     def _launch_game(self):
         if not os.path.exists(self.launch_bat):
             return f"launcher script not found: {self.launch_bat}"
-        # Enforce the window geometry BEFORE launch: ddraw.ini is read at
-        # startup, and cnc-ddraw rewrites it on exit (savesettings=1), so
-        # writing it here is what makes the setting durable. Best-effort --
-        # a layout problem must never block a recovery launch.
-        try:
-            import game_window
-            r = game_window.apply_ddraw_ini()
-            if r.get("error"):
-                print(f"  [game-window] ddraw.ini not applied: {r['error']}",
-                      flush=True)
-        except Exception as e:  # noqa: BLE001
-            print(f"  [game-window] ddraw.ini step skipped: {e}", flush=True)
+        # No pre-launch config step: the window geometry is applied AFTER the
+        # game is up, by game_window.apply_layout() further down the recovery
+        # sequence. There used to be a ddraw.ini write here, on the belief that
+        # cnc-ddraw rendered the game and would honour it at startup. It does
+        # not render the game -- the present path is D2Gdi.dll -- and since
+        # 2026-08-01 ddraw.dll is not even in the game folder.
         try:
             if is_elevated():
                 # ALREADY ELEVATED -> run the .bat directly, windowless.
