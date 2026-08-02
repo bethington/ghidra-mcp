@@ -3,17 +3,31 @@
     Build a Ghidra Function ID database from a Visual C++ 6 installation.
 
 .DESCRIPTION
-    Diablo II 1.13c is a VC6-era build with the CRT statically linked, so its
-    runtime code is scattered through every game DLL with no symbols. Ghidra's
-    stock FID databases do not cover that toolchain: measured on this corpus,
-    FID matched only 4,325 of 70,146 functions (6%). Everything it did NOT
-    match is a function the documentation pipeline will happily hand to an LLM
-    and name as though it were game logic -- which is exactly how
-    `___acrt_locale_free_numeric` ended up called `DATATBLS_FreeUnitResourceArray`.
+    Builds a Function ID database from a set of static libraries.
 
-    Feeding VC6's own CRT libraries into a FID database closes that gap at the
-    source: every additional match is both a correct classification AND a
-    correct name, applied by an analyzer rather than a language model.
+    MEASURED RESULT FOR VC6, READ THIS BEFORE RUNNING IT: essentially zero
+    gain. Controlled A/B on fresh imports, stock databases vs stock + this one:
+
+        D2Common.dll   175 -> 176 FID matches   (+1)
+        D2Client.dll   216 -> 216 FID matches   (+0)
+
+    The premise this script was written on was wrong. Ghidra DOES ship VC6-era
+    coverage -- `Ghidra/Features/FunctionID/data/vsOlder_x86.fidbf`, alongside
+    vs2012/2015/2017/2019. They are `.fidbf` (packed), so a search for `*.fidb`
+    misses them, which is how the gap was imagined in the first place. The 1,030
+    LIBCMT signatures this produces are ~99% already present.
+
+    The corollary matters more than the script: the low FID match rate (4,325 of
+    70,146 functions corpus-wide) is NOT a database gap, so do not expect a UCRT
+    build to pay off either -- vs2019_x86.fidbf already covers the modern mod
+    DLLs. Where FID misses statically-linked CRT it is because FID hashing needs
+    near-exact code equality and inlined or differently-optimised variants
+    cannot match, no matter which library is loaded. PD2_EXT.dll is mostly CRT
+    and still matches only 184 of 468 (39%) for exactly that reason.
+
+    Kept because the machinery is correct and reusable for a toolchain Ghidra
+    genuinely does not ship (anything non-Microsoft, or a bespoke SDK), and
+    because the headless traps below are expensive to rediscover.
 
     THREE STAGES, all headless and re-runnable:
       1. Import  -- each .lib is a COFF archive; Ghidra imports every .obj
@@ -153,6 +167,12 @@ try {
 
 Write-Host ''
 Write-Host "FID database: $OutFidb"
-Write-Host 'Attach it in the GUI via Tools -> Function ID -> Choose active FidDbs,'
-Write-Host 'then re-run the Function ID analyzer on a program to pick up new matches.'
-Write-Host 'Verify the gain with: python fun-doc/doc_lint.py --program <path>'
+Write-Host 'Attach in the GUI via Tools -> Function ID -> Choose active FidDbs,'
+Write-Host 'then re-run the Function ID analyzer on a program to pick up matches.'
+Write-Host ''
+Write-Host 'MEASURE the gain before trusting it -- for VC6 it was +1 and +0:'
+Write-Host '  analyzeHeadless <proj> base  -import <bin> '
+Write-Host '     -scriptPath scripts/fid -postScript CountFidMatches.java'
+Write-Host '  analyzeHeadless <proj> withdb -import <bin> '
+Write-Host '     -scriptPath scripts/fid -preScript AttachFidDatabase.java '
+Write-Host '     -postScript CountFidMatches.java'
