@@ -106,6 +106,20 @@ ENTER_GAME_COOLDOWN_SEC = float(os.environ.get("FUNDOC_ORACLE_ENTER_GAME_COOLDOW
 # observer never sees it -- /crash stayed null through every freeze measured on
 # 2026-07-31 while the game drew nothing for twenty minutes at a time.
 NOT_PRESENTING_AFTER_POLLS = int(os.environ.get("FUNDOC_ORACLE_FROZEN_AFTER", "2"))
+# Minimum wall time between two frame samples before a flat counter means
+# anything at all. D2 presents at 25-49 fps, i.e. one frame every 20-40 ms, so
+# two polls taken closer together than that legitimately read the SAME count on
+# a perfectly healthy game. With NOT_PRESENTING_AFTER_POLLS=2 that made a pair
+# of back-to-back polls enough to declare FROZEN -- and FROZEN takes the
+# force-close path, so the penalty for the false positive is killing a healthy
+# game. Measured 2026-08-02: a game presenting a steady 25.0/sec was declared
+# "0 frames drawn over 2 polls" by two check_once() calls in a row.
+#
+# The scheduled loop polls every POLL_INTERVAL_SEC (45s) and clears this
+# trivially. The guard exists for the OFF-CADENCE callers, which is every other
+# entry point: start()'s synchronous first check, the post-relaunch refresh, and
+# the dashboard's on-demand /api/health route.
+MIN_PRESENT_SAMPLE_SEC = float(os.environ.get("FUNDOC_ORACLE_PRESENT_MIN_SEC", "1.0"))
 
 # Live-confirmed 2026-07-27: after killing a wedged worker subprocess with no
 # oracle, `os.environ` gating recovered the worker on the very next candidate.
@@ -498,7 +512,10 @@ class OracleHealthMonitor:
             if present is not None and self._prev_present is not None:
                 elapsed = max(0.001, now_mono - (self._prev_present_at or now_mono))
                 self._state["present_rate"] = round((present - self._prev_present) / elapsed, 1)
-                stalled = present <= self._prev_present
+                # Same discipline as an unreadable probe: a sample window too
+                # short for a frame to have landed is NOT evidence of a hang.
+                stalled = (present <= self._prev_present
+                           and elapsed >= MIN_PRESENT_SAMPLE_SEC)
             if present is not None:
                 self._prev_present = present
                 self._prev_present_at = now_mono
