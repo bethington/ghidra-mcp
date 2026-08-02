@@ -42,7 +42,14 @@ public final class NamingConventions {
     );
 
     private static final Pattern PASCAL_CASE = Pattern.compile("^[A-Z][a-zA-Z0-9]+$");
-    private static final Pattern MODULE_PREFIX = Pattern.compile("^[A-Z]+_[A-Z].*");
+    // Digits are allowed after the first letter so D2-era prefixes are actually
+    // recognised. The original `^[A-Z]+_[A-Z].*` could not match `PD2_`,
+    // `PD2EXT_` or `D2CLIENT_`: `[A-Z]+` stops at the digit, so the whole name
+    // was treated as having NO module prefix -- which then failed the
+    // PascalCase check on the full string and emitted "contains underscores.
+    // Use PascalCase after the module prefix" for names that were already
+    // correct. Every `PD2_*` function in ProjectDiablo.dll was affected.
+    private static final Pattern MODULE_PREFIX = Pattern.compile("^[A-Z][A-Z0-9]*_[A-Z].*");
     // Built-in minimum function-name length; the active value flows through
     // ConventionConfig.FunctionNamingRules.minLength() so projects can override.
 
