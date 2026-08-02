@@ -53,18 +53,40 @@ gains nothing for an entirely different reason: **D2's statically-linked CRT is
 not this LIBCMT.** Same observation, different cause, and the cause is
 actionable in a way "it's redundant" never was.
 
-Untested leads, in rough order of likelihood:
+**The cause is now identified — it is not a service pack.** Two measurements:
 
-1. **A different VC6 service pack.** FID hashes need near-exact code equality,
-   so an SP5-vs-SP6 `.obj` will not match even for identical source.
-2. **A different CRT variant.** The measured runs used `-Libs LIBCMT` only;
-   `LIBC.LIB` was never built. Note D2 *does* link a multithreaded CRT — its
-   restored names include `__mtinitlocks` and `__lock_file2` — which argues for
-   an SP-level difference over a single-threaded lib.
+1. **Byte comparison.** Known-CRT functions in D2Common were compared against
+   the same symbols extracted from VC6's `LIBCMT.LIB`, with relocation sites
+   masked: `_qsort` 6%, `_atol` 18%, `__stricmp` 15%, `_sprintf` 17% — noise.
+   The same method run against `Benchmark.dll`, which links this LIBCMT, gives
+   `_strlen` **100.0%** and `_memset` **100.0%**, so the method is sound and the
+   D2 mismatch is real. A service-pack difference would look like 80–95%, not 6%.
 
-If either lands, expect the same order of improvement on the game binaries that
-the benchmark shows: roughly 7×, which would take a large slice of D2's ~66,000
-unidentified functions out of scope in one step.
+2. **Rich headers.** Every shipped D2 binary (D2Common, D2Client, D2Game, Fog,
+   Storm) contains **zero** VC6-compiler objects — no `Utc12_*` product IDs at
+   all. Every entry is a 710-series product at build **6030**, i.e. Visual
+   Studio .NET 2003 SP1 (7.10.6030). VC6 SP6 is build 8804.
+
+**D2 is compiled and linked with VS2003 SP1, not VC6.** That is why a VC6 LIBCMT
+database recognises 92% of the benchmark and ~0% of the game: it is the wrong
+CRT entirely, not a near-miss.
+
+### The concrete next step
+
+Build a FID database from **VS2003 SP1's `LIBCMT.LIB`**. The `vs2003-pro` media
+referenced in `fun-doc/benchmark/build.py` already supplied the 7.10 linker at
+`tools/vc6/VS7/Bin/`; only `Bin` was extracted, so the `Lib` directory is still
+needed. Then:
+
+```powershell
+./scripts/fid/build-vc6-fiddb.ps1 -Vc6Lib <VS2003>\Vc7\lib -Libs LIBCMT `
+    -OutFidb ./scripts/fid/vs2003sp1.fidb
+```
+
+and A/B it against `Benchmark.dll` first, then D2Common. If the diagnosis is
+right, expect the benchmark's order of improvement (roughly 7×) to transfer to
+the game binaries — which would take a large share of D2's unidentified
+functions out of the documentation queue in one step.
 
 ## Measuring a database before trusting it
 
