@@ -957,12 +957,15 @@ class WorkerManager:
                         restored=True,
                     )
                 )
-            except Exception as e:
+            except Exception:
                 # Per-binary locks and MAX_WORKERS legitimately reject some of
                 # these (e.g. half the roster already restarted by hand). Keep
                 # going and report -- a partial restore beats an aborted one.
-                msg = f"{spec.get('mode', 'functions')} on {spec.get('binary')}: {e}"
+                mode = spec.get("mode", "functions")
+                binary = spec.get("binary")
+                msg = f"{mode} on {binary}: failed to restore worker"
                 print(f"  Worker restore skipped: {msg}")
+                print(traceback.format_exc())
                 errors.append(msg)
         return {"restored": restored, "errors": errors}
 
