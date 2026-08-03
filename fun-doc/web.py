@@ -304,8 +304,10 @@ class WorkerManager:
     def _health_ghidra(self):
         try:
             s = self._ghidra_monitor.get_state()
-        except Exception as e:
-            return {"state": self._UNKNOWN, "label": "Ghidra", "detail": str(e),
+        except Exception:
+            print("[health] _health_ghidra failed:\n" + traceback.format_exc(), file=sys.stderr)
+            return {"state": self._UNKNOWN, "label": "Ghidra",
+                    "detail": "health check failed (see server log)",
                     "endpoint": None, "action": None}
         if s.get("reachable"):
             state, detail = self._OK, "answering /mcp/schema"
@@ -338,8 +340,10 @@ class WorkerManager:
     def _health_oracle(self):
         try:
             s = self._oracle_monitor.get_state()
-        except Exception as e:
-            return {"state": self._UNKNOWN, "label": "Oracle", "detail": str(e),
+        except Exception:
+            print("[health] _health_oracle failed:\n" + traceback.format_exc(), file=sys.stderr)
+            return {"state": self._UNKNOWN, "label": "Oracle",
+                    "detail": "health check failed (see server log)",
                     "endpoint": None, "action": None}
         if s.get("reachable"):
             state, detail = self._OK, "live-prove enabled"
@@ -374,8 +378,10 @@ class WorkerManager:
             from provider_pause import get_default_manager
 
             active = get_default_manager().all_active()
-        except Exception as e:
-            return {"state": self._UNKNOWN, "label": "Provider", "detail": str(e),
+        except Exception:
+            print("[health] _health_provider failed:\n" + traceback.format_exc(), file=sys.stderr)
+            return {"state": self._UNKNOWN, "label": "Provider",
+                    "detail": "health check failed (see server log)",
                     "endpoint": None, "action": None}
         if not active:
             return {"state": self._OK, "label": "Provider",
@@ -416,9 +422,10 @@ class WorkerManager:
             kind = getattr(repo.config, "backend", "unknown")
             return {"state": self._OK, "label": "Store", "detail": f"{kind} reachable",
                     "endpoint": None, "action": None}
-        except Exception as e:
+        except Exception:
+            print("[health] _health_store failed:\n" + traceback.format_exc(), file=sys.stderr)
             return {"state": self._DOWN, "label": "Store",
-                    "detail": f"{type(e).__name__}: {e}",
+                    "detail": "storage health check failed (see server log)",
                     "endpoint": None, "action": None}
 
     def has_active_port_workers(self):
