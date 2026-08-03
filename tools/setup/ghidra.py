@@ -1142,7 +1142,7 @@ def _list_benchmark_exports(repo_root: Path, mcp_url: str) -> list[tuple[str, st
     _ensure_mcp_ok("/list_exports", payload)
     exports: list[tuple[str, str]] = []
     if isinstance(payload, dict):
-        # 6.0.0 response contract: {"exports": [{"name", "address"}], "count", ...}
+        # 7.0.0 response contract: {"exports": [{"name", "address"}], "count", ...}
         for export in payload.get("exports") or []:
             if not isinstance(export, dict):
                 continue
@@ -1741,7 +1741,7 @@ def _bench_text(parsed: object) -> str:
 
 
 def _bench_envelope_items(parsed: object) -> list | None:
-    """Items from a 6.0.0 list-shaped response, or None if it isn't one.
+    """Items from a 7.0.0 list-shaped response, or None if it isn't one.
 
     The contract is {"<plural>": [...], "count", ...}. Rather than hardcode
     every plural key, find the single list-valued key alongside a "count" --
@@ -1758,7 +1758,7 @@ def _bench_envelope_items(parsed: object) -> list | None:
 def _bench_lines(parsed: object) -> list[str]:
     """One line per logical item.
 
-    Post-6.0.0 the list tools return records, so "lines" means "items": each
+    Post-7.0.0 the list tools return records, so "lines" means "items": each
     record is rendered compactly so `contains` needles still match field values
     and `min_lines` still counts results.
     """

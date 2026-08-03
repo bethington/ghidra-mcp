@@ -266,7 +266,7 @@ set_comment(address, comment, type="plate|pre|eol|post|repeatable", program="")
 ```
 
 `type` also accepts the aliases `decompiler` (= `pre`) and `disassembly`
-(= `eol`). In 6.0.0 this pair absorbed the function-only
+(= `eol`). In 7.0.0 this pair absorbed the function-only
 `set_plate_comment` / `set_decompiler_comment` / `set_disassembly_comment` /
 `get_plate_comment` tools, so it is now the only comment reader/writer you
 need — including for the "every documented global carries a comment" rule.

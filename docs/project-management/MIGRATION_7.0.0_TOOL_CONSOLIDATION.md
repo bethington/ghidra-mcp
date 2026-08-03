@@ -1,4 +1,4 @@
-# 6.0.0 Tool Consolidation — Migration Contract
+# 7.0.0 Tool Consolidation — Migration Contract
 
 Clean break (no aliases): old tools/routes are **deleted**; every internal caller
 (fun-doc, bridge, scripts, skills, docs/prompts, tests) is migrated to the survivor.

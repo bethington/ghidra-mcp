@@ -32,7 +32,7 @@ import fun_doc as fd  # noqa: E402
 # --------------------------------------------------------------------------- #
 # _image_range — dynamic per-program image window (any base address)
 # --------------------------------------------------------------------------- #
-# 6.0.0: list_segments returns structured records inside the standard envelope.
+# 7.0.0: list_segments returns structured records inside the standard envelope.
 def _segments(*blocks):
     return {"segments": list(blocks), "count": len(blocks),
             "offset": 0, "total": len(blocks)}
@@ -45,7 +45,7 @@ _SEGMENTS = _segments(
     {"name": ".data", "start": "1011c000", "end": "101254eb"},
     {"name": ".reloc", "start": "10128000", "end": "101371ff"},
     # A malformed record (no start/end) must be skipped, not crash the parse --
-    # the pre-6.0.0 text form had the same case as a rangeless "tdb:" line.
+    # the pre-7.0.0 text form had the same case as a rangeless "tdb:" line.
     {"name": "tdb"},
 )
 
@@ -125,7 +125,7 @@ def test_sync_global_band_autocreates_map(monkeypatch):
 # --------------------------------------------------------------------------- #
 # run_assess_globals_pass — score -> band (no rung, no cache)
 # --------------------------------------------------------------------------- #
-# 6.0.0 response contract: list-shaped tools return a named plural key plus
+# 7.0.0 response contract: list-shaped tools return a named plural key plus
 # count/total. list_globals entries are still preformatted lines.
 _GLOBAL_LINES = [
     "g_dwPlayerCount @ 6fbc9a50 [data] (int) xrefs=10",     # scores 100 -> COMPLETE_100

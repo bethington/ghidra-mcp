@@ -1756,7 +1756,7 @@ def _ghidra_get_json(path: str):
         return None
     finally:
         conn.close()
-    # /get_metadata answers {"result": "<json string>"} through the 6.0.0 envelope.
+    # /get_metadata answers {"result": "<json string>"} through the 7.0.0 envelope.
     if isinstance(body, dict) and isinstance(body.get("result"), str):
         try:
             return json.loads(body["result"])

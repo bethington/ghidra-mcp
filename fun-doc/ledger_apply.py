@@ -76,7 +76,7 @@ def _parse_layout(response) -> dict:
     """/get_struct_layout JSON ({"fields": [{"offset","size","type","name"}]})
     -> {offset: {'type':.., 'name':.., 'size':..}}.
 
-    6.0.0's response-contract migration replaced the old pipe-delimited ASCII
+    7.0.0's response-contract migration replaced the old pipe-delimited ASCII
     table this used to regex-parse with a real JSON `fields` array -- see
     docs/project-management/MCP_RESPONSE_CONTRACT.md Stage 6. A field with no
     name comes back as `"name": null` (unnamed/padding); normalize to "" so

@@ -4,7 +4,201 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
+
+### Tool consolidation (breaking) — 272 → 251 tools
+
+Redundant tools were folded into "one-or-many" survivors. **No capability was
+removed**: every operation the deleted tools performed is reachable through the
+survivor. Because 7.0.0 is the breaking boundary, this is a clean break with no
+backward-compatibility aliases. Full rationale and the behavior evidence behind
+each merge are in
+[`docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md`](docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md);
+the old→new call-site contract is in
+[`docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+
+**Comments (−4).** `set_plate_comment`, `set_decompiler_comment`,
+`set_disassembly_comment` → `set_comment(address, comment, type=plate|pre|eol|post|repeatable)`;
+`get_plate_comment` → `get_comment` (returns every kind at once). The survivors
+work at **any** address — the removed tools were function-only, so plate
+comments on data globals no longer need the `batch_set_comments` workaround.
+`set_comment(type=plate)` also flushes the decompiler cache and surfaces
+plate-structure warnings, matching the old `set_plate_comment` behavior.
+
+**Single/batch → variadic (−8).** Each survivor now takes one item **or** a
+bulk collection:
+
+| Removed | Survivor | Bulk form |
+| --- | --- | --- |
+| `batch_add_function_tags` | `add_function_tag` | `assignments=[{function,tags}]` |
+| `batch_remove_function_tags` | `remove_function_tag` | `assignments=[{function,tags}]` |
+| `batch_create_labels` | `create_label` | `labels=[{address,name}]` |
+| `batch_delete_labels` | `delete_label` | `labels=[{address,name}]` |
+| `batch_decompile` | `decompile_function` | `functions="a,b,c"` |
+| `batch_analyze_completeness` | `analyze_function_completeness` | `addresses="0x..,0x.."` |
+| `rename_variable` | `rename_variables` | `variable_renames=[...]` |
+| `batch_set_variable_types` | `set_variables` | `variables=[{name,type}]` |
+
+Note the verb change on completeness scoring: the bulk path is now a **GET**
+with a comma-separated `addresses` query parameter (it was a POST with a JSON
+array), which also puts it on the concurrent read path instead of the
+serialized write path.
+
+**True duplicates (−4).** `get_data_type_size` → `get_type_size` (a strict
+superset: adds alignment + path); `validate_data_type_exists` →
+`validate_data_type` with `address` now optional;
+`rename_function_by_address` → `rename_function`, whose `old_name` accepts a
+name **or** an address. `mcp_health` was evaluated and **kept** — it is a
+diagnostics endpoint (pool stats, uptime, memory), not a duplicate of
+`check_connection`'s liveness probe.
+
+**Semantic unifications (−6).** `set_local_variable_type` /
+`set_parameter_type` / `set_decompiler_variable_type` → `set_variable_type`
+(applies at the decompiler high-variable layer, which covers both locals and
+parameters). `rename_data` / `rename_global_variable` / `rename_label` /
+`rename_or_label` / `rename_external_location` → `rename_symbol(target,
+new_name, kind=auto|data|global|label|external)`; `auto` routes an address to
+rename-or-create-label and a name to a global. Pass `kind` explicitly when you
+need a specific symbol kind's validator — e.g. `kind="data"` for the hard
+name-quality rejection that `rename_data` applied.
+
+**Bug fixes shipped with the merges.**
+
+- `validate_data_type_exists` returned a false negative for every bare type
+  name (`int`, `DWORD`, `char *`) because it required a full category path. The
+  survivor reuses `get_type_size`'s resolver.
+- `remove_struct_field` / `modify_struct_field` rejected the field name you
+  passed to `create_struct`, because struct fields are auto-prefixed with
+  Hungarian notation on creation (`b` → `cB`). They now resolve by the original
+  pre-prefix stem as a fallback.
+- `get_function_labels` accepts an address as well as a name, and reports a
+  clear error when the parameter is missing.
+
+**Internal callers migrated.** fun-doc (workers, prompts, provider tool
+allowlists, benchmark harness), the Python bridge's per-endpoint timeout table,
+the deploy smoke tests in `tools/setup`, the bundled `DocumentFunctionWithClaude`
+script, the integration/offline test suites, and the operator docs all now call
+the survivors. A latent bug was fixed on the way: fun-doc's plate writes passed
+`program` in the POST **body**, where it is ignored (`@Param` defaults to
+`ParamSource.QUERY`) — those writes were landing on whichever program was
+focused in the UI and bypassing fun-doc's scope guard.
+
+### Response contract (breaking) — every tool returns JSON
+
+Endpoints that answered in prose now answer in JSON. `CLAUDE.md` had claimed
+"all endpoints return JSON" for years, but it was never enforced: by 6.0.0
+**33 of 86** list-shaped and getter tools still returned newline-joined text,
+and errors were bare English sentences.
+
+Six staged passes reshaped them — the 13 `list_*` tools, then the getters,
+then decompile/disassemble, then the standard envelopes, then 61
+validation/status returns, and finally the last 55 `Response.text` prose sites.
+List-shaped tools now return a named plural key plus `count`/`total`; errors are
+`{"error": ...}`.
+
+**What breaks.** Anything parsing stdout as English. Concretely:
+
+- `"<name> at <address>"` lines from `/list_functions`, `/list_globals`,
+  `/list_segments` are now records — read them through an envelope helper, not
+  a `split("\n")`.
+- `/decompile_function` in single mode returned bare C text; it now returns
+  `{name: code, ...}` in both modes.
+- `/get_function_by_address`, `/get_current_program_info` and friends return a
+  record, not `"Program Name: <x>"` prose.
+- An error is no longer distinguishable by "does the string look like a
+  sentence" — check for the `error` key.
+
+Every in-repo caller (fun-doc, the bridge, `tools/setup`, the scripts, the
+deploy gate, the tests) is migrated. `tests/performance/test_response_contract_callers.py`
+guards against a caller that reads a reshaped endpoint without unwrapping it —
+added after two rounds of the sweep each missed sites the previous one had not.
+
+One shape bug this exposed and fixed: parameters can now declare that an empty
+string is *meaningful*, rather than treating empty as absent. Clearing a comment
+did not work end to end before that.
+
+### MCP-protocol conformance suite
+
+`tests/conformance/` drives the server through a real MCP client rather than raw
+HTTP, so it exercises the path an AI tool actually takes. Three tiers: curated
+read assertions (meaning, not just reachability), write round-trips, and the
+debugger corpus.
+
+It is the reason most of the fixes below are known at all. Reachability testing
+had been passing on tools that returned the wrong thing — one baseline case
+asserted `nonempty` against `"Search pattern is required"`, so it passed while
+testing nothing.
+
+### Fixed
+
+- **`close_program` and auto-analysis could freeze the MCP server.** Both paths
+  now stay responsive.
+- **`debugger_launch`** failed for reasons that had been misattributed to the
+  debuggee; the real causes are resolved and the debugger tier closes 18/18,
+  unblocking the five dynamic-address tools.
+- **Program saves that race Ghidra's own auto-analysis transaction** now retry
+  instead of failing the write.
+- **`import_file`'s auto-analyze raced its own dependency flag.**
+- **`list_data_types`' category filter was mandatory in practice**, though
+  documented optional.
+- **`get_comment` silently omitted comment kinds** — it now emits all five.
+- **`move_file` / `move_folder` were unreachable outside one mode.**
+- **`rename_function` now refuses to overwrite a Function ID name** unless
+  `strict_mode=warn`. See below for why.
+
+A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
+a contract issue but broke real analysis. Both the revert and the re-baselined
+snapshots are in the history rather than squashed away.
+
+### Documentation correctness: `doc_lint` + Function ID
+
+`analyze_function_completeness` measures whether documentation is *present*. It
+cannot measure whether it is *true* — measured: `DATATBLS_DecimalStringToDouble`
+and `CLIENT_IsAllZeros` both scored COMPLETE_90 while tagged `LIB_CRT`.
+
+`fun-doc/doc_lint.py` is the correctness axis. It keys on **callees** rather
+than names, and its tier 0 is Ghidra's Function ID analyzer, read from
+`Function ID Analyzer` bookmarks. Those bookmarks **survive a rename**, which
+makes an overwritten library name *recoverable*, not merely detectable.
+
+That mattered immediately: FID had identified 4,325 functions corpus-wide, and
+143 had a subsystem prefix layered over the top by a documentation pass
+(`_vsprintf` → `DATATBLS_PrintFormattedString`; `___acrt_locale_free_numeric` →
+`DATATBLS_FreeUnitResourceArray`). All 143 were restored through a journalled,
+dry-run-default script. Six more were identified by hand, since FID never
+matched them — among them `_atodbl`, `_cftoe`, and `_NMSG_WRITE`, which is
+certain because it builds "Runtime Error!" and shows a box captioned "Microsoft
+Visual C++ Runtime Library". Five of those six carried a plate comment claiming
+a fabricated source file; all corrected.
+
+`doc_lint` then reported **0 findings corpus-wide, down from 149**.
+
+Two calibration guards are load-bearing and should not be dropped:
+`RUNTIME_PREFIXES` and `EH_ONLY_CALLEES`. Pure corpus calibration flagged
+`CRT_Init` (the conservative detector saw only 10 of 79 `CRT_` functions, so
+`CRT_` read 87% "non-library"), and treating `_CxxThrowException` as library
+evidence misfiled hand-written `PD2_AllocItemExtraData` as CRT. Those two guards
+cut a 43-finding run to 14.
+
+### Function ID databases
+
+`scripts/fid/` gains tooling to build a FID database from any static-library
+directory, plus `CountFidMatches` / `ReportFidCoverage` so a database's value is
+**measured rather than assumed**.
+
+The VC6 database works: **12 → 87 matches on `Benchmark.dll`** (7×), 92% of
+library code identified with zero false claims against the 9 authored functions.
+
+It adds nothing to D2Common (175→176) or D2Client (216→216), and the reason is
+recorded because the first attempt got it wrong: **Diablo II's static CRT is
+VS2003 SP1, not VC6.** Diagnosed two independent ways — relocation-masked byte
+comparison scores known-CRT functions at 6–18% against VC6 LIBCMT while the same
+method scores `_strlen`/`_memset` at 100.0% on `Benchmark.dll` (so the method is
+sound and the answer is negative); and the Rich header of
+D2Common/D2Client/D2Game/Fog/Storm contains **zero** VC6-compiler objects, every
+entry being a 710-series product at build 6030 = VS .NET 2003 SP1. VC6 SP6 is
+build 8804.
+
 
 ### fun-doc: live-prove ABI detection + shared-build failure attribution
 
@@ -278,83 +472,6 @@ trains you to ignore the number that is supposed to mean something.
 > bridge / CLI (loopback `Host`, no `Origin`) is unaffected. Set
 > `GHIDRA_MCP_AUTH_TOKEN` to restore cross-origin/remote access. This
 > backward-incompatible default is why this release is a major version bump.
-
-### Tool consolidation (breaking) — 272 → 251 tools
-
-Redundant tools were folded into "one-or-many" survivors. **No capability was
-removed**: every operation the deleted tools performed is reachable through the
-survivor. Because 6.0.0 is the breaking boundary, this is a clean break with no
-backward-compatibility aliases. Full rationale and the behavior evidence behind
-each merge are in
-[`docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md`](docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md);
-the old→new call-site contract is in
-[`docs/project-management/MIGRATION_6.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_6.0.0_TOOL_CONSOLIDATION.md).
-
-**Comments (−4).** `set_plate_comment`, `set_decompiler_comment`,
-`set_disassembly_comment` → `set_comment(address, comment, type=plate|pre|eol|post|repeatable)`;
-`get_plate_comment` → `get_comment` (returns every kind at once). The survivors
-work at **any** address — the removed tools were function-only, so plate
-comments on data globals no longer need the `batch_set_comments` workaround.
-`set_comment(type=plate)` also flushes the decompiler cache and surfaces
-plate-structure warnings, matching the old `set_plate_comment` behavior.
-
-**Single/batch → variadic (−8).** Each survivor now takes one item **or** a
-bulk collection:
-
-| Removed | Survivor | Bulk form |
-| --- | --- | --- |
-| `batch_add_function_tags` | `add_function_tag` | `assignments=[{function,tags}]` |
-| `batch_remove_function_tags` | `remove_function_tag` | `assignments=[{function,tags}]` |
-| `batch_create_labels` | `create_label` | `labels=[{address,name}]` |
-| `batch_delete_labels` | `delete_label` | `labels=[{address,name}]` |
-| `batch_decompile` | `decompile_function` | `functions="a,b,c"` |
-| `batch_analyze_completeness` | `analyze_function_completeness` | `addresses="0x..,0x.."` |
-| `rename_variable` | `rename_variables` | `variable_renames=[...]` |
-| `batch_set_variable_types` | `set_variables` | `variables=[{name,type}]` |
-
-Note the verb change on completeness scoring: the bulk path is now a **GET**
-with a comma-separated `addresses` query parameter (it was a POST with a JSON
-array), which also puts it on the concurrent read path instead of the
-serialized write path.
-
-**True duplicates (−4).** `get_data_type_size` → `get_type_size` (a strict
-superset: adds alignment + path); `validate_data_type_exists` →
-`validate_data_type` with `address` now optional;
-`rename_function_by_address` → `rename_function`, whose `old_name` accepts a
-name **or** an address. `mcp_health` was evaluated and **kept** — it is a
-diagnostics endpoint (pool stats, uptime, memory), not a duplicate of
-`check_connection`'s liveness probe.
-
-**Semantic unifications (−6).** `set_local_variable_type` /
-`set_parameter_type` / `set_decompiler_variable_type` → `set_variable_type`
-(applies at the decompiler high-variable layer, which covers both locals and
-parameters). `rename_data` / `rename_global_variable` / `rename_label` /
-`rename_or_label` / `rename_external_location` → `rename_symbol(target,
-new_name, kind=auto|data|global|label|external)`; `auto` routes an address to
-rename-or-create-label and a name to a global. Pass `kind` explicitly when you
-need a specific symbol kind's validator — e.g. `kind="data"` for the hard
-name-quality rejection that `rename_data` applied.
-
-**Bug fixes shipped with the merges.**
-
-- `validate_data_type_exists` returned a false negative for every bare type
-  name (`int`, `DWORD`, `char *`) because it required a full category path. The
-  survivor reuses `get_type_size`'s resolver.
-- `remove_struct_field` / `modify_struct_field` rejected the field name you
-  passed to `create_struct`, because struct fields are auto-prefixed with
-  Hungarian notation on creation (`b` → `cB`). They now resolve by the original
-  pre-prefix stem as a fallback.
-- `get_function_labels` accepts an address as well as a name, and reports a
-  clear error when the parameter is missing.
-
-**Internal callers migrated.** fun-doc (workers, prompts, provider tool
-allowlists, benchmark harness), the Python bridge's per-endpoint timeout table,
-the deploy smoke tests in `tools/setup`, the bundled `DocumentFunctionWithClaude`
-script, the integration/offline test suites, and the operator docs all now call
-the survivors. A latent bug was fixed on the way: fun-doc's plate writes passed
-`program` in the POST **body**, where it is ignored (`@Param` defaults to
-`ParamSource.QUERY`) — those writes were landing on whichever program was
-focused in the UI and bypassing fun-doc's scope guard.
 
 ### Security (pre-release hardening)
 

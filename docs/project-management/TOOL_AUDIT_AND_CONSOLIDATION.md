@@ -4,7 +4,8 @@
 fixes, and call-site migration are done and the offline suites are green; live
 verification against a running server is the open item.
 **Date:** 2026-07-25 · **Baseline:** v6.0.0 (272 endpoint-backed tools + 8 bridge static + 22 WinDbg proxy)
-**Target for approved changes:** amended **6.0.0** (see [Versioning](#5-versioning)).
+**Target for approved changes:** **7.0.0** (see [Versioning](#5-versioning) — an
+earlier plan to amend the published 6.0.0 in place was superseded 2026-08-03).
 
 This document backs a request to (1) verify the README lists every tool the server
 provides, (2) manually verify each tool behaves as its name/description claims,
@@ -187,14 +188,35 @@ variadic `set_comment`; different payload shape, so listed as opt-in, not baseli
 
 ## 5. Versioning
 
-v6.0.0 was tagged, pushed to `origin/main`, and published as a GitHub release **today**
-(2026-07-25); the bridge wheel is **not** on PyPI. Because it is hours old, low-adoption, and
-off any package registry, the plan is to **fold these breaking changes into an amended 6.0.0**
-rather than immediately cutting v7.0.0. Since 6.0.0 becomes the breaking boundary, **no
-backward-compat aliases** are needed — consolidation is a clean break.
+**These changes ship as v7.0.0.** No backward-compat aliases are needed —
+consolidation is a clean break, and the major bump is what advertises it.
 
-⚠️ Caveat to note in the release notes: amending a published tag means anyone who pulled v6.0.0
-in the interim will see drift from later pullers.
+### Superseded plan (2026-07-25 → 2026-08-03)
+
+This section originally proposed folding the breaking changes into an **amended
+6.0.0**. The reasoning was that v6.0.0 had been tagged, pushed and released only
+hours earlier, and the bridge wheel is not on PyPI — so retagging looked cheap.
+
+That is no longer the plan, and the amend-in-place idea was worse than it looked:
+
+- **It rewrites the meaning of a published tag.** Anyone who pulled v6.0.0 in the
+  interim would hold a `6.0.0` that behaves differently from a later `6.0.0`,
+  with no version string to tell the two apart. A caveat in the release notes
+  does not give a consumer a way to *detect* which one they have.
+- **It spends the signal that exists for exactly this.** Semantic versioning's
+  major bump is the mechanism for "this breaks you"; declining to use it on the
+  largest breaking change in the project's history saves nothing.
+- **The boundary claim leaks everywhere.** ~70 comments, docstrings and doc lines
+  across 34 files were written asserting the boundary was 6.0.0. Every one was
+  wrong for a reader running released 6.0.0, and all were retargeted to 7.0.0
+  when the decision changed. (A handful of `6.0.0` references that are *genuinely*
+  about the released tag — the audit baseline, the schema-vs-catalog diff, the
+  `/run_script` deletion, which really did ship in 6.0.0 — were deliberately left
+  alone. `v6.0.0` with the `v` prefix marks those.)
+
+Released **6.0.0 keeps the old behaviour**: 272 tools, prose responses. The
+consolidated 251-tool surface and the JSON response contract are **7.0.0 and
+later**.
 
 ---
 

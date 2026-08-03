@@ -95,7 +95,7 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
 
         Response r = service.getFunctionCallers("target", "", 0, 10, "");
 
-        // 6.0.0 response contract: list-shaped results are JSON with a named
+        // 7.0.0 response contract: list-shaped results are JSON with a named
         // plural key plus count/total, not a formatted "name @ addr" listing.
         assertTrue("expected a JSON Ok response, got " + r.getClass().getSimpleName(),
                    r instanceof Response.Ok);

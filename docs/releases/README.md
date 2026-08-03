@@ -9,7 +9,33 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v6.0.0 (Latest) — program storage tools, flow repair, provider resilience
+### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite
+
+**Major release, breaking.** The advertised surface consolidates **272 → 251
+tools**: five rename tools collapse into `rename_symbol`, four variable-type
+setters into `set_variable_type`, six `batch_*` tools into their one-or-many
+survivors, and the comment family into `set_comment` / `get_comment` with an
+explicit kind. No capability is removed — every operation the deleted tools
+performed is reachable through the survivor — and there are no
+backward-compatibility aliases.
+
+Every endpoint that answered in prose now answers **JSON**. List-shaped tools
+return a named plural key plus `count`/`total`; errors are `{"error": ...}`.
+Anything parsing stdout as English needs updating; the old→new call-site
+contract is in
+[MIGRATION_7.0.0_TOOL_CONSOLIDATION.md](../project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+
+A new **MCP-protocol conformance suite** drives the server through a real MCP
+client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
+including two that could freeze the server (`close_program` and auto-analysis).
+
+Also: `doc_lint.py`, a documentation *correctness* linter backed by Ghidra's
+Function ID analyzer, and a `rename_function` gate that refuses to overwrite an
+FID-produced name.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v6.0.0 — program storage tools, flow repair, provider resilience
 
 Minor release. Closes the last two gaps in Ghidra's per-program storage
 surface: **program options / metadata** (`list_option_groups`,

@@ -21,11 +21,11 @@ import requests
 
 
 def _globals_text(resp):
-    """Legacy newline-joined text from a 6.0.0 /list_globals response.
+    """Legacy newline-joined text from a 7.0.0 /list_globals response.
 
-    6.0.0 returns {"globals": [...], "count", "total"}; the entries are still
+    7.0.0 returns {"globals": [...], "count", "total"}; the entries are still
     preformatted "name @ addr [kind] (type) xrefs=N" lines, so joining them
-    reproduces the pre-6.0.0 body the patterns below were written against.
+    reproduces the pre-7.0.0 body the patterns below were written against.
     """
     if isinstance(resp, dict):
         items = resp.get("globals")
