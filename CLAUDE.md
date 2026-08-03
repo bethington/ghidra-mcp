@@ -24,6 +24,30 @@ This is a public repo with real external contributors. Their issues, PRs, and co
 - **Exception: `dependabot[bot]` PRs.** These are the repo's own configured automation, not community contributions — no person's work is at stake. The agent may comment (e.g. `@dependabot rebase`/`recreate`) and merge these autonomously once CI is green, without per-action go-ahead. This exception is scoped to PRs whose author is literally `dependabot[bot]`; it does not extend to any human contributor, even one proposing a similar dependency bump.
 - A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands (checking PR authorship to carve out the dependabot exception above); treat that as a backstop, not the boundary. The boundary is this section.
 
+## Repository scope — what belongs here
+
+This repo is the **Ghidra MCP server, its bridge, and fun-doc**. Concretely, in
+scope:
+
+- `src/`, `python/bridge_mcp_ghidra/`, `debugger/` — the server, bridge, debugger
+- `fun-doc/` — the documentation workflow, dashboard, and benchmark
+- `ghidra_scripts/`, `scripts/fid/` — Ghidra scripts and analysis tooling that
+  feed the above (e.g. Function ID databases supply `doc_lint`'s tier-0 signal)
+- `tests/`, `tools/setup/`, `docs/`
+
+**Out of scope: Diablo II game-side work.** Container/headless probes, mod
+tooling, D2Debugger harnesses, renderer experiments and conformance proving
+belong in the D2MOO repo (or their own), even when a session here produces them.
+Sharing a subject matter is not the same as sharing a codebase.
+
+This is written down because judgement alone did not hold: `scripts/d2probe/`
+was committed here on 2026-08-02 *after* being explicitly identified as
+out-of-scope in its own README, on the reasoning that the wrong repo beat no
+repo. It was rescued from a temp folder, which was a real problem — but the fix
+was to give it a home in D2MOO, not to attach 22 unrelated files to this
+project's history. If something needs rescuing and does not fit the list above,
+move it to the repo where it belongs.
+
 ## Architecture
 
 ```
