@@ -111,6 +111,49 @@ def sweep_program(program: str, index: ci.LibraryIndex, apply: bool,
             "buckets": dict(buckets), "writes": dict(writes), "matches": rows}
 
 
+def coverage_report(results: list, roots: list) -> None:
+    """Which binaries could we possibly have matched, and how much did we?
+
+    A low match count means one of two completely different things, and without
+    this table they are indistinguishable: either the binary really is mostly
+    non-library code, or it was built by a toolchain whose runtime we do not
+    hold. Measured on PD2-S12, the split is stark -- the VS2003 binaries land at
+    20-48% while everything built by a modern toolchain sits at 0-2%, which is
+    a statement about our library collection, not about those binaries.
+    """
+    print(f"\n{'='*78}\nCOVERAGE -- what could have matched, and what did\n")
+    print(f"  {'binary':22}{'funcs':>7}{'lib-id':>8}{'%':>7}  toolchain (Rich header)")
+    print("  " + "-" * 74)
+    rows = []
+    for r in results:
+        name = r["program"].rsplit("/", 1)[-1]
+        try:
+            total = len(_get("/list_functions", program=r["program"],
+                             limit=100000).get("functions", []))
+        except Exception:                                       # noqa: BLE001
+            total = 0
+        path = next((os.path.join(root, name) for root in roots
+                     if os.path.exists(os.path.join(root, name))), None)
+        if path:
+            rich = ci.rich_toolchain(path)
+            tc = (rich or {}).get("toolchain") or "no Rich header (not MSVC-linked)"
+        else:
+            tc = "<file not on disk -- cannot tell>"
+        rows.append((name, total, r.get("matched", 0), tc))
+
+    tn = tm = 0
+    for name, total, matched, tc in sorted(rows, key=lambda x: -x[1]):
+        tn += total
+        tm += matched
+        pct = f"{100.0 * matched / total:.1f}" if total else "-"
+        print(f"  {name:22}{total:>7}{matched:>8}{pct:>7}  {tc}")
+    print("  " + "-" * 74)
+    print(f"  {'TOTAL':22}{tn:>7}{tm:>8}"
+          f"{(100.0 * tm / tn if tn else 0):>6.1f}%")
+    print("\n  A binary with a toolchain we hold no library for CANNOT match,\n"
+          "  so its low number says nothing about how much of it is game code.")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -123,6 +166,11 @@ def main(argv=None) -> int:
                     help="also rename functions that already carry real "
                          "documentation (review the report first)")
     ap.add_argument("--report", default=None, help="write JSON report here")
+    ap.add_argument("--rich-root", action="append", default=None,
+                    help="directory holding the binaries on disk; enables the "
+                         "Rich-header coverage report, which says which "
+                         "toolchain built each binary and therefore whether we "
+                         "hold a library that COULD match it. Repeatable.")
     ap.add_argument("--libs", nargs="*", default=None,
                     help="override the static libraries to index")
     args = ap.parse_args(argv)
@@ -159,6 +207,9 @@ def main(argv=None) -> int:
     for k in ("already_correct", "default_named", "documented_disagrees",
               "ambiguous", "weak_evidence", "too_short"):
         print(f"  {k:22} {tot[k]:6}")
+
+    if args.rich_root:
+        coverage_report(results, args.rich_root)
 
     if not args.apply:
         print("\nDRY RUN -- nothing written. Re-run with --apply.")

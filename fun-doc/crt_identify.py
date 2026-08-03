@@ -719,6 +719,16 @@ def rich_toolchain(path: str) -> Optional[dict]:
     known = {6030: "VS2003 SP1 (7.10.6030)", 8804: "VC6 SP6 (6.0.8804)",
              9782: "VS2005", 21022: "VS2008", 30729: "VS2008 SP1",
              40219: "VS2010 SP1", 50727: "VS2005 SP1"}
-    top = max(builds.items(), key=lambda kv: kv[1])[0][1]
+    # Entries with build 0 are product ID 1 -- linker-generated import stubs,
+    # which carry no toolchain version and routinely outnumber every real
+    # entry (161 of them in D2Common against 115 for the actual compiler).
+    # Picking the most COMMON entry therefore reports "build 0" for every
+    # binary; the dominant entry among those that carry a version is the one
+    # that answers "what built this".
+    versioned = {k: v for k, v in builds.items() if k[1]}
+    if not versioned:
+        return {"builds": {f"{p}:{b}": c for (p, b), c in sorted(builds.items())},
+                "toolchain": None}
+    top = max(versioned.items(), key=lambda kv: kv[1])[0][1]
     return {"builds": {f"{p}:{b}": c for (p, b), c in sorted(builds.items())},
             "toolchain": known.get(top, f"build {top}")}
