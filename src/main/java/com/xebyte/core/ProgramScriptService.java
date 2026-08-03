@@ -345,8 +345,14 @@ public class ProgramScriptService {
                 entry.put("name", name);
                 OptionType type = opts.getType(name);
                 entry.put("type", type != null ? type.name() : "NO_TYPE");
-                entry.put("value", opts.getValueAsString(name));
-                entry.put("default_value", opts.getDefaultValueAsString(name));
+                // getValueAsString returns null for CUSTOM_TYPE options (e.g.
+                // "Analysis Times.Times"), and the JSON writer drops null-valued
+                // keys -- so the entry silently lost `value` entirely for that
+                // one type while every other entry carried it. A key the shape
+                // promises must always be present, so fall back to the stored
+                // object's own rendering before giving up on an empty string.
+                entry.put("value", optionValueString(opts, name, false));
+                entry.put("default_value", optionValueString(opts, name, true));
                 entry.put("is_default", opts.isDefaultValue(name));
                 entry.put("registered", opts.isRegistered(name));
                 String desc = opts.getDescription(name);
@@ -363,6 +369,35 @@ public class ProgramScriptService {
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
+    }
+
+    /**
+     * Render an option's value (or default) as a string that is never null.
+     *
+     * <p>{@link Options#getValueAsString} and {@link Options#getDefaultValueAsString}
+     * both return null for option types they cannot stringify -- CUSTOM_TYPE in
+     * practice. Because the JSON writer omits null-valued keys, that turned into
+     * an entry missing {@code value} altogether while its siblings had one, so a
+     * caller iterating options had to special-case a key the shape promises.
+     * Falling back to the stored object's own {@code toString} keeps the key
+     * present and usually carries real information; empty string is the last
+     * resort, meaning "present but not representable".
+     */
+    private static String optionValueString(Options opts, String name, boolean wantDefault) {
+        String value = wantDefault ? opts.getDefaultValueAsString(name) : opts.getValueAsString(name);
+        if (value != null) {
+            return value;
+        }
+        try {
+            Object raw = wantDefault ? opts.getDefaultValue(name) : opts.getObject(name, null);
+            if (raw != null) {
+                return String.valueOf(raw);
+            }
+        } catch (Exception ignored) {
+            // A custom option whose accessor throws is still an option we must
+            // list; degrade to empty rather than failing the whole group.
+        }
+        return "";
     }
 
     /**
