@@ -37,6 +37,18 @@ from typing import Any
 import pytest
 import requests
 
+# Self-skip the whole directory when the browser stack is absent. These are
+# the only tests in the repo that need pytest-playwright, and it is not a
+# declared dependency -- CI runs tests/unit and tests/performance, never
+# tests/. Without this, a plain `pytest tests/` anywhere without playwright
+# installed dies with an ImportError at COLLECTION, taking every other tier
+# down with it rather than skipping the one tier that cannot run.
+try:  # noqa: SIM105
+    import playwright.sync_api  # noqa: F401
+except ImportError:  # pragma: no cover - depends on the environment
+    collect_ignore_glob = ["test_*.py"]
+
+
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
 
 # Wall-clock budget for the page's first full hydration (bars fetch
