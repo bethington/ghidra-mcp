@@ -312,7 +312,17 @@ def test_launch_is_windowless_when_already_elevated(monkeypatch):
     assert m._launch_game() is None
     cmd, kw = spawned[0]
     assert "start" not in cmd, "an elevated launch must not spawn a lingering console"
-    assert kw.get("creationflags"), "and must suppress its own window"
+    # Assert against the module's own flag rather than "is truthy":
+    # CREATE_NO_WINDOW does not exist off Windows, where oracle_health
+    # deliberately degrades it to 0. Asserting truthiness made this a
+    # Windows-only test that failed on Linux CI for an entirely correct
+    # fallback. The Windows arm below keeps the real strength -- it is the
+    # platform where a 0 here would put orphaned consoles back on the desktop.
+    assert kw.get("creationflags") == oracle_health._NO_WINDOW, \
+        "and must suppress its own window"
+    if sys.platform == "win32":
+        assert oracle_health._NO_WINDOW, \
+            "CREATE_NO_WINDOW must resolve to a real flag on Windows"
 
 
 def test_launch_keeps_a_real_window_when_NOT_elevated(monkeypatch):
