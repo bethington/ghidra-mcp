@@ -22,7 +22,7 @@ defaults:
 
 tool_cases:
 
-  # ---- comments: set_comment absorbed the plate/pre/eol family in 6.0.0 -----
+  # ---- comments: set_comment absorbed the plate/pre/eol family in 7.0.0 -----
   - tool: set_comment
     name: write_plate
     tier: write

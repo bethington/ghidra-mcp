@@ -180,7 +180,7 @@ class TestJavaArchitecture(unittest.TestCase):
 
     def test_endpoint_registry_removed(self):
         """EndpointRegistry.java was dead code (never instantiated; routing is 100%
-        AnnotationScanner-driven in both GUI and headless) and was removed in 6.0.0."""
+        AnnotationScanner-driven in both GUI and headless) and was removed in 7.0.0."""
         self.assertFalse((CORE_SRC / "EndpointRegistry.java").exists())
 
     def test_endpoint_def_exists(self):

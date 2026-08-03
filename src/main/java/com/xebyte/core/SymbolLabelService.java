@@ -119,7 +119,7 @@ public class SymbolLabelService {
         }
     }
 
-    // rename_label merged into rename_symbol(kind=label) in 6.0.0; kept as a helper.
+    // rename_label merged into rename_symbol(kind=label) in 7.0.0; kept as a helper.
     public Response renameLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -270,7 +270,7 @@ public class SymbolLabelService {
         return batchCreateLabels(labels, null);
     }
 
-    // Bulk helper for create_label(labels=[...]). Merged into create_label in 6.0.0.
+    // Bulk helper for create_label(labels=[...]). Merged into create_label in 7.0.0.
     public Response batchCreateLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -380,7 +380,7 @@ public class SymbolLabelService {
         return renameOrLabel(addressStr, newName, null, null);
     }
 
-    // rename_or_label merged into rename_symbol (auto mode for address targets) in 6.0.0; kept as a helper.
+    // rename_or_label merged into rename_symbol (auto mode for address targets) in 7.0.0; kept as a helper.
     public Response renameOrLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -539,7 +539,7 @@ public class SymbolLabelService {
         return batchDeleteLabels(labels, null);
     }
 
-    // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 6.0.0.
+    // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 7.0.0.
     public Response batchDeleteLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -639,7 +639,7 @@ public class SymbolLabelService {
         return renameDataAtAddress(addressStr, newName, null);
     }
 
-    // rename_data merged into rename_symbol(kind=data) in 6.0.0; kept as a helper.
+    // rename_data merged into rename_symbol(kind=data) in 7.0.0; kept as a helper.
     public Response renameDataAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    aliases = {"function_address"},
@@ -760,7 +760,7 @@ public class SymbolLabelService {
         return renameGlobalVariable(oldName, newName, null, null);
     }
 
-    // rename_global_variable merged into rename_symbol(kind=global) in 6.0.0; kept as a helper.
+    // rename_global_variable merged into rename_symbol(kind=global) in 7.0.0; kept as a helper.
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
@@ -917,7 +917,7 @@ public class SymbolLabelService {
         return renameExternalLocation(address, newName, null);
     }
 
-    // rename_external_location merged into rename_symbol(kind=external) in 6.0.0; kept as a helper.
+    // rename_external_location merged into rename_symbol(kind=external) in 7.0.0; kept as a helper.
     public Response renameExternalLocation(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "

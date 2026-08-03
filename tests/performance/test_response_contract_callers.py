@@ -1,6 +1,6 @@
 """Callers of reshaped endpoints must unwrap the response, not str() it.
 
-The 6.0.0 response contract turned text-returning tools into JSON records. Every
+The 7.0.0 response contract turned text-returning tools into JSON records. Every
 consumer that regexed the old text has to go through a helper
 (`fun_doc.decompiled_text` / `disasm_text` / `_envelope_items`) instead.
 
@@ -120,7 +120,7 @@ def test_reshaped_endpoint_consumers_unwrap(endpoint: str, helpers: tuple[str, .
             )
 
     assert not offenders, (
-        f"/{endpoint} changed shape in 6.0.0; these call sites do not unwrap it "
+        f"/{endpoint} changed shape in 7.0.0; these call sites do not unwrap it "
         f"with one of {list(helpers)}.\n"
         "A dict reaching text-parsing code fails at runtime, not at import "
         "time -- see docs/project-management/MCP_RESPONSE_CONTRACT.md.\n"

@@ -157,7 +157,7 @@ class TestLiveServerSmoke:
     def test_program_metadata_present(self, http_client):
         response = http_client.get("/get_metadata")
         assert response.status_code == 200
-        # 6.0.0 response contract: a record, not "Program Name: <x>" prose.
+        # 7.0.0 response contract: a record, not "Program Name: <x>" prose.
         payload = json.loads(response.text)
         assert payload.get("program_name"), payload
         assert "architecture" in payload and "language" in payload

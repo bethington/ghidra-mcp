@@ -26,7 +26,7 @@ public class FunctionTagEndpointsOfflineTest extends TestCase {
     static {
         EXPECTED.put("/get_function_tags",
             new Expected("GET",  "function", "function", "program"));
-        // 6.0.0: batch_add_function_tags / batch_remove_function_tags folded into the
+        // 7.0.0: batch_add_function_tags / batch_remove_function_tags folded into the
         // singular tools, which now take `function`+`tags` OR `assignments=[{function,tags}]`.
         EXPECTED.put("/add_function_tag",
             new Expected("POST", "function", "function", "tags", "assignments", "program"));

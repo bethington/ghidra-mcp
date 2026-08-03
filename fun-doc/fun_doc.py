@@ -2273,10 +2273,10 @@ _GA_AUTONAME = re.compile(
     r"|^g_(dw|w|b|p|f|q)?(data|unknown|unk|ptr|field|global)?_?[0-9A-Fa-f]{3,8}$", re.I)
 _GA_IMG_LO, _GA_IMG_HI = 0x6f000000, 0x70000000  # legacy fallback (base D2 DLL map)
 def decompiled_text(resp):
-    """Pseudocode out of a 6.0.0 /decompile_function response.
+    """Pseudocode out of a 7.0.0 /decompile_function response.
 
     Single mode returns {"name", "address", "decompiled"}; bulk mode returns
-    {name: code, ...}. Before 6.0.0 single mode returned bare C text, which is
+    {name: code, ...}. Before 7.0.0 single mode returned bare C text, which is
     the self-inconsistency the response-contract migration removed.
     """
     if isinstance(resp, dict):
@@ -2312,7 +2312,7 @@ def disasm_text(resp):
 
 
 def _envelope_items(resp, key):
-    """Items out of a 6.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
+    """Items out of a 7.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
 
     Returns [] for anything unexpected (error payload, transport failure) so
     callers keep their existing "no data -> fall back" behavior rather than
@@ -2617,7 +2617,7 @@ def _batch_score(
 
         if batch_works is not False:
             timeout = first_batch_timeout if i == 0 else PER_BATCH_TIMEOUT
-            # 6.0.0: batch_analyze_completeness folded into
+            # 7.0.0: batch_analyze_completeness folded into
             # analyze_function_completeness (GET, addresses=comma-separated).
             # BATCH_SIZE is 6, so the query string stays well inside any
             # request-line limit.
@@ -4835,7 +4835,7 @@ def get_select_functions(state, program, address, depth=1):
             params={"address": f"0x{address}", "program": program},
         )
         if func_resp:
-            # 6.0.0: /get_function_by_address returns a record, not
+            # 7.0.0: /get_function_by_address returns a record, not
             # "Function: <name> at <addr>" prose.
             func_name = (func_resp.get("name") if isinstance(func_resp, dict) else None) \
                 or f"FUN_{address}"
@@ -4877,7 +4877,7 @@ def get_select_functions(state, program, address, depth=1):
         )
         if not func_resp:
             return None
-        # 6.0.0: /get_function_by_address returns a record.
+        # 7.0.0: /get_function_by_address returns a record.
         func_name = (
             (func_resp.get("name") if isinstance(func_resp, dict) else None)
             or f"FUN_{addr}"
@@ -14789,7 +14789,7 @@ def process_port_candidate(program, address, func_name, *, provider, model=None,
                                      "port_last_result": "decompile fetch failed"})
         _log("unknown_skip")
         return "unknown_skip"
-    # 6.0.0: single-mode decompile returns a record. Downstream consumers here
+    # 7.0.0: single-mode decompile returns a record. Downstream consumers here
     # (pp.classify_function, abi_static, the prompt builders) all expect the
     # pseudocode as text.
     decompiled = decompiled_text(_dec_resp)

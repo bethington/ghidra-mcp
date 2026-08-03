@@ -155,7 +155,7 @@ def _get(path: str, **params):
 
 
 def _items(resp, key: str) -> list:
-    """Items out of a 6.0.0 list envelope. Mirrors conformance_dashboard."""
+    """Items out of a 7.0.0 list envelope. Mirrors conformance_dashboard."""
     if isinstance(resp, dict):
         v = resp.get(key)
         if isinstance(v, list):

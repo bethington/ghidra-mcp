@@ -317,7 +317,7 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-    // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 6.0.0.
+    // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 7.0.0.
     public Response batchDecompileFunctions(
             @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -594,7 +594,7 @@ public class FunctionService {
     /**
      * Rename a variable in a function.
      */
-    // rename_variable merged into rename_variables in 6.0.0; kept as an internal helper
+    // rename_variable merged into rename_variables in 7.0.0; kept as an internal helper
     // (still used by the headless dispatcher). Callers pass variable_renames=[{old,new}].
     public Response renameVariableInFunction(
             @Param(value = "function_name", source = ParamSource.BODY, aliases = {"functionName"}, defaultValue = "") String functionName,
@@ -1338,7 +1338,7 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    // set_local_variable_type merged into set_variable_type in 6.0.0; kept as the shared impl
+    // set_local_variable_type merged into set_variable_type in 7.0.0; kept as the shared impl
     // that set_variable_type (and set_variable_type) delegate to.
     public Response setLocalVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
@@ -1530,7 +1530,7 @@ public class FunctionService {
     /**
      * Parameter-typing entry point (delegates to setLocalVariableType).
      */
-    // set_parameter_type merged into set_variable_type in 6.0.0; kept as an internal helper.
+    // set_parameter_type merged into set_variable_type in 7.0.0; kept as an internal helper.
     public Response setParameterTypeEndpoint(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -4338,7 +4338,7 @@ public class FunctionService {
     }
 
     // Bulk helper for add_function_tag(assignments=[...]). Merged into add_function_tag in
-    // 6.0.0; no longer a standalone @McpTool.
+    // 7.0.0; no longer a standalone @McpTool.
     public Response batchAddFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
@@ -4407,7 +4407,7 @@ public class FunctionService {
     }
 
     // Bulk helper for remove_function_tag(assignments=[...]). Merged into remove_function_tag
-    // in 6.0.0; no longer a standalone @McpTool.
+    // in 7.0.0; no longer a standalone @McpTool.
     public Response batchRemoveFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,

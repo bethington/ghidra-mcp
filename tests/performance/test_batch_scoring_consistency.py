@@ -6,7 +6,7 @@ Background: the bulk path was originally a naive for-loop calling the single
 analysis inside one invokeAndWait, which caused GUI lockup. It was rewritten to
 chunk the work with Thread.sleep yields. That rewrite must produce the same
 scores as calling the single mode individually — otherwise fun-doc's scan would
-drift from manual inspection. In 6.0.0 the separate batch_analyze_completeness
+drift from manual inspection. In 7.0.0 the separate batch_analyze_completeness
 tool was folded into analyze_function_completeness as the `addresses` parameter.
 
 This test picks N random functions, hits both paths, and asserts key fields
@@ -121,7 +121,7 @@ def test_batch_analyze_empty_addresses_rejected(server_url, server_available, cu
     """Empty address list should be rejected cleanly, not return stale data
     from a previous call or crash the EDT.
 
-    With the 6.0.0 CSV parameter an empty `addresses` is indistinguishable
+    With the 7.0.0 CSV parameter an empty `addresses` is indistinguishable
     from "omitted", so the tool falls through to single mode and errors on the
     empty function_address. Either shape counts as a clean refusal — what this
     pins is that empty input never hangs, crashes the EDT, or replays results.

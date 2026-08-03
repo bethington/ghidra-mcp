@@ -101,7 +101,7 @@ def _get_json(url: str, timeout: int = 15):
             body = json.loads(resp.read().decode("utf-8", "replace"))
     except (OSError, ValueError):
         return None
-    # 6.0.0 envelope: {"result": "<json string>"}
+    # 7.0.0 envelope: {"result": "<json string>"}
     if isinstance(body, dict) and isinstance(body.get("result"), str):
         try:
             return json.loads(body["result"])

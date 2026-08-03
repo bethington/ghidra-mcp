@@ -167,7 +167,7 @@ endpoint_smoke:
       type: "lines"
       # 4 conventions for x86:LE:32:default. The old text form carried an
       # "Available Calling Conventions (N):" header plus a blank line, so the
-      # pre-6.0.0 line count was inflated by 2.
+      # pre-7.0.0 line count was inflated by 2.
       min_lines: 4
       contains: ["__cdecl", "__stdcall", "__fastcall"]
 
@@ -202,7 +202,7 @@ endpoint_smoke:
       type: "json"
       contains_keys: ["name"]
 
-  # decompile (per-function covers most); bulk form absorbed batch_decompile in 6.0.0
+  # decompile (per-function covers most); bulk form absorbed batch_decompile in 7.0.0
   - endpoint: "/decompile_function"
     params: { functions: "0x6fd51000,0x6fd51050" }
     assert:
@@ -220,7 +220,7 @@ endpoint_smoke:
     assert:
       type: "nonempty"
 
-  # The param is `pattern`, not `query`. Before 6.0.0 the wrong name produced a
+  # The param is `pattern`, not `query`. Before 7.0.0 the wrong name produced a
   # plain-text "Search pattern is required", which satisfied `nonempty` -- so
   # this case passed while testing nothing. Converting errors to {"error": ...}
   # in stage 5 surfaced it.

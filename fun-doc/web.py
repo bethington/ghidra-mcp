@@ -3366,7 +3366,7 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                                 "address": addr if str(addr).startswith("0x") else f"0x{addr}",
                             })
                     elif isinstance(item, str):
-                        # 6.0.0 list_globals entries are still preformatted
+                        # 7.0.0 list_globals entries are still preformatted
                         # "name @ addr [kind] (type)" lines inside the envelope.
                         m = line_re.search(item)
                         if m:

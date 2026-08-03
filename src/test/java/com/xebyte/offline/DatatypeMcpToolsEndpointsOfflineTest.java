@@ -23,7 +23,7 @@ public class DatatypeMcpToolsEndpointsOfflineTest extends TestCase {
         EXPECTED.put("/set_function_this_type",
             new Expected("POST", "function", "function_address", "this_type", "program"));
         // set_local_variable_type / set_parameter_type / set_decompiler_variable_type
-        // were unified into set_variable_type in 6.0.0 (Tier-3 consolidation).
+        // were unified into set_variable_type in 7.0.0 (Tier-3 consolidation).
         EXPECTED.put("/set_variable_type",
             new Expected("POST", "function", "function_address", "new_type", "program", "variable_name"));
         EXPECTED.put("/resolve_duplicate_type",

@@ -67,10 +67,10 @@ def _post(path: str, data: dict) -> dict:
 
 
 def _envelope_items(resp, key: str) -> list:
-    """Items out of a 6.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
+    """Items out of a 7.0.0 list-shaped response: {"<key>": [...], "count", "total"}.
 
     Mirrors `fun_doc._envelope_items`. This module read `/list_globals`,
-    `/list_segments` and `/list_functions` as newline text until 6.0.0 reshaped
+    `/list_segments` and `/list_functions` as newline text until 7.0.0 reshaped
     them into JSON records; the `isinstance(txt, str) else ""` fallbacks then
     parsed an empty string and every globals/functions read silently returned
     ZERO rows -- the dashboard rendered 0/0 while the underlying property maps
@@ -81,7 +81,7 @@ def _envelope_items(resp, key: str) -> list:
         items = resp.get(key)
         if isinstance(items, list):
             return items
-    if isinstance(resp, str):          # pre-6.0.0 plugin still on the wire
+    if isinstance(resp, str):          # pre-7.0.0 plugin still on the wire
         return [ln for ln in resp.splitlines() if ln.strip()]
     return []
 
@@ -202,8 +202,8 @@ _FN_LINE = _re.compile(r"^(?P<name>\S.*?)\s+at\s+(?P<addr>[0-9a-fA-F]+)\s*$")
 
 
 def _function_rows(program: str) -> list:
-    """[(0xaddr, name)] for every defined function. Handles the 6.0.0 record shape
-    ({"functions": [{"name","address"}]}) and the pre-6.0.0 "<name> at <addr>" text.
+    """[(0xaddr, name)] for every defined function. Handles the 7.0.0 record shape
+    ({"functions": [{"name","address"}]}) and the pre-7.0.0 "<name> at <addr>" text.
 
     Address format matches `_tag_addrs` -- '0x' + bare lowercase hex, NOT zero-padded --
     so the two can be set-compared directly."""

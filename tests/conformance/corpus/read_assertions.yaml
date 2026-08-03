@@ -46,7 +46,7 @@ tool_cases:
     assert:
       json_keys: ["segments", "count", "total"]
       contains: [".text", ".rdata", ".data", "Headers"]
-      # Executability is a real property the pre-6.0.0 text form never carried.
+      # Executability is a real property the pre-7.0.0 text form never carried.
       not_contains: ['"executable":true,"initialized":false']
 
   - tool: get_function_count

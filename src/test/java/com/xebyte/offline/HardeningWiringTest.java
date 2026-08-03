@@ -86,7 +86,7 @@ public class HardeningWiringTest extends TestCase {
     }
 
     /** The dead, ungated /run_script route must stay unregistered.
-     *  (The old dead EndpointRegistry router was removed in 6.0.0.) */
+     *  (The old dead EndpointRegistry router was removed in 7.0.0.) */
     public void testRunScriptRouteNotRegistered() throws IOException {
         String plugin = read("GhidraMCPPlugin.java");
         assertFalse("GhidraMCPPlugin must not register the ungated /run_script route",

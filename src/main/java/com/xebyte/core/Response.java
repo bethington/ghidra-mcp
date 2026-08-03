@@ -63,7 +63,7 @@ public sealed interface Response permits Response.Ok, Response.Err, Response.Tex
      *
      * @deprecated Never use this for human-formatted text -- that violates the
      *     response contract, and it is the mechanism by which 33 tools drifted
-     *     away from it before 6.0.0. Use {@link #ok}, {@link #success}, or
+     *     away from it before 7.0.0. Use {@link #ok}, {@link #success}, or
      *     {@link #err}.
      */
     @Deprecated

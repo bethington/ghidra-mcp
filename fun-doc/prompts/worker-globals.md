@@ -93,7 +93,7 @@ overwriting `set_global`'s atomic writes. Move on to the next address
 |---|---|---|
 | Type | `apply_data_type(program=<full_path>, address=<addr>, type_name=<type>)` | If it fails with `Conflicting data exists`, the address already has a different type applied — try a wider/aligned type, or report blocked. |
 | Name | `rename_symbol(program=<full_path>, target=<addr>, new_name=<name>)` | Use `g_` + Hungarian + descriptor. |
-| Plate | `set_comment(program=<full_path>, address="0x<hex>", type="plate", comment="…")` | Works at ANY address, data globals included (it replaced the function-only `set_plate_comment` in 6.0.0). `batch_set_comments(program=..., address="0x<hex>", plate_comment="…")` also works and is preferable when you are writing several comment kinds at once. The `address` parameter is a **single string**, not a list — pass `"0x6fdc1234"`, **NOT** `["0x6fdc1234"]`, **NOT** `"ram:0x6fdc1234"`, **NOT** `["ram:0x6fdc1234"]`. |
+| Plate | `set_comment(program=<full_path>, address="0x<hex>", type="plate", comment="…")` | Works at ANY address, data globals included (it replaced the function-only `set_plate_comment` in 7.0.0). `batch_set_comments(program=..., address="0x<hex>", plate_comment="…")` also works and is preferable when you are writing several comment kinds at once. The `address` parameter is a **single string**, not a list — pass `"0x6fdc1234"`, **NOT** `["0x6fdc1234"]`, **NOT** `"ram:0x6fdc1234"`, **NOT** `["ram:0x6fdc1234"]`. |
 
 Every cell above includes `program=<full_path>` as the **first** parameter for the same reason as the main flow: omitting it routes the write to the wrong binary.
 

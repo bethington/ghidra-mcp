@@ -1929,7 +1929,7 @@ public class AnalysisService {
         return Response.ok(resultData.get());
     }
 
-    // Bulk helper for analyze_function_completeness(addresses=...). Merged in 6.0.0.
+    // Bulk helper for analyze_function_completeness(addresses=...). Merged in 7.0.0.
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
