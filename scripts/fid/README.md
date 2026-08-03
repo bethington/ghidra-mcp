@@ -71,7 +71,39 @@ actionable in a way "it's redundant" never was.
 database recognises 92% of the benchmark and ~0% of the game: it is the wrong
 CRT entirely, not a near-miss.
 
-### The concrete next step
+### Outcome — measured, and mostly negative
+
+The VS2003 `libcmt.lib` was extracted and a database built from it (1,049
+signatures, `vs2003_libcmt.fidb`). The diagnosis held at the byte level:
+D2Common's `_qsort`, `_atol` and `_sprintf` are **100.0% identical**
+(relocation-masked) to VS2003's libcmt, against 6-18% for VC6's.
+
+But identifying the right library did **not** translate into broad coverage:
+
+| Binary | functions | stock | + vs2003 db | delta |
+| --- | --- | --- | --- | --- |
+| D2Common.dll | 2,355 | 175 | 204 | **+29** |
+| D2Client.dll | 4,442 | 241 | 241 | +0 |
+| D2Game.dll | 4,506 | 235 | 235 | +0 |
+| Fog.dll | 1,007 | 273 | 273 | +0 |
+
+One binary in four gained anything. The reason is that Ghidra's stock
+`vsOlder_x86.fidbf` already covers most VS2003-era CRT — which is also why it
+covered D2 (175) far better than it covered our VC6-built benchmark (12).
+
+So the corpus-wide ceiling here is low, and an earlier estimate in this file of
+"roughly 7x, 500-1,000 functions corpus-wide" was extrapolated from a single
+binary and is wrong. The database is worth keeping — it is built, free to
+attach, and D2Common's +29 is real — but it does not materially shrink the
+documentation queue.
+
+**The residual unidentified code is therefore mostly NOT stock CRT.** Whatever
+is left in D2Client/D2Game/Fog after stock FID is either game code, inlined CRT
+that hash-exact matching cannot reach, or a runtime component still
+unaccounted for. Chasing it needs a different technique than more FID
+databases.
+
+### If you still want to close the remaining gap
 
 Build a FID database from **VS2003 SP1's `LIBCMT.LIB`**. The `vs2003-pro` media
 referenced in `fun-doc/benchmark/build.py` already supplied the 7.10 linker at
