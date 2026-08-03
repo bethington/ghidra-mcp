@@ -157,6 +157,24 @@ def test_is_default_name(name, expected):
     assert ci.is_default_name(name) is expected
 
 
+@pytest.mark.parametrize("name,expected", [
+    ("_qsort", True), ("__unlock", True), ("___sbh_alloc_block", True),
+    ("_inconsistency", True), ("__shr_96", True),
+    ("StringConcatenate", False), ("DATATBLS_MergeCoordData", False),
+    ("FUN_6fd51000", False), ("?_inconsistency@@YAXXZ", False),
+    ("_Qsort", False), ("", False),
+])
+def test_crt_shaped_recognises_existing_library_names(name, expected):
+    """Guards the rename of a name that is ALREADY a canonical library symbol.
+
+    Measured over the corpus: all 10 functions this held back would have been
+    lateral moves or regressions -- `_inconsistency` -> `?_inconsistency@@YAXXZ`
+    swaps a demangled name for a mangled one, and `_memmove` -> `_memcpy` is an
+    MSVC alias, not a correction.
+    """
+    assert bool(ci.CRT_SHAPED.match(name)) is expected
+
+
 def test_guard_ordering_is_sane():
     """A weak floor below the index floor would make the weak band empty."""
     assert ci.MIN_INFORMATIVE_BYTES < ci.STRONG_INFORMATIVE_BYTES

@@ -131,6 +131,11 @@ LIBRARY_TAG = "LIB_CRT"
 # in the FID database -- a real match, but not a name. See doc_lint.is_linker_local.
 LINKER_LOCAL = re.compile(r"^\$(L|LN|SG|M|T)\d+$")
 
+# A name that already looks like a canonical CRT symbol: `_qsort`, `__unlock`,
+# `___sbh_alloc_block`. Used to leave alias differences alone -- see
+# sync_to_ghidra.
+CRT_SHAPED = re.compile(r"^_{1,3}[a-z]")
+
 IMAGE_SYM_CLASS_EXTERNAL = 2
 IMAGE_SYM_CLASS_STATIC = 3
 IMAGE_SYM_DTYPE_FUNCTION = 2
@@ -639,10 +644,32 @@ def sync_to_ghidra(match: Match, apply_name: bool = True,
         result["skipped"] = "documented-name-preserved"
         return result
 
+    # Even with rename_documented, leave a name that is ALREADY a canonical CRT
+    # symbol alone. `_memmove` -> `_memcpy` is not a correction: MSVC compiles
+    # both from one object, so the two names are aliases and the existing one is
+    # at least as informative. The finding worth acting on is a GAME-STYLE name
+    # on library code, not a decoration difference between two library names.
+    if not is_default_name(match.current_name) and CRT_SHAPED.match(match.current_name):
+        result["skipped"] = "already-a-library-name"
+        return result
+
     res = _post("/rename_function", program,
                 {"old_name": addr, "new_name": match.lib_name})
     ok = bool(res.get("success")
               or str(res.get("status", "")).lower() == "success")
+
+    if not ok and "already exists at this address" in str(res):
+        # Not a real conflict, and restore_fid_names.py hit the same wall: an
+        # analyzer left its own label on the address as a non-primary symbol, so
+        # the rename is blocked by the very evidence being applied. Drop the
+        # duplicate label, then take the name.
+        _post("/delete_label", program,
+              {"address": addr, "name": match.lib_name})
+        res = _post("/rename_function", program,
+                    {"old_name": addr, "new_name": match.lib_name})
+        ok = bool(res.get("success")
+                  or str(res.get("status", "")).lower() == "success")
+
     result["renamed"] = match.lib_name if ok else None
     if not ok:
         # Loud, never silent -- a failed write-back that prints nothing is how
