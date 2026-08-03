@@ -131,6 +131,48 @@ except ImportError:
 from event_bus import emit as bus_emit, get_bus, get_worker_id
 from library_code_detector import detect_library_code, format_plate as format_library_plate
 
+from types import SimpleNamespace
+
+try:
+    import crt_identify
+except Exception as _crt_exc:                                  # noqa: BLE001
+    crt_identify = None
+    print(f"crt_identify unavailable ({_crt_exc}); triage falls back to the "
+          f"heuristic library detector only", flush=True)
+
+
+def crt_exact_detection(program, address):
+    """Tier-0 library classification: are these bytes LITERALLY library code?
+
+    `detect_library_code` guesses from names and callees. This does not guess --
+    it compares the function's bytes against the actual VS2003/VC6 runtime
+    libraries the binaries link, with relocation sites masked, and either finds
+    an exact match or does not. Run first so a certain answer pre-empts a
+    heuristic one.
+
+    Returns (DetectionResult-shaped object, Match) or (None, None). Never
+    raises: a triage helper that can break the worker loop is worse than a
+    triage helper that occasionally abstains.
+    """
+    if crt_identify is None:
+        return None, None
+    try:
+        if not crt_identify.load_index().count:
+            return None, None            # no libraries vendored; skip the I/O
+        match = crt_identify.identify_function(program, address)
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"  crt_identify lookup failed (non-fatal): {exc}", flush=True)
+        return None, None
+    if match is None or not match.writable:
+        # Ambiguous or weak evidence is NOT a classification. Fall through to
+        # the heuristic rather than asserting something the bytes do not show.
+        return None, None
+    detail = f"{match.lib_name} ({match.lib}/{match.obj}, {match.size}b)"
+    result = SimpleNamespace(
+        is_library=True, confidence=1.0,
+        reasons=[f"exact library match: {detail}"])
+    return result, match
+
 # Thread safety for state.json access across concurrent workers.
 # RLock (reentrant) is required because the common read-modify-write
 # pattern holds the lock while calling load_state(), which also takes
@@ -9356,11 +9398,18 @@ def process_function(
     if skip_library and not manual:
         decomp_text = data.get("decompiled")
         if decomp_text and not _is_error_response(decomp_text):
-            detection = detect_library_code(
-                name=func.get("name"),
-                decompile=str(decomp_text),
-                callees=func.get("callees"),
-            )
+            # Tier 0 first: an exact, relocation-masked byte match against the
+            # runtime library the binary actually links is not a heuristic, so
+            # it pre-empts one. When it abstains (no match, or evidence too
+            # weak/ambiguous to identify anything) we fall back to the name-and-
+            # callee detector exactly as before.
+            detection, crt_match = crt_exact_detection(program, address)
+            if detection is None:
+                detection = detect_library_code(
+                    name=func.get("name"),
+                    decompile=str(decomp_text),
+                    callees=func.get("callees"),
+                )
             if detection.is_library:
                 # Deferred pinned check: only consult the queue if the
                 # detector wants to skip. Saves one priority_queue.json
@@ -9394,6 +9443,18 @@ def process_function(
                             f"  LIBRARY-CODE plate stamp failed (non-fatal): {e}",
                             flush=True,
                         )
+                    # An exact match also earns the durable Ghidra marks: the
+                    # LIB_CRT tag and a bookmark that SURVIVES a later rename,
+                    # so this classification is recoverable from the program
+                    # itself rather than only from fun-doc's state.
+                    if crt_match is not None:
+                        try:
+                            crt_match.current_name = func.get("name") or ""
+                            crt_identify.sync_to_ghidra(crt_match)
+                        except Exception as e:                 # noqa: BLE001
+                            print(f"  CRT tag/bookmark failed (non-fatal): {e}",
+                                  flush=True)
+
                     func["library_code"] = True
                     func["library_code_at"] = datetime.now().isoformat()
                     func["library_code_reasons"] = detection.reasons
