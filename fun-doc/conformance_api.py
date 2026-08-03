@@ -22,9 +22,12 @@ Routes:
 """
 from flask import Blueprint, jsonify, request
 
+import logging
+
 import conformance_dashboard as cd
 
 conf_bp = Blueprint("conformance", __name__)
+_log = logging.getLogger(__name__)
 
 
 @conf_bp.route("/api/conformance/doctor")
@@ -155,8 +158,9 @@ def _global_review():
     try:
         return jsonify(cd.set_global_reviewed(addr, reviewed,
                                               program=d.get("program") or _prog()))
-    except OSError as exc:
-        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 502
+    except OSError:
+        _log.exception("Failed to set global reviewed state")
+        return jsonify({"error": "An internal error has occurred."}), 502
 
 
 @conf_bp.route("/api/conformance/recommended")
