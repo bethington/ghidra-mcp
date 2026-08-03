@@ -136,6 +136,8 @@ markers = [
     "requires_program: mark test as requiring a loaded program",
     "requires_server: mark test as requiring server connection",
     "write: mark test as performing write operations",
+    "e2e: browser-driven tests against a live fun-doc dashboard (tests/e2e)",
+    "destructive: e2e tests that start workers or write config (revert themselves)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

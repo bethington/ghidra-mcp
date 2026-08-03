@@ -132,6 +132,25 @@ function Wait-Healthy([int]$Seconds) {
     return $false
 }
 
+# Wait for the LISTENER PID to actually change, then for the new one to answer.
+#
+# A fixed sleep is not enough and gave a false negative that made things worse:
+# /api/admin/restart stops the workers FIRST (stop_timeout 45s), so with a few
+# port workers running the old process is still up and perfectly healthy five
+# seconds later. The old flow slept 5s, saw a healthy dashboard on the SAME
+# pid, declared "the PID did not change", and fell through to the scheduled
+# task -- firing a second restart on top of one already in flight, and
+# reporting a version that had not been deployed yet.
+function Wait-PidChange([int]$Seconds, $OldPid) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        $now = Get-ListenerPid
+        if ($now -and $now -ne $OldPid) { return $now }
+        Start-Sleep -Seconds 2
+    }
+    return $null
+}
+
 $before = Get-ListenerPid
 
 if ($InstallTask) { $Force = $true }   # task registration needs elevation anyway
@@ -156,18 +175,17 @@ if (-not $Force) {
         $resp = Invoke-RestMethod -Uri "$Base/api/admin/restart" -Method Post -TimeoutSec 15
         if ($resp.ok) {
             Write-Host "Self-restart accepted (no elevation needed). Waiting..."
-            # It stops workers first, so allow for that before it drops the port.
-            Start-Sleep -Seconds 5
-            if (Wait-Healthy $TimeoutSec) {
-                $after = Get-ListenerPid
-                if ($after -and $after -ne $before) {
+            # It stops workers first (stop_timeout 45s), so the handover can be
+            # well over a minute with a busy fleet. Watch the PID, not the clock.
+            $after = Wait-PidChange ($TimeoutSec + 60) $before
+            if ($after) {
+                if (Wait-Healthy $TimeoutSec) {
                     Write-Host "Dashboard restarted (PID $before -> $after)."
                     exit 0
                 }
-                # Same PID means it never actually went down.
-                Write-Warning "Dashboard answered but the PID did not change ($after)."
+                Write-Warning "New dashboard (PID $after) bound the port but never answered."
             } else {
-                Write-Warning "Dashboard did not come back within ${TimeoutSec}s."
+                Write-Warning "Dashboard never released the port; PID is still $before."
             }
         }
     } catch {
@@ -181,10 +199,19 @@ $task = Get-ScheduledTask -TaskName 'FunDoc Dashboard' -ErrorAction SilentlyCont
 if ($task -and -not $Force) {
     try {
         Write-Host "Trying the scheduled task..."
+        $beforeTask = Get-ListenerPid
         Stop-ScheduledTask  -TaskName 'FunDoc Dashboard' -ErrorAction Stop
         Start-Sleep -Seconds 3
         Start-ScheduledTask -TaskName 'FunDoc Dashboard' -ErrorAction Stop
-        if (Wait-Healthy $TimeoutSec) { Write-Host "Dashboard restarted via scheduled task." ; exit 0 }
+        # Same trap as path 1: "it answers" is not "it restarted". This path
+        # used to report success purely on Wait-Healthy, so a task that failed
+        # to take over the port announced a deploy that had not happened.
+        $afterTask = Wait-PidChange $TimeoutSec $beforeTask
+        if ($afterTask -and (Wait-Healthy $TimeoutSec)) {
+            Write-Host "Dashboard restarted via scheduled task (PID $beforeTask -> $afterTask)."
+            exit 0
+        }
+        Write-Warning "Scheduled task did not take over the port (PID still $beforeTask)."
     } catch {
         Write-Warning "Scheduled-task restart failed ($($_.Exception.Message))."
     }

@@ -529,3 +529,93 @@ def test_restart_endpoint_is_loopback_only():
     body = text[idx:idx + 900]
     assert "127.0.0.1" in body
     assert "403" in body
+
+
+# ====================================================== oracle health dot ===
+#
+# The dashboard's Oracle + Game dot keyed on `reachable` alone, so of
+# oracle_health.py's FOUR fault shapes the two that answer HTTP perfectly --
+# FROZEN (alive, oracle replying, drawing nothing) and IDLE (parked at a menu,
+# no world to prove against) -- both rendered as a green "live-prove enabled".
+# That is the 2026-07-31 incident verbatim: a deploy restart left the game at
+# the main menu and the fleet sat idle behind a green banner for 70 minutes.
+#
+# Detection was never the problem; `game_frozen` / `game_idle` were already in
+# the payload. Nothing consumed them. These tests pin the mapping so it cannot
+# silently revert to "reachable == healthy".
+
+
+class _FakeOracleMonitor:
+    def __init__(self, **state):
+        base = {
+            "reachable": True, "game_running": True, "game_wedged": False,
+            "game_dead": False, "game_idle": False, "game_frozen": False,
+            "relaunching": False, "relaunch_stage": None, "relaunch_error": None,
+            "recover_attempts": 0, "next_retry_in": None,
+            "recovery_degraded": False, "present_rate": 25.0,
+        }
+        base.update(state)
+        self._state = base
+
+    def get_state(self):
+        return self._state
+
+
+def _oracle_dot(**state):
+    """Call WorkerManager._health_oracle against a fake monitor."""
+    import web
+
+    mgr = web.WorkerManager.__new__(web.WorkerManager)
+    mgr._oracle_monitor = _FakeOracleMonitor(**state)
+    return web.WorkerManager._health_oracle(mgr)
+
+
+def test_healthy_oracle_is_ok_with_no_action():
+    dot = _oracle_dot()
+    assert dot["state"] == "ok"
+    assert dot["action"] is None
+
+
+def test_frozen_game_is_not_reported_as_healthy():
+    """A stalled render thread raises no exception, so /crash stays null and
+    every probe but the frame counter reads fine."""
+    dot = _oracle_dot(game_frozen=True, present_rate=0)
+    assert dot["state"] == "down", f"FROZEN game reported as {dot['state']}"
+    assert "frozen" in dot["detail"].lower()
+    assert dot["action"] == "relaunch_oracle", (
+        "FROZEN recovers on the WEDGED path, so a relaunch must be offered"
+    )
+
+
+def test_idle_game_is_degraded_and_offers_no_relaunch():
+    """IDLE passes every liveness check while proving is stalled. It must be
+    visible -- but the cure is navigation, and offering a one-click relaunch
+    of a HEALTHY game is the mistake oracle_health.py exists to prevent."""
+    dot = _oracle_dot(game_idle=True)
+    assert dot["state"] == "degraded", f"IDLE game reported as {dot['state']}"
+    assert "menu" in dot["detail"].lower() or "parked" in dot["detail"].lower()
+    assert dot["action"] is None, (
+        "an IDLE game must not offer a one-click relaunch of a healthy game"
+    )
+
+
+def test_frozen_outranks_idle_when_both_are_set():
+    """Both flags can ride together; the worse one has to win, because a
+    frozen game cannot be cured by navigating it."""
+    dot = _oracle_dot(game_frozen=True, game_idle=True)
+    assert dot["state"] == "down"
+    assert "frozen" in dot["detail"].lower()
+
+
+def test_flags_are_exposed_so_the_ui_need_not_re_derive_them():
+    for key in ("game_frozen", "game_idle"):
+        assert key in _oracle_dot(), f"health payload drops {key}"
+
+
+def test_unreachable_shapes_are_unchanged():
+    wedged = _oracle_dot(reachable=False, game_wedged=True)
+    assert wedged["state"] == "down" and "wedged" in wedged["detail"].lower()
+    dead = _oracle_dot(reachable=False, game_dead=True)
+    assert dead["state"] == "down" and "not running" in dead["detail"].lower()
+    unprobed = _oracle_dot(reachable=None)
+    assert unprobed["state"] == "unknown"
