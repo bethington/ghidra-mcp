@@ -136,6 +136,15 @@ LINKER_LOCAL = re.compile(r"^\$(L|LN|SG|M|T)\d+$")
 # sync_to_ghidra.
 CRT_SHAPED = re.compile(r"^_{1,3}[a-z]")
 
+# `__ehhandler$<mangled>` -- the per-function SEH handler thunk MSVC emits next
+# to anything that can throw. They are compiler-generated stubs, not library
+# functions, and they are near-identical to each other by construction: adding
+# the modern runtimes put 1,002 of them in ProjectDiablo.dll's match set, every
+# one ambiguous against every other. The ambiguity guard already refuses to
+# write them; skipping them at index build keeps the index honest and the
+# lookup fast. Same category as a `$L` label: real code, useless as identity.
+EH_THUNK = re.compile(r"^__ehhandler\$")
+
 IMAGE_SYM_CLASS_EXTERNAL = 2
 IMAGE_SYM_CLASS_STATIC = 3
 IMAGE_SYM_DTYPE_FUNCTION = 2
@@ -305,7 +314,8 @@ class LibraryIndex:
         # Too little survives masking for a match to mean anything, or the body
         # is shorter than the prefix we bucket on. Both are rejected here rather
         # than at lookup, so the lookup never has to reason about them.
-        if fn.size < PREFIX or fn.informative < MIN_INFORMATIVE_BYTES:
+        if (fn.size < PREFIX or fn.informative < MIN_INFORMATIVE_BYTES
+                or EH_THUNK.match(fn.name)):
             self.rejected += 1
             return False
         self.count += 1
@@ -352,21 +362,74 @@ class LibraryIndex:
         return idx
 
 
+def discover_msvc_libraries() -> List[str]:
+    """Release x86 static runtimes from every MSVC toolset installed locally.
+
+    The vendored VS2003/VC6 pair covers the game binaries and nothing else: the
+    Rich-header coverage report put every modern-toolchain binary at 0-2%, which
+    was a statement about our library collection rather than about those
+    binaries. Adding the installed toolsets is what closes that, and it is worth
+    real coverage -- BH.dll went from 26 identified to 667.
+
+    Discovered rather than vendored because these are multi-gigabyte installs
+    with machine-specific paths. Absent toolsets are simply skipped, so this
+    degrades to the vendored pair on a machine with no Visual Studio.
+    """
+    out: List[str] = []
+    roots = [r"C:\Program Files\Microsoft Visual Studio",
+             r"C:\Program Files (x86)\Microsoft Visual Studio"]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for year in sorted(os.listdir(root)):
+            msvc = os.path.join(root, year)
+            if not os.path.isdir(msvc):
+                continue
+            for edition in sorted(os.listdir(msvc)):
+                tools = os.path.join(msvc, edition, "VC", "Tools", "MSVC")
+                if not os.path.isdir(tools):
+                    continue
+                for ver in sorted(os.listdir(tools)):
+                    libdir = os.path.join(tools, ver, "lib", "x86")
+                    for name in ("libcmt.lib",        # C runtime
+                                 "libcpmt.lib",       # C++ / STL
+                                 "libvcruntime.lib"): # EH, RTTI, intrinsics
+                        p = os.path.join(libdir, name)
+                        if os.path.exists(p):
+                            out.append(p)
+    # The UCRT lives in the Windows SDK, not the compiler toolset.
+    sdk = r"C:\Program Files (x86)\Windows Kits\10\Lib"
+    if os.path.isdir(sdk):
+        for ver in sorted(os.listdir(sdk)):
+            p = os.path.join(sdk, ver, "ucrt", "x86", "libucrt.lib")
+            if os.path.exists(p):
+                out.append(p)
+    return out
+
+
 def default_libraries() -> List[str]:
-    """The release runtime libraries vendored with the benchmark toolchain.
+    """Every static runtime we can index: vendored legacy + installed modern.
 
     Merged deliberately rather than routed per binary: a relocation-masked
     exact match effectively cannot collide across toolchains, so merging costs
-    no accuracy and avoids a routing layer that can itself be wrong. Use
-    rich_toolchain() to report which binaries we hold no library for.
+    no accuracy and avoids a routing layer that can itself be wrong. Verified
+    after merging 12 more runtimes -- the Benchmark.dll control still claims 0
+    of its 9 authored functions. Use rich_toolchain() to report which binaries
+    we hold no library for at all.
+
+    Set CRT_IDENTIFY_LIBS (os.pathsep-separated) to override entirely.
     """
+    override = os.environ.get("CRT_IDENTIFY_LIBS")
+    if override:
+        return [p for p in override.split(os.pathsep) if p]
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "benchmark", "tools", "vc6")
-    return [
+    vendored = [
         os.path.join(root, "VS7", "Lib", "libcmt.lib"),     # VS2003 C runtime
         os.path.join(root, "VS7", "Lib", "libcpmt.lib"),    # VS2003 C++ / STL
         os.path.join(root, "VC98", "LIB", "LIBCMT.LIB"),    # VC6 C runtime
     ]
+    return vendored + discover_msvc_libraries()
 
 
 _index_lock = threading.Lock()
