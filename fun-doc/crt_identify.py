@@ -344,21 +344,42 @@ class LibraryIndex:
 
     @classmethod
     def from_libraries(cls, libs: Sequence[str]) -> "LibraryIndex":
+        """Index .lib archives, loose .obj files, or directories of either.
+
+        Loose objects matter because several binaries in the corpus are
+        open-source components: building one yields its .obj files, which carry
+        exactly what this index needs (code, relocations, symbol names) for the
+        project's OWN functions, not just the runtime it links.
+        """
         idx = cls()
         for lib in libs:
             if not os.path.exists(lib):
                 continue
-            idx.libs.append(lib)
-            with open(lib, "rb") as fh:
-                data = fh.read()
-            for member, blob in ar_members(data):
+            if os.path.isdir(lib):
+                members = [os.path.join(lib, f) for f in sorted(os.listdir(lib))
+                           if f.lower().endswith((".obj", ".lib"))]
+            else:
+                members = [lib]
+            for path in members:
+                idx.libs.append(path)
+                with open(path, "rb") as fh:
+                    data = fh.read()
                 try:
-                    for name, body, relocs in coff_functions(blob):
-                        idx.add(LibFunc(name, body, tuple(relocs), member, lib))
-                except (struct.error, ValueError, IndexError):
-                    # A malformed member is not worth aborting a 1,300-function
-                    # index over; skip it and keep going.
+                    if data.startswith(b"!<arch>\n"):
+                        blobs = list(ar_members(data))
+                    else:
+                        blobs = [(os.path.basename(path), data)]
+                except ValueError:
                     continue
+                for member, blob in blobs:
+                    try:
+                        for name, body, relocs in coff_functions(blob):
+                            idx.add(LibFunc(name, body, tuple(relocs),
+                                            member, path))
+                    except (struct.error, ValueError, IndexError):
+                        # A malformed member is not worth aborting a
+                        # 1,300-function index over; skip it and keep going.
+                        continue
         return idx
 
 
