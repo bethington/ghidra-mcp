@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -72,16 +73,31 @@ def _post(path: str, program: str, payload: dict) -> dict:
         return {"raw": raw}
 
 
+# `$L20876`-style MSVC linker-local labels. doc_lint already filters these out
+# of its report, but this script writes NAMES INTO GHIDRA and can be pointed at
+# any report file, including one generated before that filter existed. A second
+# check here costs nothing and the failure it prevents is a silent corpus-wide
+# rename of documented functions to meaningless labels.
+LINKER_LOCAL = re.compile(r"^\$(L|LN|SG|M|T)\d+$")
+
+
 def load_targets(report_path: str, include_multiple: bool) -> list:
     with open(report_path, encoding="utf-8") as fh:
         rep = json.load(fh)
     out = []
+    skipped_local = 0
     for d in rep.get("defects", []):
         if d.get("tier") != 0 or not d.get("fid_name"):
             continue
         if d.get("fid_multiple") and not include_multiple:
             continue
+        if LINKER_LOCAL.match(str(d.get("fid_name", "")).strip()):
+            skipped_local += 1
+            continue
         out.append(d)
+    if skipped_local:
+        print(f"skipped {skipped_local} linker-local label(s) "
+              f"($L#####) -- a real FID match, but not a name")
     return out
 
 

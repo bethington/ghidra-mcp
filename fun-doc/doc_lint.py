@@ -188,6 +188,22 @@ def canonical(name: str) -> str:
     return (name or "").lstrip("_").lower()
 
 
+# `$L20876`, `$SG12345`, `$LN4` -- MSVC linker-local labels. These reach a FID
+# database when a library object's function has no other symbol, and the
+# analyzer then reports them as if they were names.
+LINKER_LOCAL = re.compile(r"^\$(L|LN|SG|M|T)\d+$")
+
+
+def is_linker_local(name: str) -> bool:
+    """True for a compiler-generated local label masquerading as a name.
+
+    A FID match on one of these is still a real match -- the code IS library
+    code -- but the label identifies nothing, so it must never be propagated
+    into documentation as a function name.
+    """
+    return bool(LINKER_LOCAL.match((name or "").strip()))
+
+
 def module_prefix(name: str) -> Optional[str]:
     m = MODULE_PREFIX.match(name or "")
     return m.group(1) if m else None
@@ -283,6 +299,16 @@ def find_defects(recs: Iterable[FunctionRec],
     Renames that merely DEMANGLE a FID name (`??1type_info@@UAE@XZ` ->
     `~type_info`) are improvements and are not reported; neither is Ghidra's
     own `FID_conflict:` disambiguation prefix.
+
+    Nor is a LINKER-LOCAL label. A signature built from a static library can
+    carry `$L20876`-style compiler-generated labels as a function's only
+    symbol, and the analyzer reports them exactly like a real name. The MATCH
+    is still trustworthy -- the function is library code and stays tier 0 --
+    but the name carries no information, so demanding the documentation adopt
+    it would replace `LOG_AcquireLogFileLock` with `$L20082`. Measured
+    2026-08-03 on a fresh D2Common import with `vs2003_libcmt.fidb` attached:
+    25 of its 29 new matches were `$L#####`, and every one of them would have
+    been reported here and then applied by `restore_fid_names.py --apply`.
     """
     out = []
     for r in recs:
@@ -294,6 +320,8 @@ def find_defects(recs: Iterable[FunctionRec],
             if r.name.startswith("FID_conflict:"):
                 continue
             if r.fid_name.startswith("?"):      # mangled -> demangled is fine
+                continue
+            if is_linker_local(r.fid_name):     # $L20876 is not a name
                 continue
             if canonical(r.name) != canonical(r.fid_name):
                 out.append(r)
