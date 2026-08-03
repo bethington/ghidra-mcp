@@ -191,9 +191,7 @@ class TestToolGroupManagement(unittest.TestCase):
             self.assertEqual(loaded, ["issue_212_lazy_valid_after"])
             self.assertIn("grp_beta", bridge.state._loaded_groups)
             self.assertIn("issue_212_lazy_valid_after", bridge.state._dynamic_tool_names)
-            self.assertNotIn(
-                "issue_212_lazy_bad_signature", bridge.state._dynamic_tool_names
-            )
+            self.assertNotIn("issue_212_lazy_bad_signature", bridge.state._dynamic_tool_names)
             message = mock_stderr.write.call_args.args[0]
             self.assertIn("1 tool(s) failed to register", message)
             self.assertIn("issue_212_lazy_bad_signature", message)
@@ -242,20 +240,19 @@ class TestConnectInstance(unittest.TestCase):
 
         try:
             bridge.state._lazy_mode = False
-            with mock.patch.object(
-                bridge.discovery,
-                "discover_instances",
-                return_value=[
-                    {"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}
-                ],
-            ), mock.patch.object(
-                bridge.transport,
-                "do_request",
-                return_value=(json.dumps(schema), 200),
+            with (
+                mock.patch.object(
+                    bridge.discovery,
+                    "discover_instances",
+                    return_value=[{"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}],
+                ),
+                mock.patch.object(
+                    bridge.transport,
+                    "do_request",
+                    return_value=(json.dumps(schema), 200),
+                ),
             ):
-                result = json.loads(
-                    asyncio.run(bridge.connect_instance("TestProject", ctx=ctx))
-                )
+                result = json.loads(asyncio.run(bridge.connect_instance("TestProject", ctx=ctx)))
 
             self.assertTrue(result["connected"])
             self.assertEqual(result["tools_registered"], 2)
@@ -275,6 +272,38 @@ class TestConnectInstance(unittest.TestCase):
             bridge.state._active_tcp = old_active_tcp
             bridge.state._transport_mode = old_transport_mode
             bridge.state._connected_project = old_connected_project
+
+
+class TestToolsChangedFanout(unittest.TestCase):
+    def test_worker_notification_fans_out_to_all_sessions(self):
+        import bridge_mcp_ghidra as bridge
+
+        session1 = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        session2 = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+
+        async def scenario():
+            ctx1 = SimpleNamespace(
+                _request_context=object(),
+                request_context=SimpleNamespace(session=session1),
+            )
+            ctx2 = SimpleNamespace(
+                _request_context=object(),
+                request_context=SimpleNamespace(session=session2),
+            )
+            bridge.state.remember_tools_changed_context(ctx1)
+            bridge.state.remember_tools_changed_context(ctx2)
+            bridge.state.notify_tools_changed_from_worker()
+            await asyncio.sleep(0)
+
+        old_targets = list(bridge.state._tools_changed_targets)
+        try:
+            bridge.state._tools_changed_targets.clear()
+            asyncio.run(scenario())
+        finally:
+            bridge.state._tools_changed_targets[:] = old_targets
+
+        session1.send_tool_list_changed.assert_awaited_once()
+        session2.send_tool_list_changed.assert_awaited_once()
 
 
 class TestEndpointTimeouts(unittest.TestCase):

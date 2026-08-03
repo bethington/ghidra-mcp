@@ -50,6 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class FunctionService {
 
     private static final int DECOMPILE_TIMEOUT_SECONDS = 60;  // Increased from 30s to 60s for large functions
+    private static final int MAX_DECOMPILE_TIMEOUT_SECONDS = 1800;
 
     /** Matches any of the five Windows calling-convention keywords. */
     private static final Pattern CALLING_CONV_PATTERN = Pattern.compile(
@@ -166,6 +167,12 @@ public class FunctionService {
             return batchDecompileFunctions(functionsParam, programName);
         }
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required (or pass functions= for bulk)");
+        // Checked after the bulk dispatch, not before: batchDecompileFunctions
+        // takes no timeout, so validating it there would reject a bulk call
+        // over a parameter that path never reads.
+        if (timeoutSeconds <= 0 || timeoutSeconds > MAX_DECOMPILE_TIMEOUT_SECONDS) {
+            return Response.err("timeout must be between 1 and " + MAX_DECOMPILE_TIMEOUT_SECONDS + " seconds");
+        }
 
         DecompInterface decomp = null;
         try {

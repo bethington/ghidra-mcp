@@ -18,8 +18,11 @@ import os
 import socket
 import socketserver
 import sys
+import asyncio
+import concurrent.futures
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,11 +65,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length).decode("utf-8") if length else ""
         if self.path.startswith("/echo"):
-            self._reply(200, {
-                "content_type": self.headers.get("Content-Type"),
-                "received": json.loads(raw) if raw else None,
-                "path": self.path,
-            })
+            self._reply(
+                200,
+                {
+                    "content_type": self.headers.get("Content-Type"),
+                    "received": json.loads(raw) if raw else None,
+                    "path": self.path,
+                },
+            )
         elif self.path.startswith("/boom"):
             self._reply(500, {"error": "write failed"})
         else:
@@ -116,9 +122,7 @@ class TestTcpRequest(_TcpServerMixin, unittest.TestCase):
         self.assertTrue(json.loads(text)["ok"])
 
     def test_get_encodes_query_params(self):
-        text, _ = transport.tcp_request(
-            self.base_url, "GET", "ok", params={"program": "D2Common.dll", "n": 5}
-        )
+        text, _ = transport.tcp_request(self.base_url, "GET", "ok", params={"program": "D2Common.dll", "n": 5})
         path = json.loads(text)["path"]
         self.assertIn("program=D2Common.dll", path)
         self.assertIn("n=5", path)
@@ -127,9 +131,7 @@ class TestTcpRequest(_TcpServerMixin, unittest.TestCase):
 
     def test_post_sends_json_content_type_and_body(self):
         payload = {"address": "0x6fd50000", "name": "GetUnitPosition"}
-        text, status = transport.tcp_request(
-            self.base_url, "POST", "/echo", json_data=payload
-        )
+        text, status = transport.tcp_request(self.base_url, "POST", "/echo", json_data=payload)
         self.assertEqual(status, 200)
         data = json.loads(text)
         self.assertEqual(data["content_type"], "application/json")
@@ -142,7 +144,7 @@ class TestTcpRequest(_TcpServerMixin, unittest.TestCase):
 
     def test_connection_refused_raises(self):
         dead_url = f"http://127.0.0.1:{_free_port()}"
-        with self.assertRaises(OSError):
+        with self.assertRaises(transport.RequestNotSentError):
             transport.tcp_request(dead_url, "GET", "/ok", timeout=2)
 
 
@@ -164,6 +166,52 @@ class TestDoRequestRouting(_TcpServerMixin, unittest.TestCase):
         state._transport_mode = "none"
         with self.assertRaises(ConnectionError):
             transport.do_request("GET", "/ok")
+
+    def test_parallel_requests_are_not_globally_serialized(self):
+        state._transport_mode = "tcp"
+        state._active_tcp = self.base_url
+        barrier = threading.Barrier(2)
+
+        def concurrent_request(*args, **kwargs):
+            barrier.wait(timeout=1)
+            return '{"ok": true}', 200
+
+        with patch.object(transport, "tcp_request", side_effect=concurrent_request):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(transport.do_request, "GET", "/ok") for _ in range(2)]
+                self.assertEqual([future.result(timeout=2)[1] for future in futures], [200, 200])
+
+    def test_abort_during_connect_prevents_send(self):
+        handle = state.RequestCancelHandle()
+        token = state._request_cancel_handle.set(handle)
+
+        class FakeConn:
+            def __init__(self):
+                self.requested = False
+                self.closed = False
+                self.timeout = 1
+
+            def connect(self):
+                handle.abort()
+
+            def request(self, *args, **kwargs):
+                self.requested = True
+
+            def getresponse(self):
+                raise AssertionError("getresponse should not run")
+
+            def close(self):
+                self.closed = True
+
+        conn = FakeConn()
+        try:
+            with self.assertRaises(transport.RequestOutcomeUnknownError):
+                transport._request_over_connection(conn, "GET", "/ok", None, {})
+        finally:
+            state._request_cancel_handle.reset(token)
+
+        self.assertFalse(conn.requested)
+        self.assertTrue(conn.closed)
 
 
 class TestDispatchAgainstLiveServer(_TcpServerMixin, unittest.TestCase):
@@ -203,6 +251,166 @@ class TestDispatchAgainstLiveServer(_TcpServerMixin, unittest.TestCase):
         self.assertIn("HTTP 404", json.loads(text)["error"])
         self.assertEqual(self.server.hits["/missing"], 1)
 
+    def test_get_unknown_outcome_is_never_retried(self):
+        error = transport.RequestOutcomeUnknownError("response timed out")
+        with (
+            patch.object(transport, "do_request", side_effect=error) as request,
+            patch.object(dispatch, "_try_reconnect") as reconnect,
+        ):
+            text = dispatch.dispatch_get("/ok", retries=3)
+
+        self.assertEqual(request.call_count, 1)
+        reconnect.assert_not_called()
+        self.assertIn("was not retried", json.loads(text)["error"])
+
+    def test_get_reconnects_once_when_request_was_not_sent(self):
+        with (
+            patch.object(
+                transport,
+                "do_request",
+                side_effect=[
+                    transport.RequestNotSentError("connection refused"),
+                    ('{"ok": true}', 200),
+                ],
+            ) as request,
+            patch.object(dispatch, "_try_reconnect", return_value=True) as reconnect,
+        ):
+            text = dispatch.dispatch_get("/ok", retries=3)
+
+        self.assertTrue(json.loads(text)["ok"])
+        self.assertEqual(request.call_count, 2)
+        reconnect.assert_called_once()
+
+    def test_get_retries_known_unsent_failure_without_reconnect(self):
+        with (
+            patch.object(
+                transport,
+                "do_request",
+                side_effect=[
+                    transport.RequestNotSentError("connection refused"),
+                    ('{"ok": true}', 200),
+                ],
+            ) as request,
+            patch.object(dispatch, "_try_reconnect", return_value=False) as reconnect,
+            patch.object(dispatch.time, "sleep"),
+        ):
+            text = dispatch.dispatch_get("/ok", retries=3)
+
+        self.assertTrue(json.loads(text)["ok"])
+        self.assertEqual(request.call_count, 2)
+        reconnect.assert_called_once()
+
+
+class TestAsyncRequestAdmission(_TcpServerMixin, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        state._transport_mode = "tcp"
+        state._active_tcp = self.base_url
+        state._connected_project = None
+
+    def tearDown(self):
+        state._active_tcp = None
+        state._transport_mode = "none"
+        state._connected_project = None
+
+    def test_cancelled_waiter_never_executes(self):
+        call_count = 0
+
+        async def scenario():
+            nonlocal call_count
+            release = threading.Event()
+            started = threading.Event()
+            old_executor = state._ghidra_executor
+            state._ghidra_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="GhidraMCP-Test",
+            )
+
+            def blocking_call(tag):
+                nonlocal call_count
+                call_count += 1
+                if tag == "first":
+                    started.set()
+                    release.wait(1)
+                return tag
+
+            try:
+                first = asyncio.create_task(state.run_blocking_ghidra_call(blocking_call, "first"))
+                for _ in range(100):
+                    if started.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertTrue(started.is_set())
+
+                second = asyncio.create_task(state.run_blocking_ghidra_call(blocking_call, "second"))
+                await asyncio.sleep(0)
+                second.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await second
+
+                release.set()
+                self.assertEqual(await first, "first")
+            finally:
+                release.set()
+                state._ghidra_executor.shutdown(wait=True, cancel_futures=False)
+                state._ghidra_executor = old_executor
+
+        asyncio.run(scenario())
+        self.assertEqual(call_count, 1)
+
+    def test_queued_request_keeps_original_connection_snapshot(self):
+        seen_connections = []
+
+        async def scenario():
+            old_executor = state._ghidra_executor
+            state._ghidra_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="GhidraMCP-Test",
+            )
+            release = threading.Event()
+            started = threading.Event()
+
+            def blocking_call():
+                started.set()
+                release.wait(1)
+                return "released"
+
+            try:
+                state.set_connection_snapshot(
+                    "tcp",
+                    active_tcp="http://target-a:8089",
+                    connected_project="A",
+                )
+                first = asyncio.create_task(state.run_blocking_ghidra_call(blocking_call))
+                for _ in range(100):
+                    if started.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertTrue(started.is_set())
+
+                with patch.object(transport, "do_request") as request:
+                    request.side_effect = lambda *args, **kwargs: (
+                        seen_connections.append(kwargs["connection"].active_tcp) or '{"ok": true}',
+                        200,
+                    )
+                    second = asyncio.create_task(state.run_blocking_ghidra_call(dispatch.dispatch_get, "/ok"))
+                    await asyncio.sleep(0)
+                    state.set_connection_snapshot(
+                        "tcp",
+                        active_tcp="http://target-b:8089",
+                        connected_project="B",
+                    )
+                    release.set()
+                    self.assertEqual(await first, "released")
+                    self.assertTrue(json.loads(await second)["ok"])
+            finally:
+                release.set()
+                state._ghidra_executor.shutdown(wait=True, cancel_futures=False)
+                state._ghidra_executor = old_executor
+
+        asyncio.run(scenario())
+        self.assertEqual(seen_connections, ["http://target-a:8089"])
+
     def test_post_success(self):
         text = dispatch.dispatch_post("/echo", {"k": "v"})
         self.assertEqual(json.loads(text)["received"], {"k": "v"})
@@ -217,9 +425,7 @@ class TestDispatchAgainstLiveServer(_TcpServerMixin, unittest.TestCase):
     def test_post_sends_query_params_separately_from_body(self):
         # The @Param(value="program") QUERY convention: program rides the
         # URL, never the JSON body.
-        text = dispatch.dispatch_post(
-            "/echo", {"name": "x"}, query_params={"program": "D2Game.dll"}
-        )
+        text = dispatch.dispatch_post("/echo", {"name": "x"}, query_params={"program": "D2Game.dll"})
         data = json.loads(text)
         self.assertIn("program=D2Game.dll", data["path"])
         self.assertEqual(data["received"], {"name": "x"})
@@ -267,17 +473,13 @@ class TestUdsRequest(unittest.TestCase):
         self.assertTrue(json.loads(text)["ok"])
 
     def test_post_json_round_trip(self):
-        text, status = transport.uds_request(
-            self.socket_path, "POST", "/echo", json_data={"a": 1}
-        )
+        text, status = transport.uds_request(self.socket_path, "POST", "/echo", json_data={"a": 1})
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(text)["received"], {"a": 1})
 
     def test_missing_socket_raises(self):
         with self.assertRaises(OSError):
-            transport.uds_request(
-                str(Path(self._tmpdir.name) / "nope.sock"), "GET", "/ok", timeout=2
-            )
+            transport.uds_request(str(Path(self._tmpdir.name) / "nope.sock"), "GET", "/ok", timeout=2)
 
 
 if __name__ == "__main__":

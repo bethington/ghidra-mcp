@@ -20,6 +20,54 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {AUTH_TOKEN}"} if AUTH_TOKEN else {}
 
 
+class RequestNotSentError(ConnectionError):
+    """The transport could not connect, so the request was not sent."""
+
+
+class RequestOutcomeUnknownError(ConnectionError):
+    """The request may have reached Ghidra, but no complete response arrived."""
+
+
+def _request_over_connection(
+    conn: http.client.HTTPConnection,
+    method: str,
+    path: str,
+    body: bytes | None,
+    headers: dict[str, str],
+) -> tuple[str, int]:
+    """Execute one request while preserving whether retrying is safe."""
+    cancel_handle = state.get_request_cancel_handle()
+    if cancel_handle is not None and not cancel_handle.register_connection(conn):
+        raise RequestOutcomeUnknownError(f"Request aborted before start for {method} {path}")
+    try:
+        conn.connect()
+    except Exception as exc:
+        conn.close()
+        raise RequestNotSentError(f"Could not connect for {method} {path}: {exc}") from exc
+
+    if cancel_handle is not None and cancel_handle.aborted:
+        conn.close()
+        raise RequestOutcomeUnknownError(f"Request aborted before send for {method} {path}")
+
+    try:
+        if cancel_handle is not None:
+            with cancel_handle.hold_send_window(conn) as can_send:
+                if not can_send:
+                    raise RequestOutcomeUnknownError(f"Request aborted before send for {method} {path}")
+                conn.request(method, path, body=body, headers=headers)
+        else:
+            conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        result = response.read().decode("utf-8")
+        return result, response.status
+    except Exception as exc:
+        raise RequestOutcomeUnknownError(f"No complete response for {method} {path}: {exc}") from exc
+    finally:
+        if cancel_handle is not None:
+            cancel_handle.unregister_connection(conn)
+        conn.close()
+
+
 # ==========================================================================
 # UDS Transport
 # ==========================================================================
@@ -191,16 +239,7 @@ def uds_request(
     if body:
         headers["Content-Length"] = str(len(body))
 
-    try:
-        conn.request(method, path, body=body, headers=headers)
-        response = conn.getresponse()
-        result = response.read().decode("utf-8")
-        status = response.status
-        conn.close()
-        return result, status
-    except Exception:
-        conn.close()
-        raise
+    return _request_over_connection(conn, method, path, body, headers)
 
 
 # ==========================================================================
@@ -232,16 +271,7 @@ def tcp_request(
     if body:
         headers["Content-Length"] = str(len(body))
 
-    try:
-        conn.request(method, path, body=body, headers=headers)
-        response = conn.getresponse()
-        result = response.read().decode("utf-8")
-        status = response.status
-        conn.close()
-        return result, status
-    except Exception:
-        conn.close()
-        raise
+    return _request_over_connection(conn, method, path, body, headers)
 
 
 # ==========================================================================
@@ -255,22 +285,19 @@ def do_request(
     params: dict | None = None,
     json_data: dict | None = None,
     timeout: int = 30,
+    connection: state.ConnectionSnapshot | None = None,
 ) -> tuple[str, int]:
-    """Route request to the active transport (UDS or TCP).
+    """Route a request to the active transport.
 
-    All requests are serialized via _ghidra_lock to prevent concurrent
-    responses from corrupting JSON-RPC framing on stdio (GitHub #91).
+    Routing is by an immutable request-bound connection snapshot when present,
+    not by whatever global target happens to be current when the worker finally
+    runs. This keeps in-flight requests pinned to the project they were
+    admitted against even if connect_instance() switches the bridge later.
     """
-    with state._ghidra_lock:
-        if state._transport_mode == "uds" and state._active_socket:
-            return uds_request(
-                state._active_socket, method, endpoint, params, json_data, timeout
-            )
-        elif state._transport_mode == "tcp" and state._active_tcp:
-            return tcp_request(
-                state._active_tcp, method, endpoint, params, json_data, timeout
-            )
-        else:
-            raise ConnectionError(
-                "No Ghidra instance connected. Use connect_instance() first."
-            )
+    connection = connection or state.get_request_connection_snapshot() or state.get_connection_snapshot()
+    if connection.mode == "uds" and connection.active_socket:
+        return uds_request(connection.active_socket, method, endpoint, params, json_data, timeout)
+    elif connection.mode == "tcp" and connection.active_tcp:
+        return tcp_request(connection.active_tcp, method, endpoint, params, json_data, timeout)
+    else:
+        raise ConnectionError("No Ghidra instance connected. Use connect_instance() first.")

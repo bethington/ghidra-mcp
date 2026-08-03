@@ -24,10 +24,12 @@ import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.LoadResults;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
+import ghidra.util.task.TimeoutTaskMonitor;
 
 import javax.swing.SwingUtilities;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,6 +40,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @McpToolGroup(value = "program", description = "Program management, script execution, memory read, bookmarks, save")
 public class ProgramScriptService {
+
+    private static final int MAX_SCRIPT_TIMEOUT_SECONDS = 1800;
 
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
@@ -2188,6 +2192,10 @@ public class ProgramScriptService {
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        return runGhidraScript(scriptPath, scriptArgs, programName, 0);
+    }
+
+    public Response runGhidraScript(String scriptPath, String scriptArgs, String programName, int timeoutSeconds) {
         // Defense in depth: the script-execution gate belongs on the sink, not
         // only on the callers. runGhidraScriptWithCapture already checks this
         // before delegating here; enforcing it again means no current or future
@@ -2217,6 +2225,7 @@ public class ProgramScriptService {
         // before reading it, otherwise the captured text can be truncated.
         final StringWriter[] scriptWriterHolder = {null};
         final PrintWriter[] scriptPrintWriterHolder = {null};
+        final TimeoutTaskMonitor[] scriptMonitorHolder = {null};
 
         // Get the PluginTool for script state (GUI mode only)
         final PluginTool pluginTool = getToolFromProvider();
@@ -2338,7 +2347,18 @@ public class ProgramScriptService {
                         scriptState = new ghidra.app.script.GhidraState(null, null, program, location, null, null);
                     }
 
-                    ghidra.util.task.TaskMonitor scriptMonitor = new ghidra.util.task.ConsoleTaskMonitor();
+                    ghidra.util.task.TaskMonitor scriptMonitor;
+                    if (timeoutSeconds > 0) {
+                        TimeoutTaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(
+                                timeoutSeconds,
+                                TimeUnit.SECONDS,
+                                new ConsoleTaskMonitor());
+                        scriptMonitorHolder[0] = timeoutMonitor;
+                        scriptMonitor = timeoutMonitor;
+                    }
+                    else {
+                        scriptMonitor = new ConsoleTaskMonitor();
+                    }
 
                     script.set(scriptState, scriptMonitor, scriptPrintWriter);
 
@@ -2403,6 +2423,9 @@ public class ProgramScriptService {
 
                     Msg.error(this, "Script execution failed: " + scriptPath, e);
                 } finally {
+                    if (scriptMonitorHolder[0] != null) {
+                        scriptMonitorHolder[0].cancel();
+                    }
                     // Restore original output streams
                     System.setOut(originalOut);
                     System.setErr(originalErr);
@@ -3004,6 +3027,9 @@ public class ProgramScriptService {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }
+        if (timeoutSeconds <= 0 || timeoutSeconds > MAX_SCRIPT_TIMEOUT_SECONDS) {
+            return Response.err("timeout_seconds must be between 1 and " + MAX_SCRIPT_TIMEOUT_SECONDS + " seconds");
+        }
 
         // Fail fast with a clear "program not found" error before doing
         // the script-file search. The Program object isn't used in this
@@ -3069,7 +3095,8 @@ public class ProgramScriptService {
             // "It is fixed for run_script_inline but not fixed for
             //  run_ghidra_script, which always runs for the current program."
             long startTime = System.currentTimeMillis();
-            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs, programName);
+            Response scriptResponse = runGhidraScript(
+                    scriptFile.getAbsolutePath(), scriptArgs, programName, timeoutSeconds);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
             // Extract the structured result from runGhidraScript's own response
