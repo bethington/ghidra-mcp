@@ -685,6 +685,12 @@ trains you to ignore the number that is supposed to mean something.
   and passive capture kept working afterward with no run-control poisoning.
   See the docstring on `_on_exception` and the `reference-debugger-sim-runs`
   memory.
+- **Bridge connection collapse under concurrent slow requests.** Dynamic Ghidra
+  tools now offload blocking HTTP work from the FastMCP event loop, while a
+  bounded request semaphore replaces the process-wide serialization lock.
+  Bridge timeouts now outlive Ghidra's requested execution timeout, and network
+  failures distinguish safe pre-send reconnects from unknown outcomes so an
+  in-flight decompilation or write is never blindly duplicated.
 - **fun-doc storage bootstrap race.** `_get_storage_repo()` was an unlocked
   check-then-build singleton and `db/migrate.py` recorded schema versions
   with a bare INSERT, so two threads bootstrapping the same fresh SQLite

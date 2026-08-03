@@ -47,7 +47,7 @@ def discover_instances() -> list[dict]:
             if dash < 0:
                 continue
             try:
-                pid = int(name[dash + 1:])
+                pid = int(name[dash + 1 :])
             except ValueError:
                 continue
 
@@ -62,9 +62,7 @@ def discover_instances() -> list[dict]:
             info: dict = {"socket": str(sock_file), "pid": pid}
             if uds_ok:
                 try:
-                    text, status = transport.uds_request(
-                        str(sock_file), "GET", "/mcp/instance_info", timeout=5
-                    )
+                    text, status = transport.uds_request(str(sock_file), "GET", "/mcp/instance_info", timeout=5)
                     if status == 200:
                         info.update(_unwrap_response_data(text))
                 except Exception as e:
@@ -85,9 +83,9 @@ def discover_instances() -> list[dict]:
     return instances
 
 
-def _iter_tcp_instances(start_port: int = DEFAULT_TCP_PORT,
-                        range_size: int = TCP_PORT_SCAN_RANGE,
-                        timeout: float = 1.0):
+def _iter_tcp_instances(
+    start_port: int = DEFAULT_TCP_PORT, range_size: int = TCP_PORT_SCAN_RANGE, timeout: float = 1.0
+):
     """Yield (url, instance_info) for every Ghidra plugin in the TCP scan range.
 
     For each port in [start_port, start_port + range_size), issues
@@ -99,27 +97,44 @@ def _iter_tcp_instances(start_port: int = DEFAULT_TCP_PORT,
     """
     for port in range(start_port, start_port + range_size):
         url = f"http://127.0.0.1:{port}"
+        cancel_handle = state.get_request_cancel_handle()
+        conn = None
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+            if cancel_handle is not None and not cancel_handle.register_connection(conn):
+                return
             try:
-                conn.request("GET", "/mcp/instance_info")
+                conn.connect()
+                if cancel_handle is not None and cancel_handle.aborted:
+                    return
+                if cancel_handle is not None:
+                    with cancel_handle.hold_send_window(conn) as can_send:
+                        if not can_send:
+                            return
+                        conn.request("GET", "/mcp/instance_info")
+                else:
+                    conn.request("GET", "/mcp/instance_info")
                 resp = conn.getresponse()
                 if resp.status != 200:
                     continue
                 body = resp.read().decode("utf-8", errors="replace")
             finally:
+                if cancel_handle is not None and conn is not None:
+                    cancel_handle.unregister_connection(conn)
                 conn.close()
             info = _unwrap_response_data(body)
             if isinstance(info, dict):
                 yield url, info
         except Exception:
             # Connection refused / timeout / non-JSON response — try next port.
+            if cancel_handle is not None and conn is not None:
+                cancel_handle.unregister_connection(conn)
             continue
 
 
-def _tcp_instances_by_pid(start_port: int = DEFAULT_TCP_PORT,
-                          range_size: int = TCP_PORT_SCAN_RANGE,
-                          timeout: float = 1.0) -> dict[int, dict]:
+def _tcp_instances_by_pid(
+    start_port: int = DEFAULT_TCP_PORT, range_size: int = TCP_PORT_SCAN_RANGE, timeout: float = 1.0
+) -> dict[int, dict]:
     """Map pid -> {"url": ..., **instance_info} for TCP-reachable instances.
 
     Used to enrich UDS socket-file discovery on hosts where Python can't
@@ -135,9 +150,9 @@ def _tcp_instances_by_pid(start_port: int = DEFAULT_TCP_PORT,
     return by_pid
 
 
-def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
-                          range_size: int = TCP_PORT_SCAN_RANGE,
-                          timeout: float = 1.0) -> str | None:
+def _scan_tcp_for_project(
+    project: str, start_port: int = DEFAULT_TCP_PORT, range_size: int = TCP_PORT_SCAN_RANGE, timeout: float = 1.0
+) -> str | None:
     """Scan a small TCP port range for a Ghidra plugin matching `project`.
 
     Used when UDS discovery returns nothing (e.g., TCP-only multi-instance
@@ -177,9 +192,7 @@ def discover_active_tcp_instance() -> dict | None:
         info["project"] = state._connected_project
 
     try:
-        text, status = transport.tcp_request(
-            state._active_tcp, "GET", "/mcp/instance_info", timeout=5
-        )
+        text, status = transport.tcp_request(state._active_tcp, "GET", "/mcp/instance_info", timeout=5)
         if status == 200:
             info.update(_unwrap_response_data(text))
             return info
@@ -187,9 +200,7 @@ def discover_active_tcp_instance() -> dict | None:
         logger.debug(f"Could not query TCP instance info for {state._active_tcp}: {e}")
 
     try:
-        text, status = transport.tcp_request(
-            state._active_tcp, "GET", "/list_open_programs", timeout=5
-        )
+        text, status = transport.tcp_request(state._active_tcp, "GET", "/list_open_programs", timeout=5)
         if status == 200:
             data = _unwrap_response_data(text)
             if isinstance(data, dict):
@@ -197,8 +208,6 @@ def discover_active_tcp_instance() -> dict | None:
                     if key in data:
                         info[key] = data[key]
     except Exception as e:
-        logger.debug(
-            f"Could not query open programs for active TCP instance {state._active_tcp}: {e}"
-        )
+        logger.debug(f"Could not query open programs for active TCP instance {state._active_tcp}: {e}")
 
     return info

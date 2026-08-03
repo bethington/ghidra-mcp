@@ -38,9 +38,7 @@ class TestGetSocketDir(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
         env["TMPDIR"] = "/custom/tmp"
         env["USER"] = "testuser"
-        with patch.dict(os.environ, env, clear=True), patch(
-            "os.getuid", return_value=9_999_999, create=True
-        ):
+        with patch.dict(os.environ, env, clear=True), patch("os.getuid", return_value=9_999_999, create=True):
             from bridge_mcp_ghidra import get_socket_dir
 
             result = get_socket_dir()
@@ -67,6 +65,7 @@ class TestTcpPortScan(unittest.TestCase):
             def __init__(self, status, body):
                 self.status = status
                 self._body = body
+
             def read(self):
                 return self._body.encode("utf-8") if isinstance(self._body, str) else self._body
 
@@ -77,11 +76,17 @@ class TestTcpPortScan(unittest.TestCase):
                 self._resp = port_to_response.get(port)
                 if self._resp is None:
                     raise ConnectionRefusedError(f"no listener on {port}")
+
+            def connect(self):
+                pass
+
             def request(self, method, url):
                 pass
+
             def getresponse(self):
                 status, body = self._resp
                 return FakeResponse(status, body)
+
             def close(self):
                 pass
 
@@ -92,10 +97,12 @@ class TestTcpPortScan(unittest.TestCase):
         from unittest.mock import patch
         import bridge_mcp_ghidra as bridge
 
-        FakeConn = self._make_fake_conn({
-            8089: (200, json.dumps({"project": "other"})),
-            8090: (200, json.dumps({"project": "wanted"})),
-        })
+        FakeConn = self._make_fake_conn(
+            {
+                8089: (200, json.dumps({"project": "other"})),
+                8090: (200, json.dumps({"project": "wanted"})),
+            }
+        )
         with patch("http.client.HTTPConnection", FakeConn):
             result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
         self.assertEqual(result, "http://127.0.0.1:8090")
@@ -106,10 +113,12 @@ class TestTcpPortScan(unittest.TestCase):
         from unittest.mock import patch
         import bridge_mcp_ghidra as bridge
 
-        FakeConn = self._make_fake_conn({
-            8089: (200, json.dumps({"project": "unrelated"})),
-            8090: (200, json.dumps({"project": "alsoNot"})),
-        })
+        FakeConn = self._make_fake_conn(
+            {
+                8089: (200, json.dumps({"project": "unrelated"})),
+                8090: (200, json.dumps({"project": "alsoNot"})),
+            }
+        )
         with patch("http.client.HTTPConnection", FakeConn):
             result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
         self.assertIsNone(result)
@@ -130,9 +139,11 @@ class TestTcpPortScan(unittest.TestCase):
         from unittest.mock import patch
         import bridge_mcp_ghidra as bridge
 
-        FakeConn = self._make_fake_conn({
-            8089: (200, json.dumps({"project": "MyProjectVariant"})),
-        })
+        FakeConn = self._make_fake_conn(
+            {
+                8089: (200, json.dumps({"project": "MyProjectVariant"})),
+            }
+        )
         with patch("http.client.HTTPConnection", FakeConn):
             result = bridge._scan_tcp_for_project("MyProject", start_port=8089, range_size=4, timeout=0.5)
         self.assertEqual(result, "http://127.0.0.1:8089")
@@ -143,10 +154,12 @@ class TestTcpPortScan(unittest.TestCase):
         from unittest.mock import patch
         import bridge_mcp_ghidra as bridge
 
-        FakeConn = self._make_fake_conn({
-            8089: (200, json.dumps({"project": "Diablo2Mod"})),  # substring of "Diablo2"
-            8091: (200, json.dumps({"project": "Diablo2"})),     # exact match
-        })
+        FakeConn = self._make_fake_conn(
+            {
+                8089: (200, json.dumps({"project": "Diablo2Mod"})),  # substring of "Diablo2"
+                8091: (200, json.dumps({"project": "Diablo2"})),  # exact match
+            }
+        )
         with patch("http.client.HTTPConnection", FakeConn):
             result = bridge._scan_tcp_for_project("Diablo2", start_port=8089, range_size=4, timeout=0.5)
         self.assertEqual(result, "http://127.0.0.1:8091")
@@ -157,9 +170,11 @@ class TestTcpPortScan(unittest.TestCase):
         from unittest.mock import patch
         import bridge_mcp_ghidra as bridge
 
-        FakeConn = self._make_fake_conn({
-            8089: (200, json.dumps({"data": {"project": "wanted"}})),
-        })
+        FakeConn = self._make_fake_conn(
+            {
+                8089: (200, json.dumps({"data": {"project": "wanted"}})),
+            }
+        )
         with patch("http.client.HTTPConnection", FakeConn):
             result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=2, timeout=0.5)
         self.assertEqual(result, "http://127.0.0.1:8089")
@@ -191,11 +206,14 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
 
         instances = [{"socket": "/tmp/ghidra-123.sock", "pid": 123}]
 
-        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
-             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
-             patch.object(bridge.static_tools, "validate_server_url", return_value=True), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0), \
-             patch.object(bridge.static_tools, "os") as mock_os:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan,
+            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+            patch.object(bridge.static_tools, "os") as mock_os,
+        ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
@@ -216,9 +234,11 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             {"socket": "/tmp/ghidra-456.sock", "pid": 456, "project": "also_other"},
         ]
 
-        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
-             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan, \
-             patch.object(bridge.static_tools, "os") as mock_os:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
+            patch.object(bridge.static_tools, "os") as mock_os,
+        ):
             mock_os.getenv.return_value = None
 
             result = asyncio.run(bridge.connect_instance("wanted"))
@@ -234,9 +254,12 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
 
         instances = [{"socket": "/tmp/ghidra-123.sock", "pid": 123, "project": "wanted"}]
 
-        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
-             patch.object(bridge.transport, "uds_supported", return_value=True), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0):
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+        ):
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
 
@@ -253,19 +276,24 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with no port scan (the scan could pick a different instance)."""
         import bridge_mcp_ghidra as bridge
 
-        instances = [{
-            "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
-            "pid": 9020,
-            "project": "diablo2",
-            "url": "http://127.0.0.1:8089",
-        }]
+        instances = [
+            {
+                "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
+                "pid": 9020,
+                "project": "diablo2",
+                "url": "http://127.0.0.1:8089",
+            }
+        ]
 
-        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
-             patch.object(bridge.transport, "uds_supported", return_value=False), \
-             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan, \
-             patch.object(bridge.static_tools, "validate_server_url", return_value=True), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0), \
-             patch.object(bridge.static_tools, "os") as mock_os:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
+            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+            patch.object(bridge.static_tools, "os") as mock_os,
+        ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
@@ -285,19 +313,23 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         rather than refusing outright."""
         import bridge_mcp_ghidra as bridge
 
-        instances = [{
-            "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
-            "pid": 9020,
-            "project": "diablo2",
-        }]
+        instances = [
+            {
+                "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
+                "pid": 9020,
+                "project": "diablo2",
+            }
+        ]
 
-        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
-             patch.object(bridge.transport, "uds_supported", return_value=False), \
-             patch.object(bridge.discovery, "_scan_tcp_for_project",
-                          return_value="http://127.0.0.1:8093") as scan, \
-             patch.object(bridge.static_tools, "validate_server_url", return_value=True), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0), \
-             patch.object(bridge.static_tools, "os") as mock_os:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8093") as scan,
+            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+            patch.object(bridge.static_tools, "os") as mock_os,
+        ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
@@ -327,15 +359,20 @@ class TestAutoConnectWindowsTcp(unittest.TestCase):
     def test_single_instance_auto_connects_via_enriched_url(self):
         import bridge_mcp_ghidra as bridge
 
-        one = [{
-            "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
-            "pid": 9020,
-            "project": "diablo2",
-            "url": "http://127.0.0.1:8089",
-        }]
-        with patch.object(bridge.discovery, "discover_instances", return_value=one), \
-             patch.object(bridge.transport, "uds_supported", return_value=False), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=7):
+        one = [
+            {
+                "socket": r"F:\tmp\ghidra-mcp-benam\ghidra-9020.sock",
+                "pid": 9020,
+                "project": "diablo2",
+                "url": "http://127.0.0.1:8089",
+            }
+        ]
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=one),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=7),
+        ):
             bridge.state._active_socket = None
             bridge.state._active_tcp = None
             bridge.state._transport_mode = "none"
@@ -382,9 +419,12 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         inst = self._instance(url="http://127.0.0.1:8089")
-        with patch.object(bridge.discovery, "discover_instances", return_value=[inst]), \
-             patch.object(bridge.transport, "uds_supported", return_value=True), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0):
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+        ):
             self.assertTrue(bridge.dispatch._try_reconnect())
 
         self.assertEqual(bridge.state._transport_mode, "uds")
@@ -395,9 +435,12 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         inst = self._instance(url="http://127.0.0.1:8089")
-        with patch.object(bridge.discovery, "discover_instances", return_value=[inst]), \
-             patch.object(bridge.transport, "uds_supported", return_value=False), \
-             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0):
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
+        ):
             self.assertTrue(bridge.dispatch._try_reconnect())
 
         self.assertEqual(bridge.state._transport_mode, "tcp")
@@ -408,13 +451,41 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         inst = self._instance()  # no url — TCP enrichment found nothing
-        with patch.object(bridge.discovery, "discover_instances", return_value=[inst]), \
-             patch.object(bridge.transport, "uds_supported", return_value=False), \
-             patch.object(bridge.registry, "_fetch_and_register_schema") as fetch:
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+            patch.object(bridge.registry, "_fetch_schema") as fetch,
+        ):
             self.assertFalse(bridge.dispatch._try_reconnect())
 
         fetch.assert_not_called()
         self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_request_reconnect_does_not_override_explicit_switch(self):
+        import bridge_mcp_ghidra as bridge
+
+        previous = bridge.state.set_connection_snapshot(
+            "tcp",
+            active_tcp="http://127.0.0.1:8089",
+            connected_project="diablo2",
+        )
+        bridge.state.set_connection_snapshot(
+            "tcp",
+            active_tcp="http://127.0.0.1:8090",
+            connected_project="other",
+        )
+        inst = self._instance(url="http://127.0.0.1:8089")
+
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+            patch.object(bridge.transport, "uds_supported", return_value=False),
+        ):
+            rebound = bridge.dispatch._try_reconnect(previous)
+
+        self.assertIsNotNone(rebound)
+        self.assertEqual(rebound.active_tcp, "http://127.0.0.1:8089")
+        self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:8090")
+        self.assertEqual(bridge.state._connected_project, "other")
 
 
 class TestGetSocketDirCandidates(unittest.TestCase):
@@ -428,9 +499,7 @@ class TestGetSocketDirCandidates(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k not in ("XDG_RUNTIME_DIR",)}
         env["TMPDIR"] = "/custom/tmp"
         env["USER"] = "testuser"
-        with patch.dict(os.environ, env, clear=True), patch(
-            "os.getuid", return_value=9_999_999, create=True
-        ):
+        with patch.dict(os.environ, env, clear=True), patch("os.getuid", return_value=9_999_999, create=True):
             from bridge_mcp_ghidra import get_socket_dir_candidates
 
             # Use pathlib.Path equality, which normalizes separators across OSes.
@@ -485,14 +554,17 @@ class TestGetSocketDirCandidates(unittest.TestCase):
                 return iter([fake_hit])
             return orig_glob(self, pattern)
 
-        with patch.dict(os.environ, env, clear=True), \
-             patch.object(Path, "exists", fake_exists), \
-             patch.object(Path, "glob", fake_glob):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(Path, "exists", fake_exists),
+            patch.object(Path, "glob", fake_glob),
+        ):
             from bridge_mcp_ghidra import get_socket_dir_candidates
 
             candidates = get_socket_dir_candidates()
             self.assertIn(
-                fake_hit, candidates,
+                fake_hit,
+                candidates,
                 f"macOS /var/folders glob hit must appear in candidates: {candidates}",
             )
             # And the POSIX /tmp fallback must still be there too.
@@ -527,14 +599,17 @@ class TestGetSocketDirCandidates(unittest.TestCase):
                 return iter([one_level_hit])
             return orig_glob(self, pattern)
 
-        with patch.dict(os.environ, env, clear=True), \
-             patch.object(Path, "exists", fake_exists), \
-             patch.object(Path, "glob", fake_glob):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(Path, "exists", fake_exists),
+            patch.object(Path, "glob", fake_glob),
+        ):
             from bridge_mcp_ghidra import get_socket_dir_candidates
 
             candidates = get_socket_dir_candidates()
             self.assertNotIn(
-                one_level_hit, candidates,
+                one_level_hit,
+                candidates,
                 f"old one-level glob must not match: {candidates}",
             )
 
@@ -558,17 +633,20 @@ class TestGetSocketDirCandidates(unittest.TestCase):
                 return False
             return orig_exists(self)
 
-        with patch.object(os, "listdrives", create=True,
-                          return_value=["C:\\", "F:\\"]), \
-             patch.object(Path, "exists", fake_exists):
+        with (
+            patch.object(os, "listdrives", create=True, return_value=["C:\\", "F:\\"]),
+            patch.object(Path, "exists", fake_exists),
+        ):
             hits = transport._windows_drive_tmp_candidates("testuser")
 
         self.assertIn(
-            cross_drive_dir, hits,
+            cross_drive_dir,
+            hits,
             f"cross-drive socket dir missing: {hits}",
         )
         self.assertNotIn(
-            same_drive_dir, hits,
+            same_drive_dir,
+            hits,
             f"nonexistent drive-sweep dir must be excluded: {hits}",
         )
 
@@ -579,8 +657,7 @@ class TestGetSocketDirCandidates(unittest.TestCase):
         from bridge_mcp_ghidra import transport
 
         sweep_hit = Path("Q:\\") / "tmp" / "ghidra-mcp-testuser"
-        with patch.object(transport, "_windows_drive_tmp_candidates",
-                          return_value=[sweep_hit]) as sweep:
+        with patch.object(transport, "_windows_drive_tmp_candidates", return_value=[sweep_hit]) as sweep:
             candidates = transport.get_socket_dir_candidates()
         sweep.assert_called_once()
         self.assertIn(sweep_hit, candidates)
@@ -591,8 +668,7 @@ class TestGetSocketDirCandidates(unittest.TestCase):
         be consulted."""
         from bridge_mcp_ghidra import transport
 
-        with patch.object(transport, "_windows_drive_tmp_candidates",
-                          return_value=[]) as sweep:
+        with patch.object(transport, "_windows_drive_tmp_candidates", return_value=[]) as sweep:
             transport.get_socket_dir_candidates()
         sweep.assert_not_called()
 
@@ -619,14 +695,17 @@ class TestGetSocketDirCandidates(unittest.TestCase):
                 return iter([private_hit])
             return orig_glob(self, pattern)
 
-        with patch.dict(os.environ, env, clear=True), \
-             patch.object(Path, "exists", fake_exists), \
-             patch.object(Path, "glob", fake_glob):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(Path, "exists", fake_exists),
+            patch.object(Path, "glob", fake_glob),
+        ):
             from bridge_mcp_ghidra import get_socket_dir_candidates
 
             candidates = get_socket_dir_candidates()
             self.assertIn(
-                private_hit, candidates,
+                private_hit,
+                candidates,
                 f"/private/var/folders hit must appear in candidates: {candidates}",
             )
 
@@ -661,17 +740,27 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             # the test doesn't actually try to connect. Pin uds_supported to
             # True so the UDS query path runs even on Windows CPython (which
             # lacks AF_UNIX and would otherwise take the TCP enrichment path).
-            with patch.object(
-                bridge.transport, "get_socket_dir_candidates",
-                return_value=[Path(d1), Path(d2)],
-            ), patch.object(
-                bridge.transport, "uds_supported", return_value=True,
-            ), patch.object(
-                bridge.transport, "uds_request",
-                return_value=("{}", 500),  # info query fails — that's fine
-            ), patch.object(
-                bridge.validation, "is_pid_alive",
-                side_effect=lambda p: p == pid_alive,
+            with (
+                patch.object(
+                    bridge.transport,
+                    "get_socket_dir_candidates",
+                    return_value=[Path(d1), Path(d2)],
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_supported",
+                    return_value=True,
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_request",
+                    return_value=("{}", 500),  # info query fails — that's fine
+                ),
+                patch.object(
+                    bridge.validation,
+                    "is_pid_alive",
+                    side_effect=lambda p: p == pid_alive,
+                ),
             ):
                 instances = discover_instances()
 
@@ -693,17 +782,27 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             from bridge_mcp_ghidra import discover_instances
             import bridge_mcp_ghidra as bridge
 
-            with patch.object(
-                bridge.transport, "get_socket_dir_candidates",
-                return_value=[Path(d), Path(d)],  # same dir twice
-            ), patch.object(
-                bridge.transport, "uds_supported", return_value=True,
-            ), patch.object(
-                bridge.transport, "uds_request",
-                return_value=("{}", 500),
-            ), patch.object(
-                bridge.validation, "is_pid_alive",
-                side_effect=lambda p: p == pid_alive,
+            with (
+                patch.object(
+                    bridge.transport,
+                    "get_socket_dir_candidates",
+                    return_value=[Path(d), Path(d)],  # same dir twice
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_supported",
+                    return_value=True,
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_request",
+                    return_value=("{}", 500),
+                ),
+                patch.object(
+                    bridge.validation,
+                    "is_pid_alive",
+                    side_effect=lambda p: p == pid_alive,
+                ),
             ):
                 instances = discover_instances()
 
@@ -732,18 +831,31 @@ class TestDiscoverInstancesWindowsTcpEnrichment(unittest.TestCase):
                     "project": "diablo2",
                 }
             }
-            with patch.object(
-                bridge.transport, "get_socket_dir_candidates",
-                return_value=[Path(d)],
-            ), patch.object(
-                bridge.transport, "uds_supported", return_value=False,
-            ), patch.object(
-                bridge.transport, "uds_request",
-            ) as uds_req, patch.object(
-                bridge.discovery, "_tcp_instances_by_pid", return_value=tcp_info,
-            ), patch.object(
-                bridge.validation, "is_pid_alive",
-                side_effect=lambda p: p == pid_alive,
+            with (
+                patch.object(
+                    bridge.transport,
+                    "get_socket_dir_candidates",
+                    return_value=[Path(d)],
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_supported",
+                    return_value=False,
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_request",
+                ) as uds_req,
+                patch.object(
+                    bridge.discovery,
+                    "_tcp_instances_by_pid",
+                    return_value=tcp_info,
+                ),
+                patch.object(
+                    bridge.validation,
+                    "is_pid_alive",
+                    side_effect=lambda p: p == pid_alive,
+                ),
             ):
                 instances = bridge.discover_instances()
 
@@ -763,19 +875,31 @@ class TestDiscoverInstancesWindowsTcpEnrichment(unittest.TestCase):
             pid_alive = os.getpid()
             (Path(d) / f"ghidra-{pid_alive}.sock").touch()
 
-            with patch.object(
-                bridge.transport, "get_socket_dir_candidates",
-                return_value=[Path(d)],
-            ), patch.object(
-                bridge.transport, "uds_supported", return_value=True,
-            ), patch.object(
-                bridge.transport, "uds_request",
-                return_value=(json.dumps({"project": "diablo2"}), 200),
-            ), patch.object(
-                bridge.discovery, "_tcp_instances_by_pid",
-            ) as tcp_scan, patch.object(
-                bridge.validation, "is_pid_alive",
-                side_effect=lambda p: p == pid_alive,
+            with (
+                patch.object(
+                    bridge.transport,
+                    "get_socket_dir_candidates",
+                    return_value=[Path(d)],
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_supported",
+                    return_value=True,
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_request",
+                    return_value=(json.dumps({"project": "diablo2"}), 200),
+                ),
+                patch.object(
+                    bridge.discovery,
+                    "_tcp_instances_by_pid",
+                ) as tcp_scan,
+                patch.object(
+                    bridge.validation,
+                    "is_pid_alive",
+                    side_effect=lambda p: p == pid_alive,
+                ),
             ):
                 instances = bridge.discover_instances()
 
@@ -793,16 +917,27 @@ class TestDiscoverInstancesWindowsTcpEnrichment(unittest.TestCase):
             pid_alive = os.getpid()
             (Path(d) / f"ghidra-{pid_alive}.sock").touch()
 
-            with patch.object(
-                bridge.transport, "get_socket_dir_candidates",
-                return_value=[Path(d)],
-            ), patch.object(
-                bridge.transport, "uds_supported", return_value=False,
-            ), patch.object(
-                bridge.discovery, "_tcp_instances_by_pid", return_value={},
-            ), patch.object(
-                bridge.validation, "is_pid_alive",
-                side_effect=lambda p: p == pid_alive,
+            with (
+                patch.object(
+                    bridge.transport,
+                    "get_socket_dir_candidates",
+                    return_value=[Path(d)],
+                ),
+                patch.object(
+                    bridge.transport,
+                    "uds_supported",
+                    return_value=False,
+                ),
+                patch.object(
+                    bridge.discovery,
+                    "_tcp_instances_by_pid",
+                    return_value={},
+                ),
+                patch.object(
+                    bridge.validation,
+                    "is_pid_alive",
+                    side_effect=lambda p: p == pid_alive,
+                ),
             ):
                 instances = bridge.discover_instances()
 
@@ -829,9 +964,12 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
         # registry._fetch_and_register_schema(); it reads/writes state._*).
         # Patching the flat bridge.* re-exports would NOT intercept those, so
         # the test would pass vacuously regardless of the code under test.
-        with patch.object(bridge.discovery, "discover_instances", return_value=two), \
-             patch.object(bridge.registry, "_fetch_and_register_schema",
-                          side_effect=lambda *a, **kw: fetch_calls.append(1) or 0):
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=two),
+            patch.object(
+                bridge.registry, "_fetch_and_register_schema", side_effect=lambda *a, **kw: fetch_calls.append(1) or 0
+            ),
+        ):
             # Reset connection state so the test is hermetic.
             bridge.state._active_socket = None
             bridge.state._active_tcp = None
@@ -839,9 +977,9 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
             bridge._auto_connect()
 
         self.assertEqual(
-            fetch_calls, [],
-            "schema fetch was called — _auto_connect fell through to TCP "
-            "after the multi-UDS warning"
+            fetch_calls,
+            [],
+            "schema fetch was called — _auto_connect fell through to TCP " "after the multi-UDS warning",
         )
         self.assertEqual(bridge.state._transport_mode, "none")
         self.assertIsNone(bridge.state._active_tcp)
@@ -856,10 +994,12 @@ class TestDebuggerAttachAddressSync(unittest.TestCase):
     def test_uses_image_base_from_list_open_programs(self):
         import bridge_mcp_ghidra as bridge
 
-        programs_payload = json.dumps([
-            {"path": "/proj/Foo.exe", "name": "Foo.exe", "image_base": "0x400000"},
-            {"path": "/proj/Bar.dll", "name": "Bar.dll", "image_base": "0x10000000"},
-        ])
+        programs_payload = json.dumps(
+            [
+                {"path": "/proj/Foo.exe", "name": "Foo.exe", "image_base": "0x400000"},
+                {"path": "/proj/Bar.dll", "name": "Bar.dll", "image_base": "0x10000000"},
+            ]
+        )
         debugger_calls = []
 
         def fake_debugger_request(method, path, body=None, **kw):
@@ -870,14 +1010,14 @@ class TestDebuggerAttachAddressSync(unittest.TestCase):
             if path == "/list_open_programs":
                 return programs_payload
             raise AssertionError(
-                f"unexpected GET {path} — auto-sync must not call "
-                "/get_metadata or any other endpoint"
+                f"unexpected GET {path} — auto-sync must not call " "/get_metadata or any other endpoint"
             )
 
-        with patch.object(bridge.debugger, "_debugger_request",
-                          side_effect=fake_debugger_request), \
-             patch.object(bridge.dispatch, "dispatch_get", side_effect=fake_dispatch_get), \
-             patch.object(bridge.state, "_transport_mode", "tcp"):
+        with (
+            patch.object(bridge.debugger, "_debugger_request", side_effect=fake_debugger_request),
+            patch.object(bridge.dispatch, "dispatch_get", side_effect=fake_dispatch_get),
+            patch.object(bridge.state, "_transport_mode", "tcp"),
+        ):
             bridge.debugger_attach("12345")
 
         sync = [c for c in debugger_calls if c[1] == "/debugger/sync_modules"]
@@ -949,7 +1089,22 @@ class TestGetTimeout(unittest.TestCase):
     def test_decompile_timeout(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function"), 45)
+        self.assertEqual(get_timeout("/decompile_function"), 75)
+
+    def test_requested_decompile_timeout_includes_transport_grace(self):
+        from bridge_mcp_ghidra import get_timeout
+
+        self.assertEqual(get_timeout("/decompile_function", {"timeout": "120"}), 135)
+
+    def test_timeout_seconds_alias_uses_same_grace(self):
+        from bridge_mcp_ghidra import get_timeout
+
+        self.assertEqual(get_timeout("/run_ghidra_script", {"timeout_seconds": "120"}), 1800)
+
+    def test_requested_timeout_is_capped_with_grace_preserved(self):
+        from bridge_mcp_ghidra import get_timeout
+
+        self.assertEqual(get_timeout("/decompile_function", {"timeout": "1800"}), 1815)
 
     def test_script_timeout(self):
         from bridge_mcp_ghidra import get_timeout
@@ -1189,11 +1344,7 @@ class TestToolNameSanitization(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
-        invalid = [
-            name
-            for name in bridge.mcp._tool_manager._tools
-            if not pattern.fullmatch(name)
-        ]
+        invalid = [name for name in bridge.mcp._tool_manager._tools if not pattern.fullmatch(name)]
         self.assertEqual(invalid, [])
 
     def test_registered_dynamic_tool_names_are_valid(self):
@@ -1213,11 +1364,7 @@ class TestToolNameSanitization(unittest.TestCase):
         bridge.register_tools_from_schema(schema, groups=None)
         pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
         try:
-            invalid = [
-                name
-                for name in bridge.mcp._tool_manager._tools
-                if not pattern.fullmatch(name)
-            ]
+            invalid = [name for name in bridge.mcp._tool_manager._tools if not pattern.fullmatch(name)]
             self.assertEqual(invalid, [])
             self.assertIn("server_status", bridge.mcp._tool_manager._tools)
             # /check/tools collides with the static management tool check_tools
@@ -1386,60 +1533,44 @@ class TestDebuggerEnabled(unittest.TestCase):
     def test_disabled_on_non_windows_with_local_url(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(
-            _debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override=None)
-        )
+        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override=None))
 
     def test_disabled_on_non_windows_with_localhost_name(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(
-            _debugger_enabled(url="http://localhost:8099", platform="darwin", override=None)
-        )
+        self.assertFalse(_debugger_enabled(url="http://localhost:8099", platform="darwin", override=None))
 
     def test_disabled_on_non_windows_with_ipv6_loopback(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(
-            _debugger_enabled(url="http://[::1]:8099", platform="linux", override=None)
-        )
+        self.assertFalse(_debugger_enabled(url="http://[::1]:8099", platform="linux", override=None))
 
     def test_enabled_on_non_windows_with_remote_host(self):
         """A remote Windows host running the server is reachable from Linux."""
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(
-            _debugger_enabled(url="http://winbox.lan:8099", platform="linux", override=None)
-        )
+        self.assertTrue(_debugger_enabled(url="http://winbox.lan:8099", platform="linux", override=None))
 
     def test_enabled_on_windows_with_local_url(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(
-            _debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override=None)
-        )
+        self.assertTrue(_debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override=None))
 
     def test_override_forces_off_even_on_windows(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(
-            _debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override="0")
-        )
+        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override="0"))
 
     def test_override_forces_on_even_on_linux_local(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(
-            _debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override="1")
-        )
+        self.assertTrue(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override="1"))
 
     def test_blank_override_is_ignored(self):
         """An empty string (e.g. unset-but-present env) falls back to auto-detect."""
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(
-            _debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override="")
-        )
+        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override=""))
 
 
 class TestDebuggerToolRegistration(unittest.TestCase):
@@ -1454,12 +1585,8 @@ class TestDebuggerToolRegistration(unittest.TestCase):
     def test_all_static_names_superset_of_active(self):
         import bridge_mcp_ghidra as bridge
 
-        self.assertTrue(
-            bridge.DEBUGGER_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES)
-        )
-        self.assertTrue(
-            bridge.STATIC_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES)
-        )
+        self.assertTrue(bridge.DEBUGGER_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES))
+        self.assertTrue(bridge.STATIC_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES))
 
     @unittest.skipIf(sys.platform.startswith("win"), "proxies active on Windows")
     def test_inactive_proxy_frees_clean_name_for_trace_rmi_tool(self):
@@ -1467,9 +1594,7 @@ class TestDebuggerToolRegistration(unittest.TestCase):
         TraceRmi /debugger/status (System B) gets the clean name, not _2."""
         import bridge_mcp_ghidra as bridge
 
-        schema = bridge._parse_schema(
-            {"tools": [{"path": "/debugger/status", "method": "GET", "params": []}]}
-        )
+        schema = bridge._parse_schema({"tools": [{"path": "/debugger/status", "method": "GET", "params": []}]})
         self.assertEqual(schema[0]["name"], "debugger_status")
         self.assertFalse(schema[0]["name_collided"])
 

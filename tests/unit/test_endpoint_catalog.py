@@ -72,9 +72,7 @@ class TestAnnotatedEndpoints(unittest.TestCase):
     def test_has_annotated_endpoints(self):
         """Services should have @McpTool annotations."""
         count = count_mcptool_annotations()
-        self.assertGreater(
-            count, 100, f"Expected >100 annotated endpoints, found {count}"
-        )
+        self.assertGreater(count, 100, f"Expected >100 annotated endpoints, found {count}")
 
     def test_all_paths_start_with_slash(self):
         """All @McpTool paths should start with /."""
@@ -126,9 +124,7 @@ class TestEndpointsJson(unittest.TestCase):
     def test_no_duplicate_paths(self):
         data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         paths = [ep["path"] for ep in data.get("endpoints", [])]
-        self.assertEqual(
-            len(paths), len(set(paths)), "Duplicate paths in endpoints.json"
-        )
+        self.assertEqual(len(paths), len(set(paths)), "Duplicate paths in endpoints.json")
 
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_endpoints_have_required_fields(self):
@@ -154,8 +150,7 @@ class TestEndpointsJson(unittest.TestCase):
             ]
         }
         invalid = [
-            tool["name"] for tool in _parse_schema(raw_schema)
-            if not re.fullmatch(r"^[a-zA-Z0-9_-]+$", tool["name"])
+            tool["name"] for tool in _parse_schema(raw_schema) if not re.fullmatch(r"^[a-zA-Z0-9_-]+$", tool["name"])
         ]
         self.assertEqual(invalid, [])
 
@@ -174,20 +169,20 @@ class TestBridgeIsDynamic(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         content = _bridge_source_text()
-        mgmt_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        mgmt_count = len(re.findall(r"@mcp\.tool\([^\n]*\)", content))
         debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
         tool_count = mgmt_count + debugger_count
         self.assertEqual(
             tool_count,
             len(bridge._ALL_STATIC_TOOL_NAMES),
-            f"Bridge has {mgmt_count} @mcp.tool() + {debugger_count} "
+            f"Bridge has {mgmt_count} @mcp.tool(...) + {debugger_count} "
             f"@_debugger_tool() decorators ({tool_count}) but "
             f"{len(bridge._ALL_STATIC_TOOL_NAMES)} static tool names",
         )
         self.assertEqual(
             mgmt_count,
             len(bridge.MANAGEMENT_TOOL_NAMES),
-            "management @mcp.tool() decorators should match MANAGEMENT_TOOL_NAMES",
+            "management @mcp.tool(...) decorators should match MANAGEMENT_TOOL_NAMES",
         )
         self.assertEqual(
             debugger_count,

@@ -14,8 +14,160 @@ from .server import Context, mcp
 from .validation import validate_server_url
 
 
-@mcp.tool()
-def list_instances() -> str:
+def _connect_instance_sync(project: str) -> dict:
+    """Blocking connect_instance implementation for worker-thread execution."""
+    cancel_handle = state.get_request_cancel_handle()
+
+    def _commit_if_live(func, /, *args, **kwargs):
+        if cancel_handle is None:
+            return func(*args, **kwargs)
+        return cancel_handle.run_if_not_aborted(func, *args, **kwargs)
+
+    instances = discovery.discover_instances()
+
+    # Try UDS instances first
+    match = None
+    matched_tcp_url = None
+    if instances:
+        for inst in instances:
+            if inst.get("project", "") == project:
+                match = inst
+                break
+        if not match:
+            for inst in instances:
+                if project.lower() in inst.get("project", "").lower():
+                    match = inst
+                    break
+        if match and not transport.uds_supported():
+            matched_tcp_url = match.get("url")
+        elif match:
+            candidate = state.build_connection_snapshot(
+                mode="uds",
+                active_socket=match["socket"],
+                connected_project=match.get("project"),
+            )
+            try:
+                schema = registry._fetch_schema(connection=candidate)
+            except Exception as e:
+                return {
+                    "error": f"Schema fetch failed: {e}",
+                    "socket": match["socket"],
+                }
+            if cancel_handle is not None and cancel_handle.aborted:
+                return {"error": "connect_instance cancelled before commit"}
+            with state._tool_registry_lock:
+                result = _commit_if_live(
+                    lambda: (
+                        registry.register_tools_from_schema(
+                            schema,
+                            groups=None if not state._lazy_mode else state._default_groups,
+                        ),
+                        state.set_connection_snapshot(
+                            "uds",
+                            active_socket=match["socket"],
+                            active_tcp=None,
+                            connected_project=match.get("project"),
+                        ),
+                    )
+                )
+                if result is None:
+                    return {"error": "connect_instance cancelled before commit"}
+                count, installed = result
+            total = len(state._full_schema)
+            note = (
+                f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
+                if state._lazy_mode
+                else f"Loaded all {count} tools on connect."
+            )
+            return {
+                "connected": True,
+                "transport": "uds",
+                "project": installed.connected_project,
+                "socket": match["socket"],
+                "pid": match.get("pid"),
+                "tools_registered": count,
+                "tools_total": total,
+                "loaded_groups": sorted(state._loaded_groups),
+                "note": note,
+            }
+
+    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    if env_tcp:
+        tcp_url = env_tcp
+    elif matched_tcp_url:
+        tcp_url = matched_tcp_url
+    elif match is None and instances and any(inst.get("project") for inst in instances):
+        available = [inst.get("project", "unknown") for inst in instances]
+        return {
+            "error": (
+                f"No instance matching '{project}' (UDS: {len(instances)} found, "
+                f"none matched). Refusing to use any instance's tcp_port - would "
+                f"connect to the wrong project. Use list_instances() to see what's "
+                f"available."
+            ),
+            "available": available,
+        }
+    else:
+        scanned = discovery._scan_tcp_for_project(project)
+        tcp_url = scanned if scanned else DEFAULT_TCP_URL
+    if not validate_server_url(tcp_url):
+        return {
+            "error": f"Refusing to connect to invalid TCP URL: {tcp_url}. Expected http://<127.0.0.1|localhost|::1>:<port> (http scheme and an explicit port are required)."
+        }
+
+    candidate = state.build_connection_snapshot(
+        mode="tcp",
+        active_tcp=tcp_url,
+        connected_project=match.get("project") if match else None,
+    )
+    try:
+        schema = registry._fetch_schema(connection=candidate)
+    except Exception as e:
+        available = [inst.get("project", "unknown") for inst in instances]
+        return {
+            "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
+            "available": available,
+        }
+    if cancel_handle is not None and cancel_handle.aborted:
+        return {"error": "connect_instance cancelled before commit"}
+
+    with state._tool_registry_lock:
+        result = _commit_if_live(
+            lambda: (
+                registry.register_tools_from_schema(
+                    schema,
+                    groups=None if not state._lazy_mode else state._default_groups,
+                ),
+                state.set_connection_snapshot(
+                    "tcp",
+                    active_socket=None,
+                    active_tcp=tcp_url,
+                    connected_project=match.get("project") if match else None,
+                ),
+            )
+        )
+        if result is None:
+            return {"error": "connect_instance cancelled before commit"}
+        count, _installed = result
+
+    total = len(state._full_schema)
+    note = (
+        f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
+        if state._lazy_mode
+        else f"Loaded all {count} tools on connect."
+    )
+    return {
+        "connected": True,
+        "transport": "tcp",
+        "url": tcp_url,
+        "tools_registered": count,
+        "tools_total": total,
+        "loaded_groups": sorted(state._loaded_groups),
+        "note": note,
+    }
+
+
+def _list_instances_sync() -> str:
     """
     List known Ghidra instances from UDS discovery and the active TCP fallback.
 
@@ -28,27 +180,35 @@ def list_instances() -> str:
         instances.append(tcp_instance)
 
     if not instances:
-        return json.dumps(
-            {"instances": [], "note": "No running Ghidra instances found."}
-        )
+        return json.dumps({"instances": [], "note": "No running Ghidra instances found."})
 
     for inst in instances:
         if inst.get("transport") == "tcp":
-            inst["connected"] = (
-                state._transport_mode == "tcp" and inst.get("url") == state._active_tcp
-            )
+            inst["connected"] = state._transport_mode == "tcp" and inst.get("url") == state._active_tcp
         else:
             # UDS-discovered instances may carry a TCP url too (Windows
             # enrichment) — either transport counts as connected.
             inst["connected"] = inst["socket"] == state._active_socket or (
-                state._transport_mode == "tcp"
-                and bool(inst.get("url"))
-                and inst.get("url") == state._active_tcp
+                state._transport_mode == "tcp" and bool(inst.get("url")) and inst.get("url") == state._active_tcp
             )
 
-    return json.dumps(
-        {"instances": [_summarize_instance(i) for i in instances]}, indent=2
-    )
+    return json.dumps({"instances": [_summarize_instance(i) for i in instances]}, indent=2)
+
+
+def _load_groups_sync(group_names: list[str]) -> list[str]:
+    loaded: list[str] = []
+    for name in group_names:
+        loaded.extend(registry._load_group(name))
+    return loaded
+
+
+@mcp.tool(name="list_instances")
+async def _list_instances_tool() -> str:
+    return await state.run_in_worker(_list_instances_sync)
+
+
+def list_instances() -> str:
+    return _list_instances_sync()
 
 
 # A project can hold hundreds of programs; only the open ones are actionable.
@@ -104,139 +264,14 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     Args:
         project: Project name (or substring) to connect to
     """
-    instances = discovery.discover_instances()
-
-    # Try UDS instances first
-    match = None
-    matched_tcp_url = None
-    if instances:
-        for inst in instances:
-            if inst.get("project", "") == project:
-                match = inst
-                break
-        if not match:
-            for inst in instances:
-                if project.lower() in inst.get("project", "").lower():
-                    match = inst
-                    break
-        if match and not transport.uds_supported():
-            # Windows CPython can't dial the socket it just matched; the
-            # discovery enrichment recorded the instance's TCP url — route
-            # the connection there instead of failing the UDS handshake.
-            matched_tcp_url = match.get("url")
-        elif match:
-            state._active_socket = match["socket"]
-            state._active_tcp = None
-            state._transport_mode = "uds"
-            state._connected_project = match.get("project")
-
-            try:
-                count = registry._fetch_and_register_schema()
-                total = len(state._full_schema)
-                note = (
-                    f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
-                    if state._lazy_mode
-                    else f"Loaded all {count} tools on connect."
-                )
-                await registry._notify_tools_changed(ctx)
-                return json.dumps(
-                    {
-                        "connected": True,
-                        "transport": "uds",
-                        "project": state._connected_project,
-                        "socket": match["socket"],
-                        "pid": match.get("pid"),
-                        "tools_registered": count,
-                        "tools_total": total,
-                        "loaded_groups": sorted(state._loaded_groups),
-                        "note": note,
-                    }
-                )
-            except Exception as e:
-                return json.dumps(
-                    {"error": f"Schema fetch failed: {e}", "socket": state._active_socket}
-                )
-
-    # Try TCP fallback. The behavior depends on what UDS discovery returned:
-    #
-    #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
-    #   * If a UDS instance matched but Python can't dial UDS (Windows), use
-    #     the TCP url discovery recorded for that exact instance.
-    #   * If UDS found one or more instances with project metadata and none
-    #     matched the project, refuse to fall back to TCP -- that's how we
-    #     previously silently connected to the wrong instance (Copilot #196
-    #     review item).
-    #   * If UDS found no usable project metadata, scan the TCP port range
-    #     looking for a /mcp/instance_info that matches the project. Handles
-    #     TCP-only and native Windows cases where AF_UNIX is unavailable.
-    #   * If no scan match either, try the default port as a last resort.
-    env_tcp = os.getenv("GHIDRA_MCP_URL")
-    if env_tcp:
-        tcp_url = env_tcp
-    elif matched_tcp_url:
-        tcp_url = matched_tcp_url
-    elif match is None and instances and any(inst.get("project") for inst in instances):
-        # UDS found instances but none matched the requested project. Don't
-        # randomly pick another instance's tcp_port — that connects to the
-        # wrong project. Return the "no match" error directly.
-        available = [inst.get("project", "unknown") for inst in instances]
-        return json.dumps(
-            {
-                "error": (
-                    f"No instance matching '{project}' (UDS: {len(instances)} found, "
-                    f"none matched). Refusing to use any instance's tcp_port — would "
-                    f"connect to the wrong project. Use list_instances() to see what's "
-                    f"available."
-                ),
-                "available": available,
-            }
-        )
-    else:
-        # No usable UDS project metadata. Scan the TCP port range to find one
-        # matching the project. _scan_tcp_for_project returns the URL of the
-        # first matching instance, or None if nothing matched.
-        scanned = discovery._scan_tcp_for_project(project)
-        tcp_url = scanned if scanned else DEFAULT_TCP_URL
-    if not validate_server_url(tcp_url):
-        return json.dumps(
-            {
-                "error": f"Refusing to connect to invalid TCP URL: {tcp_url}. Expected http://<127.0.0.1|localhost|::1>:<port> (http scheme and an explicit port are required)."
-            }
-        )
-    try:
-        state._active_tcp = tcp_url
-        state._active_socket = None
-        state._transport_mode = "tcp"
-        state._connected_project = match.get("project") if match else None
-        count = registry._fetch_and_register_schema()
-        total = len(state._full_schema)
-        note = (
-            f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
-            if state._lazy_mode
-            else f"Loaded all {count} tools on connect."
-        )
+    result = await state.run_blocking_ghidra_call(
+        _connect_instance_sync,
+        project,
+        bind_connection=False,
+    )
+    if result.get("connected"):
         await registry._notify_tools_changed(ctx)
-        return json.dumps(
-            {
-                "connected": True,
-                "transport": "tcp",
-                "url": tcp_url,
-                "tools_registered": count,
-                "tools_total": total,
-                "loaded_groups": sorted(state._loaded_groups),
-                "note": note,
-            }
-        )
-    except Exception as e:
-        state._transport_mode = "none"
-        state._active_tcp = None
-        available = [inst.get("project", "unknown") for inst in instances]
-        return json.dumps(
-            {
-                "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
-                "available": available,
-            }
-        )
+    return json.dumps(result)
 
 
 @mcp.tool()
@@ -248,9 +283,7 @@ def list_tool_groups() -> str:
     Use load_tool_group(group) to load a group's tools.
     """
     if not state._full_schema:
-        return json.dumps(
-            {"error": "No instance connected. Use connect_instance() first."}
-        )
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
     groups = registry._get_group_info()
     return json.dumps({"groups": groups, "total_tools": len(state._full_schema)}, indent=2)
 
@@ -266,18 +299,22 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
         group: Category name (e.g. "function", "datatype") or "all"
     """
     if not state._full_schema:
-        return json.dumps(
-            {"error": "No instance connected. Use connect_instance() first."}
-        )
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+
+    state.remember_tools_changed_context(ctx)
+
+    def _notify_if_changed(result):
+        if result:
+            state.notify_tools_changed_from_worker()
 
     if group == "all":
         # Load all unloaded groups
         all_groups = {td.get("category", "unknown") for td in state._full_schema}
-        all_loaded: list[str] = []
-        for g in sorted(all_groups):
-            all_loaded.extend(registry._load_group(g))
-        if all_loaded:
-            await registry._notify_tools_changed(ctx)
+        all_loaded = await state.run_in_worker(
+            _load_groups_sync,
+            sorted(all_groups),
+            done_callback=_notify_if_changed,
+        )
         return json.dumps(
             {
                 "loaded": "all",
@@ -287,14 +324,16 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
             }
         )
 
-    loaded_names = registry._load_group(group)
+    loaded_names = await state.run_in_worker(
+        registry._load_group,
+        group,
+        done_callback=_notify_if_changed,
+    )
     if not loaded_names:
         available = sorted({td.get("category", "unknown") for td in state._full_schema})
         if group in state._loaded_groups:
             # Already loaded — return the tool names so the agent knows what's callable
-            already = sorted(
-                td["name"] for td in state._full_schema if td.get("category") == group
-            )
+            already = sorted(td["name"] for td in state._full_schema if td.get("category") == group)
             return json.dumps(
                 {
                     "message": f"Group '{group}' is already loaded.",
@@ -308,8 +347,6 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
                 "available_groups": available,
             }
         )
-
-    await registry._notify_tools_changed(ctx)
     return json.dumps(
         {
             "loaded": group,
@@ -337,13 +374,15 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
             }
         )
 
-    removed = registry._unload_group(group)
-    if removed == 0:
-        return json.dumps(
-            {"message": f"Group '{group}' is not loaded or has no tools."}
-        )
+    state.remember_tools_changed_context(ctx)
 
-    await registry._notify_tools_changed(ctx)
+    removed = await state.run_in_worker(
+        registry._unload_group,
+        group,
+        done_callback=lambda result: result > 0 and state.notify_tools_changed_from_worker(),
+    )
+    if removed == 0:
+        return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
     return json.dumps(
         {
             "unloaded": group,
@@ -504,7 +543,7 @@ async def import_file(
     if compiler_spec:
         payload["compiler_spec"] = compiler_spec
 
-    result = dispatch.dispatch_post("/import_file", payload)
+    result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
 
     # Parse result to check if analysis was started
     try:
@@ -522,8 +561,8 @@ async def import_file(
             await asyncio.sleep(5)  # Initial delay
             for _ in range(360):  # Up to 30 minutes
                 try:
-                    status_text = dispatch.dispatch_get(
-                        "/analysis_status", {"program": program_name}
+                    status_text = await state.run_blocking_ghidra_call(
+                        dispatch.dispatch_get, "/analysis_status", {"program": program_name}
                     )
                     status = json.loads(status_text)
                     status_data = status.get("data", status)
@@ -550,48 +589,61 @@ def _auto_connect():
     if len(instances) == 1:
         inst = instances[0]
         if transport.uds_supported():
-            state._active_socket = inst["socket"]
-            state._transport_mode = "uds"
-            state._connected_project = inst.get("project")
-            logger.info(f"Auto-connecting via UDS to {state._connected_project or 'unknown'}")
+            candidate = state.build_connection_snapshot(
+                mode="uds",
+                active_socket=inst["socket"],
+                connected_project=inst.get("project"),
+            )
+            logger.info(f"Auto-connecting via UDS to {inst.get('project') or 'unknown'}")
             try:
-                count = registry._fetch_and_register_schema()
-                logger.info(
-                    f"Auto-registered {count} tools from {state._connected_project or 'unknown'}"
-                )
+                schema = registry._fetch_schema(connection=candidate)
+                with state._tool_registry_lock:
+                    count = registry.register_tools_from_schema(
+                        schema,
+                        groups=None if not state._lazy_mode else state._default_groups,
+                    )
+                    state.set_connection_snapshot(
+                        "uds",
+                        active_socket=inst["socket"],
+                        active_tcp=None,
+                        connected_project=inst.get("project"),
+                    )
+                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
                 return
             except Exception as e:
                 logger.warning(f"UDS auto-connect schema fetch failed: {e}")
-                state._active_socket = None
-                state._transport_mode = "none"
         elif inst.get("url") and validate_server_url(inst["url"]):
             # Windows CPython can't dial the discovered socket; discovery
             # enriched it with the instance's TCP url — connect there.
-            state._active_tcp = inst["url"]
-            state._transport_mode = "tcp"
-            state._connected_project = inst.get("project")
+            candidate = state.build_connection_snapshot(
+                mode="tcp",
+                active_tcp=inst["url"],
+                connected_project=inst.get("project"),
+            )
             logger.info(
                 f"Auto-connecting via TCP ({inst['url']}) to "
-                f"{state._connected_project or 'unknown'} (UDS unavailable on this Python)"
+                f"{inst.get('project') or 'unknown'} (UDS unavailable on this Python)"
             )
             try:
-                count = registry._fetch_and_register_schema()
-                logger.info(
-                    f"Auto-registered {count} tools from {state._connected_project or 'unknown'}"
-                )
+                schema = registry._fetch_schema(connection=candidate)
+                with state._tool_registry_lock:
+                    count = registry.register_tools_from_schema(
+                        schema,
+                        groups=None if not state._lazy_mode else state._default_groups,
+                    )
+                    state.set_connection_snapshot(
+                        "tcp",
+                        active_socket=None,
+                        active_tcp=inst["url"],
+                        connected_project=inst.get("project"),
+                    )
+                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
                 return
             except Exception as e:
                 logger.warning(f"TCP auto-connect schema fetch failed: {e}")
-                state._active_tcp = None
-                state._transport_mode = "none"
     elif len(instances) > 1:
-        names = ", ".join(
-            i.get("project") or i.get("socket") or "?" for i in instances
-        )
-        logger.info(
-            f"Multiple UDS instances found ({len(instances)}: {names}). "
-            "Use connect_instance() to choose."
-        )
+        names = ", ".join(i.get("project") or i.get("socket") or "?" for i in instances)
+        logger.info(f"Multiple UDS instances found ({len(instances)}: {names}). " "Use connect_instance() to choose.")
         # Do NOT fall through to the TCP fallback — that would silently
         # connect to whichever Ghidra happened to bind 8089 (possibly a
         # third instance entirely) right after telling the user to choose.
@@ -605,14 +657,20 @@ def _auto_connect():
         logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
         return
     try:
-        state._active_tcp = tcp_url
-        state._transport_mode = "tcp"
-        count = registry._fetch_and_register_schema()
+        candidate = state.build_connection_snapshot(mode="tcp", active_tcp=tcp_url)
+        schema = registry._fetch_schema(connection=candidate)
+        with state._tool_registry_lock:
+            count = registry.register_tools_from_schema(
+                schema,
+                groups=None if not state._lazy_mode else state._default_groups,
+            )
+            state.set_connection_snapshot(
+                "tcp",
+                active_socket=None,
+                active_tcp=tcp_url,
+                connected_project=None,
+            )
         logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
     except Exception:
-        state._active_tcp = None
-        state._transport_mode = "none"
         if not instances:
-            logger.info(
-                "No Ghidra instances found. Tools will be registered on connect_instance()."
-            )
+            logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
