@@ -126,9 +126,17 @@ def summary(program: str = None) -> dict:
 
 def matrix(program: str = None) -> dict:
     """The DOC_ x CONF_ joint counts, plus marginals and the never-evaluated cell.
-    Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math."""
-    conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
-    doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
+    Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math.
+
+    Library/stub functions are subtracted, exactly as `bands()` does, because
+    the dashboard divides these counts by `in_scope` -- which already excludes
+    them. Without the subtraction the numerator covers a WIDER population than
+    the denominator and the bars read over 100%: measured 105.3% on D2Common
+    and 172.6% on PD2_EXT before this, with the leading `untagged`/`none`
+    segment clamped to zero so the bar looked merely full instead of wrong."""
+    excl = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
+    conf_sets = {r: _tag_addrs(r, program) - excl for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r, program) - excl for r in DOC_RUNGS}
     conf_tagged = set().union(*conf_sets.values()) if conf_sets else set()
     doc_tagged = set().union(*doc_sets.values()) if doc_sets else set()
 
