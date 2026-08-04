@@ -127,6 +127,30 @@ def _oracle_endpoint():
     return os.environ.get("D2DBG_MCP_URL", "http://127.0.0.1:8790").rstrip("/")
 
 
+def resolve_untyped_global_targets(binary):
+    """The addresses behind the types bar's untyped count, for a TARGETED
+    globals run (`request_start_globals_worker` with `targeted: true`).
+
+    Resolved server-side and fresh (`force=True`) on purpose. The browser has
+    a count from whenever the bar last rendered, which can be many minutes old;
+    dispatching a worker at that list would re-audit globals someone else has
+    since fixed and miss ones that regressed. The bar is a prompt, not the
+    work order.
+
+    Returns [] — never None — when there is nothing to do, so the caller can
+    tell "no work" from "look at the whole binary". Never raises: a Ghidra
+    hiccup here must not turn a button click into a stack trace, and an empty
+    list makes the caller refuse the launch rather than silently widening it
+    to the entire binary (which is exactly the behaviour this replaces)."""
+    try:
+        import conformance_dashboard as _cd
+        nt = _cd.native_types_status(program=binary, force=True)
+        return list(nt.get("invalid_addresses") or [])
+    except Exception as e:  # noqa: BLE001
+        print(f"  target resolution failed for {binary}: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
@@ -346,7 +370,29 @@ class WorkerManager:
                     "detail": "health check failed (see server log)",
                     "endpoint": None, "action": None}
         if s.get("reachable"):
-            state, detail = self._OK, "live-prove enabled"
+            # `reachable` alone is NOT health. oracle_health.py detects FOUR
+            # fault shapes and two of them answer HTTP perfectly: FROZEN (alive,
+            # oracle replying, drawing nothing) and IDLE (parked at a menu, no
+            # world to prove against). Both were being reported as
+            # "live-prove enabled" -- a green dot over a fleet that cannot do
+            # any work, which is the precise symptom of the 2026-07-31 incident
+            # where a deploy restart left the game at the main menu and workers
+            # sat idle behind a green banner for 70 minutes.
+            if s.get("game_frozen"):
+                state = self._DOWN
+                rate = s.get("present_rate")
+                detail = "Game.exe FROZEN — answering but drawing nothing"
+                if rate is not None:
+                    detail += f" ({rate:g} fps)"
+            elif s.get("game_idle"):
+                # Deliberately NOT `down`, and deliberately no relaunch action:
+                # the game is healthy, it is just parked at a menu. Recovery is
+                # to NAVIGATE (_navigate_and_load_character); relaunching a
+                # healthy game is the exact thing oracle_health warns against.
+                state = self._DEGRADED
+                detail = "game parked at a menu — proving needs a world"
+            else:
+                state, detail = self._OK, "live-prove enabled"
         elif s.get("reachable") is None:
             state, detail = self._UNKNOWN, "not probed yet"
         else:
@@ -369,8 +415,19 @@ class WorkerManager:
         return {
             "state": state, "label": "Oracle + Game", "detail": detail,
             "endpoint": _oracle_endpoint(),
-            "action": "relaunch_oracle" if state != self._OK else None,
+            # No relaunch affordance for IDLE: the game is healthy and parked,
+            # and a one-click relaunch of a healthy game is the mistake
+            # oracle_health.py exists to prevent. Auto-recovery navigates.
+            "action": (
+                None
+                if state == self._OK or s.get("game_idle")
+                else "relaunch_oracle"
+            ),
             "degraded": bool(s.get("recovery_degraded")),
+            # Surfaced so the UI can distinguish the two answering-but-useless
+            # shapes from a plain outage without re-deriving them.
+            "game_frozen": bool(s.get("game_frozen")),
+            "game_idle": bool(s.get("game_idle")),
         }
 
     def _health_provider(self):
@@ -3590,13 +3647,36 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         """Launch a globals worker on the selected binary. Per Q1/Q9 the
         binary is required (selected in the header dropdown by the user
         before clicking the button); the WorkerManager rejects launches
-        with no binary or a binary already held by another globals worker."""
+        with no binary or a binary already held by another globals worker.
+
+        `targeted: true` (the types bar's "Start typing worker" button) aims
+        the run at exactly the globals the bar counted as untyped, instead of
+        turning the worker loose on the binary in enumeration order. The
+        address list is resolved HERE, not sent by the browser: the bar's
+        numbers can be minutes old, and dispatching a worker at a stale list
+        would re-audit globals someone else already fixed while missing ones
+        that regressed since the page last rendered."""
         try:
             provider = (data or {}).get("provider", "minimax")
             continuous = bool((data or {}).get("continuous", False))
             count = max(1, min(500, int((data or {}).get("count", 5))))
             model = (data or {}).get("model") or None
             binary = (data or {}).get("binary") or None
+            addresses = None
+            if (data or {}).get("targeted") and binary:
+                addresses = resolve_untyped_global_targets(binary)
+                if not addresses:
+                    # Nothing left to type -- the bar was stale. Say so instead
+                    # of starting a worker that would walk the whole binary.
+                    sio_emit("worker_error", {
+                        "error": f"No untyped globals left in {Path(binary).name} "
+                                 f"-- the types bar was out of date."})
+                    return
+                # The address list IS the bound, so it sets the count directly
+                # (no 500 clamp: D2Client alone carries 553 and silently doing
+                # 500 of them would report a clean sweep that never happened).
+                count = len(addresses)
+                continuous = False   # targeted run does this binary, then stops
             worker_id = worker_mgr.start_worker(
                 provider=provider,
                 count=count,
@@ -3604,8 +3684,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 binary=binary,
                 continuous=continuous,
                 mode="globals",
+                addresses=addresses,
             )
-            sio_emit("worker_started_ack", {"worker_id": worker_id, "mode": "globals"})
+            sio_emit("worker_started_ack", {
+                "worker_id": worker_id, "mode": "globals",
+                "targeted": len(addresses) if addresses else 0,
+            })
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
 
@@ -3918,6 +4002,14 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         try:
             worker_mgr.stop_worker(wid)
             return jsonify({"ok": True, "worker_id": wid})
+        except ValueError as e:
+            # "Unknown worker: <id>" is a CLIENT error, not a server fault. The
+            # socket handler has always reported it as such; the HTTP twin
+            # returned a 500 with a generic message, so an operator's script
+            # stopping an already-finished worker got an alarming "internal
+            # error -- see dashboard server log" and nothing in the log.
+            # Message is built from fixed literals plus the caller's own id.
+            return jsonify({"ok": False, "error": str(e)}), 404  # codeql[py/stack-trace-exposure]
         except Exception:  # noqa: BLE001
             app.logger.exception("HTTP worker stop failed for %r", wid)
             return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500

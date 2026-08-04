@@ -24,6 +24,8 @@ import re as _re
 import urllib.request
 from urllib.parse import urlencode, quote
 
+import d2moo_types   # placeholder-type vocabulary; import is lazy (load() reads no files)
+
 GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
 
@@ -126,9 +128,17 @@ def summary(program: str = None) -> dict:
 
 def matrix(program: str = None) -> dict:
     """The DOC_ x CONF_ joint counts, plus marginals and the never-evaluated cell.
-    Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math."""
-    conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
-    doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
+    Rows = CONF (best->worst then none); cols = DOC (none->best). Cheap set math.
+
+    Library/stub functions are subtracted, exactly as `bands()` does, because
+    the dashboard divides these counts by `in_scope` -- which already excludes
+    them. Without the subtraction the numerator covers a WIDER population than
+    the denominator and the bars read over 100%: measured 105.3% on D2Common
+    and 172.6% on PD2_EXT before this, with the leading `untagged`/`none`
+    segment clamped to zero so the bar looked merely full instead of wrong."""
+    excl = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
+    conf_sets = {r: _tag_addrs(r, program) - excl for r in CONF_RUNGS}
+    doc_sets = {r: _tag_addrs(r, program) - excl for r in DOC_RUNGS}
     conf_tagged = set().union(*conf_sets.values()) if conf_sets else set()
     doc_tagged = set().union(*doc_sets.values()) if doc_sets else set()
 
@@ -221,31 +231,56 @@ def _function_rows(program: str) -> list:
     return out
 
 
-def inventory(search: str = "", limit: int = 6000, program: str = None) -> dict:
+def inventory(search: str = "", limit: int = 6000, program: str = None,
+              include_library: bool = False) -> dict:
     """Searchable Function Inventory: the COMPLETE list of in-scope functions matching `search`
     (name substring), each with its DOC_/CONF_ rung. Library functions (LIB_-tagged) are
     excluded. Computed from tag sets + a name filter over the defined function list. Rows are
     sorted (un-proven first, then by name) BEFORE the limit is applied, so the cap keeps the
-    most-relevant rows rather than an arbitrary address-ordered slice."""
+    most-relevant rows rather than an arbitrary address-ordered slice.
+
+    `include_library=True` is the operator's "show library code" toggle. It adds the excluded
+    rows back with `library` set to the tag that excluded them, so the view is auditable --
+    you can see WHY something is out of scope, not just that it is. `library_total` is
+    reported either way, so the caller can render "191 in scope (272 library hidden)" without
+    a second request; a hidden count that is invisible is how the operator ends up believing
+    a binary is smaller than it is."""
     program = program or PROGRAM
     conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
     doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
-    lib = set().union(*(_tag_addrs(t, program) for t in EXCLUDE_TAGS))
+    # Keep per-tag sets rather than one union: the toggled-in row carries the
+    # tag that excluded it, which is the auditable part.
+    lib_by_tag = {t: _tag_addrs(t, program) for t in EXCLUDE_TAGS}
+    lib = set().union(*lib_by_tag.values()) if lib_by_tag else set()
     s = search.lower()
     rows = []
     seen = set()
+    lib_total = 0
     for a, name in _function_rows(program):
-        if a in seen or a in lib:          # dedup + exclude library (out of scope)
+        if a in seen:                      # dedup: one row per address
             continue
         seen.add(a)
+        is_lib = a in lib
+        if is_lib:
+            lib_total += 1
+            if not include_library:
+                continue
         if s and s not in name.lower():
             continue
         conf = next((r for r in CONF_RUNGS if a in conf_sets[r]), "none")
         doc = next((r for r in DOC_RUNGS if a in doc_sets[r]), "none")
-        rows.append({"name": name, "address": a, "doc": doc, "conf": conf})
+        row = {"name": name, "address": a, "doc": doc, "conf": conf}
+        if is_lib:
+            row["library"] = next((t for t in EXCLUDE_TAGS if a in lib_by_tag[t]),
+                                  "LIB")
+        rows.append(row)
     total = len(rows)
-    rows.sort(key=lambda r: (r["conf"] == "none", r["name"].lower()))
-    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit)}
+    # Library rows sort last even when shown: the toggle is for inspection, and
+    # burying the actual work under 272 CRT rows would defeat the inventory.
+    rows.sort(key=lambda r: (bool(r.get("library")), r["conf"] == "none",
+                             r["name"].lower()))
+    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit),
+            "library_total": lib_total, "include_library": bool(include_library)}
 
 
 from pathlib import Path as _Path
@@ -497,12 +532,29 @@ def list_binaries() -> dict:
 #
 # This used to be a much stricter `_GLOB_PRIM` regex that also rejected int/dword/
 # word/byte, and it fed a "typed groundwork" underlay on the Globals bar. The Java
-# scorer's type axis (DataTypeService.auditGlobalAt -> hasUndefinedType) only
-# rejects `undefined*`, so the same global was simultaneously "untyped" on the bar
+# scorer's type axis (DataTypeService.auditGlobalAt -> hasPlaceholderType) only
+# rejects placeholders, so the same global was simultaneously "untyped" on the bar
 # and worth a full 20/20 type points to the band -- which is how the bar could read
 # 96% documented against 51% typed. The underlay is gone; this test now matches the
 # scorer exactly and is used only for inventory styling and work prioritization.
-_GLOB_UNTYPED = _re.compile(r"^\s*(undefined\d*|code)?\s*$", _re.I)
+#
+# 2026-08-03: the `pointer` family joined the placeholder set on BOTH sides at once
+# (NamingConventions.isPlaceholderTypeName / d2moo_types.PLACEHOLDERS). It has to be
+# all three or none -- when Java alone rejected `undefined*` and Python's validator
+# also rejected bare `pointer`, a `pointer *` global audited perfectly clean while
+# the types bar counted it untyped, so the bar demanded a globals worker that
+# structurally could not change its own count.
+#
+# This delegates to d2moo_types rather than re-encoding the set in a regex: the
+# decoration strip (`pointer *`, `undefined4[8]`) is the same problem d2moo_types._base
+# already solves, and a second copy is exactly how the two sides drifted apart before.
+def _glob_is_untyped(type_str: str) -> bool:
+    """True when the global carries no real type -- empty, or a Ghidra placeholder
+    (`undefined*`, `code`, bare `pointer`/`pointer32`/`pointer64`), with pointer/array
+    decoration stripped. Mirrors NamingConventions.isPlaceholderTypeName on the Java
+    side; both must move together."""
+    base = d2moo_types._base(type_str)
+    return not base or base in d2moo_types.PLACEHOLDERS
 _GLOB_LINE = _re.compile(
     r"^(?P<name>\S+)\s+@\s+(?P<addr>[0-9a-fA-F]+)\s+\[[^\]]*\]\s+\((?P<type>[^)]*)\)"
     r"(?:\s+xrefs=(?P<xrefs>\d+))?")
@@ -574,10 +626,34 @@ def _scope_excluded_globals(program: str) -> set[str]:
     return out
 
 
-def _global_rows(program: str) -> list[dict]:
+def _scope_excluded_tags(program: str) -> dict[str, str]:
+    """{addr -> the tag that excluded it} from the `Scope` map.
+
+    Sibling of `_scope_excluded_globals` rather than a change to it: that one returns a set
+    and both the route-contract test and the completeness tests patch it as a set. Only the
+    "show library code" toggle needs the values, so only the toggle pays for the call."""
+    out: dict[str, str] = {}
+    try:
+        r = _get("/list_properties", map="Scope", program=program, limit=100000)
+        for p in ((r or {}).get("entries") or (r or {}).get("properties") or []):
+            a, v = p.get("address"), p.get("value")
+            if a and v:
+                out["0x" + str(a).lower().lstrip("0x").rjust(8, "0")] = str(v)
+    except (OSError, AttributeError):
+        pass
+    return out
+
+
+def _global_rows(program: str, include_library: bool = False) -> list[dict]:
     """In-scope image globals for a program: {addr, name, type, typed, xrefs, aliases}.
     Parsed from list_globals (one call, no per-global fanout). Excludes out-of-image OS
     labels (TIB/PEB), Ordinal_ export aliases, and triage-marked library data (Scope).
+
+    `include_library=True` adds the Scope-excluded globals back with `library` set, for the
+    operator's "show library code" toggle. It mirrors the function inventory's toggle so the
+    two halves of the same question never disagree about what is in scope -- two views of
+    "the globals in this binary" with different denominators is the exact bug class the
+    shadowed-globals endpoint was built to expose.
 
     ONE ROW PER ADDRESS. Ghidra allows many symbols on one data address, and
     /list_globals emits a line for each: D2Client has 3,405 symbol lines over 3,223
@@ -590,6 +666,7 @@ def _global_rows(program: str) -> list[dict]:
     img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
     txt = _get("/list_globals", program=program, limit=100000)
     excluded = _scope_excluded_globals(program)
+    excluded_tag = _scope_excluded_tags(program) if include_library else {}
     by_addr = {}
     for ln in _envelope_items(txt, "globals"):
         m = _GLOB_LINE.match(str(ln).strip())
@@ -600,16 +677,22 @@ def _global_rows(program: str) -> list[dict]:
             continue
         name = m.group("name")
         key = "0x%08x" % a
-        if name.startswith("Ordinal_") or key in excluded:
+        if name.startswith("Ordinal_"):
+            continue
+        is_lib = key in excluded
+        if is_lib and not include_library:
             continue
         prev = by_addr.get(key)
         if prev is not None:
             prev["aliases"].append(name)     # secondary label, same address
             continue
         t = m.group("type").strip()
-        by_addr[key] = {"addr": key, "name": name, "type": t,
-                        "typed": not bool(_GLOB_UNTYPED.match(t)),
-                        "xrefs": int(m.group("xrefs") or 0), "aliases": []}
+        row = {"addr": key, "name": name, "type": t,
+               "typed": not _glob_is_untyped(t),
+               "xrefs": int(m.group("xrefs") or 0), "aliases": []}
+        if is_lib:
+            row["library"] = excluded_tag.get(key) or "LIB"
+        by_addr[key] = row
     return list(by_addr.values())
 
 
@@ -707,19 +790,25 @@ def _bar(scope, rung_order, rung_sets, addr_pool):
     return {"scope": scope, "rungs": rungs, "done": done, "remaining": rem}
 
 
-def globals_inventory(search: str = "", limit: int = 100, program: str = None) -> dict:
+def globals_inventory(search: str = "", limit: int = 100, program: str = None,
+                      include_library: bool = False) -> dict:
     """Searchable Globals Inventory (sibling of the function inventory): in-scope image
     globals matching `search`, each with its type, completeness band, and REVIEWED bit.
 
     Sorted worst-first so the top of the list is the work: unscored before banded,
     lower band before higher, untyped before typed, then by name. The `summary`
     block is whole-program (NOT filtered by `search`) and feeds the single Globals
-    bar -- band distribution plus a reviewed count."""
+    bar -- band distribution plus a reviewed count.
+
+    `include_library=True` is the same toggle the function inventory carries. `library_total`
+    is reported either way so the caller can say how many are hidden without a second call."""
     program = program or PROGRAM
     img = _image_range(program) or (_IMG_LO, _IMG_HI)
     bandmap = _complete_map_bands(program, img)
     reviewed = _review_flags(program, img)
-    allrows = _global_rows(program)
+    allrows = _global_rows(program, include_library=include_library)
+    lib_total = (sum(1 for g in allrows if g.get("library")) if include_library
+                 else len(_scope_excluded_globals(program)))
 
     scope = len(allrows)
     counts = {t: 0 for t in BAND_TAGS}
@@ -738,11 +827,16 @@ def globals_inventory(search: str = "", limit: int = 100, program: str = None) -
     s = search.lower()
     rows = [{"name": g["name"], "address": g["addr"], "type": g["type"],
              "typed": g["typed"], "xrefs": g.get("xrefs", 0),
-             "band": bandmap.get(g["addr"]), "reviewed": g["addr"] in reviewed}
+             "band": bandmap.get(g["addr"]), "reviewed": g["addr"] in reviewed,
+             **({"library": g["library"]} if g.get("library") else {})}
             for g in allrows if not s or s in g["name"].lower()]
     total = len(rows)
-    rows.sort(key=lambda r: (rank.get(r["band"], 0), r["typed"], r["name"].lower()))
-    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit), "summary": summ}
+    # Library rows sort last even when shown -- same rule as the function inventory.
+    rows.sort(key=lambda r: (bool(r.get("library")), rank.get(r["band"], 0),
+                             r["typed"], r["name"].lower()))
+    return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit),
+            "summary": summ, "library_total": lib_total,
+            "include_library": bool(include_library)}
 
 
 def set_global_reviewed(address: str, reviewed: bool, program: str = None) -> dict:
@@ -818,7 +912,7 @@ def remove_pin(kind: str, address: str, program: str = None) -> list:
 
 
 # ---- canonical D2MOO type vocabulary: is it loaded into this binary's type manager? ----
-import d2moo_types
+# (d2moo_types is imported at module top -- _glob_is_untyped needs it too.)
 
 _TYPES_CACHE = {}   # program -> status (session cache; the check runs once per binary per session)
 
@@ -883,12 +977,29 @@ _NATIVE_CACHE = {}   # program -> native-type-usage status (globals canary; sess
 def native_types_status(program: str = None, force: bool = False) -> dict:
     """Cheap 'is this binary using native (non-canonical) types?' canary: scans in-image GLOBALS
     (one list_globals call) and counts UNREFINED (dword/byte/uint -> normalizable) and INVALID
-    (undefined*/code -> untyped) via validate_type. A trigger for the Normalize bar; the full
-    globals+locals+fields fix runs on demand. Cached per binary per session."""
+    (placeholder: undefined*/code/bare pointer -> untyped) via validate_type. A trigger for the
+    Normalize bar; the full globals+locals+fields fix runs on demand. Cached per binary per session.
+
+    Also returns `invalid_addresses` -- the actual 0x-prefixed addresses behind the INVALID
+    count, so the bar's button can dispatch a globals worker AT THEM (target_addresses) instead
+    of turning it loose on the whole binary in arbitrary enumeration order. The bar names a
+    number; the action it offers should act on the things counted, not on their neighbours.
+    `invalid_types` is the distinct placeholder spellings found, so the bar can say `undefined`
+    vs `pointer *` truthfully rather than hardcoding "(undefined*)".
+
+    Counts are per ADDRESS, not per list_globals line. Two labels on one address (Ghidra keeps
+    every alias: `g_abCharClassFlags` and `g_p_char_class_flags` both sit on 0x100120a0) are one
+    global and one unit of work. Counting lines made `invalid` disagree with the length of
+    `invalid_addresses` -- 29 vs 16 on D2sound.dll -- so the bar overstated the backlog and the
+    targeted run's `count` would not have matched the number the bar showed. `_global_rows` and
+    `glob_bands` have always been per-address; this now matches them."""
     program = program or PROGRAM
     if not force and program in _NATIVE_CACHE:
         return _NATIVE_CACHE[program]
     unref = inval = total = 0
+    invalid_addresses = []
+    invalid_types = {}
+    seen = set()
     try:
         img_lo, img_hi = _image_range(program) or (_IMG_LO, _IMG_HI)
         txt = _get("/list_globals", program=program, limit=100000)
@@ -899,22 +1010,88 @@ def native_types_status(program: str = None, force: bool = False) -> dict:
             a = int(m.group("addr"), 16)
             if not (img_lo <= a < img_hi) or m.group("name").startswith("Ordinal_"):
                 continue
+            addr = "0x%08x" % a
+            if addr in seen:                 # alias label on an address already counted
+                continue
+            seen.add(addr)
             total += 1
             v = d2moo_types.validate_type(m.group("type")).get("verdict")
             if v == "UNREFINED":
                 unref += 1
             elif v == "INVALID":
                 inval += 1
+                invalid_addresses.append(addr)
+                spelling = (m.group("type") or "").strip() or "(none)"
+                invalid_types[spelling] = invalid_types.get(spelling, 0) + 1
     except OSError:
         pass
     res = {"program": program, "unrefined": unref, "invalid": inval, "native": unref + inval,
-           "globals_scanned": total, "scope": "globals"}
+           "globals_scanned": total, "scope": "globals",
+           "invalid_addresses": invalid_addresses,
+           "invalid_types": dict(sorted(invalid_types.items(), key=lambda kv: -kv[1]))}
     _NATIVE_CACHE[program] = res
     return res
 
 
 def native_cache_clear(program: str = None) -> None:
     _NATIVE_CACHE.pop(program, None) if program else _NATIVE_CACHE.clear()
+
+
+_SHADOW_CACHE = {}   # program -> shadowed-globals status (session-cached)
+
+
+def shadowed_globals(program: str = None, force: bool = False, limit: int = 5000) -> dict:
+    """Globals with no type of their own because a larger unit starting earlier
+    covers them — the population `/list_globals` structurally cannot show.
+
+    This is the ONE dashboard read that cannot be derived from the inventory:
+    `/list_globals` resolves the CONTAINING data unit, so a shadowed global
+    reports its eater's type and renders as perfectly typed. Measured across
+    the PD2-S12 corpus on 2026-08-03: 540 shadowed globals, 539 of them
+    invisible to every existing dashboard view, each one hard-capped at 79 by
+    the untyped ceiling and so unable to band COMPLETE_80+ no matter what else
+    is done to it. A number nobody can see is a number nobody fixes.
+
+    One bulk call per binary (`/list_shadowed_globals`), not one audit per
+    global — the corpus has 17,773 globals and the per-address route would be
+    17,773 HTTP round-trips per refresh.
+
+    `top_containers` is the actionable half: the damage is concentrated, and
+    10 containers covered 32% of the corpus total, so the panel can point at
+    the handful of decisions that matter instead of a flat list of 540."""
+    program = program or PROGRAM
+    if not force and program in _SHADOW_CACHE:
+        return _SHADOW_CACHE[program]
+    rows, err = [], None
+    try:
+        txt = _get("/list_shadowed_globals", program=program, limit=limit)
+        for item in _envelope_items(txt, "shadowed"):
+            if isinstance(item, dict):
+                rows.append(item)
+    except OSError as e:
+        # Degrade to a reported error, never a 500 and never a silent 0 — a
+        # zero here reads as "clean", which is exactly the false reassurance
+        # this panel exists to remove.
+        err = f"{type(e).__name__}: {e}"
+    by_container = {}
+    for r in rows:
+        c = r.get("container") or {}
+        key = c.get("address")
+        if not key:
+            continue
+        slot = by_container.setdefault(key, {"address": key, "name": c.get("name"),
+                                             "type": c.get("type"), "victims": 0})
+        slot["victims"] += 1
+    top = sorted(by_container.values(), key=lambda d: -d["victims"])[:10]
+    res = {"program": program, "shadowed": len(rows), "containers": len(by_container),
+           "top_containers": top, "items": rows[:200], "error": err}
+    if err is None:
+        _SHADOW_CACHE[program] = res
+    return res
+
+
+def shadow_cache_clear(program: str = None) -> None:
+    _SHADOW_CACHE.pop(program, None) if program else _SHADOW_CACHE.clear()
 
 
 def _pretty(rung: str) -> str:
