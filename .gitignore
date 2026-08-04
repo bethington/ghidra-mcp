@@ -587,6 +587,11 @@ extract_*.py
 apply_prefix_renames.py
 audit_*.py
 audit-*.json
+# ...but fun-doc/scripts/ holds FIRST-CLASS audit tooling, not one-offs: CLAUDE.md
+# gives audit_ret_widths / audit_stdcall_argc / audit_reimpl_offsets their own
+# test-matrix rows. The blanket audit_*.py rule above was silently keeping them
+# out of version control -- a machine failure would have taken them with it.
+!fun-doc/scripts/audit_*.py
 
 fun-doc/state.json
 fun-doc/state.json.bak
