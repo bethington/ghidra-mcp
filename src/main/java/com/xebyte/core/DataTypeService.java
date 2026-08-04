@@ -7,6 +7,7 @@ import ghidra.program.model.mem.Memory;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
+import ghidra.program.model.symbol.SymbolIterator;
 import ghidra.program.model.symbol.ReferenceManager;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
@@ -1165,6 +1166,19 @@ public class DataTypeService {
                         enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
                     }
                 }
+            }
+
+            // Eviction gate — same rule as set_global. This path is the one a
+            // caller reaches for when set_global refuses, so leaving it open
+            // made the guard a speed bump: measured 2026-08-03, a worker hit
+            // set_global's refusal four times and then completed the identical
+            // write through apply_data_type + rename_symbol + set_comment.
+            // Only relevant when clearExisting is set — without it createData
+            // collides and nothing is destroyed.
+            if (clearExisting) {
+                Response evictionReject = evictionRejection(
+                        program, address, dataType, 0, false, typeName);
+                if (evictionReject != null) return evictionReject;
             }
 
             // Apply the data type under the injected threading strategy so the
@@ -3111,6 +3125,15 @@ public class DataTypeService {
 
                     // 2. APPLY DATA TYPE
                     if (dataTypeToApply != null) {
+                        // Eviction gate — third and last clearing writer in this
+                        // file. All three share evictionRejection so a fix to the
+                        // rule lands everywhere at once; guarding them one at a
+                        // time is what let a refused write complete through the
+                        // next tool in the chain.
+                        Response reject = evictionRejection(
+                                program, addr, dataTypeToApply, 0, false, typeApplied.get());
+                        if (reject != null) throw new EvictionRejected(reject);
+
                         // Clear existing code/data
                         CodeUnit existingCU = listing.getCodeUnitAt(addr);
                         if (existingCU != null) {
@@ -3149,6 +3172,11 @@ public class DataTypeService {
 
                     return null;
                 });
+            } catch (EvictionRejected e) {
+                // Structured refusal, not a fault — surface it verbatim so the
+                // caller sees `type_would_evict` and the casualty list rather
+                // than a bare error string.
+                responseRef.set(e.response);
             } catch (Exception e) {
                 responseRef.set(Response.err(e.getMessage()));
             }
@@ -3553,13 +3581,31 @@ public class DataTypeService {
         Data data = listing.getDefinedDataAt(addr);
         String typeName = "";
         int length = 0;
-        boolean hasUndefinedType = false;
+        boolean hasPlaceholderType = false;
         boolean lengthMismatch = false;
+
+        // "No data here" and "swallowed by a data unit that starts earlier" are
+        // different facts and used to be reported identically (both just
+        // `untyped`, length 0). The difference matters because a swallowed
+        // global is INVISIBLE elsewhere: /list_globals resolves the CONTAINING
+        // unit, so it reports the eater's type at the dead address and the
+        // dashboard shows the global as perfectly typed. Measured on
+        // PD2_EXT.dll 2026-08-03: the types bar counted 1 untyped, audit_global
+        // counted 3, and the 2 ghosts were exactly the globals a neighbouring
+        // type application had destroyed. Surface the container so the
+        // difference is reportable instead of inferable.
+        Data container = (data == null) ? listing.getDataContaining(addr) : null;
+        boolean isInteriorToData = container != null && !container.getMinAddress().equals(addr);
         if (data != null) {
             DataType dt = data.getDataType();
             if (dt != null) {
                 typeName = dt.getName();
-                hasUndefinedType = typeName.startsWith("undefined");
+                // Placeholder = "undefined*" OR bare "pointer"/"pointer32/64".
+                // See NamingConventions.isPlaceholderTypeName for why the
+                // pointer family belongs here — a `pointer *` global used to
+                // audit perfectly clean, which made the dashboard's types bar
+                // unclearable by the very worker it told you to run.
+                hasPlaceholderType = NamingConventions.isPlaceholderTypeName(typeName);
                 int declared = dt.getLength();
                 length = data.getLength();
                 if (declared > 0 && length != declared) lengthMismatch = true;
@@ -3634,8 +3680,41 @@ public class DataTypeService {
         // where structural deductions are forgiven in `effective_score`.
         Map<String, String> severityByIssue = new java.util.LinkedHashMap<>();
 
-        boolean autoGen = NamingConventions.isAutoGeneratedGlobalName(name) || name.isEmpty();
-        if (autoGen) {
+        // EXPORTED addresses are exempt from the naming convention. The
+        // exported name IS the DLL's public ABI contract — the loader in every
+        // consuming process resolves against it — so `g_` + Hungarian form is
+        // not an improvement, it is the destruction of the symbol's identity.
+        //
+        // Measured on PD2_EXT.dll 2026-08-04. That DLL is a `version.dll` proxy:
+        // all 12 of its named exports are FORWARDER strings ("version.VerFindFileW")
+        // and it has no real code exports at all. A globals pass renamed every
+        // one of them — `GetFileVersionInfoA` became
+        // `g_szImportNameGetFileVersionInfoA`, and `GetFileVersionInfoW` became
+        // `g_szVerFileVersionApi`, which does not even name the right export.
+        // `list_exports` then reported both `Ordinal_1` and the invented global
+        // at the same address. The model that first refused the rename ("would
+        // destroy the canonical exported API identity") was right; nothing in
+        // the tool layer backed it up, so a later pass did it anyway.
+        //
+        // Type and plate checks still apply — an export forwarder deserves a
+        // correct `char[N]` and an explanation. Only the NAME is off-limits.
+        //
+        // NOT every export is protected, and the distinction is the whole
+        // subtlety. D2's own DLLs export by ORDINAL: Ghidra names those
+        // `Ordinal_10001`, they carry no identity worth keeping, and renaming
+        // them to something meaningful is the core of this project's workflow.
+        // A blanket "exports are untouchable" rule would break that. What is
+        // protected is an export that arrived with a REAL NAME from the export
+        // name table — there, the name is the contract.
+        boolean isExported = symTable.isExternalEntryPoint(addr)
+                && !NamingConventions.isOrdinalExportName(name)
+                && !name.isEmpty();
+
+        boolean autoGen = !isExported
+                && (NamingConventions.isAutoGeneratedGlobalName(name) || name.isEmpty());
+        if (isExported) {
+            // Nothing to check: the name is fixed by the export table.
+        } else if (autoGen) {
             issues.add("generic_name");
             severityByIssue.put("generic_name", "hard");
         } else {
@@ -3668,9 +3747,37 @@ public class DataTypeService {
             }
         }
 
-        if (data == null || hasUndefinedType) {
+        if (data == null || hasPlaceholderType) {
             issues.add("untyped");
             severityByIssue.put("untyped", "hard");
+        }
+
+        // Soft, deliberately: `untyped` (hard) already fires for every interior
+        // global, so this adds visibility without adding a second blocking issue
+        // the worker would burn provider calls failing to satisfy. Resolving it
+        // needs a judgement call the model shouldn't make alone — either the
+        // container's length is wrong or this symbol shouldn't exist.
+        if (isInteriorToData) {
+            issues.add("interior_to_data");
+            severityByIssue.put("interior_to_data", "soft");
+        }
+
+        // Plate says N, the applied type says M. MEDIUM, so it blocks
+        // `fully_documented` — the whole point is that a type sized to the
+        // nearest accidental label must not certify clean under a plate that
+        // describes a different extent. Matching EITHER the element count or
+        // the byte length clears it, so "256-byte table" + byte[256] is fine.
+        if (data != null) {
+            long elements = 1;
+            DataType dt = data.getDataType();
+            if (dt instanceof ghidra.program.model.data.Array) {
+                elements = ((ghidra.program.model.data.Array) dt).getNumElements();
+            }
+            if (NamingConventions.plateExtentContradicts(
+                    plateComment, typeName, name, elements, length)) {
+                issues.add("plate_extent_mismatch");
+                severityByIssue.put("plate_extent_mismatch", "medium");
+            }
         }
 
         if (data != null) {
@@ -3813,7 +3920,7 @@ public class DataTypeService {
         applicableAxes.put("value_semantics",
                 isIntType || (!typeName.isEmpty() && typeName.contains("*")));
 
-        return JsonHelper.mapOf(
+        Map<String, Object> out = new java.util.LinkedHashMap<>(JsonHelper.mapOf(
                 "address", addr.toString(),
                 "name", name,
                 "type", typeName,
@@ -3828,7 +3935,162 @@ public class DataTypeService {
                 ),
                 "applicable_axes", applicableAxes,
                 "fully_documented", fullyDocumented
-        );
+        ));
+        if (isExported) {
+            // Tell the worker WHY the name went unaudited, so it doesn't read
+            // the silence as permission to rename.
+            out.put("is_export", true);
+        }
+        if (isInteriorToData) {
+            Symbol containerSym = symTable.getPrimarySymbol(container.getMinAddress());
+            out.put("interior_to_data", true);
+            out.put("container", JsonHelper.mapOf(
+                    "address", container.getMinAddress().toString(),
+                    "name", containerSym != null ? containerSym.getName() : "",
+                    "type", container.getDataType() != null ? container.getDataType().getName() : "",
+                    "length", container.getLength()
+            ));
+        }
+        return out;
+    }
+
+    /**
+     * Every NAMED global that applying {@code totalLen} bytes at {@code addr}
+     * would clear out of existence. Empty list == the write is safe.
+     *
+     * Two ways a write destroys a neighbour, and both have bitten us:
+     *   1. FORWARD — a big type laid at `addr` covers a named global that
+     *      starts later inside its extent (`byte[256]` at 0x10015179 ate
+     *      `g_abUppercaseCharTbl2_end` at 0x1001517a).
+     *   2. CONTAINING — a small type laid INSIDE an existing data unit.
+     *      clearCodeUnits works on whole code units, so clearing 4 bytes at
+     *      0x1001700c destroys the entire `g_apfnApiSlots` array that starts
+     *      at 0x10017000 and spans 128.
+     *
+     * Auto-generated labels (DAT_*, LAB_*, s_*) are not victims — see
+     * {@link NamingConventions#isEvictableSymbolName}. Neither is a symbol at
+     * `addr` itself: re-typing the global you are addressing is the point.
+     */
+    static List<Map<String, Object>> findEvictionVictims(Program program, Address addr, int totalLen) {
+        List<Map<String, Object>> victims = new ArrayList<>();
+        if (totalLen <= 0) return victims;
+        Listing listing = program.getListing();
+        SymbolTable symTable = program.getSymbolTable();
+        Address end;
+        try {
+            end = addr.add(totalLen - 1);
+        } catch (Exception e) {
+            return victims;                      // extent leaves the space; createData will complain
+        }
+
+        java.util.Set<Address> seen = new java.util.LinkedHashSet<>();
+
+        // (2) CONTAINING — a data unit that starts BEFORE addr but covers it.
+        Data container = listing.getDataContaining(addr);
+        if (container != null && !container.getMinAddress().equals(addr)) {
+            seen.add(container.getMinAddress());
+        }
+        // (1) FORWARD — data units and symbols starting inside (addr, end].
+        Data d = listing.getDefinedDataAfter(addr);
+        while (d != null && d.getMinAddress().compareTo(end) <= 0) {
+            seen.add(d.getMinAddress());
+            d = listing.getDefinedDataAfter(d.getMinAddress());
+        }
+        SymbolIterator symIter = symTable.getSymbolIterator(addr.next(), true);
+        while (symIter.hasNext()) {
+            Symbol s = symIter.next();
+            if (s == null || s.getAddress() == null) break;
+            if (s.getAddress().compareTo(end) > 0) break;
+            seen.add(s.getAddress());
+        }
+
+        for (Address victimAddr : seen) {
+            if (victimAddr.equals(addr)) continue;
+            Symbol prim = symTable.getPrimarySymbol(victimAddr);
+            String victimName = prim != null ? prim.getName() : null;
+            if (NamingConventions.isEvictableSymbolName(victimName)) continue;
+            Data vd = listing.getDefinedDataAt(victimAddr);
+            victims.add(JsonHelper.mapOf(
+                    "address", victimAddr.toString(),
+                    "name", victimName,
+                    "type", vd != null && vd.getDataType() != null ? vd.getDataType().getName() : "",
+                    "length", vd != null ? vd.getLength() : 0,
+                    "relation", victimAddr.compareTo(addr) < 0 ? "contains" : "inside"
+            ));
+        }
+        return victims;
+    }
+
+    /**
+     * Carries a {@code type_would_evict} refusal out of a write lambda without
+     * it being flattened into a plain error string by the surrounding
+     * {@code catch (Exception)}. The refusal is a structured answer the caller
+     * needs to act on (which globals, how many bytes are free), not a fault.
+     */
+    static final class EvictionRejected extends RuntimeException {
+        final transient Response response;
+        EvictionRejected(Response response) {
+            super("type_would_evict");
+            this.response = response;
+        }
+    }
+
+    /** Rejection text for {@code type_would_evict}. See
+     *  {@link NamingConventions#evictionSuggestion} for why it never names the
+     *  override parameter. */
+    static String evictionSuggestion(Program program, Address addr, List<Map<String, Object>> victims) {
+        int contains = 0, inside = 0;
+        long free = -1;
+        for (Map<String, Object> v : victims) {
+            if ("contains".equals(v.get("relation"))) {
+                contains++;
+            } else {
+                inside++;
+                try {
+                    Address va = ServiceUtils.parseAddress(program, String.valueOf(v.get("address")));
+                    if (va != null) {
+                        long gap = va.subtract(addr);
+                        if (gap >= 0 && (free < 0 || gap < free)) free = gap;
+                    }
+                } catch (Exception ignored) {
+                    // gap is advisory; the refusal stands either way
+                }
+            }
+        }
+        return NamingConventions.evictionSuggestion(contains, inside, (int) Math.max(free, 0));
+    }
+
+    /**
+     * Shared eviction gate for every writer that clears a byte range before
+     * applying a type. Returns a rejection Response when the write would
+     * destroy a named global, or null when it is safe to proceed.
+     *
+     * There are THREE such writers in this file (`set_global`,
+     * `apply_data_type`, `apply_data_classification`) and guarding only one of
+     * them made the guard advisory rather than binding: on 2026-08-03 a worker
+     * hit `set_global`'s refusal four times and then completed the same write
+     * through `apply_data_type` + `rename_symbol` + `set_comment`, which is
+     * simply the next tool in the chain. A guard the caller can step around is
+     * a speed bump.
+     */
+    static Response evictionRejection(Program program, Address addr, DataType type,
+                                      int arrayLength, boolean allowEvict, String typeName) {
+        if (type == null || allowEvict) return null;
+        int totalLen = arrayLength > 0 ? type.getLength() * arrayLength : type.getLength();
+        List<Map<String, Object>> victims = findEvictionVictims(program, addr, totalLen);
+        if (victims.isEmpty()) return null;
+        return Response.ok(JsonHelper.mapOf(
+                "status", "rejected",
+                "error", "type_would_evict",
+                "issue", "type_would_evict",
+                "address", addr.toString(),
+                "type_name", typeName,
+                "total_bytes", totalLen,
+                "would_destroy", victims,
+                "message", "Applying this type would clear " + victims.size()
+                        + " named global(s) out of existence.",
+                "suggestion", evictionSuggestion(program, addr, victims)
+        ));
     }
 
     /** Strip g_ + Hungarian prefix off a global name to isolate the
@@ -4224,7 +4486,10 @@ public class DataTypeService {
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
-                    String strictModeArg) {
+                    String strictModeArg,
+            @Param(value = "allow_evict", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.")
+                    boolean allowEvict) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4396,6 +4661,17 @@ public class DataTypeService {
                 ));
             }
         }
+
+        // Eviction guard. clearCodeUnits below operates on whole code units and
+        // its exception is swallowed, so without this a type application quietly
+        // deletes any named global it overlaps — and reports success. Measured
+        // 2026-08-03: three globals destroyed in one PD2_EXT.dll pass, each one
+        // reported `completed` seconds earlier. Refuse instead, and name the
+        // casualties so the caller can pick a type that fits or fix the conflict
+        // deliberately via allow_evict.
+        Response evictionReject = evictionRejection(
+                program, addr, resolvedType, arrayLength, allowEvict, typeName);
+        if (evictionReject != null) return evictionReject;
 
         // Single transaction: type → array → name → plate comment.
         final List<String> applied = new ArrayList<>();
