@@ -292,3 +292,110 @@ def test_poor_fixture_scores_low():
     assert result["quality"] < 0.25, (
         f"poor fixture scored too high: {result['quality']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Falsifiability dimension — the benchmark analog of falsify.py: the doc must
+# not CLAIM provably false things, independent of how similar it is to truth.
+# ---------------------------------------------------------------------------
+
+def _falsify_captured(**kw):
+    base = {
+        "name": "CalcCrc16",
+        "return_type": "unsigned short",
+        "parameters": [{"name": "data", "type": "uchar *"},
+                       {"name": "length", "type": "int"}],
+        "locals": [],
+        "plate": ("Computes a CRC-16.\n\nParameters:\n"
+                  "  data: uchar * - input buffer\n"
+                  "  length: int - byte count\n\nReturns:\n"
+                  "  unsigned short: the checksum\n"),
+    }
+    base.update(kw)
+    return base
+
+
+def _falsify_truth(**kw):
+    base = {
+        "name": "calc_crc16",
+        "return_type": "unsigned short",
+        "parameters": [{"name": "data", "type": "unsigned char *"},
+                       {"name": "length", "type": "int"}],
+    }
+    base.update(kw)
+    return base
+
+
+def test_falsifiability_clean_doc_scores_one():
+    from scorer import _score_falsifiability
+
+    d = _score_falsifiability(_falsify_captured(), _falsify_truth())
+    assert d["score"] == 1.0
+    assert d["failed"] == []
+    assert d["applicable"] >= 3
+
+
+def test_falsifiability_phantom_plate_param_fails():
+    cap = _falsify_captured(plate=(
+        "Computes a CRC-16.\n\nParameters:\n"
+        "  data: uchar * - input buffer\n"
+        "  length: int - byte count\n"
+        "  pTable: ushort * - lookup table\n\nReturns:\n"
+        "  unsigned short: the checksum\n"))
+    from scorer import _score_falsifiability
+
+    d = _score_falsifiability(cap, _falsify_truth())
+    assert "plate_params_exist" in d["failed"]
+    assert d["score"] < 1.0
+
+
+def test_falsifiability_excess_arity_fails_but_fewer_is_hygiene():
+    from scorer import _score_falsifiability
+
+    over = _falsify_captured(parameters=[{"name": "a"}, {"name": "b"},
+                                         {"name": "c"}],
+                             plate="")
+    d = _score_falsifiability(over, _falsify_truth())
+    assert "arity_vs_truth" in d["failed"], \
+        "claiming a third parameter that doesn't exist is a contradiction"
+
+    under = _falsify_captured(parameters=[{"name": "data", "type": "uchar *"}],
+                              plate="")
+    d2 = _score_falsifiability(under, _falsify_truth())
+    assert "arity_vs_truth" not in d2["failed"], \
+        "a missing param is incompleteness, not a false claim"
+
+
+def test_falsifiability_void_contradiction_fails():
+    from scorer import _score_falsifiability
+
+    cap = _falsify_captured(return_type="void")
+    d = _score_falsifiability(cap, _falsify_truth())
+    assert "return_family_vs_truth" in d["failed"]
+    assert "plate_return_consistent" in d["failed"], \
+        "plate says 'unsigned short:' while the prototype says void"
+
+
+def test_falsifiability_rides_quality_and_dimensions():
+    from scorer import score_function
+
+    res = score_function(_falsify_captured(), _falsify_truth())
+    assert "falsifiability" in res["dimensions"]
+    assert res["weights"].get("falsifiability", 0) > 0
+    clean_q = res["quality"]
+    res_bad = score_function(_falsify_captured(return_type="void"),
+                             _falsify_truth())
+    assert res_bad["quality"] < clean_q, \
+        "a contradicted doc must cost quality points"
+
+
+def test_falsifiability_explicit_weights_without_key_opt_out():
+    """Documented behavior: a truth weights block omitting `falsifiability`
+    scores the dimension at weight 0 (the fast-tier YAMLs carry it)."""
+    from scorer import score_function
+
+    truth = _falsify_truth(weights={"name": 0.5, "signature": 0.5})
+    res = score_function(_falsify_captured(return_type="void"), truth)
+    assert res["weights"].get("falsifiability") is None
+    assert res["dimensions"]["falsifiability"]["score"] < 1.0, \
+        "the dimension still computes for diagnostics even at weight 0"

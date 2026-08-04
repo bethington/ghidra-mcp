@@ -86,6 +86,22 @@ rules:
       window_seconds: 3600   # 1h
       group_by_field: provider
 
+  - id: refutation_cluster
+    description: >
+      Ten or more falsify.py tier-1 refutations (mechanical doc-vs-disassembly
+      contradictions) within 30 minutes. One refutation is a bad function;
+      ten in half an hour is a SYSTEMIC producer — a prompt regression, a
+      scorer change that stopped penalizing a claim class, or a propagation
+      pass spreading a wrong name. Report-only: the per-function consequence
+      (forced audit + DOC_REFUTED + re-queue) already runs in the worker.
+    kind: event_count_in_window
+    mode: report
+    signature: "refutation_cluster"
+    condition:
+      event: falsify_refutation
+      count_min: 10
+      window_seconds: 1800   # 30 min
+
   - id: run_failure_rate_spike
     description: >
       Rolling last-30 run failure rate exceeds 60%. Trend-based detector for

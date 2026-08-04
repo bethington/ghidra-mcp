@@ -88,6 +88,17 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "port_draft_path",
     "port_failure_stage",
     "port_last_result",
+    # falsifiability axis (migration 0007) — falsify.py verdicts. The sweep
+    # CLI writes these via update_function_fields; the worker stage via
+    # update_function_state. Both gates must list them (CLAUDE.md trap).
+    "falsify_status",
+    "falsify_checked_at",
+    "falsify_findings",
+    "falsify_source",
+    # audit tool-call persistence (migration 0007) — was silently dropped on
+    # every audit while absent from both lists.
+    "audit_tool_calls",
+    "audit_tool_calls_known",
 }
 
 

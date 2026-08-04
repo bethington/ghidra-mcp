@@ -512,3 +512,13 @@ export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
 
 java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 ```
+
+---
+
+## Two Documentation Metrics: Hygiene vs Truth
+
+`analyze_function_completeness` is a **hygiene** score: it verifies documentation is *present and well-formed* (name quality, plate sections, typed params). It is computed entirely from the documentation, so it cannot detect a claim that is confidently wrong — a plate describing an algorithm the code does not implement still scores 100.
+
+The **truth** axis is falsifiability (`fun-doc/falsify.py`): mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. Tier-1 (mechanically certain) findings mark the function `DOC_REFUTED`, stamp an idempotent `[AUDIT falsify:*]` plate flag, force an audit pass seeded with the contradiction, and keep the function in the work queue regardless of its score.
+
+Operationally: treat a high completeness score as "the form is filled in", never as "the content is verified". When a plate carries an `[AUDIT falsify:*]` flag, resolving that contradiction — by correcting the documentation to match the disassembly, never the reverse — takes priority over any score-driven work.

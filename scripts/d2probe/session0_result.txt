@@ -1,0 +1,32 @@
+== CONTEXT ==
+  session      : 0   <-- Session 0 (container-like)
+  user         : SYSTEM
+  windowstation: Service-0x0-3e7$
+  desktop      : Default
+== GDI RENDER PATH ==
+  RegisterClass    : OK (err 0)
+  CreateWindowEx   : OK (err 0)
+  GetDC            : OK
+  CreateDIBSection : OK (err 0)  bits=01B30000
+  StretchBlt       : FAIL (err 5)
+== DIRECTSOUND ==
+  CoInitializeEx   : 0x00000000
+    device: Primary Sound Driver
+    device: Headphones (HyperX Cloud III Wireless)
+    device: Speakers (Steam Streaming Speakers)
+    device: Speakers (NVIDIA Broadcast)
+    device: Speakers (Steam Streaming Microphone)
+    device: MOTIV Mix Virtual Input (Shure Virtual Audio)
+    device: Realtek Digital Output (Realtek(R) Audio)
+    device: LG Ultra HD (2- NVIDIA High Definition Audio)
+  Enumerate        : 0x00000000  devices=8
+  DirectSoundCreate8: 0x00000000 OK
+  SetCoopLevel     : 0x00000000
+  CreateSoundBuffer: 0x00000000 OK
+  Lock             : 0x00000000  bytes=88200
+  Unlock           : OK
+  Play             : 0x00000000 OK
+  GetCurrentPos    : 0x00000000  play=8072 write=10716 <-- CURSOR ADVANCING
+== VERDICT ==
+  GDI path usable  : NO
+  DirectSound usable: (see CreateSoundBuffer / GetCurrentPos above)

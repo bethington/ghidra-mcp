@@ -55,6 +55,7 @@ BUS_SUBSCRIPTIONS = (
     "worker_stopped",
     "provider_timeout",
     "run_logged",
+    "falsify_complete",
 )
 
 
@@ -78,6 +79,11 @@ class _WatcherState:
     # don't leak memory; bounds far exceed any rule's evaluation window.
     provider_timeouts: deque = field(default_factory=lambda: deque(maxlen=500))
     recent_runs: deque = field(default_factory=lambda: deque(maxlen=500))
+    # falsify_complete events with outcome=contradicted (falsify.py tier-1
+    # mechanical contradictions). A cluster of these is a SYSTEMIC signal —
+    # a prompt/scorer regression producing wrong docs at rate, not N
+    # coincidences.
+    falsify_refutations: deque = field(default_factory=lambda: deque(maxlen=500))
 
     # Per (rule_id, event_type) — when did the bridge_counter_stall
     # condition start holding continuously? Cleared when condition breaks.
@@ -145,6 +151,7 @@ class AuditWatcher:
             "worker_stopped": self._on_worker_stopped,
             "provider_timeout": self._on_provider_timeout,
             "run_logged": self._on_run_logged,
+            "falsify_complete": self._on_falsify_complete,
         }
         for evt in BUS_SUBSCRIPTIONS:
             unsub = self._bus.on(evt, handlers[evt])
@@ -201,6 +208,16 @@ class AuditWatcher:
         with self._lock:
             self._state.recent_runs.append(
                 {"ts": self._now(), "result": data.get("result")}
+            )
+
+    def _on_falsify_complete(self, data: Optional[dict[str, Any]]) -> None:
+        data = data or {}
+        if data.get("outcome") != "contradicted":
+            return
+        with self._lock:
+            self._state.falsify_refutations.append(
+                {"ts": self._now(), "key": data.get("key", "?"),
+                 "tier1": data.get("tier1", 0)}
             )
 
     # -- periodic tick ----------------------------------------------------
@@ -350,6 +367,8 @@ class AuditWatcher:
         with self._lock:
             if event_name == "provider_timeout":
                 recent = [e for e in self._state.provider_timeouts if e["ts"] >= cutoff]
+            elif event_name == "falsify_refutation":
+                recent = [e for e in self._state.falsify_refutations if e["ts"] >= cutoff]
             else:
                 return  # unsupported — extend here when adding more rules
 

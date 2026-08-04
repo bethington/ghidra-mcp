@@ -100,6 +100,31 @@ def main():
         print("  (no proven_pending_review candidate staged right now -- run the PORT worker "
               "or process_port_candidate() manually to exercise checks 5-6)")
 
+    # 7) falsifiability summary (SQL-backed; degrades to an error payload, not
+    # a 500, when the store is unavailable)
+    r = client.get("/api/falsify/summary")
+    fsum = r.get_json() or {}
+    totals = fsum.get("totals") or {}
+    print("[falsify]    status=%s contradicted=%s passed=%s unchecked=%s%s"
+          % (r.status_code, totals.get("contradicted"), totals.get("passed"),
+             totals.get("unchecked"),
+             (" (error: %s)" % fsum.get("error")) if fsum.get("error") else ""))
+    if r.status_code != 200:
+        print("  FAIL: /api/falsify/summary should always return 200")
+        ok = False
+
+    # 8) falsifiability findings listing (contract only — an empty corpus is
+    # a legitimate state before the first sweep)
+    r = client.get("/api/falsify/findings", query_string={"limit": 5})
+    ff = r.get_json() or {}
+    print("[falsify]    findings status=%s count=%s"
+          % (r.status_code, ff.get("count")))
+    if r.status_code != 200 or (not ff.get("error")
+                                and "functions" not in ff):
+        print("  FAIL: /api/falsify/findings must return 200 with a "
+              "functions list (or a structured error payload)")
+        ok = False
+
     print("\nSELFTEST %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
