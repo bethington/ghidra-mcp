@@ -22,9 +22,42 @@ def test_archive_exchange_is_disabled_by_default():
 
 
 def test_bsim_scripts_have_no_default_destination():
-    for script in (REPO_ROOT / "ghidra_scripts").glob("BSim*.java"):
+    """No BSim script may carry a baked-in destination.
+
+    The glob used to be `BSim*.java`, which matched nothing once the scripts
+    were named `Analyze_BSim*`. Ten of them shipped a hardcoded private
+    address straight past this test; only the broader
+    `test_removed_private_destination_does_not_reappear` caught it. Match on
+    the substring so a rename cannot silently retire the check again.
+    """
+    scripts = [
+        p for p in (REPO_ROOT / "ghidra_scripts").rglob("*.java")
+        if "bsim" in p.name.lower()
+    ]
+    assert scripts, "expected BSim scripts to exist; glob is matching nothing"
+    for script in scripts:
         source = script.read_text(encoding="utf-8")
-        assert "DEFAULT_BSIM_URL" not in source, script
+        # A constant is fine as long as it is sourced from the environment;
+        # what must never appear is a literal URL assigned to one.
+        for line in source.splitlines():
+            if "DEFAULT_BSIM_URL" in line and "=" in line:
+                value = line.split("=", 1)[1]
+                assert "://" not in value, f"{script}: literal destination -> {line.strip()}"
+
+
+def test_bsim_credentials_file_is_not_committed():
+    """db.env holds a real password; only the template belongs in git."""
+    import subprocess
+
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "ghidra_scripts/db.env"], cwd=REPO_ROOT,
+            capture_output=True, check=True, timeout=30,
+        ).stdout.decode().strip()
+    except (OSError, subprocess.SubprocessError):
+        return  # no git available; the egress test still covers the address
+    assert not tracked, "ghidra_scripts/db.env is tracked -- it contains a password"
+    assert (REPO_ROOT / "ghidra_scripts" / "db.env.example").exists()
 
 
 def _tracked_files() -> list[Path] | None:

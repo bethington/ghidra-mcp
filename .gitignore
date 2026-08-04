@@ -656,3 +656,6 @@ fun-doc/imgui.ini
 fun-doc/BH.json
 fun-doc/ProjectDiablo.json
 fun-doc/SGD2FreeResolution.json
+
+# BSim credentials (see ghidra_scripts/db.env.example)
+ghidra_scripts/db.env
