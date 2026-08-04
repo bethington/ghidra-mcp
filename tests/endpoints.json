@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 251,
+  "total_endpoints": 252,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1745,6 +1745,18 @@
       "description": "List global variables"
     },
     {
+      "path": "/list_shadowed_globals",
+      "method": "GET",
+      "category": "listing",
+      "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals - it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
+      "parameters": [
+        "offset",
+        "limit",
+        "include_all_sections",
+        "program"
+      ]
+    },
+    {
       "path": "/list_imports",
       "method": "GET",
       "category": "listing",
@@ -2576,7 +2588,8 @@
         "array_length",
         "plate_comment",
         "program",
-        "strict_mode"
+        "strict_mode",
+        "allow_evict"
       ],
       "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type \u00e2\u2020\u2019 rename_data \u00e2\u2020\u2019 batch_set_comments \u00e2\u2020\u2019 create_label)."
     },

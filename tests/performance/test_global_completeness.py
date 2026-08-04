@@ -484,7 +484,8 @@ def test_globals_inventory_is_band_based(monkeypatch):
 
     monkeypatch.setattr(cd, "_get", fake_get)
     monkeypatch.setattr(cd, "_image_range", lambda p: (0x6FD50000, 0x6FDF9000))
-    monkeypatch.setattr(cd, "_global_rows", lambda program: rows)
+    monkeypatch.setattr(cd, "_global_rows",
+                        lambda program, include_library=False: rows)
 
     out = cd.globals_inventory(program="/p")
     s = out["summary"]
@@ -574,3 +575,209 @@ def test_glob_bands_and_inventory_agree(monkeypatch):
     assert gb["untagged"] == gi["unscored"] == 1
     assert gb["reviewed"] == gi["reviewed"] == 1
     assert gb["bands"] == gi["bands"]
+
+
+# --------------------------------------------------------------------------- #
+# Placeholder types — the ONE definition of "untyped", on both sides
+# --------------------------------------------------------------------------- #
+# 2026-08-03. Two oracles used to answer "is this global typed?" and they
+# disagreed on the `pointer` family:
+#
+#   Java  DataTypeService.auditGlobalAt -> typeName.startsWith("undefined")
+#   Python d2moo_types.PLACEHOLDERS     -> undefined* AND code AND pointer*
+#
+# So a global typed `pointer *` audited with issues:[] and fully_documented:true
+# — the globals worker filed it `already_clean` and wrote it into the clean
+# cache — while the dashboard's types bar counted it untyped and told the
+# operator to run that same worker. The bar's count could not go down. Measured:
+# 2 of PD2_EXT.dll's 5 flagged globals, ~180 corpus-wide.
+#
+# The fix put `pointer`/`pointer32`/`pointer64` in the placeholder set on BOTH
+# sides. These tests pin the Python half and the alignment; the Java half is
+# NamingConventionsTest.testPlaceholderTypePointerFamily.
+PLACEHOLDER_SPELLINGS = [
+    "", "   ", "undefined", "undefined1", "undefined2", "undefined4", "undefined8",
+    "code", "pointer", "pointer32", "pointer64",
+    # Decorated forms: Ghidra spells a pointer-to-pointer "pointer *", and an
+    # array of placeholders "undefined4[8]". Still placeholders.
+    "pointer *", "pointer  *  *", "undefined4[8]", "pointer *[4]",
+]
+
+REAL_TYPE_SPELLINGS = [
+    "uint32_t", "uint32_t *", "UnitAny *", "void *", "char *", "FARPROC",
+    "dword", "byte[200]", "ulonglong",
+    # Names that merely START with a placeholder word are real types.
+    "pointerTable", "pointer_t", "codepage_t",
+]
+
+
+@pytest.mark.parametrize("spelling", PLACEHOLDER_SPELLINGS)
+def test_glob_is_untyped_accepts_every_placeholder(spelling):
+    import conformance_dashboard as cd
+    assert cd._glob_is_untyped(spelling) is True, spelling
+
+
+@pytest.mark.parametrize("spelling", REAL_TYPE_SPELLINGS)
+def test_glob_is_untyped_rejects_real_types(spelling):
+    import conformance_dashboard as cd
+    assert cd._glob_is_untyped(spelling) is False, spelling
+
+
+def test_glob_is_untyped_agrees_with_the_type_validator():
+    """The inventory's `typed` flag and the types bar's INVALID count are two
+    readings of one question; they must never disagree again."""
+    import conformance_dashboard as cd
+    import d2moo_types
+    for spelling in PLACEHOLDER_SPELLINGS + REAL_TYPE_SPELLINGS:
+        invalid = d2moo_types.validate_type(spelling).get("verdict") == "INVALID"
+        assert cd._glob_is_untyped(spelling) == invalid, spelling
+
+
+def test_pointer_family_is_in_the_placeholder_vocabulary():
+    """Guards the actual regression: dropping these back out of PLACEHOLDERS
+    would silently restore the unclearable bar."""
+    import d2moo_types
+    for name in ("pointer", "pointer32", "pointer64"):
+        assert name in d2moo_types.PLACEHOLDERS
+
+
+# --------------------------------------------------------------------------- #
+# native_types_status — the types bar's payload
+# --------------------------------------------------------------------------- #
+def _native_status(monkeypatch, lines):
+    import conformance_dashboard as cd
+    monkeypatch.setattr(cd, "_get", lambda path, **kw: {"globals": lines} if path == "/list_globals" else {})
+    monkeypatch.setattr(cd, "_image_range", lambda p: (0x10000000, 0x10100000))
+    cd.native_cache_clear()
+    return cd.native_types_status(program="/p", force=True)
+
+
+def test_native_types_status_reports_the_offending_addresses(monkeypatch):
+    """The bar names a count; the button acts on target_addresses. If the two
+    were computed from different populations we would be back where we started,
+    so the count and the address list come out of ONE pass."""
+    out = _native_status(monkeypatch, [
+        "g_pfnGetEnvironmentStringsW @ 1000e0d0 [DATA] (pointer *) xrefs=1",
+        "g_apfnApiSlots @ 10017000 [DATA] (undefined) xrefs=8",
+        "g_dwVerInstallFileW @ 10013e70 [DATA] (dword) xrefs=2",
+        "g_pUnit @ 10013e80 [DATA] (UnitAny *) xrefs=4",
+    ])
+    assert out["invalid"] == 2
+    assert out["unrefined"] == 1                     # dword -> native width
+    assert out["globals_scanned"] == 4
+    assert out["invalid_addresses"] == ["0x1000e0d0", "0x10017000"]
+    assert len(out["invalid_addresses"]) == out["invalid"]
+    # The spellings drive the bar's label, which used to hardcode "(undefined*)"
+    # and was therefore wrong for exactly the globals nothing would fix.
+    assert set(out["invalid_types"]) == {"pointer *", "undefined"}
+
+
+def test_native_types_status_dedupes_aliased_addresses(monkeypatch):
+    """Two labels on one address is one unit of work, not two.
+
+    Every counter has to dedupe, not just the address list. Counting LINES while
+    deduping addresses made `invalid` (29) disagree with len(invalid_addresses)
+    (16) on the live D2sound.dll -- the bar would have overstated its own backlog
+    and promised a targeted run of a size it could not deliver."""
+    out = _native_status(monkeypatch, [
+        "g_abCharClassFlags @ 100120a0 [DATA] (undefined) xrefs=3",
+        "g_p_char_class_flags @ 100120a0 [DATA] (undefined) xrefs=1",
+        "g_dwFlags @ 100120b0 [DATA] (dword) xrefs=2",
+        "g_dw_flags_alias @ 100120b0 [DATA] (dword) xrefs=1",
+    ])
+    assert out["invalid_addresses"] == ["0x100120a0"]
+    assert out["invalid"] == 1
+    assert out["unrefined"] == 1
+    assert out["globals_scanned"] == 2          # 4 lines, 2 addresses
+    assert out["invalid_types"] == {"undefined": 1}
+
+
+def test_native_types_status_count_always_matches_the_address_list(monkeypatch):
+    """The bar renders `invalid`; the button dispatches `invalid_addresses` and
+    uses its length as the worker's count. If these two ever drift the bar is
+    lying about the size of the job it is offering."""
+    out = _native_status(monkeypatch, [
+        "g_a @ 1000e0d0 [DATA] (pointer *) xrefs=1",
+        "g_a_alias @ 1000e0d0 [DATA] (pointer *) xrefs=1",
+        "g_b @ 10017000 [DATA] (undefined) xrefs=8",
+        "g_c @ 10017010 [DATA] (pointer) xrefs=2",
+        "g_ok @ 10017020 [DATA] (UnitAny *) xrefs=2",
+    ])
+    assert out["invalid"] == len(out["invalid_addresses"]) == 3
+
+
+def test_native_types_status_ignores_out_of_image_and_ordinals(monkeypatch):
+    out = _native_status(monkeypatch, [
+        "g_pfnThunk @ 6fbc9a50 [DATA] (pointer *) xrefs=1",     # outside the image
+        "Ordinal_101 @ 10011000 [DATA] (undefined) xrefs=1",    # export ordinal
+        "g_apfnApiSlots @ 10017000 [DATA] (undefined) xrefs=8",
+    ])
+    assert out["invalid_addresses"] == ["0x10017000"]
+    assert out["globals_scanned"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# shadowed_globals — the population no other dashboard view can see
+# --------------------------------------------------------------------------- #
+# `/list_globals` resolves the CONTAINING data unit, so a global swallowed by a
+# neighbour reports the EATER's type and renders as perfectly typed everywhere.
+# Corpus measurement 2026-08-03: 540 shadowed globals, 539 invisible to every
+# existing panel, each hard-capped at 79 by the untyped ceiling. This read is a
+# single bulk call per binary on purpose — the per-address route would be one
+# audit_global per global, and the corpus holds 17,773 of them.
+def _shadow(monkeypatch, items, raise_oserror=False):
+    import conformance_dashboard as cd
+
+    def fake_get(path, **kw):
+        if path == "/list_shadowed_globals":
+            if raise_oserror:
+                raise OSError("ghidra down")
+            return {"shadowed": items, "count": len(items),
+                    "offset": 0, "total": len(items)}
+        return {}
+
+    monkeypatch.setattr(cd, "_get", fake_get)
+    cd.shadow_cache_clear()
+    return cd.shadowed_globals(program="/p", force=True)
+
+
+def _victim(addr, name, caddr, cname, ctype="byte[256]"):
+    return {"address": addr, "name": name, "xrefs": 2,
+            "container": {"address": caddr, "name": cname, "type": ctype, "length": 256}}
+
+
+def test_shadowed_globals_counts_and_groups_by_container(monkeypatch):
+    out = _shadow(monkeypatch, [
+        _victim("1001517a", "g_abUppercaseCharTbl2_end", "10015179", "g_abUppercaseCharTbl2"),
+        _victim("10012e20", "g_dwPosInfBits", "10012e18", "g_ldHalf", "float10"),
+        _victim("10012e21", "g_dwOther", "10012e18", "g_ldHalf", "float10"),
+    ])
+    assert out["shadowed"] == 3
+    assert out["containers"] == 2
+    # The damage is concentrated -- 10 containers covered 32% of the corpus
+    # total -- so the worst offenders are what the panel points at.
+    assert out["top_containers"][0]["name"] == "g_ldHalf"
+    assert out["top_containers"][0]["victims"] == 2
+
+
+def test_shadowed_globals_reports_errors_instead_of_zero(monkeypatch):
+    """A zero here reads as `clean`, which is the exact false reassurance this
+    panel exists to remove. An unreachable Ghidra must surface as an error."""
+    out = _shadow(monkeypatch, [], raise_oserror=True)
+    assert out["error"]
+    assert out["shadowed"] == 0
+
+
+def test_shadowed_globals_error_is_not_cached(monkeypatch):
+    """Caching a failure would pin the panel at `unknown` for the session."""
+    import conformance_dashboard as cd
+    _shadow(monkeypatch, [], raise_oserror=True)
+    assert "/p" not in cd._SHADOW_CACHE
+    out = _shadow(monkeypatch, [_victim("1001517a", "g_x", "10015179", "g_c")])
+    assert out["shadowed"] == 1 and out["error"] is None
+    assert "/p" in cd._SHADOW_CACHE
+
+
+def test_shadowed_globals_clean_binary_is_zero(monkeypatch):
+    out = _shadow(monkeypatch, [])
+    assert out["shadowed"] == 0 and out["containers"] == 0 and out["error"] is None

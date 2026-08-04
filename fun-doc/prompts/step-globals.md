@@ -273,7 +273,7 @@ not.
 
 | Code | Severity | What to fix |
 |---|---|---|
-| `untyped` | hard | Apply a real type via `set_global`. |
+| `untyped` | hard | Apply a real type via `set_global`. A bare `pointer`/`pointer32`/`pointer64` counts as untyped — type what it points AT. |
 | `missing_plate_comment` | hard | Add a one-line ≥4-word summary. |
 | `ida_reserved_prefix` | hard | Rename — never reuse `sub_`/`loc_`/`byte_`/`dword_`/`unk_`/`var_`/`arg_` as a global name. |
 | `name_*` (any) | hard | See rejection list above. |

@@ -20,7 +20,8 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-from conftest import wait_for
+# See the note in test_bars.py: never `from conftest import ...` here.
+from _dashboard_helpers import wait_for
 
 pytestmark = pytest.mark.e2e
 

@@ -30,12 +30,37 @@ Run:
 
 from __future__ import annotations
 
-import re
-import time
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
+
+# The DOM/legend parsing is shared with the hermetic `tests/dashboard` tier.
+# One copy only: `read_legend` encodes a real parsing trap (legend labels
+# contain digits, so the count must be anchored on the LAST integer), and a
+# second copy that drifts from it gives a tier that passes for the wrong
+# reason. `tests/e2e` has no __init__.py -- it is collected by rootdir
+# insertion -- so reach the shared module by path rather than by package.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _dashboard_helpers import (  # noqa: E402
+    assert_percentage_sane,
+    assert_segments_fit,
+    pct_from_label,
+    read_legend,
+    read_segments,
+    wait_for,
+)
+
+__all__ = [
+    "assert_percentage_sane",
+    "assert_segments_fit",
+    "pct_from_label",
+    "read_legend",
+    "read_segments",
+    "wait_for",
+]
 
 # Self-skip the whole directory when the browser stack is absent. These are
 # the only tests in the repo that need pytest-playwright, and it is not a
@@ -335,55 +360,10 @@ def worker_guard(api: Api):
 # --------------------------------------------------------------------------
 # shared DOM helpers
 # --------------------------------------------------------------------------
-
-_LEGEND_RE = re.compile(r"^(?P<label>.*?)\s+(?P<n>[\d,]+)$")
-
-
-def read_legend(page, legend_id: str) -> dict[str, int]:
-    """Parse a ``.seg-legend`` into ``{label: count}``.
-
-    Entries render as ``<swatch>LABEL N`` — the label may itself contain
-    digits (``80+``, ``<80``, ``100``), so anchor on the LAST whitespace-
-    separated integer rather than splitting greedily.
-    """
-    out: dict[str, int] = {}
-    for text in page.locator(f"#{legend_id} .lg").all_inner_texts():
-        m = _LEGEND_RE.match(text.strip())
-        assert m, f"unparseable legend entry {text!r} in #{legend_id}"
-        out[m.group("label").strip()] = int(m.group("n").replace(",", ""))
-    return out
-
-
-def read_segments(page, bar_id: str) -> list[tuple[str, float]]:
-    """Return ``[(title, width_pct)]`` for a segmented bar's drawn spans.
-
-    Only segments with n > 0 are drawn, so this is the bar as the operator
-    actually SEES it — which is what a width-overflow bug shows up in.
-    """
-    return page.evaluate(
-        """(id) => Array.from(document.querySelectorAll('#' + id + ' > span'))
-              .map(s => [s.title, parseFloat(s.style.width) || 0])""",
-        bar_id,
-    )
-
-
-def pct_from_label(text: str) -> float | None:
-    """Extract the leading percentage from a bar's ``.p`` label.
-
-    Returns None for the em-dash the renderers print when the denominator
-    is unknown — that is a legitimate, deliberate state, not a parse error.
-    """
-    m = re.search(r"(-?[\d.]+)\s*%", text)
-    return float(m.group(1)) if m else None
-
-
-def wait_for(predicate, timeout: float = 30.0, interval: float = 0.5, what: str = "condition"):
-    """Poll a server-side predicate. Playwright's expect() cannot see the API."""
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        last = predicate()
-        if last:
-            return last
-        time.sleep(interval)
-    raise AssertionError(f"timed out after {timeout}s waiting for {what} (last={last!r})")
+#
+# `read_legend`, `read_segments`, `pct_from_label` and `wait_for` are imported
+# at the TOP of this file from `tests/_dashboard_helpers.py` and re-exported,
+# so `from conftest import read_legend` in the test modules keeps working.
+# They are shared with the hermetic `tests/dashboard` tier -- one copy only,
+# because `read_legend` encodes a parsing trap (labels contain digits) that a
+# drifting second copy would get wrong quietly.

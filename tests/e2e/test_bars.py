@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import pct_from_label, read_legend, read_segments
+# Import from the shared module, NOT from `conftest`: three tiers each have
+# a conftest.py, and a bare `from conftest import X` resolves to whichever
+# one reached sys.modules first, so a combined run picks the wrong file.
+from _dashboard_helpers import pct_from_label, read_legend, read_segments
 
 pytestmark = pytest.mark.e2e
 

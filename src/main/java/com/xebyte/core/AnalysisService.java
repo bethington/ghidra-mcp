@@ -2747,7 +2747,8 @@ public class AnalysisService {
                         double pts = Math.min(8.0 * untypedCount, 8.0);
                         globalDeductions += pts;
                         breakdown.add(deductionItem("untyped_global", pts, true, untypedCount,
-                                untypedCount + " referenced global(s) have undefined* type"));
+                                untypedCount + " referenced global(s) have a placeholder type "
+                                + "(undefined* or bare pointer)"));
                     }
                     if (unformattedCount > 0) {
                         double pts = Math.min(5.0 * unformattedCount, 5.0);

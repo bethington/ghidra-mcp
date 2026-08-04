@@ -287,6 +287,17 @@
   .inv-row .panel { margin-bottom:0; min-width:0; }
   .inv-head { display:flex; gap:.5rem; align-items:center; }
   .inv-search { flex:1; max-width:280px; min-width:80px; }
+  /* "show library code" toggle. Library rows are rendered DIMMED rather than
+     styled like the rest: the toggle is for inspection, and they must never be
+     mistaken for work still owed. */
+  .libtoggle { display:flex; align-items:center; gap:.2rem; font-size:.62rem;
+    color:var(--text-muted); cursor:pointer; user-select:none; white-space:nowrap; }
+  .libtoggle input { margin:0; cursor:pointer; }
+  table.inv tr.librow { opacity:.5; }
+  table.inv tr.librow td.fn { font-style:italic; }
+  .libchip { font-family:var(--font-mono); font-size:.55rem; padding:0 .25rem;
+    border:1px solid var(--border); border-radius:3px; color:var(--text-muted);
+    vertical-align:middle; }
   table.inv { width:100%; border-collapse:collapse; margin-top:.5rem; table-layout:fixed; }
   table.inv td.gtype { font-family:var(--font-mono); font-size:.64rem; color:var(--text-secondary);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -601,6 +612,7 @@
           <div class="bar-lab"><span class="t">Globals</span><span class="p" id="globBandPct">-</span></div>
           <div class="segbar" id="globBandBar"></div>
           <div class="seg-legend" id="globBandLegend"></div>
+          <div class="seg-legend" id="globShadowed" style="display:none"></div>
         </div>
       </div>
     </div></div>
@@ -649,6 +661,8 @@
       <div class="panel">
         <div class="panel-header inv-head"><h2 style="margin:0">Function Inventory</h2>
           <input class="worker-input inv-search" id="invSearch" placeholder="search by name..." oninput="debouncedInv()" style="width:auto">
+          <label class="libtoggle" title="Show CRT / compiler-runtime functions. They are excluded from every count and from worker selection; this reveals them for inspection.">
+            <input type="checkbox" id="invLib" onchange="loadInv()"> lib</label>
           <span class="hint" id="invHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
@@ -659,6 +673,8 @@
       <div class="panel">
         <div class="panel-header inv-head"><h2 style="margin:0">Globals Inventory</h2>
           <input class="worker-input inv-search" id="globSearch" placeholder="search by name..." oninput="debouncedGlob()" style="width:auto">
+          <label class="libtoggle" title="Show library-owned globals — those whose every referrer is CRT/runtime code. Excluded from the counts and the types bar; this reveals them for inspection.">
+            <input type="checkbox" id="globLib" onchange="loadGlobals()"> lib</label>
           <span class="hint" id="globHint"></span>
         </div>
         <div class="panel-content" style="max-height:340px;overflow-y:auto">
@@ -949,7 +965,34 @@
   // ---- Globals - Completeness: untagged -> COMPLETE_80 -> 90 -> 95 -> 100 ----
   // The data-address analog of the function completeness bar; exclusive score-band
   // values live in the `Complete` property map. Rendered from /api/conformance/glob_bands.
+  // Globals a neighbouring data unit has swallowed. Deliberately rendered under
+  // the Globals bar rather than as a bar segment: these globals are NOT a band
+  // of completeness, they are a measurement fault — every other view reports
+  // them as typed, because /list_globals resolves the containing unit and hands
+  // back the eater's type. 540 of them corpus-wide on 2026-08-03, 539 invisible.
+  // Each is hard-capped at 79 by the untyped ceiling, so this number is a hard
+  // ceiling on the bar directly above it.
+  async function renderShadowedGlobals(){
+    const el=document.getElementById("globShadowed"); if(!el) return;
+    const s=await api("/shadowed_globals");
+    if(!s || s.error){ el.style.display="none"; return; }
+    if(!s.shadowed){ el.style.display="none"; return; }
+    const top=(s.top_containers||[]).slice(0,3)
+      .map(c=>`${escHtml(c.name||c.address)} (${c.victims})`).join(', ');
+    el.style.display="";
+    el.innerHTML =
+      `<span class="revchip" title="These globals have no type of their own — a larger data unit `
+      + `starting at an earlier address covers them, so Ghidra reports THAT unit's type here and `
+      + `every other panel shows them as typed. They are hard-capped at 79 and cannot band `
+      + `COMPLETE_80+ until the overlap is resolved. Fix the container's extent, or remove the `
+      + `interior symbol — whichever the disassembly supports.">`
+      + `&#9888; ${s.shadowed.toLocaleString()} shadowed by ${s.containers.toLocaleString()} `
+      + `container(s)</span>`
+      + (top ? ` <span class="muted">worst: ${top}</span>` : '');
+  }
+
   async function renderGlobBandBar(){
+    renderShadowedGlobals();
     const b=await api("/glob_bands"); if(!b||b.in_scope==null) return;
     let target=90;
     try{ const r=await fetch("/api/queue/config"); const j=await r.json();
@@ -1066,10 +1109,13 @@
   }
   async function loadGlobals(){
     const q=document.getElementById("globSearch").value;
-    const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200")||SAMPLE_GLOB;
-    document.getElementById("globHint").textContent=`${g.shown} of ${g.total}`;
+    const lib=document.getElementById("globLib").checked;
+    const g=await api("/globals?q="+encodeURIComponent(q)+"&limit=200"+(lib?"&lib=1":""))||SAMPLE_GLOB;
+    const ghidden=g.library_total||0;
+    document.getElementById("globHint").textContent=
+      `${g.shown} of ${g.total}`+(ghidden?(lib?` · ${ghidden} library shown`:` · ${ghidden} library hidden`):"");
     document.getElementById("globBody").innerHTML=(g.rows||[]).map(r=>
-      `<tr><td class="fn gname" title="${escHtml(r.name)}">${escHtml(r.name)}</td>`+
+      `<tr class="${r.library?'librow':''}"><td class="fn gname" title="${escHtml(r.name)}">${escHtml(r.name)}${r.library?` <span class="libchip" title="Every function referencing this global is library code, so it is excluded from the globals counts and the types bar.">lib</span>`:""}</td>`+
       `<td class="gtype ${r.typed?'':'untyped'}" title="${escHtml(r.type)}">${escHtml(r.type)||'-'}</td>`+
       `<td>${bandBadge(r.band)}</td>`+
       `<td class="act"><button class="pin-btn ${r.reviewed?'pinned':''}" `+
@@ -1081,12 +1127,17 @@
   }
   async function loadInv(){
     const q=document.getElementById("invSearch").value;
-    const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000")||SAMPLE.inventory;
-    document.getElementById("invHint").textContent=`${inv.shown} of ${inv.total}`;
+    const lib=document.getElementById("invLib").checked;
+    const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000"+(lib?"&lib=1":""))||SAMPLE.inventory;
+    // Always state how many are hidden. A count that silently shrinks reads as
+    // "this binary is smaller than I thought", not "library code is excluded".
+    const hidden=inv.library_total||0;
+    document.getElementById("invHint").textContent=
+      `${inv.shown} of ${inv.total}`+(hidden?(lib?` · ${hidden} library shown`:` · ${hidden} library hidden`):"");
     (inv.rows||[]).forEach(f=>{ NAME_BY_ADDR[bareAddr(f.address)]=f.name; });
     renderPins();
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>
-      `<tr onclick="openFn('${f.address}')"><td class="fn gname" title="${escHtml(f.name)}">${escHtml(f.name)}</td><td class="mono" style="color:var(--text-muted)">${escHtml(f.address)}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
+      `<tr class="${f.library?'librow':''}" onclick="openFn('${f.address}')"><td class="fn gname" title="${escHtml(f.name)}">${escHtml(f.name)}${f.library?` <span class="libchip" title="Excluded from the inventory and from worker selection by the ${escHtml(f.library)} tag.">${escHtml(f.library)}</span>`:""}</td><td class="mono" style="color:var(--text-muted)">${escHtml(f.address)}</td><td>${badge(f.doc)}</td><td>${badge(f.conf)}</td>`+
       `<td class="act">${isPinned(f.address)?`<button class="pin-btn pinned" title="pinned — unpin" onclick="event.stopPropagation();unpin('fn','${f.address}')">&#9733;</button>`:`<button class="pin-btn" title="pin — Doc &amp; Prove workers prioritize this" onclick="event.stopPropagation();pin('fn','${f.address}','${jsq(f.name)}')">+</button>`}</td></tr>`).join("");
   }
   async function openFn(addr){
@@ -1310,6 +1361,7 @@
   const _typesChecked = new Set();   // programs checked this session (once-per-session cadence)
   let _typesBusy = false;
   let _globalsTypingActive = false;  // true while a globals worker runs on the current binary
+  let _globalsTypingPendingUntil = 0; // ms deadline: ignore "no worker" until the launch lands
   function _shortBin(p){ return (p||'').split(/[\\/]/).pop() || p || 'this binary'; }
   // ORDERED checks: (1) missing/stale canonical types FIRST (prerequisite -- can't normalize to
   // uint32_t until it exists); (2) only once loaded, warn about existing NATIVE-typed variables.
@@ -1343,9 +1395,18 @@
     if(nt && nt.invalid > 0){
       bar.classList.remove("busy","ok"); bar.dataset.mode="detect";
       btn.style.display=""; btn.disabled=false; btn.textContent="Start typing worker";
-      const parts=[`${nt.invalid.toLocaleString()} untyped (undefined*)`];
+      // Name the placeholder spellings actually found. This used to hardcode
+      // "(undefined*)" and was wrong for the `pointer *` family -- the exact
+      // globals that, until 2026-08-03, no worker would ever fix.
+      const kinds = Object.keys(nt.invalid_types || {}).slice(0,3).join(', ');
+      const parts=[`${nt.invalid.toLocaleString()} untyped${kinds?` (${escHtml(kinds)})`:''}`];
       if(nt.unrefined) parts.push(`${nt.unrefined.toLocaleString()} on native width`);
-      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals &mdash; start a globals worker to apply real D2MOO types.`;
+      // Only the untyped ones are what the button acts on -- say so, rather
+      // than implying the native-width count is part of the same job.
+      msg.innerHTML = `<b>${_shortBin(prog)}</b>: ${parts.join(' &middot; ')} of ${nt.globals_scanned.toLocaleString()} globals `
+        + `&mdash; start a globals worker on the ${nt.invalid.toLocaleString()} untyped to apply real D2MOO types`
+        + (nt.unrefined ? ` (native-width globals are left alone; they are often a legitimately final type)` : '')
+        + `.`;
       bar.classList.add("active"); return;
     }
     bar.classList.remove("active","busy","ok");     // all clean (no untyped globals)
@@ -1567,17 +1628,28 @@
     flash("relaunching D2Debugger oracle…");
   }
 
-  // One click: start a continuous globals worker on the current binary using the
-  // dashboard's selected (primary) provider — start_worker rejects it if that
-  // provider is disabled, so this tracks the operator's provider decision. The
-  // bar hides optimistically; worker_status keeps it hidden while the worker runs.
+  // One click: start a globals worker aimed at THIS binary's untyped globals,
+  // using the dashboard's selected (primary) provider — start_worker rejects it
+  // if that provider is disabled, so this tracks the operator's provider decision.
+  //
+  // `targeted:true` makes the server re-resolve the untyped addresses and pass
+  // them as target_addresses. Before this the button sent `continuous:true` with
+  // no addresses, so the worker walked all ~400 globals in arbitrary enumeration
+  // order and then rotated to OTHER binaries — the bar named 5 globals and the
+  // click acted on a corpus. The addresses are deliberately NOT sent from here;
+  // see the socket handler for why a browser-side list is the wrong authority.
+  //
+  // The bar hides optimistically; worker_status keeps it hidden while the worker
+  // runs, and a rejection (worker_error) puts it back.
   function startGlobalsTyping(){
     if(!socket){ flash("no socket"); return; }
     if(!PROGRAM){ flash("no binary selected"); return; }
     const provider=document.getElementById("provider").value;
-    socket.emit("request_start_globals_worker",{binary:PROGRAM, provider, count:0, continuous:true});
-    flash(`typing globals on ${_shortBin(PROGRAM)} (${provider})`);
+    socket.emit("request_start_globals_worker",
+                {binary:PROGRAM, provider, targeted:true, continuous:false});
+    flash(`typing untyped globals in ${_shortBin(PROGRAM)} (${provider})`);
     _globalsTypingActive=true;
+    _globalsTypingPendingUntil = Date.now() + 15000;
     document.getElementById("typesBar").classList.remove("active");
   }
   function loadTypes(){
@@ -1737,10 +1809,21 @@
   // actually running on the current binary: hide it while one is active, and
   // when it stops, re-scan (force) so the bar re-shows the updated — hopefully
   // smaller — untyped count, or stays gone once the backlog is clear.
+  //
+  // The launch grace window exists because a `worker_status` push already IN
+  // FLIGHT when the button is clicked does not contain the new worker. Without
+  // the guard that stale payload reads as "no globals worker running", undoes
+  // the optimistic hide, and slams the same warning back on screen a
+  // heartbeat after the click — indistinguishable from the launch failing.
+  // With three port workers pushing status continuously, that race lands often.
+  // A real rejection still restores the bar immediately: worker_error clears
+  // the window explicitly.
   function maybeToggleTypesBarForWorkers(w){
     const LIVE = ['starting','running','stopping','quota_paused'];
     const active = (w||[]).some(x =>
       x.mode==='globals' && x.binary===PROGRAM && LIVE.includes(x.status));
+    if(active) _globalsTypingPendingUntil = 0;   // confirmed — stop waiting
+    else if(Date.now() < _globalsTypingPendingUntil) return;   // launch in flight
     if(active===_globalsTypingActive) return;   // no transition
     _globalsTypingActive = active;
     if(active){
@@ -1775,12 +1858,16 @@
     socket.on("falsify_complete",()=>{ clearTimeout(falsifyTimer); falsifyTimer=setTimeout(loadFalsify,1200); });
     let wsTimer;
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
-    socket.on("worker_started_ack",a=>flash(`worker ${a.mode||''} started`));
+    socket.on("worker_started_ack",a=>flash(
+      a.targeted ? `worker globals started on ${a.targeted} untyped global(s)`
+                 : `worker ${a.mode||''} started`));
     socket.on("worker_error",e=>{
       flash(`error: ${e.error||'worker'}`);
       // A globals-typing launch we optimistically hid the bar for was rejected
       // (e.g. disabled provider, binary already held) -- undo the optimistic
-      // hide so the backlog warning comes back.
+      // hide so the backlog warning comes back. This is the one path that must
+      // beat the launch grace window, so clear it explicitly.
+      _globalsTypingPendingUntil = 0;
       if(_globalsTypingActive){ _globalsTypingActive=false; checkTypes(true); }
     });
     // --- scan lifecycle (steering panel) ---

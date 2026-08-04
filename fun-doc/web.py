@@ -127,6 +127,30 @@ def _oracle_endpoint():
     return os.environ.get("D2DBG_MCP_URL", "http://127.0.0.1:8790").rstrip("/")
 
 
+def resolve_untyped_global_targets(binary):
+    """The addresses behind the types bar's untyped count, for a TARGETED
+    globals run (`request_start_globals_worker` with `targeted: true`).
+
+    Resolved server-side and fresh (`force=True`) on purpose. The browser has
+    a count from whenever the bar last rendered, which can be many minutes old;
+    dispatching a worker at that list would re-audit globals someone else has
+    since fixed and miss ones that regressed. The bar is a prompt, not the
+    work order.
+
+    Returns [] — never None — when there is nothing to do, so the caller can
+    tell "no work" from "look at the whole binary". Never raises: a Ghidra
+    hiccup here must not turn a button click into a stack trace, and an empty
+    list makes the caller refuse the launch rather than silently widening it
+    to the entire binary (which is exactly the behaviour this replaces)."""
+    try:
+        import conformance_dashboard as _cd
+        nt = _cd.native_types_status(program=binary, force=True)
+        return list(nt.get("invalid_addresses") or [])
+    except Exception as e:  # noqa: BLE001
+        print(f"  target resolution failed for {binary}: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
@@ -3684,13 +3708,36 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         """Launch a globals worker on the selected binary. Per Q1/Q9 the
         binary is required (selected in the header dropdown by the user
         before clicking the button); the WorkerManager rejects launches
-        with no binary or a binary already held by another globals worker."""
+        with no binary or a binary already held by another globals worker.
+
+        `targeted: true` (the types bar's "Start typing worker" button) aims
+        the run at exactly the globals the bar counted as untyped, instead of
+        turning the worker loose on the binary in enumeration order. The
+        address list is resolved HERE, not sent by the browser: the bar's
+        numbers can be minutes old, and dispatching a worker at a stale list
+        would re-audit globals someone else already fixed while missing ones
+        that regressed since the page last rendered."""
         try:
             provider = (data or {}).get("provider", "minimax")
             continuous = bool((data or {}).get("continuous", False))
             count = max(1, min(500, int((data or {}).get("count", 5))))
             model = (data or {}).get("model") or None
             binary = (data or {}).get("binary") or None
+            addresses = None
+            if (data or {}).get("targeted") and binary:
+                addresses = resolve_untyped_global_targets(binary)
+                if not addresses:
+                    # Nothing left to type -- the bar was stale. Say so instead
+                    # of starting a worker that would walk the whole binary.
+                    sio_emit("worker_error", {
+                        "error": f"No untyped globals left in {Path(binary).name} "
+                                 f"-- the types bar was out of date."})
+                    return
+                # The address list IS the bound, so it sets the count directly
+                # (no 500 clamp: D2Client alone carries 553 and silently doing
+                # 500 of them would report a clean sweep that never happened).
+                count = len(addresses)
+                continuous = False   # targeted run does this binary, then stops
             worker_id = worker_mgr.start_worker(
                 provider=provider,
                 count=count,
@@ -3698,8 +3745,12 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                 binary=binary,
                 continuous=continuous,
                 mode="globals",
+                addresses=addresses,
             )
-            sio_emit("worker_started_ack", {"worker_id": worker_id, "mode": "globals"})
+            sio_emit("worker_started_ack", {
+                "worker_id": worker_id, "mode": "globals",
+                "targeted": len(addresses) if addresses else 0,
+            })
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})
 

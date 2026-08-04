@@ -815,3 +815,103 @@ class TestOverlayAddressSpaces:
         assert r.status_code == 200, r.text
         result = json.loads(r.text)
         assert "error" not in result, f"overlay read failed for {addr}: {result}"
+
+
+class TestShadowedGlobalsConsistency:
+    """`/list_shadowed_globals` must stay a strict SUBSET of `/list_globals`.
+
+    These are two views of one population and their counts render side by side
+    on the dashboard's Globals panel, so a divergence between them shows up as
+    two numbers that disagree about the same binary. The Java side shares one
+    gate (`isGlobalDataSymbol`) precisely so they cannot drift; this test is the
+    live proof that the sharing actually holds end to end.
+
+    Background (2026-08-03): `/list_shadowed_globals` was originally written
+    with hand-copied gates, which is the same two-code-paths-one-question shape
+    that produced every other bug in this area.
+    """
+
+    @pytest.fixture
+    def shadow_program(self, http_client):
+        """An OPEN program that actually has shadowed globals.
+
+        Without this the suite runs against whatever program happens to be
+        active -- which after a deploy is the benchmark fixture, has none, and
+        skips all three checks. A test that skips is not a test that passes;
+        this searches the open set and only skips when the whole session has
+        nothing to assert on.
+        """
+        r = http_client.get("/list_open_programs")
+        if r.status_code != 200:
+            pytest.skip("cannot enumerate open programs")
+        progs = [p.get("path") for p in (json.loads(r.text).get("programs") or [])
+                 if isinstance(p, dict) and p.get("path")]
+        for path in progs:
+            resp = http_client.get("/list_shadowed_globals",
+                                   params={"program": path, "limit": 5})
+            if resp.status_code == 200 and (json.loads(resp.text).get("shadowed") or []):
+                return path
+        pytest.skip("no open program has shadowed globals to assert on")
+
+    def _globals(self, http_client, program=None, **params):
+        params = {"limit": 100000, "min_xrefs": 0, **params}
+        if program:
+            params["program"] = program
+        r = http_client.get("/list_globals", params=params)
+        assert r.status_code == 200
+        return json.loads(r.text).get("globals") or []
+
+    def _shadowed(self, http_client, program=None):
+        params = {"limit": 100000}
+        if program:
+            params["program"] = program
+        r = http_client.get("/list_shadowed_globals", params=params)
+        assert r.status_code == 200
+        return json.loads(r.text).get("shadowed") or []
+
+    @staticmethod
+    def _addr_of(line):
+        # "name @ 1001517a [Label] (undefined) xrefs=1"
+        parts = str(line).split(" @ ")
+        return parts[1].split()[0].lower().lstrip("0") if len(parts) > 1 else None
+
+    def test_shadowed_is_a_subset_of_list_globals(self, http_client, shadow_program):
+        shadowed = self._shadowed(http_client, shadow_program)
+        assert shadowed, "fixture guarantees a non-empty set"
+        listed = {self._addr_of(l) for l in self._globals(http_client, shadow_program)}
+        missing = [s["address"].lower().lstrip("0") for s in shadowed
+                   if s["address"].lower().lstrip("0") not in listed]
+        assert not missing, (
+            f"{len(missing)} shadowed globals are absent from /list_globals — the "
+            f"two scanners have drifted: {missing[:5]}")
+
+    def test_shadowed_globals_report_no_type_in_list_globals(self, http_client, shadow_program):
+        """The whole point of the formatGlobalSymbol fix.
+
+        A shadowed global has no type AT its address; `symbol.getObject()` used
+        to hand back the CONTAINING data unit, so the listing printed the
+        covering neighbour's type and every consumer read the global as typed.
+        """
+        shadowed = self._shadowed(http_client, shadow_program)
+        by_addr = {self._addr_of(l): str(l)
+                   for l in self._globals(http_client, shadow_program)}
+        wrong = []
+        for s in shadowed[:50]:
+            line = by_addr.get(s["address"].lower().lstrip("0"))
+            if line and "(undefined)" not in line:
+                wrong.append(line)
+        assert not wrong, (
+            "shadowed globals still report a type in /list_globals (the "
+            f"container's): {wrong[:3]}")
+
+    def test_shadowed_globals_are_selected_by_the_untyped_axis(self, http_client, shadow_program):
+        """`type_filter=undefined` derives from getDefinedDataAt, so it already
+        selected these correctly even when the printed line contradicted it.
+        Selection and display must now agree."""
+        shadowed = self._shadowed(http_client, shadow_program)
+        untyped = {self._addr_of(l) for l in self._globals(
+            http_client, shadow_program, filter="defined", type_filter="undefined")}
+        missing = [s["address"].lower().lstrip("0") for s in shadowed
+                   if s["address"].lower().lstrip("0") not in untyped]
+        assert not missing, (
+            f"shadowed globals not selected by type_filter=undefined: {missing[:5]}")

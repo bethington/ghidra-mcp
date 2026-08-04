@@ -123,13 +123,21 @@ def _glob_bands():
     return jsonify(cd.glob_bands(program=_prog()))
 
 
+def _truthy(name: str) -> bool:
+    """Query-string flag. Accepts the forms a checkbox and a hand-typed URL both
+    produce, so `?lib=1`, `?lib=true` and `?lib=on` all mean the same thing."""
+    return str(request.args.get(name, "")).strip().lower() in ("1", "true", "on", "yes")
+
+
 @conf_bp.route("/api/conformance/inventory")
 def _inventory():
     try:
         limit = max(1, min(20000, int(request.args.get("limit", 6000))))
     except (TypeError, ValueError):
         limit = 6000
-    return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
+    return jsonify(cd.inventory(search=request.args.get("q", ""), limit=limit,
+                                program=_prog(),
+                                include_library=_truthy("lib")))
 
 
 @conf_bp.route("/api/conformance/globals")
@@ -138,7 +146,9 @@ def _globals():
         limit = max(1, min(500, int(request.args.get("limit", 100))))
     except (TypeError, ValueError):
         limit = 100
-    return jsonify(cd.globals_inventory(search=request.args.get("q", ""), limit=limit, program=_prog()))
+    return jsonify(cd.globals_inventory(search=request.args.get("q", ""), limit=limit,
+                                        program=_prog(),
+                                        include_library=_truthy("lib")))
 
 
 @conf_bp.route("/api/conformance/global_review", methods=["POST"])
@@ -206,3 +216,11 @@ def _native_types_status():
     """Cheap globals canary: is the focused binary using native (non-canonical) types?"""
     force = request.args.get("force") in ("1", "true", "yes")
     return jsonify(cd.native_types_status(program=_prog(), force=force))
+
+
+@conf_bp.route("/api/conformance/shadowed_globals")
+def _shadowed_globals():
+    """Globals a neighbouring data unit has swallowed — the population every
+    other view reports as typed, because /list_globals resolves the container."""
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify(cd.shadowed_globals(program=_prog(), force=force))

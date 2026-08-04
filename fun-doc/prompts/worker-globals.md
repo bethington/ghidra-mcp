@@ -29,7 +29,7 @@ The shape of each issue you may encounter:
 | `name_missing_g_prefix` | hard | Add the `g_` prefix. |
 | `name_prefix_type_mismatch` | hard | Make Hungarian prefix match the type. |
 | `name_short_descriptor` | hard | Add ≥2 chars of descriptor after the Hungarian prefix. |
-| `untyped` | hard | Apply a real type (not `undefined1/2/4/8`). |
+| `untyped` | hard | Apply a real type — not `undefined1/2/4/8`, and not a bare `pointer`/`pointer32`/`pointer64` (that says "four bytes holding an address" and nothing about the pointee; type the target, e.g. `D2UnitStrc *` or a function-pointer typedef). |
 | `missing_plate_comment` | hard | Add a ≥4-word plate comment summarizing purpose. |
 | `plate_comment_too_short` | medium | Expand the plate comment to ≥4 words. |
 | `unformatted_bytes_length_mismatch` | medium | Re-apply the type with the correct `array_length`. |

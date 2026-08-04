@@ -833,3 +833,255 @@ def test_workermanager_function_worker_unaffected_by_globals_lock(monkeypatch):
         provider="minimax", count=1, binary="/proj/A.dll", mode="functions"
     )
     assert wid is not None
+
+
+# ---------- targeted typing runs (the types bar's "Start typing worker") ----------
+#
+# 2026-08-03. The bar names N untyped globals; the button used to send
+# `continuous:true` with NO addresses, so the worker walked the binary's whole
+# global list in arbitrary enumeration order and then rotated to OTHER binaries.
+# On PD2_EXT.dll that meant a click aimed at 5 globals dispatched against 392,
+# starting (measured) with `g_abManifest_2_409` and `GetFileVersionInfoA`.
+# `run_globals_worker_pass` already accepted `target_addresses`; nothing wired
+# the button to it.
+
+
+def test_resolve_untyped_global_targets_returns_the_bar_addresses(monkeypatch):
+    import web
+    import conformance_dashboard as cd
+
+    monkeypatch.setattr(cd, "native_types_status",
+                        lambda program, force: {"invalid": 2,
+                                                "invalid_addresses": ["0x1000e0d0", "0x10017000"]})
+    assert web.resolve_untyped_global_targets("/proj/A.dll") == ["0x1000e0d0", "0x10017000"]
+
+
+def test_resolve_untyped_global_targets_forces_a_fresh_scan(monkeypatch):
+    """The browser's count can be minutes old. A targeted run must be built
+    from the CURRENT state, not from whatever the bar last rendered."""
+    import web
+    import conformance_dashboard as cd
+    seen = {}
+
+    def fake(program, force):
+        seen["force"] = force
+        return {"invalid_addresses": []}
+
+    monkeypatch.setattr(cd, "native_types_status", fake)
+    web.resolve_untyped_global_targets("/proj/A.dll")
+    assert seen["force"] is True
+
+
+def test_resolve_untyped_global_targets_survives_a_ghidra_failure(monkeypatch):
+    """Returns [] so the caller REFUSES the launch. Returning None (or raising)
+    would fall through to the untargeted path and turn one click into a
+    whole-corpus run -- the exact behaviour being replaced."""
+    import web
+    import conformance_dashboard as cd
+
+    def boom(program, force):
+        raise OSError("ghidra down")
+
+    monkeypatch.setattr(cd, "native_types_status", boom)
+    assert web.resolve_untyped_global_targets("/proj/A.dll") == []
+
+
+def test_workermanager_carries_addresses_through_to_the_worker(monkeypatch):
+    """start_worker -> worker['addresses'] -> run_globals_worker_pass's
+    target_addresses. A break anywhere on this path degrades silently into a
+    full-binary sweep, which looks like success."""
+    mgr = _make_mgr()
+    monkeypatch.setattr(mgr, "_run_worker", lambda wid: None)
+    wid = mgr.start_worker(
+        provider="minimax", count=2, binary="/proj/A.dll", mode="globals",
+        addresses=["0x1000e0d0", "0x10017000"],
+    )
+    assert mgr._workers[wid]["addresses"] == ["0x1000e0d0", "0x10017000"]
+
+
+def test_targeted_pass_dispatches_only_the_named_addresses(monkeypatch):
+    """`target_addresses` filters the enumeration AND bypasses the clean cache
+    (a targeted fix must run even on an address a previous pass called clean)."""
+    dispatched = []
+
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda b: [
+        {"address": "0x1000e0d0", "name": "g_pfnGetEnvironmentStringsW"},
+        {"address": "0x10013d38", "name": "GetFileVersionInfoA"},
+        {"address": "0x10017000", "name": "g_apfnApiSlots"},
+        {"address": "0x10018060", "name": "g_abManifest_2_409"},
+    ])
+    # Every address is clean-cached; the targeted run must ignore that.
+    monkeypatch.setattr(fun_doc, "_load_globals_clean_cache", lambda: {})
+    monkeypatch.setattr(fun_doc, "_clean_cache_is_fresh",
+                        lambda cache, b, a, axis=None: True)
+    monkeypatch.setattr(fun_doc, "_save_globals_clean_cache", lambda c: None)
+    monkeypatch.setattr(fun_doc, "_clean_cache_mark",
+                        lambda cache, b, a, axes=None: None)
+    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda b: None)
+    monkeypatch.setattr(fun_doc, "_save_globals_worker_program", lambda b: None)
+    monkeypatch.setattr(fun_doc, "_resolve_globals_program_path", lambda b: b)
+    monkeypatch.setattr(fun_doc, "_resolve_globals_audit_provider",
+                        lambda p, snapshot=None: None)
+
+    def fake_process(binary, address, **kw):
+        dispatched.append(address)
+        return "completed"
+
+    monkeypatch.setattr(fun_doc, "process_global", fake_process)
+
+    summary = fun_doc.run_globals_worker_pass(
+        worker_id="t1",
+        initial_binary="/proj/A.dll",
+        provider="minimax",
+        model=None,
+        count=2,
+        continuous=False,
+        stop_flag=threading.Event(),
+        target_addresses=["0x1000e0d0", "0x10017000"],
+    )
+
+    assert dispatched == ["0x1000e0d0", "0x10017000"]
+    assert summary["totals"]["cache_skipped"] == 0     # cache bypassed, not consulted
+    assert summary["binaries_visited"] == ["/proj/A.dll"]   # no rotation to other binaries
+
+
+# ---------- eviction: a completed global destroyed by the next write ----------
+#
+# 2026-08-03. `set_global` cleared its whole extent with the exception swallowed,
+# so a type application deleted any named global it overlapped and still reported
+# success. In one PD2_EXT.dll pass: `g_dwPosInfBits` eaten by a float10 starting
+# 8 bytes earlier, `g_abUppercaseCharTbl2_end` eaten by a byte[256] starting 1
+# byte earlier, and the 128-byte `g_apfnApiSlots` array destroyed by three 4-byte
+# writes inside it. Each was reported `completed` seconds before it died.
+#
+# The Java `type_would_evict` guard prevents the common cause. This layer is the
+# backstop for every other writer (apply_data_type, create_data, the GUI, a
+# second worker) and, critically, stops the DAMAGE being cached: the post-audit
+# inside process_global certifies a global before the next one is processed, so
+# `completed` is not proof the global is still alive at end of pass.
+
+
+def _clean_cache_with(prog, addrs):
+    now = fun_doc.datetime.now().isoformat()
+    return {"programs": {prog: {a: {"doc": now, "type": now,
+                                    "v": fun_doc.GLOBALS_AUDIT_RULES_VERSION}
+                                for a in addrs}}}
+
+
+def test_verify_clean_writes_uncaches_a_destroyed_global(isolated_run_log, monkeypatch):
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x10012e20", "0x10012e18"])
+
+    def fake_audit(p, a):
+        if a == "0x10012e20":       # eaten by the float10 at 0x10012e18
+            return {"name": "g_dwPosInfBits", "type": "", "length": 0,
+                    "issues": ["untyped"], "interior_to_data": True,
+                    "container": {"address": "10012e18", "name": "g_ldHalf",
+                                  "type": "float10", "length": 10}}
+        return {"name": "g_ldHalf", "type": "float10", "length": 10, "issues": []}
+
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", fake_audit)
+    summary = {"totals": {}}
+    failed = fun_doc._verify_clean_writes(
+        prog, ["0x10012e20", "0x10012e18"], cache, summary=summary, worker_id="t1")
+
+    assert failed == ["0x10012e20"]
+    # The victim must be GONE from the cache -- caching the damage is what turned
+    # a one-pass bug into a 7-day blind spot.
+    assert "0x10012e20" not in cache["programs"][prog]
+    # The survivor is untouched.
+    assert "0x10012e18" in cache["programs"][prog]
+    assert summary["totals"]["evicted"] == 1
+
+
+def test_verify_clean_writes_reports_loudly(isolated_run_log, capsys, monkeypatch):
+    """Silence is exactly how this went unnoticed for a full pass."""
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x10017000"])
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", lambda p, a: {
+        "name": "g_apfnApiSlots", "type": "", "length": 0, "issues": ["untyped"]})
+    fun_doc._verify_clean_writes(prog, ["0x10017000"], cache, worker_id="t1")
+    out = capsys.readouterr().out
+    assert "EVICTED" in out
+    assert "g_apfnApiSlots" in out
+
+
+def test_verify_clean_writes_leaves_healthy_globals_alone(isolated_run_log, monkeypatch):
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x10015179"])
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", lambda p, a: {
+        "name": "g_abUppercaseCharTbl2", "type": "byte[256]", "length": 256,
+        "issues": ["plate_line_too_long"]})
+    assert fun_doc._verify_clean_writes(prog, ["0x10015179"], cache) == []
+    assert "0x10015179" in cache["programs"][prog]
+
+
+def test_verify_clean_writes_ignores_unreadable_audits(isolated_run_log, monkeypatch):
+    """`can't read it` is not `it's broken`. Un-caching on a transient HTTP
+    failure would re-dispatch healthy globals and burn provider calls."""
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x10015179"])
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", lambda p, a: None)
+    assert fun_doc._verify_clean_writes(prog, ["0x10015179"], cache) == []
+    assert "0x10015179" in cache["programs"][prog]
+
+
+def test_clean_cache_forget_is_idempotent():
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x1000"])
+    assert fun_doc._clean_cache_forget(cache, prog, "0x1000") is True
+    assert fun_doc._clean_cache_forget(cache, prog, "0x1000") is False
+    assert fun_doc._clean_cache_forget(cache, "/proj/missing.dll", "0x1000") is False
+
+
+def test_pass_verifies_completed_writes_before_caching(isolated_run_log, monkeypatch):
+    """End-to-end through run_globals_worker_pass: a global reported `completed`
+    but destroyed by a later write must not survive in the clean cache."""
+    saved = {}
+    monkeypatch.setattr(fun_doc, "_list_global_entries", lambda b: [
+        {"address": "0x10012e20", "name": "g_dwPosInfBits"},
+        {"address": "0x10012e18", "name": "g_ldHalf"},
+    ])
+    monkeypatch.setattr(fun_doc, "_load_globals_clean_cache", lambda: {})
+    monkeypatch.setattr(fun_doc, "_clean_cache_is_fresh",
+                        lambda cache, b, a, axis=None: False)
+    monkeypatch.setattr(fun_doc, "_save_globals_clean_cache",
+                        lambda c: saved.update(c))
+    monkeypatch.setattr(fun_doc, "_invalidate_global_inventory", lambda b: None)
+    monkeypatch.setattr(fun_doc, "_save_globals_worker_program", lambda b: None)
+    monkeypatch.setattr(fun_doc, "_resolve_globals_program_path", lambda b: b)
+    monkeypatch.setattr(fun_doc, "_resolve_globals_audit_provider",
+                        lambda p, snapshot=None: None)
+    monkeypatch.setattr(fun_doc, "process_global",
+                        lambda binary, address, **kw: "completed")
+    # Post-pass reality: the float10 at ...e18 swallowed ...e20.
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", lambda p, a: (
+        {"name": "g_dwPosInfBits", "type": "", "length": 0, "issues": ["untyped"]}
+        if a == "0x10012e20" else
+        {"name": "g_ldHalf", "type": "float10", "length": 10, "issues": []}))
+
+    summary = fun_doc.run_globals_worker_pass(
+        worker_id="t1", initial_binary="/proj/A.dll", provider="minimax",
+        model=None, count=2, continuous=False, stop_flag=threading.Event(),
+    )
+
+    assert summary["totals"]["evicted"] == 1
+    prog_slot = (saved.get("programs") or {}).get("/proj/A.dll") or {}
+    assert "0x10012e20" not in prog_slot, "destroyed global was cached clean"
+    assert "0x10012e18" in prog_slot
+
+
+def test_eviction_rows_never_reach_the_production_run_log(isolated_run_log, monkeypatch):
+    """_verify_clean_writes appends to runs.jsonl. These tests used to run
+    without the isolation fixture, so `worker_id: t1` eviction rows landed in
+    the REAL fun-doc/logs/runs.jsonl and were indistinguishable from live
+    worker output -- they briefly read as 9 production evictions that never
+    happened. Telemetry a test can forge is telemetry you cannot trust."""
+    prog = "/proj/A.dll"
+    cache = _clean_cache_with(prog, ["0x1000"])
+    monkeypatch.setattr(fun_doc, "_audit_global_with_retry", lambda p, a: {
+        "name": "g_test", "type": "", "length": 0, "issues": ["untyped"]})
+    fun_doc._verify_clean_writes(prog, ["0x1000"], cache, worker_id="t1")
+    rows = _read_jsonl(isolated_run_log)
+    assert [r["result"] for r in rows] == ["evicted"]
+    assert rows[0]["worker_id"] == "t1"

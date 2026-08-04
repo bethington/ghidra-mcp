@@ -11831,7 +11831,14 @@ GLOBALS_CLEAN_AXES = (GLOBALS_AXIS_DOC, GLOBALS_AXIS_TYPE)
 # never fire. A cache that gates a rule engine has to know when the rules
 # moved; without this, every future audit rule is silently suppressed for a
 # week on every already-cached address.
-GLOBALS_AUDIT_RULES_VERSION = 2
+#
+# v3 (2026-08-03): `untyped` now also fires on a bare `pointer`/`pointer32`/
+# `pointer64`, not just `undefined*` (NamingConventions.isPlaceholderTypeName).
+# Those globals previously audited with issues:[] and were filed `already_clean`
+# WITH the type axis claimed, so without this bump the ~180 of them corpus-wide
+# would stay suppressed behind a v2 entry recorded under the old rules --
+# the exact 873-global failure described above, replayed.
+GLOBALS_AUDIT_RULES_VERSION = 3
 
 
 def _clean_cache_is_fresh(
@@ -11864,6 +11871,91 @@ def _clean_cache_is_fresh(
     except (ValueError, TypeError):
         return False
     return 0 <= age < ttl_seconds
+
+
+def _clean_cache_forget(cache, prog_path, address):
+    """Drop `address` from the clean cache entirely, so the next pass re-audits
+    it instead of skipping it. Returns True when something was actually removed."""
+    slot = (cache.get("programs") or {}).get(prog_path)
+    if not slot or address not in slot:
+        return False
+    slot.pop(address, None)
+    return True
+
+
+def _verify_clean_writes(prog_path, addresses, cache, summary=None, worker_id=None):
+    """Re-audit every address this pass marked clean, and un-cache any that is
+    untyped RIGHT NOW. Returns the list of addresses that failed verification.
+
+    Why a second look at work already reported `completed`: applying a data type
+    clears the bytes it covers, and until the 2026-08-03 `type_would_evict` guard
+    nothing stopped one global's type from deleting a neighbour's. The post-audit
+    inside process_global runs BEFORE the next global is processed, so it happily
+    certifies a global that the very next write destroys. Measured in one
+    PD2_EXT.dll pass: `g_dwPosInfBits` (eaten by a float10 starting 8 bytes
+    earlier), `g_abUppercaseCharTbl2_end` (eaten by a byte[256] starting 1 byte
+    earlier), and `g_apfnApiSlots` (a 128-byte array destroyed by three 4-byte
+    writes inside it). All three were cached clean on both axes for 7 days, and
+    /list_globals reported the surviving neighbour's type at each dead address,
+    so no layer showed a loss.
+
+    The check is deliberately state-free: it asks "is this global untyped now?",
+    not "did we break it?". A global that is untyped must never sit in the clean
+    cache no matter what put it there — the Java guard prevents the common cause,
+    this catches whatever else does it (apply_data_type, create_data, a human in
+    the GUI, a later worker on the same binary)."""
+    failed = []
+    for address in addresses:
+        audit = _audit_global_with_retry(prog_path, address)
+        if not audit:
+            continue                      # unreadable != broken; leave it alone
+        issues = list(audit.get("issues") or [])
+        if "untyped" not in issues:
+            continue
+        failed.append(address)
+        _clean_cache_forget(cache, prog_path, address)
+        container = audit.get("container") or {}
+        detail = (f" — now inside {container.get('name') or '?'} "
+                  f"@ {container.get('address')} ({container.get('type')})"
+                  if audit.get("interior_to_data") else "")
+        # LOUD. This is documentation being destroyed; silence is how it went
+        # unnoticed for a full pass.
+        print(f"  [globals-worker{' ' + str(worker_id) if worker_id else ''}] "
+              f"EVICTED: {audit.get('name') or address} @ {address} was written "
+              f"clean this pass but is untyped again{detail}. Un-cached for "
+              f"re-work.", flush=True)
+        try:
+            bus_emit("global_evicted", {
+                "worker_id": worker_id,
+                "program_path": prog_path,
+                "address": address,
+                "name": audit.get("name"),
+                "container": container or None,
+                "timestamp": datetime.now().isoformat(),
+            })
+        except Exception:
+            pass
+        try:
+            _append_run_log({
+                "run_id": uuid.uuid4().hex[:8],
+                "timestamp": datetime.now().isoformat(),
+                "worker_id": worker_id,
+                "mode": "globals",
+                "program": prog_path,
+                "address": address,
+                "name": audit.get("name"),
+                "result": "evicted",
+                "issues_before": [],
+                "issues_after": issues,
+                "fixed_count": 0,
+                "reason": "written_clean_then_untyped",
+                "container": container or None,
+            })
+        except Exception:
+            pass
+    if summary is not None and failed:
+        summary["totals"]["evicted"] = summary["totals"].get("evicted", 0) + len(failed)
+    return failed
 
 
 def _clean_cache_mark(cache, prog_path, address, axes=GLOBALS_CLEAN_AXES):
@@ -13100,6 +13192,7 @@ def run_globals_worker_pass(
             "blocked": 0,
             "audit_fail": 0,
             "cache_skipped": 0,
+            "evicted": 0,
         },
         "skip_reasons": {},
         "review": {},
@@ -13215,6 +13308,11 @@ def run_globals_worker_pass(
             )
 
         binary_done = False
+        # Addresses this pass wrote and then marked clean. Re-verified against
+        # Ghidra before the cache is persisted — see _verify_clean_writes. Only
+        # `completed` addresses go in: a `skipped` was never written, so its
+        # audit is a plain read that nothing in this pass can have invalidated.
+        written_clean = []
         for address in addresses:
             if stop_flag.is_set():
                 summary["stopped"] = True
@@ -13273,6 +13371,8 @@ def run_globals_worker_pass(
                 _clean_cache_mark(clean_cache, current_binary, address,
                                   axes=GLOBALS_CLEAN_AXES)
                 cache_dirty = True
+                if result == "completed":
+                    written_clean.append(address)
             # Checkpoint-save so a Ghidra crash mid-binary can't discard
             # more than GLOBALS_SAVE_EVERY runs of provider work. `blocked`
             # is included: a provider can error *after* its writes landed.
@@ -13302,6 +13402,25 @@ def run_globals_worker_pass(
         else:
             # Loop completed naturally — exhausted this binary's globals.
             binary_done = True
+
+        # Eviction verification, BEFORE the cache is persisted. A global that is
+        # untyped right now must not be written into the clean cache — caching
+        # the damage is what turned a one-pass bug into a 7-day blind spot.
+        if written_clean:
+            try:
+                evicted = _verify_clean_writes(
+                    current_binary, written_clean, clean_cache,
+                    summary=summary, worker_id=worker_id,
+                )
+                if evicted:
+                    cache_dirty = True
+                    print(f"  [globals-worker {worker_id}] {prog_name}: "
+                          f"{len(evicted)} of {len(written_clean)} completed "
+                          f"global(s) were destroyed after being written — "
+                          f"un-cached for re-work.", flush=True)
+            except Exception as exc:   # noqa: BLE001 — verification must not kill the pass
+                print(f"  [globals-worker {worker_id}] clean-write verification "
+                      f"failed: {type(exc).__name__}: {exc}", flush=True)
 
         # Final checkpoint for this binary: flush unsaved writes and persist
         # the clean cache before moving on (also covers user_stop/blocked
