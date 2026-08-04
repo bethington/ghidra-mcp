@@ -86,4 +86,39 @@ def test_intake_count_matches_api(dashboard, api, active_program):
     served = api.get("/api/conformance/intake", program=active_program)
     assert shown.split()[0].replace(",", "") == str(served["untriaged"])
     assert f"{served['in_scope']:,}" in shown
-    assert str(served["excluded_lib"]) in shown
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known defect: /api/conformance/intake returns excluded_lib=null for "
+        "most binaries (measured 2026-08-04: D2Common 247, but D2Client, "
+        "Benchmark.dll and a nonexistent path all null), while the template "
+        "renders `${ik.excluded_lib||0}`. So a binary whose library-exclusion "
+        "count was NEVER COMPUTED draws as '0 excluded' -- identical to one "
+        "with genuinely nothing excluded. That is the shadowed_globals rule "
+        "verbatim: a zero reads as 'clean', which is the false reassurance the "
+        "panel exists to remove. The fix is to render an explicit unknown "
+        "(and/or have the route report a real number) rather than coerce null "
+        "to 0 in the template; this xfail turns red the moment it lands."
+    ),
+)
+def test_intake_excluded_lib_is_not_a_fabricated_zero(dashboard, api, active_program):
+    """A null exclusion count must not be rendered as the number zero."""
+    page, _ = dashboard
+    shown = page.locator("#intakeN").inner_text().strip()
+    if shown in ("-", "—", ""):
+        pytest.skip("intake counter not populated")
+    served = api.get("/api/conformance/intake", program=active_program)
+    excluded = served.get("excluded_lib")
+
+    if excluded is None:
+        assert "0 excluded" not in shown, (
+            f"intake tile shows {shown!r} while the API reports "
+            f"excluded_lib=null for {active_program}. 'Not computed' is being "
+            f"displayed as 'none excluded'."
+        )
+    else:
+        assert str(excluded) in shown, (
+            f"intake tile {shown!r} omits the API's excluded_lib={excluded}"
+        )

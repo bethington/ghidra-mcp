@@ -30,6 +30,48 @@ def _wait_rows(page, tbody: str, timeout: int = 45_000):
     )
 
 
+def _assert_hint_matches(hint: str, served: dict, label: str):
+    """Both halves of an inventory hint: the counts, and the hidden-library tail.
+
+    The hint reads ``"147 of 147 · 322 library hidden"``. It used to be asserted
+    as exact equality against ``"{shown} of {total}"``, which broke the moment
+    the library toggle shipped -- these tests and that feature were developed on
+    two branches in parallel and first met when both merged into `dev`.
+
+    Rather than loosen the check to a prefix and lose coverage, assert both
+    parts. The tail is the more interesting one: CLAUDE.md requires
+    ``library_total`` be reported *whether the toggle is on or off*, because a
+    count that silently shrinks when library code is hidden reads as "this
+    binary is smaller than I thought". Nothing pinned that until now.
+
+    The separator is U+00B7 and is deliberately not asserted on -- it is
+    styling, and matching it invites an encoding failure that says nothing
+    about correctness.
+    """
+    head = f"{served['shown']} of {served['total']}"
+    assert hint.startswith(head), (
+        f"{label} hint {hint!r} does not start with {head!r} "
+        f"(API shown={served['shown']} total={served['total']})"
+    )
+
+    library_total = served.get("library_total")
+    tail = hint[len(head):].strip().lstrip("·").strip()
+
+    if library_total:
+        assert str(library_total) in tail and "librar" in tail.lower(), (
+            f"{label} hint {hint!r} omits the hidden-library count; the API "
+            f"reports library_total={library_total}. A hint that shows only "
+            f"the in-scope total makes excluded library code invisible, which "
+            f"is what `library_total` exists to prevent."
+        )
+    else:
+        assert not tail, (
+            f"{label} hint {hint!r} carries the trailing text {tail!r} while "
+            f"the API reports library_total={library_total!r}. The hint is "
+            f"claiming a hidden population the server does not report."
+        )
+
+
 # ---------------------------------------------------------------------------
 # function inventory
 # ---------------------------------------------------------------------------
@@ -52,9 +94,7 @@ def test_function_inventory_hint_matches_api(dashboard, api):
     _wait_rows(page, "invBody")
     hint = page.locator("#invHint").inner_text().strip()
     served = api.get("/api/conformance/inventory", q="", limit=6000)
-    assert hint == f"{served['shown']} of {served['total']}", (
-        f"inventory hint {hint!r} vs API shown={served['shown']} total={served['total']}"
-    )
+    _assert_hint_matches(hint, served, "inventory")
     assert _rows(page, "invBody") == served["shown"]
 
 
@@ -148,7 +188,7 @@ def test_globals_inventory_hint_matches_api(dashboard, api):
     _wait_rows(page, "globBody")
     hint = page.locator("#globHint").inner_text().strip()
     served = api.get("/api/conformance/globals", q="", limit=200)
-    assert hint == f"{served['shown']} of {served['total']}"
+    _assert_hint_matches(hint, served, "globals inventory")
     assert _rows(page, "globBody") == served["shown"]
 
 
