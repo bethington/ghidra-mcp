@@ -30,7 +30,7 @@ GOOD_DOC = {
     "function_name": "DATATBLS_GetRecordCount",
     "calling_convention": "__stdcall",
     "return_type": "int",
-    "parameters": [{"name": "nRecordId", "type": "int"}],
+    "parameters": [{"name": "nRecordId", "type": "int", "ordinal": 0}],
     "plate_comment": "Counts records.\n\nReturns:\n  int: the count\n",
 }
 
@@ -53,6 +53,11 @@ def _ghidra_get_stub(doc=GOOD_DOC, dis=CLEAN_DISASM):
             return dict(doc)
         if path == "/disassemble_function":
             return dict(dis)
+        if path == "/get_function_variables":
+            # The ABI checks read Ghidra's real per-parameter STORAGE; a
+            # stack-resident param is what makes RET n meaningful.
+            return {"parameters": [{"name": "nRecordId", "type": "int",
+                                    "ordinal": 0, "storage": "Stack[0x4]:4"}]}
         raise AssertionError(f"unexpected GET {path}")
     return stub
 
@@ -77,7 +82,8 @@ def test_bundle_assembles_from_live_state(monkeypatch):
     b = fd._falsify_bundle("D2Common.dll", "6fd51000")
     assert b["name"] == "DATATBLS_GetRecordCount"
     assert b["calling_convention"] == "__stdcall"
-    assert b["params"] == [{"name": "nRecordId", "type": "int"}]
+    assert b["params"] == [{"name": "nRecordId", "type": "int", "ordinal": 0,
+                            "storage": "Stack[0x4]:4"}],         "the bundle must carry per-parameter STORAGE for the ABI checks"
     assert "RET 0x4" in b["disasm_text"]
     assert b["address"] == "0x6fd51000"
 

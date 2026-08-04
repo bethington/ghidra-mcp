@@ -25,13 +25,23 @@ def _bundle(**kw):
         "name": "DATATBLS_GetRecordCount",
         "calling_convention": "__stdcall",
         "return_type": "int",
-        "params": [{"name": "nRecordId", "type": "int"}],
+        "params": [_p("nRecordId", "int", "Stack[0x4]:4")],
         "plate": "",
         "disasm_text": "",
         "prototype": "",
     }
     b.update(kw)
     return b
+
+
+
+def _p(name, type_="int", storage="Stack[0x4]:4", ordinal=None):
+    """A parameter dict carrying Ghidra's STORAGE string — the ABI checks read
+    storage, never the convention name, to decide what the callee pops."""
+    d = {"name": name, "type": type_, "storage": storage}
+    if ordinal is not None:
+        d["ordinal"] = ordinal
+    return d
 
 
 def _dis(*instructions):
@@ -118,7 +128,7 @@ def test_cdecl_with_ret_n_is_tier1():
 
 def test_stdcall_with_bare_ret_and_stack_args_is_tier1():
     b = _bundle(calling_convention="__stdcall",
-                params=[{"name": "a", "type": "int"}],
+                params=[_p("a")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET"))
     f = fz.check_convention(b)
     assert _ids(f) == ["convention_contradiction"]
@@ -134,7 +144,7 @@ def test_stdcall_zero_args_bare_ret_is_legitimate():
 def test_fastcall_reg_args_do_not_need_cleanup():
     """fastcall with <=2 args passes everything in ECX/EDX -- bare RET is right."""
     b = _bundle(calling_convention="__fastcall",
-                params=[{"name": "a", "type": "int"}, {"name": "b", "type": "int"}],
+                params=[_p("a", storage="ECX:4"), _p("b", storage="EDX:4")],
                 disasm_text=_dis("MOV EAX,ECX", "ADD EAX,EDX", "RET"))
     assert fz.check_convention(b) == []
 
@@ -149,7 +159,7 @@ def test_multiple_ret_immediates_are_undetermined():
 
 def test_matching_stdcall_is_clean():
     b = _bundle(calling_convention="__stdcall",
-                params=[{"name": "a", "type": "int"}],
+                params=[_p("a")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x4"))
     assert fz.check_convention(b) == []
 
@@ -165,7 +175,7 @@ def test_undeclared_convention_is_silent():
 def test_stdcall_argc_mismatch_is_tier1():
     """The eip=0x140 class: manifest says 1 arg, RET 0x8 says 2."""
     b = _bundle(calling_convention="__stdcall",
-                params=[{"name": "a", "type": "int"}],
+                params=[_p("a")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x8"))
     f = fz.check_arity(b)
     assert _ids(f) == ["arity_contradiction"]
@@ -176,7 +186,8 @@ def test_stdcall_argc_mismatch_is_tier1():
 def test_fastcall_register_args_reduce_expected_cleanup():
     """3 declared fastcall args -> 1 on the stack -> RET 0x4 is a MATCH."""
     b = _bundle(calling_convention="__fastcall",
-                params=[{"name": "a"}, {"name": "b"}, {"name": "c"}],
+                params=[_p("a", storage="ECX:4"), _p("b", storage="EDX:4"),
+                        _p("c")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x4"))
     assert fz.check_arity(b) == []
 
@@ -184,7 +195,7 @@ def test_fastcall_register_args_reduce_expected_cleanup():
 def test_thiscall_this_rides_ecx():
     """2 declared thiscall params (this + one) -> RET 0x4 expected."""
     b = _bundle(calling_convention="__thiscall",
-                params=[{"name": "this"}, {"name": "a"}],
+                params=[_p("this", storage="ECX:4"), _p("a")],
                 disasm_text=_dis("MOV EAX,dword ptr [ECX + 0x8]", "RET 0x4"))
     assert fz.check_arity(b) == []
 
@@ -193,7 +204,7 @@ def test_arity_bare_ret_defers_to_convention_check():
     """obs==0 with declared stack args is the cdecl-shape contradiction --
     convention_contradiction owns it; arity must not double-report."""
     b = _bundle(calling_convention="__stdcall",
-                params=[{"name": "a", "type": "int"}],
+                params=[_p("a")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET"))
     assert fz.check_arity(b) == []
     assert fz.check_convention(b), "the convention check must own this shape"
@@ -201,7 +212,7 @@ def test_arity_bare_ret_defers_to_convention_check():
 
 def test_arity_varargs_is_undetermined():
     b = _bundle(calling_convention="__stdcall",
-                params=[{"name": "fmt", "type": "char*"}],
+                params=[_p("fmt", "char*")],
                 prototype="int Foo(char* fmt, ...)",
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x8"))
     assert fz.check_arity(b) == []
@@ -209,7 +220,7 @@ def test_arity_varargs_is_undetermined():
 
 def test_arity_cdecl_is_out_of_scope():
     b = _bundle(calling_convention="__cdecl",
-                params=[{"name": "a"}, {"name": "b"}],
+                params=[_p("a"), _p("b")],
                 disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET"))
     assert fz.check_arity(b) == []
 
@@ -455,3 +466,78 @@ def test_real_broken_setter_still_fires_after_the_thunk_guard():
     b = _bundle(name="D2CLIENT_SetVideoFlag",
                 disasm_text=_dis("MOV EAX,0x1", "RET"))
     assert _ids(fz.check_name_verb(b)) == ["name_verb_contradiction"]
+
+
+# ------------------------------- storage-aware ABI checks (2026-08-04) -------
+# The ABI checks must read Ghidra's OWN per-parameter storage, never infer it
+# from the convention name. D2 is full of custom register conventions where
+# stdcall->argc / fastcall->argc-2 is simply false, and that assumption is what
+# made D2Game.dll report a 30% contradiction rate on the first corpus sweep.
+
+def test_register_params_do_not_require_cleanup():
+    """`DATATBLS_GetSkillDescriptionRecord` shape: declared __stdcall, but the
+    input arrives in EAX. Zero stack params -> a bare RET is correct."""
+    b = _bundle(calling_convention="__stdcall",
+                params=[_p("nSkillId", storage="EAX:4")],
+                disasm_text=_dis("TEST EAX,EAX", "MOV EAX,dword ptr [0x6fd1829c]",
+                                 "RET"))
+    assert fz.check_convention(b) == []
+    assert fz.check_arity(b) == []
+
+
+def test_stack_storage_still_requires_cleanup():
+    """`FindRoomAtCoordinates` shape: ECX, EDX, Stack[0x4]. Ghidra's own
+    storage says one stack param — a bare RET leaves it unpopped."""
+    b = _bundle(calling_convention="__fastcall",
+                params=[_p("pRoom", "DrlgRoom *", "ECX:4"),
+                        _p("nCoordX", storage="EDX:4"),
+                        _p("nCoordY", storage="Stack[0x4]:4")],
+                disasm_text=_dis("SUB ESP,0x8", "CMP EAX,ESI", "ADD ESP,0x8",
+                                 "RET"))
+    f = fz.check_convention(b)
+    assert _ids(f) == ["convention_contradiction"]
+    assert f[0].detail["declared_stack_args"] == 1
+
+
+def test_missing_storage_abstains_entirely():
+    """Guard-first: no storage means no verdict, never a guessed one."""
+    b = _bundle(calling_convention="__stdcall",
+                params=[{"name": "a", "type": "int"}],   # no storage key
+                disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x8"))
+    assert fz.check_arity(b) == []
+    assert fz.check_convention(b) == []
+
+
+def test_partial_storage_abstains():
+    """One param without storage poisons the count — abstain rather than
+    undercount the cleanup the callee owes."""
+    b = _bundle(calling_convention="__stdcall",
+                params=[_p("a"), {"name": "b", "type": "int"}],
+                disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x4"))
+    assert fz.check_arity(b) == []
+
+
+def test_arity_counts_stack_params_only():
+    """4 declared params, 2 on the stack -> expect RET 0x8; RET 0x4 is the
+    contradiction, and the evidence must report both counts."""
+    b = _bundle(calling_convention="__fastcall",
+                params=[_p("a", storage="ECX:4"), _p("b", storage="EDX:4"),
+                        _p("c", storage="Stack[0x4]:4"),
+                        _p("d", storage="Stack[0x8]:4")],
+                disasm_text=_dis("MOV EAX,dword ptr [ESP + 0x4]", "RET 0x4"))
+    f = fz.check_arity(b)
+    assert _ids(f) == ["arity_contradiction"]
+    assert f[0].detail["declared_stack_argc"] == 2
+    assert f[0].detail["declared_argc"] == 4
+    assert f[0].detail["expected_bytes"] == 8
+
+
+def test_stack_param_count_helper():
+    assert fz._stack_param_count(_bundle(params=[])) == 0
+    assert fz._stack_param_count(_bundle(params=[_p("a", storage="ECX:4")])) == 0
+    assert fz._stack_param_count(_bundle(params=[_p("a")])) == 1
+    # split across register and stack: the caller pushed part of it
+    assert fz._stack_param_count(
+        _bundle(params=[_p("a", storage="EDX:4,Stack[0x4]:4")])) == 1
+    assert fz._stack_param_count(
+        _bundle(params=[{"name": "a"}])) is None

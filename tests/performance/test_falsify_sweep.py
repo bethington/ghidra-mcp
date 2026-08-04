@@ -131,8 +131,11 @@ def test_dry_run_issues_zero_writes(monkeypatch, tmp_path, capsys):
         if path == "/get_function_documentation":
             return {"function_name": "DATATBLS_GetX",
                     "calling_convention": "__stdcall", "return_type": "int",
-                    "parameters": [{"name": "a", "type": "int"}],
+                    "parameters": [{"name": "a", "type": "int", "ordinal": 0}],
                     "plate_comment": ""}
+        if path == "/get_function_variables":
+            return {"parameters": [{"name": "a", "type": "int", "ordinal": 0,
+                                    "storage": "Stack[0x4]:4"}]}
         if path == "/disassemble_function":
             return {"instructions": [
                 {"address": "6fd51000",

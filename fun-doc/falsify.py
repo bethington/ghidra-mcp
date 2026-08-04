@@ -140,6 +140,43 @@ def _declared_cc(bundle: dict) -> Optional[str]:
     return m.group(1).lower() if m else None
 
 
+# Ghidra's per-parameter storage strings: "ECX:4", "Stack[0x4]:4",
+# "EDX:4,ECX:4" (a split 8-byte value). Only STACK-resident parameters
+# participate in callee cleanup.
+_STACK_STORAGE_RE = re.compile(r"\bStack\[", re.I)
+
+
+def _stack_param_count(bundle: dict) -> Optional[int]:
+    """How many declared parameters actually live on the stack, per Ghidra's
+    OWN storage assignment -- or None when storage is unavailable.
+
+    Deriving this from the convention NAME (stdcall -> all params, fastcall ->
+    argc-2, thiscall -> argc-1) is an assumption about standard MSVC storage,
+    and D2's binaries are full of custom register conventions where it does not
+    hold: Ghidra declares `__fastcall` while assigning EAX/ECX/EDX/ESI by hand,
+    or declares `__stdcall` on a function whose only input arrives in EAX. The
+    storage string is the authority the same way the disassembly is -- it is
+    what Ghidra will actually emit and what the decompiler reasons about.
+
+    A split storage ("EDX:4,ECX:4") counts as stack only if a Stack[] fragment
+    appears; a value split ACROSS a register and the stack is deliberately
+    counted as stack, since the caller did push part of it.
+    """
+    params = bundle.get("params")
+    if not params:
+        return 0 if params == [] else None
+    n = 0
+    for p in params:
+        if not isinstance(p, dict):
+            return None
+        storage = p.get("storage")
+        if not storage:
+            return None                  # unknown for ANY param -> no verdict
+        if _STACK_STORAGE_RE.search(str(storage)):
+            n += 1
+    return n
+
+
 def _ret_pops(parsed: list) -> set:
     """Set of RET immediates (0 for bare RET). Every return path must agree
     before any check treats the value as fact -- the calling convention is a
@@ -322,10 +359,12 @@ def check_convention(bundle: dict) -> List[Finding]:
                                 f"cleans {obs} byte(s); callee-cleans is not cdecl",
                        declared=cc, ret_bytes=obs))
     elif cc in ("stdcall", "fastcall", "thiscall") and obs == 0:
-        argc = len(bundle.get("params") or [])
-        stack_argc = {"stdcall": argc,
-                      "fastcall": max(0, argc - 2),
-                      "thiscall": max(0, argc - 1)}[cc]
+        # Stack-arg count comes from Ghidra's OWN per-parameter storage, never
+        # from the convention name -- see _stack_param_count. No storage means
+        # no verdict (guard-first).
+        stack_argc = _stack_param_count(bundle)
+        if stack_argc is None:
+            return out
         if stack_argc > 0:
             out.append(_mk(bundle, "convention_contradiction", TIER_MECHANICAL,
                            claim=f"declared __{cc} with {stack_argc} stack "
@@ -339,12 +378,21 @@ def check_convention(bundle: dict) -> List[Finding]:
 
 
 def check_arity(bundle: dict) -> List[Finding]:
-    """F3: declared parameter count vs the callee's actual stack cleanup.
+    """F3: declared STACK parameters vs the callee's actual stack cleanup.
 
-    stdcall: RET n where n = 4*argc; fastcall: 4*max(0, argc-2) (ECX/EDX carry
-    the first two); thiscall: 4*max(0, argc-1) (this in ECX). A wrong count on
-    a callee-cleans convention skews ESP and access-violates the process
-    (eip=0x140, 2026-07-30) -- which is why this is tier 1.
+    A callee-cleans convention pops 4 bytes per stack-resident parameter, so
+    `RET n` states how many the compiler believed there were. A wrong count
+    skews ESP and access-violates the process (eip=0x140, 2026-07-30), which
+    is why this is tier 1.
+
+    The stack-parameter count comes from Ghidra's OWN per-parameter storage,
+    never from the convention name. Deriving it as stdcall->argc /
+    fastcall->argc-2 assumes standard MSVC storage, and D2 is full of custom
+    register conventions where that is false: `FindRoomAtCoordinates` is
+    declared `__fastcall` with storage `ECX, EDX, Stack[0x4]` (agrees), while
+    `DATATBLS_GetSkillDescriptionRecord` is declared `__stdcall` with storage
+    `Stack[0x4]` yet reads its input from EAX. Counting `Stack[...]` entries
+    is the only reading that tracks what Ghidra will actually emit.
     """
     cc = _declared_cc(bundle)
     if cc not in ("stdcall", "fastcall", "thiscall"):
@@ -354,6 +402,9 @@ def check_arity(bundle: dict) -> List[Finding]:
         return []
     if "..." in (bundle.get("prototype") or ""):
         return []                    # varargs -- cleanup is caller business
+    stack_argc = _stack_param_count(bundle)
+    if stack_argc is None:
+        return []                    # storage unknown -> no verdict
     parsed = parse_disasm(bundle.get("disasm_text") or "")
     if not parsed:
         return []
@@ -361,21 +412,19 @@ def check_arity(bundle: dict) -> List[Finding]:
     if len(pops) != 1:
         return []
     obs = next(iter(pops))
-    argc = len(params)
-    exp = {"stdcall": 4 * argc,
-           "fastcall": 4 * max(0, argc - 2),
-           "thiscall": 4 * max(0, argc - 1)}[cc]
+    exp = 4 * stack_argc
     if obs == exp:
         return []
     if obs == 0 and exp > 0:
         return []                    # bare-RET shape: convention_contradiction owns it
     real_stack = obs // 4
     return [_mk(bundle, "arity_contradiction", TIER_MECHANICAL,
-                claim=f"declared __{cc} with {argc} parameter(s) "
-                      f"(callee should pop {exp} bytes)",
+                claim=f"declared __{cc} with {stack_argc} stack parameter(s) "
+                      f"of {len(params)} total (callee should pop {exp} bytes)",
                 evidence=f"RET 0x{obs:x} pops {obs} bytes -> "
                          f"{real_stack} real stack slot(s)",
-                declared_argc=argc, expected_bytes=exp, observed_bytes=obs,
+                declared_argc=len(params), declared_stack_argc=stack_argc,
+                expected_bytes=exp, observed_bytes=obs,
                 real_stack_slots=real_stack)]
 
 
@@ -816,6 +865,49 @@ def render_disasm(resp) -> str:
     return "\n".join(out)
 
 
+def attach_param_storage(params: list, func_name: Optional[str],
+                         program: str) -> list:
+    """Merge Ghidra's per-parameter STORAGE into the parameter dicts.
+
+    `/get_function_documentation` reports name/type/ordinal but not storage;
+    `/get_function_variables` reports storage ("ECX:4", "Stack[0x4]:4"). The
+    ABI checks need storage to know which parameters the callee must pop, so
+    fetch it here rather than letting them assume standard MSVC layout.
+
+    Parameters are matched by ORDINAL when the endpoint supplies it and by
+    position otherwise. On any failure the params come back UNCHANGED (no
+    `storage` key), which the checks read as "unknown" and abstain -- the
+    guard-first rule: a missing fact must never become a verdict.
+    """
+    if not params or not func_name:
+        return params
+    try:
+        resp = _get("/get_function_variables", function_name=func_name,
+                    program=program)
+        live = resp.get("parameters") if isinstance(resp, dict) else None
+        if not isinstance(live, list) or not live:
+            return params
+    except Exception as e:  # noqa: BLE001 - abstain, never fail the scan
+        print(f"[falsify] storage unavailable for {func_name}: {e}",
+              file=sys.stderr)
+        return params
+    by_ordinal = {p.get("ordinal"): p for p in live
+                  if isinstance(p, dict) and p.get("ordinal") is not None}
+    out = []
+    for i, p in enumerate(params):
+        if not isinstance(p, dict):
+            out.append(p)
+            continue
+        src = by_ordinal.get(p.get("ordinal", i))
+        if src is None and i < len(live) and isinstance(live[i], dict):
+            src = live[i]
+        merged = dict(p)
+        if src is not None and src.get("storage"):
+            merged["storage"] = src["storage"]
+        out.append(merged)
+    return out
+
+
 def collect_bundle(program: str, address: str, with_callees: bool = False) -> dict:
     """One function's claims + ground truth, from a live Ghidra instance.
 
@@ -827,13 +919,14 @@ def collect_bundle(program: str, address: str, with_callees: bool = False) -> di
     if not isinstance(doc, dict) or doc.get("error"):
         raise RuntimeError(f"get_function_documentation failed for {a}: {doc}")
     dis = _get("/disassemble_function", address=a, program=program)
+    params = doc.get("parameters") if isinstance(doc.get("parameters"), list) else []
     bundle = {
         "program": program,
         "address": a,
         "name": doc.get("function_name") or "",
         "calling_convention": doc.get("calling_convention") or "",
         "return_type": doc.get("return_type") or "",
-        "params": doc.get("parameters") if isinstance(doc.get("parameters"), list) else [],
+        "params": attach_param_storage(params, doc.get("function_name"), program),
         "plate": doc.get("plate_comment") or "",
         "disasm_text": render_disasm(dis),
         "prototype": "",

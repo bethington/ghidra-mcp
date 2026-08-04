@@ -8598,6 +8598,44 @@ def _rescore_and_sync(func, address, program):
 # findings are report-only. All best-effort — never fatal to a run, always
 # loud on failure.
 
+def _falsify_params_with_storage(params, func_name, program):
+    """Merge per-parameter STORAGE from /get_function_variables into the
+    parameter dicts /get_function_documentation returned.
+
+    The ABI checks must know which parameters the callee actually pops, and
+    only the storage string says so ("ECX:4" vs "Stack[0x4]:4") -- inferring
+    it from the convention NAME assumes standard MSVC layout, which D2's
+    custom register conventions routinely violate. Returns the params
+    UNCHANGED on any failure so the checks abstain rather than guess.
+    """
+    if not params or not func_name:
+        return params
+    try:
+        resp = ghidra_get("/get_function_variables",
+                          params={"function_name": func_name, "program": program})
+        live = resp.get("parameters") if isinstance(resp, dict) else None
+        if not isinstance(live, list) or not live:
+            return params
+    except Exception as e:  # noqa: BLE001
+        print(f"  [falsify] storage unavailable for {func_name}: {e}")
+        return params
+    by_ordinal = {p.get("ordinal"): p for p in live
+                  if isinstance(p, dict) and p.get("ordinal") is not None}
+    out = []
+    for i, p in enumerate(params):
+        if not isinstance(p, dict):
+            out.append(p)
+            continue
+        src = by_ordinal.get(p.get("ordinal", i))
+        if src is None and i < len(live) and isinstance(live[i], dict):
+            src = live[i]
+        merged = dict(p)
+        if src is not None and src.get("storage"):
+            merged["storage"] = src["storage"]
+        out.append(merged)
+    return out
+
+
 def _falsify_bundle(program, address):
     """Assemble falsify.py's check bundle from live Ghidra state.
 
@@ -8624,7 +8662,9 @@ def _falsify_bundle(program, address):
             "name": doc.get("function_name") or "",
             "calling_convention": doc.get("calling_convention") or "",
             "return_type": doc.get("return_type") or "",
-            "params": params if isinstance(params, list) else [],
+            "params": _falsify_params_with_storage(
+                params if isinstance(params, list) else [],
+                doc.get("function_name"), program),
             "plate": doc.get("plate_comment") or "",
             "disasm_text": disasm_text(dis),
             "prototype": "",
