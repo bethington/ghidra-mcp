@@ -12,7 +12,7 @@ is the repeatable version of what Phase 0 did by hand:
 BACKENDS: `--index` takes either an H2 file path or a full BSim URL.
 
     C:/bsim/refindex                              -> H2 file (default, zero-ops)
-    postgresql://ben@10.0.10.30:5432/bsim_ref     -> shared Postgres
+    postgresql://<user>@<host>:5432/bsim_ref      -> shared Postgres
 
 H2 remains the DEFAULT because a reference index is written rarely and read by
 one sweep at a time, and a single file you can copy, diff or delete is easier to
@@ -21,10 +21,11 @@ concurrent sweeps need the same index.
 
 Postgres needs SSL: Ghidra's BSim client hard-codes `sslmode=require` (plus its
 own `ghidra.net.DefaultSSLSocketFactory`), so a server without SSL is rejected
-outright with "The server does not support SSL". The 10.0.10.30 container was
-configured for this on 2026-08-03 -- self-signed cert in PGDATA, `ssl=on` via
-ALTER SYSTEM. Note `sslmode=require` ENCRYPTS BUT DOES NOT VERIFY, so a
-self-signed certificate is sufficient and no CA distribution is needed.
+outright with "The server does not support SSL". Configure the server for it
+first -- self-signed cert in PGDATA, `ssl=on` via ALTER SYSTEM (`ssl` is a
+sighup parameter, so a reload suffices; no restart). Note `sslmode=require`
+ENCRYPTS BUT DOES NOT VERIFY, so a self-signed certificate is sufficient and no
+CA distribution is needed.
 
 Postgres also PROMPTS for a password on every `bsim` invocation, which makes
 unattended runs awkward; pipe it on stdin, or stay on H2 for local work.
