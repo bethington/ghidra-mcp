@@ -12,6 +12,8 @@ fires, no LLM should be naming that function at all.
 | --- | --- |
 | `vc6_vc98.fidb` | 1,030 signatures built from VC6 `LIBCMT.LIB`, the multithreaded static CRT that Diablo II 1.13c links. Committed so it survives a temp-folder wipe. |
 | `vc6_vc98_build_report.txt` | The populate run's own report: 1,100 functions visited, 1,030 added, 70 excluded (43 hash-too-short, 19 duplicate, 6 thunk, 2 unnamed). |
+| `vs2003_libcmt.fidb` | 1,049 signatures built from **VS2003's `libcmt.lib`** — the CRT Diablo II actually links (see below). Its internal metadata reads `VisualStudio:VC6:/:libcmt` because it was built before `build-vc6-fiddb.ps1` took `-LibraryName`/`-LibraryVersion`; the signatures are right, the self-description is not. Rebuild with those params set if the provenance ever needs to be trustworthy. |
+| `vs2003_libcmt_dupes.txt` | That build's report: 1,120 visited, 1,049 added, 71 excluded. |
 | `build-vc6-fiddb.ps1` | Rebuilds the database from any static-library directory. |
 | `CountFidMatches.java` | Counts FID matches in a program, so a database's value can be measured rather than assumed. |
 | `ReportFidCoverage.java` | Splits coverage into authored vs library code on `Benchmark.dll`, where we wrote every game function. Reports library coverage AND false positives against our own code — the check that makes the D2 results trustworthy. |
@@ -103,22 +105,29 @@ that hash-exact matching cannot reach, or a runtime component still
 unaccounted for. Chasing it needs a different technique than more FID
 databases.
 
-### If you still want to close the remaining gap
+### If you still want to close the remaining gap — read this first
 
-Build a FID database from **VS2003 SP1's `LIBCMT.LIB`**. The `vs2003-pro` media
-referenced in `fun-doc/benchmark/build.py` already supplied the 7.10 linker at
-`tools/vc6/VS7/Bin/`; only `Bin` was extracted, so the `Lib` directory is still
-needed. Then:
+**Building the VS2003 database is already done** (`vs2003_libcmt.fidb`, above),
+and the answer it gave is the one in the table: +29 on one binary, +0 on three.
+An earlier revision of this section sat here predicting that the benchmark's 7×
+would transfer to the game binaries. It did not, and that prediction is exactly
+the one-binary extrapolation this file has now made twice. Do not build a third
+CRT database expecting a different answer.
 
-```powershell
-./scripts/fid/build-vc6-fiddb.ps1 -Vc6Lib <VS2003>\Vc7\lib -Libs LIBCMT `
-    -OutFidb ./scripts/fid/vs2003sp1.fidb
-```
+What is genuinely still open is smaller and more specific:
 
-and A/B it against `Benchmark.dll` first, then D2Common. If the diagnosis is
-right, expect the benchmark's order of improvement (roughly 7×) to transfer to
-the game binaries — which would take a large share of D2's unidentified
-functions out of the documentation queue in one step.
+1. **The databases are attached but the corpus was never re-analyzed.** Both
+   `.fidb` files are registered in Ghidra's `FID.USER.ADDED` preference, which
+   only affects analysis performed *after* attaching. The live PD2-S12 programs
+   still carry stock-only results — D2Common shows exactly 175 `Function ID
+   Analyzer` bookmarks against the 204 the A/B measured. Re-running the Function
+   ID analyzer on already-documented programs is the step that banks the +29,
+   and the step that can relabel work fun-doc already did; `fun-doc/scripts/
+   restore_fid_names.py` is the inverse tool and has already had to undo 143.
+2. **Techniques other than hash-exact matching.** What is left unidentified is
+   game code, inlined CRT, or a runtime component still unaccounted for. BSim
+   similarity reaches inlined and re-optimised code that FID's exact hashing
+   structurally cannot.
 
 ## Measuring a database before trusting it
 

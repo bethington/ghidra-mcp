@@ -187,6 +187,30 @@ def test_kept_fid_name_is_not_a_defect_despite_underscores():
     assert dl.find_defects(recs, {}) == []
 
 
+def test_linker_local_fid_label_is_not_a_defect():
+    """`$L20876` is a real FID match but not a name.
+
+    Measured 2026-08-03: a fresh D2Common import with `vs2003_libcmt.fidb`
+    attached produced 29 new matches, 25 of them `$L#####` compiler-generated
+    labels. Reporting those as defects makes `restore_fid_names.py --apply`
+    rename documented functions to meaningless labels.
+    """
+    recs = dl.classify([_fn("LOG_AcquireLogFileLock", "00001000")], [],
+                       fid=_fid("$L20082"))
+    # still library code, still tier 0 -- only the NAME is unusable
+    assert recs[0].tier == 0
+    assert recs[0].is_library
+    assert dl.find_defects(recs, {}) == []
+
+
+def test_is_linker_local_accepts_real_names():
+    for junk in ("$L20876", "$LN4", "$SG12345", "$T7", "$M1"):
+        assert dl.is_linker_local(junk), junk
+    for real in ("_strcat", "__lockexit", "$", "$Lx", "L20876",
+                 "??1type_info@@UAE@XZ", "", None):
+        assert not dl.is_linker_local(real), real
+
+
 def test_norm_addr_reconciles_bookmark_and_listing_forms():
     assert dl.norm_addr("0x6fdd791b") == dl.norm_addr("6fdd791b")
     assert dl.norm_addr("1000") == "00001000"

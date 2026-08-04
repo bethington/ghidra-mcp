@@ -29,12 +29,16 @@
     different cause, and the cause is the actionable part: identify the CRT
     variant Blizzard actually linked and rebuild against that.
 
-    Untested candidates for it: a different VC6 service pack, or LIBC.LIB
-    (single-threaded) rather than LIBCMT.LIB. The -Libs default below includes
-    LIBC so this can be tried; the runs above used `-Libs LIBCMT` only.
-    Note D2 does use a multithreaded CRT (its restored names include
-    `__mtinitlocks` and `__lock_file2`), which argues for an SP-level or build
-    difference over a single-threaded lib.
+    THAT CRT HAS SINCE BEEN IDENTIFIED, and it is not a VC6 service pack:
+    Diablo II links Visual Studio .NET 2003 SP1 (7.10.6030). Relocation-masked
+    byte compare puts D2Common's `_qsort`/`_atol`/`_sprintf` at 100.0% against
+    VS2003's libcmt versus 6-18% against VC6's, and the Rich headers of
+    D2Common/D2Client/D2Game/Fog/Storm carry zero VC6-compiler (Utc12_*)
+    objects. `vs2003_libcmt.fidb` was built from it -- and gained D2Common +29
+    while gaining D2Client/D2Game/Fog nothing, because Ghidra's stock
+    vsOlder_x86.fidbf already covers most VS2003-era CRT. So do NOT expect the
+    benchmark's 7x to transfer by finding a still-better CRT match: what remains
+    unidentified in the game binaries is mostly not stock CRT at all.
 
     Measure any new database with ReportFidCoverage.java against Benchmark.dll
     before trusting it -- that is the only binary here with known ground truth.
@@ -52,11 +56,23 @@
     installation -- this script writes it there and removes it afterwards.
 
 .PARAMETER Vc6Lib
-    VC6 library directory. Default C:\VC6\VC98\LIB.
+    Library directory to ingest. Default C:\VC6\VC98\LIB. Despite the name this
+    script is not VC6-specific -- point it at any static-library directory.
 
 .PARAMETER Libs
     Which archives to ingest. LIBCMT (multithreaded static CRT) is the one D2
     1.13c links; the others are cheap to add and harmless if unused.
+
+.PARAMETER LibraryName
+.PARAMETER LibraryVersion
+    The Library and Version recorded INSIDE the database for every signature
+    it holds. CreateMultipleLibraries derives them from the import folder's
+    depth-3 layout (<Name>/<Version>/<Variant>), so they must be set here and
+    not after the fact. Set them to match the toolchain you are actually
+    ingesting: leaving the VC6 defaults while building from VS2003's libcmt is
+    how `vs2003_libcmt.fidb` ended up self-describing as
+    `VisualStudio:VC6:/:libcmt`, which makes every match it produces lie about
+    its own provenance.
 
 .PARAMETER OutFidb
     Destination .fidb path.
@@ -64,12 +80,23 @@
 .EXAMPLE
     ./scripts/fid/build-vc6-fiddb.ps1
     ./scripts/fid/build-vc6-fiddb.ps1 -Libs LIBCMT,LIBC -OutFidb C:\tmp\vc6.fidb
+
+.EXAMPLE
+    # VS2003 SP1 -- the CRT Diablo II actually links. Note the metadata params.
+    ./scripts/fid/build-vc6-fiddb.ps1 -Vc6Lib '<VS2003>\Vc7\lib' -Libs LIBCMT `
+        -LibraryName VisualStudio -LibraryVersion VS2003SP1 `
+        -OutFidb ./scripts/fid/vs2003_libcmt.fidb
 #>
 [CmdletBinding()]
 param(
     [string]$GhidraDir = 'F:\ghidra_12.1.2_PUBLIC',
     [string]$Vc6Lib    = 'C:\VC6\VC98\LIB',
     [string[]]$Libs    = @('LIBCMT', 'LIBC'),
+    # Recorded inside the database as the Library/Version of every signature.
+    # These are metadata about the SOURCE toolchain, not about this script --
+    # override them whenever -Vc6Lib does not point at VC6.
+    [string]$LibraryName    = 'VisualStudio',
+    [string]$LibraryVersion = 'VC6',
     # Staging project for the imported .obj programs -- ~531 MB, scratch only,
     # deliberately NOT in the repo. Only the resulting .fidb is committed.
     [string]$ProjectDir  = 'C:\tmp\fidproj',
@@ -104,7 +131,7 @@ if (-not $SkipImport) {
         # them; population then aborts on the first mismatch with "Program
         # rtti.obj has different compiler spec (windows) than already
         # established (gcc)" after the whole import has already run.
-        & $headless $ProjectDir "$ProjectName/VisualStudio/VC6/$lib" `
+        & $headless $ProjectDir "$ProjectName/$LibraryName/$LibraryVersion/$lib" `
             -import $archive -recursive 1 -analysisTimeoutPerFile 60 `
             -processor $LanguageId -cspec $CompilerSpec
         if ($LASTEXITCODE -ne 0) { throw "import of $lib failed ($LASTEXITCODE)" }
