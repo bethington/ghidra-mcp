@@ -136,6 +136,11 @@ markers = [
     "requires_program: mark test as requiring a loaded program",
     "requires_server: mark test as requiring server connection",
     "write: mark test as performing write operations",
+    "e2e: browser-driven tests against a live fun-doc dashboard (tests/e2e)",
+    "destructive: e2e tests that start workers or write config (revert themselves)",
+    "dashboard: hermetic fun-doc dashboard route contract (tests/dashboard) -- no Ghidra, no browser, CI-safe",
+    "benchmark_e2e: undocumented -> documented pass over Benchmark.dll (tests/benchmark_e2e)",
+    "real_provider: benchmark_e2e tests that spend real provider tokens (opt in with --real-provider)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
