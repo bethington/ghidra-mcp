@@ -258,3 +258,86 @@ def test_is_saturated_measures_calls_since_last_new_input(planner):
 def test_zero_arg_still_exempt(planner):
     import conf_ladder
     assert conf_ladder.effective_distinct_floor("CONF_BATTLETESTED", argc=0) == 0
+
+
+# --- low-frequency (lifecycle) volume exemption ------------------------------
+# The volume bar assumed a function the game calls often. A once-per-process
+# function (patch application, init, teardown) can never reach 1,000 calls in any
+# number of sessions, so it capped at CONF_VETTED forever no matter how correct.
+# The exemption mirrors saturation: measured, never declared -- and it is INERT
+# until the session bar is calibrated from real data.
+
+def test_low_frequency_exemption_is_not_yet_calibrated(planner):
+    """Pins the report-only state. Setting this bar is a calibration act."""
+    import conf_ladder
+    assert conf_ladder.REQUIRED_LOW_FREQUENCY_SESSIONS is None
+
+
+def test_uncalibrated_exemption_grants_nothing(planner):
+    """The whole safety property: reporting must not become a promotion path."""
+    import conf_ladder
+    st = conf_ladder.low_frequency_status(max_hits_in_any_session=1, sessions_observed=500)
+    assert st["classified"] is True, "it IS a lifecycle function"
+    assert st["granted"] is False, "but nothing may be granted before calibration"
+    assert st["calibrated"] is False
+
+
+def test_volume_floor_stands_while_uncalibrated(planner):
+    import conf_ladder
+    assert conf_ladder.effective_volume_floor("CONF_BATTLETESTED") == 1_000
+    # Even if a caller passes the flag, an uncalibrated system must not promote.
+    st = conf_ladder.low_frequency_status(1, 500)
+    assert conf_ladder.meets_promotion_bar(
+        "CONF_BATTLETESTED", calls=1, distinct_inputs=20,
+        low_frequency_granted=st["granted"]) is False
+
+
+def test_one_quiet_session_does_not_classify(planner):
+    """A single low-hit session says more about the playthrough than the function."""
+    import conf_ladder
+    assert conf_ladder.is_low_frequency(max_hits_in_any_session=1, sessions_observed=1) is False
+    assert conf_ladder.is_low_frequency(max_hits_in_any_session=1, sessions_observed=3) is True
+
+
+def test_a_hot_function_is_never_low_frequency(planner):
+    """Bounded means bounded BELOW the bar; a busy function keeps the flat floor."""
+    import conf_ladder
+    assert conf_ladder.is_low_frequency(max_hits_in_any_session=5_000,
+                                        sessions_observed=50) is False
+
+
+def test_unknown_frequency_never_classifies(planner):
+    """Absent measurement is not evidence of low frequency."""
+    import conf_ladder
+    assert conf_ladder.is_low_frequency(None, 50) is False
+
+
+def test_exemption_would_waive_volume_once_calibrated(planner, monkeypatch):
+    """The mechanism works -- it is only the THRESHOLD that is unset."""
+    import conf_ladder
+    monkeypatch.setattr(conf_ladder, "REQUIRED_LOW_FREQUENCY_SESSIONS", 20)
+    st = conf_ladder.low_frequency_status(max_hits_in_any_session=1, sessions_observed=25)
+    assert st["granted"] is True
+    assert conf_ladder.effective_volume_floor(
+        "CONF_BATTLETESTED", low_frequency_granted=True) == 0
+    assert conf_ladder.meets_promotion_bar(
+        "CONF_BATTLETESTED", calls=1, distinct_inputs=20,
+        low_frequency_granted=True) is True
+
+
+def test_exemption_never_waives_the_diversity_floor(planner, monkeypatch):
+    """Volume and diversity are independent bars; waiving one must not waive both."""
+    import conf_ladder
+    monkeypatch.setattr(conf_ladder, "REQUIRED_LOW_FREQUENCY_SESSIONS", 20)
+    assert conf_ladder.meets_promotion_bar(
+        "CONF_BATTLETESTED", calls=1, distinct_inputs=3,
+        low_frequency_granted=True) is False
+
+
+def test_existing_volume_behaviour_is_unchanged(planner):
+    """Regression guard: today's callers pass no flag and must see the old bars."""
+    import conf_ladder
+    assert conf_ladder.meets_promotion_bar("CONF_BATTLETESTED", 1_000, 20) is True
+    assert conf_ladder.meets_promotion_bar("CONF_BATTLETESTED", 999, 20) is False
+    assert conf_ladder.meets_promotion_bar("CONF_SHIPPED", 10_000, 50) is True
+    assert conf_ladder.meets_promotion_bar("CONF_SHIPPED", 9_999, 50) is False

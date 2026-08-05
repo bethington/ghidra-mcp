@@ -41,8 +41,42 @@ import conf_ladder  # noqa: E402
 IMAGE_BASES = {
     "D2Common.dll": 0x6FD50000,
     "D2Client.dll": 0x6FAB0000,
+    # SGD2FreeRes-GDI, the conformance lab's subject. This is its GHIDRA base
+    # (which is also its PE preferred base); the LIVE base differs -- the process
+    # maps it at 0x6cfb0000 because ProjectDiablo.dll claims 0x10000000 first.
+    # IMAGE_BASES is a Ghidra-side table (note D2Client's 0x6FAB0000 here versus
+    # its live 0x03600000), so the preferred base is the correct value.
+    "SGD2FreeRes.dll": 0x10000000,
 }
 _D2COMMON_BASE = IMAGE_BASES["D2Common.dll"]  # back-compat for existing callers
+
+# Live MODULE name -> Ghidra PROGRAM name.
+#
+# A dispatcher reports the module it was hooked into, as the running process
+# names it. Every Ghidra write here passes that string as `program`. For D2's own
+# DLLs the two coincide, so the distinction never had to exist -- and the code
+# open-coded `mod` at five call sites on that assumption.
+#
+# It stops coinciding the moment a subject is imported under a different name,
+# which SGD2FreeRes-GDI is and had to be: the stale 2023 upstream build already
+# occupies the program name `SGD2FreeRes.dll` in this project, and
+# `switch_program` matches by NAME. Left unmapped, a promotion or refutation
+# earned by the GDI fork would have been tagged onto the 2023 program -- the
+# wrong-binary failure class, in the module whose header comment already records
+# two previous instances of it.
+MODULE_TO_PROGRAM = {
+    "SGD2FreeRes.dll": "SGD2FreeRes-GDI.dll",
+}
+
+
+def ghidra_program_for(module: str) -> str:
+    """Ghidra program name for a live module name; identity when unmapped.
+
+    Identity is the right default -- D2's DLLs are imported under their own
+    names -- but it must be a deliberate lookup rather than an assumption, so a
+    renamed import cannot silently retarget a write.
+    """
+    return MODULE_TO_PROGRAM.get(module, module)
 
 BATTLE_MIN_HITS = int(os.environ.get(
     "FUNDOC_BATTLETEST_MIN_HITS",
@@ -232,6 +266,9 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
         # would resolve D2Client offsets inside D2Common, which is the
         # wrong-binary failure class again.
         mod = d.get("module") or program
+        # The Ghidra program to WRITE to. Resolved once, here, so no call site
+        # can reintroduce the assumption that a module name is a program name.
+        prog = ghidra_program_for(mod)
         base = IMAGE_BASES.get(mod)
         if base is None:
             if mod not in _WARNED_NO_DISTINCT:
@@ -299,13 +336,13 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
         if is_shadow and ddivs > 0:
             # Ghidra is the source of truth for the held rung; the registry may
             # lag, name-drift, or not exist for this function at all.
-            held = _ghidra_rung(addr_hex, mod) or (r.get("conf") if r else None)
+            held = _ghidra_rung(addr_hex, prog) or (r.get("conf") if r else None)
             demote, rung, record = conf_ladder.decide_refutation(
                 held, "shadow_divergence",
                 {"divergences": ddivs, "hits": dhits, "mode": d.get("modeName")})
             if demote:
                 record["date"] = time.strftime("%Y-%m-%d")
-                res = _set_rung(addr_hex, rung, mod, record)
+                res = _set_rung(addr_hex, rung, prog, record)
                 if res.get("status") == "success" or "already_present" in str(res):
                     refuted.append({"name": d["name"], "address": addr_hex,
                                     "from": held, "divergences": ddivs})
@@ -380,7 +417,7 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
                       f"distinct ({hits - (r or {}).get('shadow_distinct_at_hits', 0)} "
                       f"calls with no new input) -- diversity floor waived; that is "
                       f"100% of reachable coverage, not a relaxed bar.")
-            held = _ghidra_rung(addr_hex, mod) or (r or {}).get("conf")
+            held = _ghidra_rung(addr_hex, prog) or (r or {}).get("conf")
             if conf_ladder.rung_strength(target) <= conf_ladder.rung_strength(held):
                 continue
             record = {
@@ -394,11 +431,11 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
                     f"saturated@{distinct} across {sat_sessions} sessions "
                     f"({hits - _m.get('at_hits', 0)} calls with no new input "
                     f"in the latest)")
-            tag_result = _set_rung(addr_hex, target, mod, record)
+            tag_result = _set_rung(addr_hex, target, prog, record)
             if tag_result.get("status") == "success" or "already_present" in str(tag_result):
                 if r is None:
                     # Materialise the missing mirror row (append-only registry).
-                    r = {"name": d["name"], "address": addr_hex, "program": mod,
+                    r = {"name": d["name"], "address": addr_hex, "program": prog,
                          "callconv": None, "ret": None,
                          "date": time.strftime("%Y-%m-%d"),
                          "origin": "shadow promotion; no prior record_proof row "

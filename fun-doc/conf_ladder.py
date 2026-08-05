@@ -230,6 +230,95 @@ def saturation_qualifies(saturated_sessions):
     return int(saturated_sessions or 0) >= REQUIRED_SATURATED_SESSIONS
 
 
+# --- low-frequency (lifecycle) functions ------------------------------------
+# The volume bar assumes a function the game calls OFTEN. Some functions cannot
+# be called often by construction: patch application, one-shot init, teardown,
+# and rare error paths run once per process lifetime. 1,000 calls is not a high
+# bar for them, it is an IMPOSSIBLE one -- no number of sessions reaches it,
+# because each session contributes at most a handful of calls.
+#
+# Measured 2026-08-04 on SGD2FreeRes-GDI, a patch DLL whose 32 patch-application
+# classes each run exactly once at load: every one of them can be perfectly
+# correct and still cap at CONF_VETTED forever. This is not specific to that
+# binary -- every init/teardown/rare-path function in the corpus is in the same
+# position, and it directly contradicts the goal of driving everything to
+# CONF_BATTLETESTED.
+#
+# The fix mirrors saturation exactly, and for the same reason. Saturation
+# replaced an unsatisfiable DISTINCT-INPUT floor with a MEASURED observation of
+# what the game can actually produce; this replaces an unsatisfiable VOLUME
+# floor with a measured observation of how often the game can actually call the
+# function. Both are measured, never declared -- the declared-input_domain
+# attempt failed precisely because a declaration describes the LEGAL domain
+# while promotion depends on the REACHABLE one.
+#
+# NOT YET CALIBRATED, AND DELIBERATELY INERT. Every other threshold in this
+# system is a calibration output with a recorded basis (STRONG_INFORMATIVE_BYTES
+# = 20 from a libcrypto negative control; SIGNIF_FLOOR = 30 from a D2Common one;
+# REQUIRED_SATURATED_SESSIONS raised 1 -> 2 after a measured bad promotion). We
+# have no per-session frequency data at all yet, so any number written here today
+# would be invention wearing calibration's clothes. Until this is set from data,
+# `low_frequency_status()` REPORTS the exemption and `meets_promotion_bar` grants
+# nothing -- a lifecycle function still cannot promote, but the evidence needed
+# to set the bar now accumulates in the logs instead of being invisible.
+REQUIRED_LOW_FREQUENCY_SESSIONS = None
+
+# A function is a low-frequency candidate when its per-session call count is
+# provably bounded below the volume bar. Observing that across several sessions
+# is what distinguishes "runs once" from "the game was barely played".
+LOW_FREQUENCY_MIN_SESSIONS_TO_CLASSIFY = 3
+
+
+def is_low_frequency(max_hits_in_any_session, sessions_observed, rung="CONF_BATTLETESTED"):
+    """Is this function's per-session call count provably bounded below the bar?
+
+    Necessary but NOT sufficient for the exemption -- see low_frequency_status().
+    Requires several sessions before classifying, because one quiet session says
+    more about the playthrough than about the function.
+    """
+    bar = PROMOTION_THRESHOLDS.get(rung)
+    if bar is None or max_hits_in_any_session is None:
+        return False
+    if int(sessions_observed or 0) < LOW_FREQUENCY_MIN_SESSIONS_TO_CLASSIFY:
+        return False
+    return int(max_hits_in_any_session) < bar["calls"]
+
+
+def low_frequency_status(max_hits_in_any_session, sessions_observed,
+                         rung="CONF_BATTLETESTED"):
+    """Report-only view of the low-frequency exemption.
+
+    Returns a dict describing what WOULD be granted once the bar is calibrated,
+    and whether it is granted today. Kept separate from meets_promotion_bar so
+    the reporting cannot accidentally become a promotion path: while
+    REQUIRED_LOW_FREQUENCY_SESSIONS is None, `granted` is always False.
+    """
+    classified = is_low_frequency(max_hits_in_any_session, sessions_observed, rung)
+    required = REQUIRED_LOW_FREQUENCY_SESSIONS
+    return {
+        "classified": classified,
+        "max_hits_per_session": max_hits_in_any_session,
+        "sessions_observed": int(sessions_observed or 0),
+        "required_sessions": required,
+        "granted": bool(classified and required is not None
+                        and int(sessions_observed or 0) >= required),
+        "calibrated": required is not None,
+    }
+
+
+def effective_volume_floor(rung, *, low_frequency_granted=False):
+    """The volume floor that actually applies to this function.
+
+    Sibling of effective_distinct_floor. Returns 0 only when a CALIBRATED
+    low-frequency exemption has been granted; until then the flat bar stands,
+    so an uncalibrated system cannot promote on an exemption nobody has measured.
+    """
+    bar = PROMOTION_THRESHOLDS.get(rung)
+    if bar is None:
+        return 0
+    return 0 if low_frequency_granted else bar["calls"]
+
+
 def effective_distinct_floor(rung, argc=None, saturated=False):
     """The distinct-input floor that actually applies to this function.
 
@@ -261,15 +350,23 @@ def effective_distinct_floor(rung, argc=None, saturated=False):
     return bar["distinct_inputs"]
 
 
-def meets_promotion_bar(rung, calls, distinct_inputs, argc=None, saturated=False):
+def meets_promotion_bar(rung, calls, distinct_inputs, argc=None, saturated=False,
+                        low_frequency_granted=False):
     """Both thresholds, never one. A function hammering two code paths 10,000
     times must NOT promote -- that is the exact evidence the plan calls
     worthless -- UNLESS those two paths are provably all the input the game can
-    produce (saturation). The VOLUME bar always applies regardless."""
+    produce (saturation).
+
+    The VOLUME bar likewise always applies, UNLESS a calibrated low-frequency
+    exemption has been granted for a function the game cannot call often (see
+    REQUIRED_LOW_FREQUENCY_SESSIONS). That exemption is inert until calibrated,
+    so today this behaves exactly as it always has -- callers may pass the flag,
+    and effective_volume_floor will still refuse to lower the bar.
+    """
     bar = PROMOTION_THRESHOLDS.get(rung)
     if bar is None:
         return True
-    return (calls >= bar["calls"]
+    return (calls >= effective_volume_floor(rung, low_frequency_granted=low_frequency_granted)
             and distinct_inputs >= effective_distinct_floor(rung, argc, saturated))
 
 

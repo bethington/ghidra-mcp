@@ -480,3 +480,67 @@ def test_a_new_input_breaks_saturation_for_this_session(rig):
     m = rig["marks"][f"D2Common.dll:{addr}"]
     assert m["counted_this_session"] is False
     assert m["at_hits"] == hits, "saturation clock restarts from the new input"
+
+
+# --- module name is not a program name --------------------------------------
+# A dispatcher reports the LIVE module name; every Ghidra write passes that as
+# `program`. For D2's DLLs the two coincide, and five call sites open-coded that
+# assumption. It stops holding for SGD2FreeRes-GDI: the stale 2023 upstream build
+# already owns the program name `SGD2FreeRes.dll`, and `switch_program` matches
+# by name -- so an unmapped write lands on the wrong binary.
+
+ADDR_SGD2FR = 0x10000000
+
+
+def _programs_written(state):
+    return {d.get("program") for _, d in state["writes"]}
+
+
+def test_module_name_maps_to_the_ghidra_program_name():
+    assert bp.ghidra_program_for("SGD2FreeRes.dll") == "SGD2FreeRes-GDI.dll"
+
+
+def test_unmapped_modules_resolve_to_themselves():
+    """Identity is the right default -- D2's DLLs import under their own names."""
+    for m in ("D2Common.dll", "D2Client.dll", "Fog.dll"):
+        assert bp.ghidra_program_for(m) == m
+
+
+def test_sgd2freeres_promotion_targets_the_lab_program_not_the_stale_import(rig):
+    """The whole point: the GDI fork's rung must not be tagged onto the 2023 build."""
+    addr = hex(ADDR_SGD2FR + 0x1000)
+    rig["dispatchers"] = [_disp("PatchApply", 0x1000, module="SGD2FreeRes.dll")]
+    rig["rows"] = [{"name": "PatchApply", "address": addr, "conf": "CONF_LIVE",
+                    "program": "SGD2FreeRes-GDI.dll"}]
+    bp.poll_and_promote(program="SGD2FreeRes.dll")
+
+    written = _programs_written(rig)
+    assert "SGD2FreeRes-GDI.dll" in written
+    assert "SGD2FreeRes.dll" not in written, (
+        "wrote to the stale 2023 upstream program -- the wrong-binary failure class")
+
+
+def test_sgd2freeres_refutation_also_targets_the_lab_program(rig):
+    """Refutation is the more dangerous direction: it TAKES A TAG AWAY."""
+    addr = hex(ADDR_SGD2FR + 0x2000)
+    rig["dispatchers"] = [_disp("PatchApply", 0x2000, module="SGD2FreeRes.dll",
+                                divergences=7)]
+    rig["rows"] = [{"name": "PatchApply", "address": addr, "conf": "CONF_BATTLETESTED",
+                    "program": "SGD2FreeRes-GDI.dll"}]
+    bp.poll_and_promote(program="SGD2FreeRes.dll")
+
+    written = _programs_written(rig)
+    assert written, "a divergence must produce a write"
+    assert "SGD2FreeRes.dll" not in written, (
+        "removed a tag from the stale 2023 program instead of the lab program")
+
+
+def test_sgd2freeres_offsets_resolve_against_its_own_base(rig):
+    """Its Ghidra base is the PE preferred base, not the live 0x6cfb0000."""
+    assert bp.IMAGE_BASES["SGD2FreeRes.dll"] == 0x10000000
+    rig["dispatchers"] = [_disp("PatchApply", 0x1234, module="SGD2FreeRes.dll")]
+    rig["rows"] = [{"name": "PatchApply", "address": hex(ADDR_SGD2FR + 0x1234),
+                    "conf": "CONF_LIVE", "program": "SGD2FreeRes-GDI.dll"}]
+    bp.poll_and_promote(program="SGD2FreeRes.dll")
+    assert any(int(str(d["function"]), 16) == ADDR_SGD2FR + 0x1234
+               for _, d in rig["writes"] if "function" in d)
