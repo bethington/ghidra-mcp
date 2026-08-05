@@ -288,6 +288,126 @@ def _has_delegate_call(body):
     return False
 
 
+# Externals whose only effect is through the pointer argument the CALLER owns.
+# Deliberately tiny and explicit: an unknown external cannot be shown pure, and
+# an unproven callee must abstain rather than be assumed harmless.
+_PURE_EXTERNAL_CALLEES = frozenset({
+    "SetRect", "SetRectEmpty", "CopyRect", "OffsetRect", "InflateRect",
+    "IntersectRect", "UnionRect", "PtInRect", "EqualRect", "IsRectEmpty",
+    "memcpy", "memmove", "memset", "memcmp", "abs", "labs", "min", "max",
+})
+
+# Names that make a callee impure on sight: it reaches beyond its parameters.
+_IMPURE_CALLEE_RE = re.compile(
+    r"\b(malloc|calloc|realloc|free|new|delete|fopen|fclose|fwrite|fread|"
+    r"printf|sprintf|Sleep|CreateFile|WriteFile|RegSet|Send|Recv|socket)\w*\b",
+    re.I)
+
+
+def _callee_names(body):
+    """Real callees in `body` -- control flow and decompiler intrinsics excluded."""
+    return {m.group(1) for m in _CALL_ID_RE.finditer(body)
+            if not _SAFE_CALL_RE.match(m.group(1))}
+
+
+_PURITY_MAX_DEPTH = 4
+
+
+def _writes_a_global(body):
+    """A global on the LEFT of an assignment. Reading one is fine."""
+    for gre in (_DAT_GLOBAL_RE, _NAMED_GLOBAL_RE):
+        for m in gre.finditer(body):
+            rest = body[m.end():m.end() + 24].lstrip()
+            if rest.startswith("=") and not rest.startswith("=="):
+                return True
+    return False
+
+
+def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None):
+    """True when a callee's only effects are through its own parameters.
+
+    Purity is TRANSITIVE: a callee that is itself clean but calls something
+    unknown gives no guarantee, so this recurses into its callees and every one
+    of them must also be shown pure. A body that was not supplied cannot be
+    shown pure and returns False -- unproven is treated as unsafe.
+
+    Recursion is depth-capped and cycle-guarded; exceeding either abstains
+    rather than assuming. Real accessor chains are shallow (the measured case is
+    two levels: a resolver call, then a deref).
+    """
+    if depth > _PURITY_MAX_DEPTH or not callee_text:
+        return False
+    text = _strip_comments(str(callee_text))
+    _, _, body = text.partition("{")
+    if not body:
+        return False
+    if _IMPURE_CALLEE_RE.search(text) or _writes_a_global(body):
+        return False
+
+    _seen = set() if _seen is None else _seen
+    for name in _callee_names(body):
+        if name in _PURE_EXTERNAL_CALLEES or name in _seen:
+            continue
+        _seen.add(name)
+        if not _callee_is_pure((callee_bodies or {}).get(name),
+                               callee_bodies, depth + 1, _seen):
+            return False
+    return True
+
+
+def _all_callees_pure(body, callee_bodies):
+    """Can EVERY callee be shown side-effect-free beyond its parameters?
+
+    `callee_bodies` maps callee name -> its decompiled text, and must contain the
+    TRANSITIVE closure: a callee whose own callees are missing cannot be cleared.
+    A name that is neither supplied nor on the pure-externals allowlist blocks the
+    class. Abstaining is the whole point -- this gate is what permits a
+    delegate-calling mutator to be proven in the LIVE game, where the reimpl's
+    callees actually run, so an unchecked side effect happens twice per call.
+    """
+    callee_bodies = callee_bodies or {}
+    for name in _callee_names(body):
+        if name in _PURE_EXTERNAL_CALLEES:
+            continue
+        if not _callee_is_pure(callee_bodies.get(name), callee_bodies, 1, {name}):
+            return False
+    return True
+
+
+_OUTBUF_WRITE_RE = re.compile(r"\b%s\s*(?:\[\s*(\d+)\s*\]|\+\s*(\d+))")
+_OUTBUF_FIELD_RE = re.compile(r"->\s*(\w+)\s*=(?!=)")
+
+
+def outbuf_extent(body, param_name, word=4):
+    """Highest byte offset written through `param_name`, or None if not derivable.
+
+    Class B compares the bytes the two implementations leave behind, so it needs
+    a size. An UNDER-sized extent silently compares part of the struct and calls a
+    divergent reimpl equivalent -- strictly worse than not proving it -- so any
+    write at a non-constant offset makes this return None and the function stays
+    out of the class.
+
+    Indices are scaled by `word` because Ghidra renders a `uint *` write as
+    `p[6]`, i.e. byte offset 24.
+    """
+    if not body or not param_name:
+        return None
+    max_off = None
+    for m in re.finditer(_OUTBUF_WRITE_RE.pattern % re.escape(param_name), body):
+        idx = m.group(1) or m.group(2)
+        off = int(idx) * word
+        max_off = off if max_off is None else max(max_off, off)
+    # A bare `*p =` writes at offset 0.
+    if re.search(r"\*\s*%s\s*=(?!=)" % re.escape(param_name), body):
+        max_off = 0 if max_off is None else max(max_off, 0)
+    if max_off is None:
+        return None
+    # Any write through a COMPUTED offset means the extent is not bounded here.
+    if re.search(r"\b%s\s*\[\s*[A-Za-z_]" % re.escape(param_name), body):
+        return None
+    return max_off + word
+
+
 def _strip_comments(text):
     """Drop /* ... */ blocks before classification. fun-doc's plate comments
     are English prose (algorithm descriptions, parameter docs) that can
@@ -333,7 +453,7 @@ _SCALAR_POINTER_BASE_TYPES = {
 }
 
 
-def classify_function(decompiled_text, variables=None):
+def classify_function(decompiled_text, variables=None, callee_bodies=None):
     """Classify a function for the port pipeline. Returns:
       "leaf"        -- pure/leaf, provable via static /emulate_function.
       "global_leaf" -- reads only NAMED globals, provable LIVE via the resolver.
@@ -473,6 +593,44 @@ def classify_function(decompiled_text, variables=None):
             and not _DAT_GLOBAL_RE.search(text)
             and not _has_delegate_call(body)):
         return "mutator_leaf"
+
+    # OUT-BUFFER LEAF (2026-08-05) -- a mutator_leaf in every respect EXCEPT that
+    # it calls something. mutator_leaf refuses those, correctly: its proof runs on
+    # a SYNTH object filled with pattern bytes that are not valid pointers, and a
+    # callee handed one can free/walk it and take the game down (the
+    # STAT_ImportStateFlagsFromBuffer wild-frees mechanism). That gate is safety
+    # and is left exactly as it was -- this class is reached only after it declines.
+    #
+    # The difference is the PROOF PATH, not the shape. This routes to class-B
+    # SHADOW dispatch (gen_shadow_dispatch: "void with an out-param buffer,
+    # comparison = the written bytes; the reimpl runs on an INDEPENDENT copy of
+    # the input buffer"). The buffer is a REAL one from the live game, so the
+    # synth-pointer hazard does not arise -- pointers inside it are valid.
+    #
+    # The hazard it DOES create is the reason for the purity gate. Under shadow
+    # the reimpl's callees actually RUN, so any effect reaching past the
+    # out-buffer -- a global write, an allocation, I/O -- happens TWICE per call
+    # in the live game. mutator_leaf avoided that by forbidding callees outright;
+    # here every callee must be shown side-effect-free beyond its own parameters,
+    # transitively, or the function is not admitted. A callee whose body was not
+    # supplied cannot be shown pure and therefore blocks the class: unproven is
+    # treated as unsafe, which is the same abstain-when-unsure rule the byte,
+    # FID and BSim lanes already run on.
+    #
+    # The extent must also be derivable (outbuf_extent). Class B compares bytes;
+    # an under-sized extent would compare part of the struct and call a divergent
+    # reimpl equivalent, which is worse than never proving it.
+    if (total_ptr_params == 1
+            and (struct_access or scalar_ptr_params or cast_deref_ptr_params)
+            and _PTR_WRITE_RE.search(body)
+            and not _DEEP_DEREF_RE.search(body)
+            and not _MUTATOR_UNSAFE_DEREF_RE.search(body)
+            and not _DAT_GLOBAL_RE.search(text)
+            and _has_delegate_call(body)
+            and _all_callees_pure(body, callee_bodies)):
+        ptr_names = _POINTER_PARAM_NAME_RE.findall(params_text) or []
+        if ptr_names and outbuf_extent(body, ptr_names[0]) is not None:
+            return "outbuf_leaf"
 
     # NAMED-GLOBAL TABLE GETTER (before the ->/deep-deref guards): a function that
     # reads a NAMED global (g_*/_g_*), takes NO live-object pointer param (only scalar/
