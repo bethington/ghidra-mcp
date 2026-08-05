@@ -268,33 +268,122 @@ ARCHIVE_URL = os.environ.get("RE_KB_ARCHIVE_URL", "").strip().rstrip("/")
 # Loaded lazily from state.json the first time the validator is invoked, so we
 # don't force a state.json read at import time. The environment variable wins
 # if both are present.
-_PROJECT_FOLDER_OVERRIDE = (os.environ.get("FUN_DOC_PROJECT_FOLDER") or "").strip().rstrip("/")
-_PROJECT_FOLDER_CACHED: str | None = None  # set by _get_project_folder()
+_PROJECT_FOLDER_OVERRIDE = (os.environ.get("FUN_DOC_PROJECT_FOLDER") or "").strip()
+_SCOPE_FOLDERS_CACHED: tuple[str, ...] | None = None
+_SCOPE_CACHE_STAMP: tuple | None = None   # (mtimes...) the cache was built from
+_SCOPE_CACHE_CHECKED_AT: float = 0.0
+_SCOPE_MTIME_THROTTLE_SEC = 1.0
+
+
+def _scope_sources() -> tuple:
+    """(state.json, priority_queue.json) — the files the scope is read from."""
+    return (STATE_FILE, SCRIPT_DIR / "priority_queue.json")
+
+
+def _scope_stamp() -> tuple:
+    out = []
+    for p in _scope_sources():
+        try:
+            out.append(os.path.getmtime(p))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def _split_folders(raw) -> list[str]:
+    """Accept a list, or a comma/semicolon-separated string."""
+    if raw is None:
+        return []
+    items = raw if isinstance(raw, (list, tuple)) else re.split(r"[,;]", str(raw))
+    return [s.strip().rstrip("/") for s in items if str(s).strip().rstrip("/")]
+
+
+def get_scope_folders() -> tuple[str, ...]:
+    """Every project folder this process may address, PRIMARY FIRST.
+
+    The primary folder (index 0) is the one a bare binary name auto-prefixes
+    into; the rest are additionally permitted. Empty tuple == no enforcement.
+
+    Sources, in priority order:
+      * FUN_DOC_PROJECT_FOLDER env var -- may name several, comma-separated.
+        Wins outright, so a per-environment scope needs no file edits.
+      * state.json's `project_folder` (primary) PLUS priority_queue.json's
+        `config.scope_folders` (additional). With `scope_folders` absent this
+        is byte-for-byte the old single-folder behaviour.
+
+    WHY THIS IS NOT CACHED FOR THE PROCESS LIFETIME ANY MORE. It was, and the
+    consequence was measured on 2026-08-04: the dashboard switched context to
+    /Lab and its scan even logged "Incremental scan in /Lab", while this guard
+    went on reading /Mods/PD2-S12 from a cache populated at process start. Every
+    call for the newly focused binary was refused, and (see _fetch_function_list)
+    the refusal was reported as "0 functions". A guard that cannot be updated
+    without a restart is a guard that silently disagrees with the UI.
+
+    The mtime re-check is throttled to once a second, so the hot path costs at
+    most one stat() per source per second -- negligible beside the HTTP call it
+    guards. Workers are separate processes, so cross-process invalidation has to
+    come from the filesystem; this is the same "readers re-read on change"
+    contract provider_pause.json already uses.
+    """
+    global _SCOPE_FOLDERS_CACHED, _SCOPE_CACHE_STAMP, _SCOPE_CACHE_CHECKED_AT
+
+    if _PROJECT_FOLDER_OVERRIDE:
+        if _SCOPE_FOLDERS_CACHED is None:
+            _SCOPE_FOLDERS_CACHED = tuple(_split_folders(_PROJECT_FOLDER_OVERRIDE))
+        return _SCOPE_FOLDERS_CACHED
+
+    now = time.time()
+    if (_SCOPE_FOLDERS_CACHED is not None
+            and (now - _SCOPE_CACHE_CHECKED_AT) < _SCOPE_MTIME_THROTTLE_SEC):
+        return _SCOPE_FOLDERS_CACHED
+    _SCOPE_CACHE_CHECKED_AT = now
+
+    stamp = _scope_stamp()
+    if _SCOPE_FOLDERS_CACHED is not None and stamp == _SCOPE_CACHE_STAMP:
+        return _SCOPE_FOLDERS_CACHED
+
+    primary = ""
+    try:
+        with open(STATE_FILE) as f:
+            primary = (json.load(f).get("project_folder") or "").strip().rstrip("/")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        primary = ""
+
+    extra: list[str] = []
+    try:
+        with open(SCRIPT_DIR / "priority_queue.json") as f:
+            cfg = (json.load(f).get("config") or {})
+        extra = _split_folders(cfg.get("scope_folders"))
+    except (OSError, json.JSONDecodeError, AttributeError):
+        extra = []
+
+    ordered: list[str] = []
+    for folder in ([primary] if primary else []) + extra:
+        if folder not in ordered:
+            ordered.append(folder)
+
+    _SCOPE_FOLDERS_CACHED = tuple(ordered)
+    _SCOPE_CACHE_STAMP = stamp
+    return _SCOPE_FOLDERS_CACHED
+
+
+def _reset_scope_cache() -> None:
+    """Drop the cached scope. For tests and for in-process config writers."""
+    global _SCOPE_FOLDERS_CACHED, _SCOPE_CACHE_STAMP, _SCOPE_CACHE_CHECKED_AT
+    _SCOPE_FOLDERS_CACHED = None
+    _SCOPE_CACHE_STAMP = None
+    _SCOPE_CACHE_CHECKED_AT = 0.0
 
 
 def _get_project_folder() -> str:
-    """Return the configured project folder prefix, or '' if unset.
+    """The PRIMARY project folder, or '' if unset.
 
-    Priority: FUN_DOC_PROJECT_FOLDER env var > state.json's 'project_folder'
-    field > '' (no enforcement). Result is cached for the process lifetime so
-    a state.json edit takes a worker restart to pick up — same lifetime as
-    the worker config snapshot pattern.
+    Retained because bare-name auto-prefixing has to resolve to exactly one
+    folder -- guessing between several is how a write lands on the wrong
+    binary. Callers wanting the full permitted set use get_scope_folders().
     """
-    global _PROJECT_FOLDER_CACHED
-    if _PROJECT_FOLDER_CACHED is not None:
-        return _PROJECT_FOLDER_CACHED
-    if _PROJECT_FOLDER_OVERRIDE:
-        _PROJECT_FOLDER_CACHED = _PROJECT_FOLDER_OVERRIDE
-        return _PROJECT_FOLDER_CACHED
-    try:
-        # state.json may not exist yet on a brand-new install; tolerate.
-        with open(STATE_FILE) as f:
-            state = json.load(f)
-        pf = (state.get("project_folder") or "").strip().rstrip("/")
-        _PROJECT_FOLDER_CACHED = pf
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        _PROJECT_FOLDER_CACHED = ""
-    return _PROJECT_FOLDER_CACHED
+    folders = get_scope_folders()
+    return folders[0] if folders else ""
 
 
 def _validate_program_param(program: str | None) -> tuple[str | None, str | None]:
@@ -316,19 +405,27 @@ def _validate_program_param(program: str | None) -> tuple[str | None, str | None
     Note the '== prefix or startswith(prefix + "/")' check is deliberate to
     prevent prefix-collision attacks (e.g. /Mods/PD2-S12-OTHER vs
     /Mods/PD2-S12).
+
+    SEVERAL folders may be permitted (get_scope_folders); a path is in scope if
+    it matches ANY of them. Bare names still auto-prefix into the PRIMARY folder
+    only -- resolving a bare name against several candidates would mean guessing
+    which binary was meant, and this guard exists precisely to stop a call
+    landing on the wrong one.
     """
     if program is None or program == "":
         return program, None
-    pf = _get_project_folder()
-    if not pf:
+    folders = get_scope_folders()
+    if not folders:
         return program, None
     if "/" not in program:
-        # Bare binary name -> auto-prefix
-        return f"{pf}/{program}", None
-    if program == pf or program.startswith(pf + "/"):
-        return program, None
+        # Bare binary name -> auto-prefix into the primary folder
+        return f"{folders[0]}/{program}", None
+    for pf in folders:
+        if program == pf or program.startswith(pf + "/"):
+            return program, None
+    allowed = ", ".join(f"'{f}'" for f in folders)
     return program, (
-        f"program path '{program}' is outside scoped project folder '{pf}'"
+        f"program path '{program}' is outside scoped project folder(s) {allowed}"
     )
 
 # ---------------------------------------------------------------------------
@@ -1998,6 +2095,20 @@ def _fetch_function_list(prog_path):
                 funcs_resp = json.loads(funcs_resp)
             except (json.JSONDecodeError, TypeError):
                 return None if not all_funcs else all_funcs
+        # An ERROR is not an empty binary. ghidra_get returns failures as a dict
+        # shaped exactly like a response, so `resp.get("functions") or []` reads
+        # a refusal as "this program has no functions" -- and the caller then
+        # prints a perfectly calm "0 functions (0 non-thunk)".
+        #
+        # Measured 2026-08-04: the scope guard refused every call for
+        # /Lab/SGD2FreeRes-GDI.dll, and the scan reported the binary as empty
+        # while Ghidra held 1,265 functions for it. Nothing anywhere said
+        # "blocked". Returning None routes this to the caller's existing
+        # "WARNING: Could not list functions" path instead.
+        if isinstance(funcs_resp, dict) and funcs_resp.get("error"):
+            print(f"    ERROR listing functions for {prog_path}: "
+                  f"{funcs_resp['error']}", flush=True)
+            return None if not all_funcs else all_funcs
         page = funcs_resp.get("functions") or []
         if not page:
             break
@@ -5433,6 +5544,91 @@ def _extract_work_items(completeness):
     if not items:
         return None
     return "\n".join(items)
+
+
+def strip_plate_delimiters(text):
+    """Remove C comment delimiters that a plate should never contain.
+
+    The FIX prompt embeds the DECOMPILATION, and Ghidra renders an existing
+    plate at the top of it as `/* ... */`. A model rewriting the plate copies
+    what it was shown, wrapper included, so the stored comment ends up holding
+    a literal `/*` and Ghidra then renders `/* /* ...`. It compounds: every pass
+    adds another layer, and it corrupts the format every plate consumer parses.
+
+    Measured 2026-08-05 on the audit pass; verified against /get_comment rather
+    than the decompiler's rendering, which hides it by looking identical.
+    """
+    if not text:
+        return text
+    s = str(text).strip()
+    while s.startswith("/*"):
+        s = s[2:].lstrip("*").lstrip()
+        if s.endswith("*/"):
+            s = s[:-2].rstrip()
+    # Strip a uniform leading-asterisk gutter (" * foo") if every line has one.
+    lines = s.splitlines()
+    if len(lines) > 1 and all(
+        (not ln.strip()) or ln.lstrip().startswith("*") for ln in lines[1:]
+    ):
+        lines = [lines[0]] + [
+            ln.lstrip().lstrip("*").lstrip() if ln.strip() else ln for ln in lines[1:]
+        ]
+        s = "\n".join(lines)
+    return s.strip()
+
+
+def build_function_review_prompt(func_name, address, ghidra_data, program=None):
+    """The second-provider REVIEW prompt for a FUNCTION.
+
+    Functions had no such prompt: the audit pass called build_fix_prompt --
+    byte-identical to the worker's own FIX prompt -- so the "auditor" was never
+    told it was auditing. It re-documented instead of reviewing.
+
+    Measured 2026-08-05: with the fix prompt, a minimax audit of a minimax
+    fabrication ("FUN_10005ca0 means the game is active", invented) spent 24
+    tool calls and ~440K tokens, grew the plate from 42 to ~91 lines, ADDED a
+    second unverified provenance claim, and left the falsehood untouched.
+
+    Mirrors _build_global_review_prompt deliberately, including its guard that
+    agreeing is a successful outcome -- without that, a second pass rewrites
+    correct work to prove it ran, which is churn, not review.
+    """
+    review_header = (
+        "# Role: REVIEWER (second pass)\n\n"
+        "This function has ALREADY been documented, by a different pass. You are the\n"
+        "independent check. Your job is to decide whether the documentation is\n"
+        "actually TRUE of the code, not whether you would have written it the same\n"
+        "way.\n\n"
+        "**The disassembly is the ground truth. The existing documentation is a CLAIM\n"
+        "about it.** Treat every statement in the plate as unproven until you have\n"
+        "checked it against the code.\n\n"
+        "Check, in this order:\n"
+        "1. Claims about what a CALLEE does. The plate may name a callee and assert a\n"
+        "   meaning for it (\"if the game is active\", \"returns the item count\").\n"
+        "   Decompile that callee and verify. An invented meaning for a called\n"
+        "   function is the single most common false claim, and nothing else in this\n"
+        "   pipeline can detect it -- the completeness score cannot see truth, and\n"
+        "   falsify.py's checks are all structural (convention, arity, return width,\n"
+        "   parameter counts), so a wrong semantic claim passes every one of them.\n"
+        "2. Claims about CONTROL FLOW and conditions -- 'skipped for menus', 'only on\n"
+        "   startup'. Does the branch actually test that?\n"
+        "3. Claims about PARAMETERS, return values and struct offsets.\n"
+        "4. The Source/provenance line. If provenance is not established by the\n"
+        "   binary, it must say so rather than guess a plausible module.\n\n"
+        "When a claim is NOT supported by the disassembly, do not replace it with a\n"
+        "different guess. Say plainly what the code does show and mark the unknown as\n"
+        "unknown. An honest 'the meaning of this flag is not established here' is\n"
+        "correct documentation; a confident wrong answer is not.\n\n"
+        "If the documentation is correct, **change nothing and say so.** Agreeing is a\n"
+        "successful review. Do not rewrite correct work to look busy -- churn on a\n"
+        "correct function is a worse outcome than no review at all.\n\n"
+        "Do NOT include `/*` or `*/` in any plate comment you write. Ghidra adds the\n"
+        "delimiters; the decompilation you are shown below already has them, and\n"
+        "copying them back nests one comment inside another.\n\n---\n\n"
+    )
+    return review_header + build_fix_prompt(
+        func_name, address, ghidra_data, program=program
+    )
 
 
 def build_fix_prompt(func_name, address, ghidra_data, program=None):
@@ -10456,6 +10652,34 @@ def process_function(
                 if d.get("fixable", False)
             )
 
+            # Normalise a plate the model wrapped in comment delimiters. The
+            # model writes to Ghidra through its OWN tool calls, so fun-doc
+            # cannot intercept the write -- this repairs the stored state after
+            # the fact instead. Cheap: one read, and a write only when damaged.
+            if post_has_plate:
+                try:
+                    # /get_comment returns every comment type keyed separately;
+                    # read `plate` explicitly. (`comment` is a convenience field
+                    # that is not guaranteed to be the plate, and `type` is not
+                    # a parameter this endpoint accepts -- it is silently
+                    # ignored, which is the no-op class #207 guards against.)
+                    _plate_now = (ghidra_get(
+                        "/get_comment",
+                        params={"program": program, "address": f"0x{address}"},
+                        timeout=20,
+                    ) or {}).get("plate")
+                    _plate_fixed = strip_plate_delimiters(_plate_now)
+                    if _plate_now and _plate_fixed != _plate_now.strip():
+                        ghidra_post(
+                            "/batch_set_comments",
+                            data={"address": f"0x{address}",
+                                  "plate_comment": _plate_fixed},
+                            params={"program": program},
+                        )
+                        print("  [plate] stripped stray comment delimiters", flush=True)
+                except Exception as _e:  # never fail a run over cosmetics
+                    print(f"  [plate] delimiter cleanup skipped: {_e}", flush=True)
+
             # Check: plate comment should exist after FULL or FIX with plate deduction
             if not post_has_plate and (
                 mode == "FULL"
@@ -10688,7 +10912,10 @@ def process_function(
                 if audit_data.get("completeness")
                 else func_name
             )
-            audit_prompt = build_fix_prompt(
+            # REVIEW, not a second draft. Using build_fix_prompt here meant the
+            # auditor got the worker's own prompt and re-documented instead of
+            # checking -- see build_function_review_prompt for the measurement.
+            audit_prompt = build_function_review_prompt(
                 audit_func_name, address, audit_data, program=program
             )
             # Seed a findings-forced audit with the concrete contradictions —
