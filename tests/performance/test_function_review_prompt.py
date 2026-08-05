@@ -126,3 +126,29 @@ def test_does_not_eat_multiplication_or_pointer_text():
 def test_tolerates_empty_input():
     assert fd.strip_plate_delimiters("") == ""
     assert fd.strip_plate_delimiters(None) is None
+
+
+# --- review gating: skipped_delta is retired ---------------------------------
+# It skipped review whenever the worker gained >= audit_min_delta, on the theory
+# that a productive pass needs no second look. For truth-checking that is
+# backwards -- a large gain means a large amount of NEW TEXT, which is exactly
+# when a fabrication is most likely. The measured case gained +52 and carried an
+# invented causal claim that only the review pass caught.
+
+def test_the_delta_skip_is_gone_from_the_audit_gate():
+    import inspect
+    src = inspect.getsource(fd.process_function)
+    assert 'audit_outcome = "skipped_delta"' not in src, (
+        "the delta skip is back: a large-gain pass would go unreviewed again")
+
+
+def test_the_good_enough_skip_is_retained():
+    """A function already at target has little new text to be wrong about."""
+    import inspect
+    src = inspect.getsource(fd.process_function)
+    assert 'audit_outcome = "skipped_good_enough"' in src
+
+
+def test_audit_min_delta_is_still_accepted_for_back_compat():
+    """Retained in config and the snapshot; simply unused by the gate now."""
+    assert "audit_min_delta" in fd.DEFAULT_QUEUE_CONFIG

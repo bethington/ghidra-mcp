@@ -150,3 +150,94 @@ void __cdecl F(uint *pOut,int i)
 }
 """
     assert pp.classify_function(computed, None, {"FUN_100203b0": PURE_GETTER}) != "outbuf_leaf"
+
+
+# --- magic-static carve-out --------------------------------------------------
+# Verified 2026-08-05 by reading gen_shadow_dispatch.emit_dispatcher_b: the
+# class-B thunk runs orig() BEFORE SafeReimpl(), so a function-local static is
+# already initialised when the reimpl calls the accessor. The reimpl's call is a
+# pure read; nothing is initialised twice. Narrow on purpose -- any OTHER global
+# write still makes a callee impure, because that argument is specific to
+# one-time initialisation.
+
+MAGIC_STATIC_GETTER = """
+int FUN_100203b0(void)
+{
+  if (*(int *)(*(int *)((int)ThreadLocalStoragePointer + _tls_index * 4) + 0x18) < DAT_10042e04) {
+    _Init_thread_header(&DAT_10042e04);
+    DAT_10042e00 = 640;
+    _Init_thread_footer(&DAT_10042e04);
+  }
+  return DAT_10042e00;
+}
+"""
+
+EVERY_CALL_WRITER = """
+int FUN_100203b0(void)
+{
+  DAT_10042e00 = DAT_10042e00 + 1;
+  return DAT_10042e00;
+}
+"""
+
+
+def test_a_magic_static_callee_is_admitted():
+    assert classify({"FUN_100203b0": MAGIC_STATIC_GETTER}) == "outbuf_leaf"
+
+
+def test_a_plain_global_writer_is_still_refused():
+    """The carve-out must not become 'writes a global are fine'."""
+    assert classify({"FUN_100203b0": EVERY_CALL_WRITER}) != "outbuf_leaf"
+
+
+def test_the_pattern_is_what_is_matched_not_the_word_static():
+    body = "{ static_thing = 1; DAT_10042e00 = 2; }"
+    assert pp._is_magic_static_init(body) is False
+
+
+def test_magic_static_markers_are_recognised():
+    for marker in ("_Init_thread_header(&g)", "_tls_index * 4",
+                   "ThreadLocalStoragePointer"):
+        assert pp._is_magic_static_init(marker) is True
+
+
+# The shape that actually occurs. In SGD2FreeRes-GDI the CRT statics helpers are
+# UNNAMED (FUN_10027a38 / FUN_100279e7) and the accessor calls a real initialiser
+# (FUN_10005b50), so a name-based allowlist cannot clear it and recursing into the
+# initialiser never will. The pattern match on the guard is what makes it work.
+REAL_MAGIC_STATIC = """
+undefined4 FUN_10005ca0(void)
+{
+  void *local_10;
+  undefined4 local_8;
+  local_8 = 0xffffffff;
+  local_10 = ExceptionList;
+  ExceptionList = &local_10;
+  if (*(int *)(*(int *)((int)ThreadLocalStoragePointer + _tls_index * 4) + 0x18) < DAT_10042e04) {
+    FUN_10027a38(&DAT_10042e04);
+    if (DAT_10042e04 == -1) {
+      DAT_10042e00 = (undefined4 *)FUN_10005b50();
+      FUN_100279e7(&DAT_10042e04);
+    }
+  }
+  ExceptionList = local_10;
+  return *DAT_10042e00;
+}
+"""
+
+
+def test_the_real_unnamed_helper_shape_is_admitted():
+    """Matches on the guard pattern, not on helper names."""
+    assert classify({"FUN_100203b0": REAL_MAGIC_STATIC}) == "outbuf_leaf"
+
+
+def test_the_initialiser_body_is_not_judged():
+    """The reimpl never executes it -- the original already ran it."""
+    assert pp._callee_is_pure(REAL_MAGIC_STATIC, {}, 1, set()) is True
+
+
+def test_an_accessor_reached_through_a_wrapper_is_admitted():
+    """FUN_100203b0 in the real binary is a two-level accessor."""
+    wrapper = "int FUN_100203b0(void) { int *p; p = FUN_10020320(); return *p; }"
+    assert classify({"FUN_100203b0": wrapper,
+                     "FUN_10020320": REAL_MAGIC_STATIC}) == "outbuf_leaf"

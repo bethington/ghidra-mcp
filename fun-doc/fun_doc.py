@@ -10947,11 +10947,23 @@ def process_function(
             print(
                 f"  [audit] skipped — score {new_score}% already >= good_enough {good_enough}%"
             )
-        elif worker_diff >= audit_min_delta and not force_audit:
-            audit_outcome = "skipped_delta"
-            print(
-                f"  [audit] skipped — worker gained {worker_diff:.0f}% (>= minΔ {audit_min_delta})"
-            )
+        # `skipped_delta` is RETIRED (2026-08-05). It skipped review whenever the
+        # worker gained >= audit_min_delta, on the reasoning that a productive pass
+        # needs no second look. For truth-checking that is backwards: a large gain
+        # means a large amount of NEW TEXT was written, which is exactly when a
+        # fabrication is most likely.
+        #
+        # Measured on the one function in this corpus with ground truth available:
+        # it gained +52 (so this gate would have skipped it) and carried a
+        # confident, invented causal claim -- "FUN_10005ca0 means the game is
+        # active", a magic-static accessor -- that falsify cannot see, because all
+        # six of its checks are structural. The review pass caught it, and cost
+        # LESS than the un-framed pass it replaced (274,636 vs 415,328 input
+        # tokens).
+        #
+        # `skipped_good_enough` stays: a function already at target has little new
+        # text to be wrong about. `audit_min_delta` is retained in config and in
+        # the snapshot for back-compat, and is now unused by this gate.
         else:
             if force_audit:
                 print(

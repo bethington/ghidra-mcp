@@ -295,6 +295,14 @@ _PURE_EXTERNAL_CALLEES = frozenset({
     "SetRect", "SetRectEmpty", "CopyRect", "OffsetRect", "InflateRect",
     "IntersectRect", "UnionRect", "PtInRect", "EqualRect", "IsRectEmpty",
     "memcpy", "memmove", "memset", "memcmp", "abs", "labs", "min", "max",
+    # The CRT's thread-safe-statics helpers. They are the magic-static guard
+    # sequence itself, so they are safe for exactly the reason the carve-out in
+    # _is_magic_static_init is: the ORIGINAL runs first and performs the one-time
+    # initialisation, and the reimpl's call then finds the guard already set.
+    # Listing them here is required for that carve-out to be reachable at all --
+    # without it the recursion sees two unsupplied delegates and refuses.
+    "_Init_thread_header", "_Init_thread_footer",
+    "_Init_thread_abort", "_Init_thread_wait",
 })
 
 # Names that make a callee impure on sight: it reaches beyond its parameters.
@@ -313,13 +321,52 @@ def _callee_names(body):
 _PURITY_MAX_DEPTH = 4
 
 
+# An MSVC function-local static ("magic static"). Ghidra renders the guard
+# sequence as a TLS-indexed compare against a guard variable, then a call to
+# _Init_thread_header / _Init_thread_footer around the one-time initialisation.
+_MAGIC_STATIC_RE = re.compile(
+    r"ThreadLocalStoragePointer|_tls_index|_Init_thread_(header|footer)", re.I)
+
+
+def _is_magic_static_init(body):
+    """Does this body's global write come from a magic-static initialisation?
+
+    SAFE UNDER CLASS-B SHADOW, and this is a verified fact rather than an
+    assumption about idempotence. Read out of the emitted thunk
+    (gen_shadow_dispatch.emit_dispatcher_b) on 2026-08-05:
+
+        memcpy(inbuf, buffer, N);      // snapshot the input
+        orig(...);                     // ORIGINAL RUNS FIRST
+        memcpy(origOut, buffer, N);
+        memcpy(local, inbuf, N);
+        SafeReimpl(rfn, ...local...);  // reimpl runs SECOND, on the copy
+        memcmp(local, origOut, N);
+
+    The ORIGINAL's call performs the initialisation -- once, exactly as it would
+    have without any dispatcher. By the time the reimpl calls the same accessor
+    the guard variable is set, so it takes the already-initialised path and the
+    call is a pure read. Nothing is initialised twice, and the game's own buffer
+    only ever receives the original's write.
+
+    Deliberately narrow: this recognises the MSVC guard pattern only. Any OTHER
+    global write still makes a callee impure, because the ordering argument above
+    is specific to one-time initialisation and does not generalise to a function
+    that writes a global on every call.
+    """
+    return bool(_MAGIC_STATIC_RE.search(body))
+
+
 def _writes_a_global(body):
-    """A global on the LEFT of an assignment. Reading one is fine."""
+    """A global on the LEFT of an assignment. Reading one is fine.
+
+    A magic-static initialisation is exempt -- see _is_magic_static_init for the
+    thunk-ordering fact that makes it safe under class-B shadow.
+    """
     for gre in (_DAT_GLOBAL_RE, _NAMED_GLOBAL_RE):
         for m in gre.finditer(body):
             rest = body[m.end():m.end() + 24].lstrip()
             if rest.startswith("=") and not rest.startswith("=="):
-                return True
+                return not _is_magic_static_init(body)
     return False
 
 
@@ -341,6 +388,28 @@ def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None):
     _, _, body = text.partition("{")
     if not body:
         return False
+
+    # A magic-static accessor is pure AS THE REIMPL EXECUTES IT, and that is the
+    # only execution this gate is about. Everything that could matter -- the
+    # one-time initialisation and whatever it calls -- sits inside the guard and
+    # runs exactly once, on the ORIGINAL's call, because the class-B thunk runs
+    # orig() before SafeReimpl() (verified 2026-08-05 in
+    # gen_shadow_dispatch.emit_dispatcher_b). By the time the reimpl calls the
+    # accessor the guard is set, so its path is: read guard, read value, return.
+    #
+    # This short-circuits rather than recursing, deliberately. Recursing would
+    # judge the INITIALISER's body, which the reimpl never executes -- and in a
+    # real binary that initialiser drags in the whole CRT thread-safe-statics
+    # machinery and is never provably pure. Measured on SGD2FreeRes-GDI, where
+    # those helpers are unnamed (FUN_10027a38 / FUN_100279e7), so a name-based
+    # allowlist cannot see them at all.
+    #
+    # Scope of the claim, stated plainly: it covers the accessor's fast path, NOT
+    # its initialiser. Any callee that writes a global on EVERY call is still
+    # impure -- see _writes_a_global.
+    if _is_magic_static_init(body):
+        return True
+
     if _IMPURE_CALLEE_RE.search(text) or _writes_a_global(body):
         return False
 
