@@ -3385,7 +3385,18 @@ def fetch_function_data(program, address, mode="FIX"):
             or not (isinstance(completeness, dict)
                     and completeness.get("function_name"))
         )
-        if decompiled_is_error and completeness_missing_name:
+        # An ENVIRONMENTAL refusal is not evidence about the address. A scope
+        # block, an unresolvable program, or a dead connection makes both calls
+        # fail exactly like a bad address does -- and `not_a_function` is
+        # DURABLE: the selector skips the function permanently once it is set.
+        #
+        # Measured 2026-08-05: config.scope_folders was silently reverted (F11),
+        # every call for /Lab/SGD2FreeRes-GDI.dll was refused, and a function we
+        # had just documented came back not_a_function=True. Same principle
+        # `bad_target` already encodes on the prove side: nothing was executed,
+        # so there is no verdict to record.
+        if (decompiled_is_error and completeness_missing_name
+                and not _is_environmental_error(_dec_resp)):
             data["not_a_function"] = True
 
     if not data.get("not_a_function"):
@@ -4093,9 +4104,29 @@ def _merge_config_on_write(cfg, baseline):
 
     Scoped to `config` on purpose. `pinned` is a list with its own add/remove
     semantics and merging it blindly would resurrect unpinned entries.
+
+    MISSING BASELINE. `load_priority_queue` arms the baseline, but a caller that
+    hand-builds a queue dict has none, and this used to `return cfg` -- i.e. fall
+    straight back to the last-writer-wins clobber the merge exists to prevent.
+    Measured 2026-08-05: `config.scope_folders` and `config.audit_provider` were
+    both set on disk, verified in effect, and later found reset to None with no
+    error. `audit_provider` is a KNOWN key, so this was not an unknown-key
+    problem -- some writer simply saved without a baseline.
+
+    DEFAULT_QUEUE_CONFIG now stands in as the implied baseline, which is the
+    honest reading of "the caller never expressed an opinion": a key still at its
+    default cannot be a deliberate choice, so disk wins; a key the caller moved
+    OFF its default is an opinion, so the caller wins; a key the caller does not
+    have at all stays as found on disk.
+
+    Known limit, recorded rather than hidden: a caller that deliberately RESETS a
+    key to its default is indistinguishable from one that never touched it, so
+    disk wins and the reset is lost. That ambiguity is created by the missing
+    baseline, not by this fallback -- the fix is to arm the baseline (load via
+    `load_priority_queue`), and this only bounds the damage when nobody did.
     """
     if not isinstance(baseline, dict):
-        return cfg                      # no baseline (hand-built queue) -> caller wins
+        baseline = DEFAULT_QUEUE_CONFIG
     try:
         with open(PRIORITY_QUEUE_FILE, "r", encoding="utf-8") as f:
             disk = (json.load(f) or {}).get("config") or {}
@@ -5303,6 +5334,42 @@ def _is_error_response(resp):
     if isinstance(resp, str) and resp.startswith("Error"):
         return True
     return False
+
+
+_ENVIRONMENTAL_ERROR_MARKERS = (
+    "scope guard blocked call",   # our own guard refused before the HTTP call
+    "program not found",          # wrong/renamed program, not a bad address
+    "no program",                 # nothing open to answer against
+    "connection",                 # socket died
+    "timed out",
+    "timeout",
+    "unreachable",
+    "ghidra offline",
+)
+
+
+def _is_environmental_error(resp):
+    """True when a failed response says nothing about the ADDRESS.
+
+    An error that means "we could not ask" must never be read as "we asked and
+    the answer was no". The distinction matters wherever a failure is recorded
+    DURABLY -- `not_a_function` makes the selector skip a function permanently,
+    so an infrastructure hiccup would retire real work with no way back.
+
+    Same principle `bad_target` encodes on the prove side: nothing executed, so
+    there is no verdict. Conservative on purpose -- an unrecognised error is
+    treated as a real answer, because the alternative (assume environmental) is
+    an infinite retry loop on a genuinely bad address.
+    """
+    if resp is None:
+        return True                      # no response at all: the call failed
+    text = ""
+    if isinstance(resp, dict):
+        text = str(resp.get("error") or "")
+    elif isinstance(resp, str):
+        text = resp
+    text = text.lower()
+    return any(m in text for m in _ENVIRONMENTAL_ERROR_MARKERS)
 
 
 def _variables_for_prompt(variables):
