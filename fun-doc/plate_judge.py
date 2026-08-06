@@ -136,7 +136,39 @@ class PlateVerdict:
         return "accurate" if not self.unsupported else "accurate_with_invention"
 
 
+# A GREEDY `\{.*\}` spans from the FIRST brace anywhere in the reply to the
+# LAST one, so any prose containing a brace -- or a fenced block preceded by an
+# explanation -- yields text that is not valid JSON. Measured 2026-08-06: the
+# judge answered correctly for all 8 functions and every row came back
+# `unscorable`, because the model wrapped its object in a ```json fence with a
+# sentence before it. The verdicts were real; the parser threw them away.
+_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 _JSON_RE = re.compile(r"\{.*\}", re.S)
+
+
+def _json_candidates(raw: str):
+    """Plausible JSON objects in a reply, best first.
+
+    Fenced blocks are tried before the greedy span, and the greedy span before
+    a brace-balanced scan from each opening brace -- so a correct answer is not
+    discarded because of the prose around it.
+    """
+    for m in _FENCE_RE.finditer(raw):
+        yield m.group(1)
+    m = _JSON_RE.search(raw)
+    if m:
+        yield m.group(0)
+    depth = 0
+    start = -1
+    for i, ch in enumerate(raw):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                yield raw[start:i + 1]
 
 
 def parse_judge_response(text) -> PlateVerdict:
@@ -152,13 +184,19 @@ def parse_judge_response(text) -> PlateVerdict:
         payload = text
     else:
         raw = str(text or "")
-        m = _JSON_RE.search(raw)
-        if not m:
-            return PlateVerdict(unscorable_reason="no JSON object in response")
-        try:
-            payload = json.loads(m.group(0))
-        except Exception as exc:
-            return PlateVerdict(unscorable_reason=f"unparseable JSON: {exc}")
+        payload, err = None, "no JSON object in response"
+        for cand in _json_candidates(raw):
+            try:
+                parsed = json.loads(cand)
+            except Exception as exc:
+                err = f"unparseable JSON: {exc}"
+                continue
+            if isinstance(parsed, dict) and "describes_right_function" in parsed:
+                payload = parsed
+                break
+            payload = payload or parsed
+        if payload is None:
+            return PlateVerdict(unscorable_reason=err)
     if not isinstance(payload, dict) or "describes_right_function" not in payload:
         return PlateVerdict(unscorable_reason="missing describes_right_function")
 

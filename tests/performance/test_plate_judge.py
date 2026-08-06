@@ -189,3 +189,35 @@ def test_invention_rate_is_measured_among_right_functions_only():
 
 def test_summarising_nothing_does_not_divide_by_zero():
     assert pj.summarise([])["reviewed"] == 0
+
+
+# --- the parser must not discard a correct verdict ---------------------------
+# MEASURED 2026-08-06. The judge answered correctly for all 8 functions of the
+# warming experiment and every row came back `unscorable`: a greedy `\{.*\}`
+# spans from the first brace anywhere in the reply to the last, so a fenced
+# object preceded by a sentence yields text that is not valid JSON. The
+# verdicts were real; the parser threw them away -- and because unscorable rows
+# stay out of the rates, that silently produced "0/8 scorable" rather than an
+# error anyone would chase.
+
+def test_a_fenced_object_after_prose_is_read():
+    raw = ("Here is my assessment of the documentation:\n\n```json\n"
+           + _resp(describes_right_function=False) + "\n```\n")
+    v = pj.parse_judge_response(raw)
+    assert v.scorable and v.right_function is False
+
+
+def test_prose_containing_braces_does_not_break_it():
+    raw = ("The plate mentions a struct {foo} and a set {bar}.\n" + _resp())
+    assert pj.parse_judge_response(raw).scorable
+
+
+def test_the_object_with_the_verdict_key_wins():
+    """A reply may carry more than one object; pick the one that answers."""
+    raw = '{"note": "thinking"}\n' + _resp(describes_right_function=False)
+    v = pj.parse_judge_response(raw)
+    assert v.scorable and v.right_function is False
+
+
+def test_genuinely_unusable_output_is_still_unscorable():
+    assert not pj.parse_judge_response("I could not assess this.").scorable
