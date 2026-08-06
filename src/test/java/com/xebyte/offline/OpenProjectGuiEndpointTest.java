@@ -35,7 +35,7 @@ public class OpenProjectGuiEndpointTest extends TestCase {
     public void testPluginRegistersOpenProjectRoute() throws IOException {
         String src = readUtf8("src/main/java/com/xebyte/GhidraMCPPlugin.java");
         Pattern p = Pattern.compile(
-                "server\\.createContext\\s*\\(\\s*\"/open_project\"",
+                "(?:server\\.createContext|reg\\.add)\\s*\\(\\s*\"/open_project\"",
                 Pattern.MULTILINE);
         assertTrue(
                 "GhidraMCPPlugin.java must register a route handler for "
@@ -51,7 +51,7 @@ public class OpenProjectGuiEndpointTest extends TestCase {
         // optional `program` to launchCodeBrowser when the user asked
         // for a non-headless open.
         Pattern routeBlock = Pattern.compile(
-                "server\\.createContext\\(\\s*\"/open_project\"[\\s\\S]*?openProject\\s*\\(",
+                "(?:server\\.createContext|reg\\.add)\\(\\s*\"/open_project\"[\\s\\S]*?openProject\\s*\\(",
                 Pattern.MULTILINE);
         Matcher m = routeBlock.matcher(src);
         assertTrue("Expected /open_project route block to call openProject(...)",

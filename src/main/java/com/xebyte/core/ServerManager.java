@@ -151,6 +151,14 @@ public class ServerManager {
             });
         }
 
+        // Advertise the plugin's hand-coded routes too — they are registered on this
+        // server further down, and a route missing from the schema is a route the
+        // bridge's dynamic discovery never offers. Only when a registrar was supplied,
+        // so the schema can never promise a path this server does not serve.
+        if (guiEndpoints != null) {
+            ManualToolDescriptors.addAll(scanner, ManualToolDescriptors.SHARED_ROUTES);
+        }
+
         // Serve MCP tool schema
         String schemaJson = scanner.generateSchema();
         server.createContext("/mcp/schema", exchange -> {

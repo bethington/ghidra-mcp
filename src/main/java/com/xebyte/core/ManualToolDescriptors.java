@@ -42,6 +42,47 @@ public final class ManualToolDescriptors {
 
     private ManualToolDescriptors() {}
 
+    /**
+     * Every hand-coded route the GUI plugin registers on <em>all</em> transports
+     * (see {@code GhidraMCPPlugin.registerHandCodedRoutes}).
+     *
+     * <p>Named once because two scanners have to advertise the same set: the plugin's
+     * for TCP and {@link ServerManager}'s for the Unix socket. ServerManager built its
+     * own list and had none of these, so a bridge on UDS could not see them even after
+     * the routes themselves were shared.
+     */
+    public static final List<String> SHARED_ROUTES = List.of(
+        "/batch_apply_documentation",
+        "/check_connection",
+        "/exit_ghidra",
+        "/mcp/health",
+        "/mcp/schema",
+        "/open_project",
+        "/project/info",
+        "/server/admin/set_permissions",
+        "/server/admin/terminate_all_checkouts",
+        "/server/admin/terminate_checkout",
+        "/server/admin/users",
+        "/server/authenticate",
+        "/server/checkouts",
+        "/server/connect",
+        "/server/disconnect",
+        "/server/repositories",
+        "/server/repository/create",
+        "/server/repository/file",
+        "/server/repository/files",
+        "/server/status",
+        "/server/version_control/add",
+        "/server/version_control/checkin",
+        "/server/version_control/checkout",
+        "/server/version_control/undo_checkout",
+        "/server/version_history",
+        "/tool/goto_address",
+        "/tool/launch_codebrowser",
+        "/tool/running_tools"
+    );
+
+
     private static AnnotationScanner.ParamDescriptor p(String name, String source, String description) {
         return new AnnotationScanner.ParamDescriptor(name, "string", source, true, null, description, "", false);
     }
@@ -199,6 +240,10 @@ public final class ManualToolDescriptors {
      * @throws IllegalStateException if any path is not present in {@link #ALL}
      */
     public static void addAll(AnnotationScanner scanner, String... paths) {
+        addAll(scanner, java.util.Arrays.asList(paths));
+    }
+
+    public static void addAll(AnnotationScanner scanner, java.util.Collection<String> paths) {
         for (String path : paths) {
             AnnotationScanner.ToolDescriptor td = ALL.get(path);
             if (td == null) {
