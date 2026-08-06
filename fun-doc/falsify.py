@@ -560,6 +560,83 @@ def check_phantom_callee(bundle: dict) -> List[Finding]:
                 phantom=phantom, callees=sorted(callees))]
 
 
+# An ABSOLUTE address, not a struct offset. Six-plus hex digits only: `+0x14`,
+# `0x5c` and string ids like `0xFCA` are offsets and constants, and matching them
+# would accuse a plate of lying every time it documented a field layout.
+_PLATE_ABS_ADDR_RE = re.compile(r"\b0x([0-9a-fA-F]{6,8})\b")
+
+# Sections that legitimately name addresses the function does NOT reference.
+# "Called By" lists CALLERS -- a function never references its own callers, so
+# scanning that section would produce a finding on every well-documented function.
+_ADDR_EXEMPT_SECTIONS = ("called by", "callers", "used by", "references to",
+                         "xrefs", "see also")
+
+
+def check_phantom_address(bundle: dict) -> List[Finding]:
+    """F8 (tier 2): the plate cites an absolute address the function never touches.
+
+    Mechanical and model-free: an address a plate names either appears among the
+    addresses the instructions reference, or it does not.
+
+    MEASURED ORIGIN (2026-08-05). D2Client's `HandleSaveAndExitDialogConfirm`
+    carries an AI-written plate naming `g_pSaveExitDialog (0x6fbcc994)` and
+    `g_dwGameModeState (0x6fbcd5ac)`. Its disassembly writes `0x6fbc77e8` and
+    `0x6fbcc2cc`. BOTH cited addresses are fabricated -- and D2Debugger had
+    copied one of them into a hardcoded constant, which disabled a guard its own
+    comment describes as protecting against refcount corruption. Nobody noticed
+    because every existing falsify check is structural in a different dimension:
+    convention, arity, return width, parameter counts, verb agreement.
+
+    Deliberately narrow, because a tier-1 accusation carries consequences and a
+    false one is worse than a miss:
+      * only 6-8 hex-digit ABSOLUTE addresses, so struct offsets (`+0x14`),
+        small constants and string ids are never matched;
+      * caller-listing sections are exempt -- a function does not reference the
+        things that call it;
+      * a plate address that appears ANYWHERE in the disassembly passes, even as
+        an immediate, so a documented constant is not accused.
+    Tier 2 rather than 1 on first release: the rule is sound but unmeasured at
+    corpus scale, and phantom_callee set the precedent for earning tier 1.
+    """
+    disasm = bundle.get("disasm_text")
+    if not disasm:
+        return []
+    plate = bundle.get("plate") or ""
+    if not plate:
+        return []
+
+    # Drop exempt sections before scanning.
+    kept, skipping = [], False
+    for line in plate.splitlines():
+        stripped = line.strip().lower().rstrip(":")
+        if stripped and not line.startswith((" ", "\t")) and stripped.endswith(
+                tuple(s.split()[-1] for s in _ADDR_EXEMPT_SECTIONS)):
+            skipping = any(stripped.startswith(s.split()[0]) for s in _ADDR_EXEMPT_SECTIONS)
+        elif stripped and not line.startswith((" ", "\t")) and line.rstrip().endswith(":"):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    scanned = "\n".join(kept)
+
+    cited = {m.group(1).lower() for m in _PLATE_ABS_ADDR_RE.finditer(scanned)}
+    if not cited:
+        return []
+    referenced = {m.group(1).lower() for m in _PLATE_ABS_ADDR_RE.finditer(disasm)}
+    # The function's own address is legitimately citable.
+    own = str(bundle.get("address") or "").lower().lstrip("0x")
+    if own:
+        referenced.add(own)
+
+    phantom = sorted(a for a in cited if a not in referenced)
+    if not phantom:
+        return []
+    return [_mk(bundle, "phantom_address", TIER_REVIEW,
+                claim=f"plate cites address(es) 0x{', 0x'.join(phantom[:5])}"
+                      + (" ..." if len(phantom) > 5 else ""),
+                evidence="not referenced anywhere in the disassembly",
+                phantom_addresses=phantom)]
+
+
 ALL_CHECKS = {
     "param_mismatch": check_param_mismatch,
     "convention_contradiction": check_convention,
@@ -567,6 +644,7 @@ ALL_CHECKS = {
     "return_contradiction": check_return,
     "name_verb_contradiction": check_name_verb,
     "phantom_callee": check_phantom_callee,
+    "phantom_address": check_phantom_address,
 }
 DEFAULT_DISABLED = frozenset({"phantom_callee"})
 
