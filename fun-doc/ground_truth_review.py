@@ -114,6 +114,15 @@ class NameVerdict:
     matched: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
     invented: list[str] = field(default_factory=list)
+    context_tokens: list[str] = field(default_factory=list)
+    context_matched: list[str] = field(default_factory=list)
+
+    @property
+    def context_recall(self) -> float:
+        """How much of the namespace/class the name carries. Reported, never
+        folded into `recall` -- a stripped binary does not contain it."""
+        return (len(self.context_matched) / len(self.context_tokens)
+                if self.context_tokens else 0.0)
 
     @property
     def recall(self) -> float:
@@ -172,16 +181,47 @@ def _is_structor(truth: str) -> bool:
     return last == prev or last == "~" + prev
 
 
+def split_truth(truth: str):
+    """(context_tokens, operation_tokens) for a qualified C++ name.
+
+    The final `::` component is the OPERATION -- the verb and object a reader of
+    the machine code can actually recover. Everything before it is CONTEXT: the
+    namespace and class, which a stripped binary does not carry.
+
+    MEASURED 2026-08-06. Scoring both together penalised the pipeline for
+    information nobody could recover: `d2::CelFile_Api::GetCel` demands the
+    tokens cel/file/api before a single one about what the function DOES, so a
+    perfect reading of the code still scores partial. Reported separately, the
+    operation figure says how well the code was read and the context figure says
+    how much structure was inferred -- two different abilities that a single
+    number conflates.
+
+    For a constructor the last component IS the class name, which is correct:
+    naming the class is the operation.
+    """
+    parts = [p for p in str(truth or "").split("::") if p]
+    if not parts:
+        return [], []
+    return tokens("::".join(parts[:-1])), tokens(parts[-1])
+
+
 def compare_names(documented: str, truth: str) -> NameVerdict:
     """Semantic comparison. See the module docstring for why not string equality."""
-    tt, dt = tokens(truth), tokens(documented)
+    ctx_tokens, tt = split_truth(truth)
+    dt = tokens(documented)
     matched, missed = [], []
     for t in tt:
         if any(tokens_agree(t, d) for d in dt):
             matched.append(t)
         else:
             missed.append(t)
-    invented = [d for d in dt if not any(tokens_agree(d, t) for t in tt)]
+    # Context is scored, but SEPARATELY -- a doc name that also carries the
+    # class is better, and one that does not is not wrong about the code.
+    ctx_matched = [c for c in ctx_tokens if any(tokens_agree(c, d) for d in dt)]
+    # Invention is judged against BOTH: a token echoing the class is not
+    # invented, it is just context the operation name did not need.
+    all_truth = tt + ctx_tokens
+    invented = [d for d in dt if not any(tokens_agree(d, x) for x in all_truth)]
     if _is_structor(truth):
         # The suffix IS the operation the truth expresses by repeating the class
         # name; crediting it is reading the same fact, not relaxing the bar.
@@ -189,7 +229,8 @@ def compare_names(documented: str, truth: str) -> NameVerdict:
         invented = [d for d in invented if d not in allowed]
     return NameVerdict(truth=truth, documented=documented, truth_tokens=tt,
                        doc_tokens=dt, matched=matched, missed=missed,
-                       invented=invented)
+                       invented=invented, context_tokens=ctx_tokens,
+                       context_matched=ctx_matched)
 
 
 # --- structural comparison ---------------------------------------------------

@@ -249,3 +249,53 @@ def test_a_dropped_concept_still_costs_the_constructor():
 def test_constructor_verbs_are_not_credited_on_ordinary_functions():
     v = gtr.compare_names("InitializeApplyPatch", "sgd2fr::ApplyPatch")
     assert "initialize" in v.invented
+
+
+# --- operation vs context ----------------------------------------------------
+# MEASURED 2026-08-06. Truth names carry C++ class/namespace context that a
+# STRIPPED BINARY DOES NOT CONTAIN. Scoring both together penalised the pipeline
+# for information nobody could recover: `d2::CelFile_Api::GetCel` demanded
+# cel/file/api before a single token about what the function does, so a perfect
+# reading of the machine code still scored partial. Reported separately, the
+# operation figure says how well the CODE was read and the context figure says
+# how much STRUCTURE was inferred -- two different abilities.
+
+def test_the_operation_is_the_final_component():
+    ctx, op = gtr.split_truth("d2::CelFile_Api::GetCel")
+    assert op == ["get", "cel"]
+    assert "api" in ctx
+
+
+def test_class_context_does_not_count_against_the_operation():
+    """`GetCel` is a correct reading of the code even without the class."""
+    v = gtr.compare_names("GetCel", "d2::CelFile_Api::GetCel")
+    assert v.verdict == "correct"
+
+
+def test_context_recall_is_reported_separately():
+    bare = gtr.compare_names("GetCel", "d2::CelFile_Api::GetCel")
+    rich = gtr.compare_names("CelFileApi_GetCel", "d2::CelFile_Api::GetCel")
+    assert bare.verdict == rich.verdict == "correct"
+    assert rich.context_recall > bare.context_recall
+
+
+def test_echoing_the_class_is_not_invention():
+    v = gtr.compare_names("CelFileApi_GetCel", "d2::CelFile_Api::GetCel")
+    assert v.invented == []
+
+
+def test_a_wrong_operation_is_still_wrong():
+    """The split must not rescue a genuine miss -- these are the measured
+    wrong answers and they stay wrong."""
+    assert gtr.compare_names("ResolveLookupResult",
+                             "d2::CelFile_Api::GetCel").verdict == "wrong"
+    assert gtr.compare_names("FreeGdiResHandle",
+                             "d2::MpqArchiveHandle_Api::Close").verdict == "wrong"
+
+
+def test_a_constructor_still_needs_the_class_name():
+    """For a constructor the final component IS the class, so naming it is the
+    operation -- the split must not hand it over for free."""
+    v = gtr.compare_names("SomethingElse_ctor",
+                          "sgd2fr::FooPatch_1_09D::FooPatch_1_09D")
+    assert v.verdict == "wrong"
