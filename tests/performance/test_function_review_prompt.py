@@ -137,7 +137,10 @@ def test_tolerates_empty_input():
 
 def test_the_delta_skip_is_gone_from_the_audit_gate():
     import inspect
-    src = inspect.getsource(fd.process_function)
+    # _process_function_inner, not process_function: the latter is now a thin
+    # guard that records a crash before re-raising (2026-08-06), so its source
+    # no longer contains the audit logic these assertions are about.
+    src = inspect.getsource(fd._process_function_inner)
     assert 'audit_outcome = "skipped_delta"' not in src, (
         "the delta skip is back: a large-gain pass would go unreviewed again")
 
@@ -145,7 +148,7 @@ def test_the_delta_skip_is_gone_from_the_audit_gate():
 def test_the_good_enough_skip_is_retained():
     """A function already at target has little new text to be wrong about."""
     import inspect
-    src = inspect.getsource(fd.process_function)
+    src = inspect.getsource(fd._process_function_inner)
     assert 'audit_outcome = "skipped_good_enough"' in src
 
 
