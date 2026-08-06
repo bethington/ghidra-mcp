@@ -3361,6 +3361,27 @@ def fetch_function_data(program, address, mode="FIX"):
                 return data
         data["analyze_for_doc"] = afd
 
+    # CALLEE CONTEXT. A pass-through wrapper's entire meaning lives in what it
+    # calls, and the prompt used to say only that a callee EXISTED and was
+    # undocumented -- never what it did.
+    #
+    # MEASURED 2026-08-06 on SGD2FreeRes, whose original source we have.
+    # `Sgd2fr_D2Client_IsMouseOver800NewStatsButton` is `return FUN_10001d70();`.
+    # The model was given the name of the callee and nothing else, could not
+    # decline to answer, and produced `CLIENT_CheckViewportVisible` -- a
+    # coherent, well-structured, internally consistent description of a function
+    # that does not exist. The answer was one hop away: the callee builds a rect
+    # from half the screen dimensions and does a four-sided containment test,
+    # which reads as a hit test to anyone who sees it.
+    #
+    # Thin wrappers are not rare: 12 of 140 decompiled real-code functions
+    # (8.6%) are <= 3 statements with exactly one callee.
+    #
+    # A documented callee contributes its NAME AND PLATE; an undocumented one
+    # contributes a bounded slice of its decompilation. Bounded because the
+    # point is evidence, not a second function's worth of tokens.
+        data["callee_context"] = _gather_callee_context(afd, program)
+
     # Pre-flight: detect addresses that aren't functions at all (raw data,
     # PRIMITIVE-typed regions, dead code that the priority queue lists with
     # a stale score). Without this signal the worker falls through to the
@@ -5834,6 +5855,83 @@ def build_fix_prompt(func_name, address, ghidra_data, program=None):
     return "\n".join(sections)
 
 
+# How much of a callee to show. Enough to reveal what it does, not so much that
+# a wrapper's prompt becomes a second function's worth of tokens.
+_CALLEE_CONTEXT_MAX = 6            # callees described at all
+_CALLEE_BODY_MAX_LINES = 40        # lines of an UNDOCUMENTED callee's body
+
+
+def _gather_callee_context(afd, program):
+    """What each callee IS, for the prompt.
+
+    A documented callee contributes its name and plate -- the cheapest and best
+    evidence, and the reason documenting callees BEFORE callers matters. An
+    undocumented one contributes a bounded slice of its decompilation, because
+    otherwise a pass-through wrapper is documented from no evidence at all.
+
+    Returns [] on any failure: missing context must degrade the prompt, never
+    fail the run.
+    """
+    if not isinstance(afd, dict):
+        return []
+    callees = afd.get("callees") or []
+    if not isinstance(callees, list):
+        return []
+
+    out = []
+    for c in callees[:_CALLEE_CONTEXT_MAX]:
+        if not isinstance(c, dict):
+            continue
+        name = c.get("name") or ""
+        if not name:
+            continue
+        entry = {"name": name, "undocumented": bool(c.get("undocumented"))}
+        try:
+            # SINGLE mode with the sanctioned unwrapper, not bulk. Bulk returns
+            # a name-keyed map, which reads the payload without going through
+            # decompiled_text() -- and the response-contract guard rejects that
+            # on sight, correctly: every consumer of a reshaped endpoint has to
+            # unwrap it one way, or the next shape change breaks them silently.
+            # The cost is bounded by _CALLEE_CONTEXT_MAX calls.
+            params = {"address": name, "program": program} if program else {"address": name}
+            resp = ghidra_get("/decompile_function", params=params, timeout=45)
+            body = decompiled_text(resp)
+            if body and not body.lstrip().startswith("Error:"):
+                lines = [ln for ln in body.splitlines() if ln.strip()]
+                entry["body"] = "\n".join(lines[:_CALLEE_BODY_MAX_LINES])
+                if len(lines) > _CALLEE_BODY_MAX_LINES:
+                    entry["body"] += f"\n    ... ({len(lines) - _CALLEE_BODY_MAX_LINES} more lines)"
+        except Exception:
+            pass
+        out.append(entry)
+    return out
+
+
+def render_callee_context(callee_context):
+    """The prompt section. Kept separate so it is testable without Ghidra."""
+    if not callee_context:
+        return ""
+    parts = ["## Callees (what this function delegates to)",
+             "",
+             "A wrapper's meaning lives in what it calls. Use these bodies as"
+             " evidence for what the target function is FOR -- and note that two"
+             " wrappers over the SAME callee can have opposite meanings (a getter"
+             " and a setter sharing one helper), so read how the target passes"
+             " arguments and uses the return, not the callee alone.",
+             ""]
+    for c in callee_context:
+        tag = "undocumented" if c.get("undocumented") else "documented"
+        parts.append(f"### {c['name']} ({tag})")
+        if c.get("body"):
+            parts.append("```c")
+            parts.append(c["body"])
+            parts.append("```")
+        else:
+            parts.append("(body unavailable)")
+        parts.append("")
+    return "\n".join(parts)
+
+
 def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
     """Assemble a full documentation prompt from modules + inline data."""
     sections = [read_module("core.md"), ""]
@@ -5863,6 +5961,15 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
             afd_str = str(afd)
         sections.append(afd_str)
         sections.append("```")
+
+    # Callee bodies. Placed right after the analysis and BEFORE the target's own
+    # decompilation, because for a pass-through wrapper this section carries the
+    # only evidence of what the function is FOR -- without it the model has the
+    # callee's NAME and nothing more, which is how CLIENT_CheckViewportVisible
+    # was invented for a mouse-over hit test.
+    callee_section = render_callee_context(ghidra_data.get("callee_context"))
+    if callee_section:
+        sections.append(callee_section)
     elif afd:
         sections.append("## Full Analysis: FETCH FAILED")
         sections.append(
