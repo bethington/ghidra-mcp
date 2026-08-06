@@ -84,12 +84,44 @@ HARD_CALLEE_NAMES = frozenset({
     # functions.
     "_amsg_exit", "__crt_debugger_hook",
     "_cinit", "_initterm", "_initterm_e",
-    "_invoke_watson", "_invalid_parameter", "_invalid_parameter_noinfo",
+    "_invalid_parameter", "_invalid_parameter_noinfo",
     "unhandled_exception", "_terminate",
     "__std_terminate", "__std_exception_copy", "__std_exception_destroy",
     # iostream helpers — dead giveaways for ParseSignedShort-style code
     # that never appear in authored user functions.
-    "_Xinvalid_argument", "_Xout_of_range", "_Xlength_error", "_Xbad_alloc",
+    #
+    # `_invoke_watson` and `_Xout_of_range` USED TO LIVE HERE and were moved to
+    # SOFT_BODY_SIGNALS (where both already appeared) on measurement, not
+    # taste. Against SGD2FreeRes-GDI.dll -- a binary whose original source we
+    # have, so every verdict is scorable -- their per-signal precision was:
+    #
+    #     _invoke_watson       34 STL / 16 authored   0.68
+    #     _Xout_of_range        3 STL /  3 authored   0.50
+    #     _CxxThrowException    7 STL /  0 authored   1.00   <- kept HARD
+    #     _Xlength_error        5 STL /  0 authored   1.00   <- kept HARD
+    #     __std_exception_copy 11 STL /  0 authored   1.00   <- kept HARD
+    #
+    # Neither is CRT-only in practice: MSVC emits `_invoke_watson` into
+    # ORDINARY functions through /GS and secure-CRT validation, and
+    # `_Xout_of_range` arrives inlined with `std::vector::at`. The authored
+    # casualties were plain game code -- `DrawLeftInterfaceBarBackground`,
+    # `mapi::GamePatch::MakeGameBranchPatch`, `sgd2fr::config::GetCustomMpqPath`.
+    #
+    # Whole-binary effect of the demotion, with STL as the positive control so
+    # that a detector which simply stopped claiming things could not pass:
+    #
+    #     before   false positives 17/377 (4.5%)   recall 63/285 (22.1%)
+    #     after    false positives  0/377 (0.0%)   recall 28/285 ( 9.8%)
+    #
+    # Recall is the right thing to spend. A `LIB_*` classification retires a
+    # function from the selector PERMANENTLY, so a false positive deletes
+    # authored code from the workload for good, while a miss only means the
+    # function gets documented -- and the EXACT lanes (bytes / FID / BSim) are
+    # what this project relies on for library recall anyway. Same rule as
+    # everywhere else here: ambiguous or weak => write NOTHING.
+    #
+    # Do not restore either name without re-running that measurement.
+    "_Xinvalid_argument", "_Xlength_error", "_Xbad_alloc",
     # std::locale / atexit-registration helpers (v5.9.1 — caught the
     # SetGlobalLocale miss). These are MSVCP library internals; user code
     # registers atexit handlers via `atexit()` (no underscore) and never
@@ -191,6 +223,45 @@ _SOFT_BODY_HIT = "soft_body:{}"
 _SOFT_NAME_HIT = "soft_name"
 
 
+# MEASURED 2026-08-06 against a binary whose ORIGINAL SOURCE we have. The body
+# these signals are searched in is `/decompile_function` output, and that output
+# CARRIES THE COMMENTS -- the plate at the top and every inline comment a
+# previous documentation pass wrote. So the detector was matching PROSE, not
+# code, and two things followed from it:
+#
+#   1. `d2::CelFile_Api::GetCel` -- three authored lines wrapping a delegate --
+#      was classified `hard_callee:_CxxThrowException` when the ONLY occurrences
+#      of that string in its body were an inline comment from an earlier pass
+#      ("...jump to thunk_FUN_10001e60 which calls _CxxThrowException") and the
+#      detector's own plate. The decompiled CODE never mentions it.
+#
+#   2. The classification became SELF-CONFIRMING. The stamped plate embeds the
+#      reason string verbatim ("matched signals: hard_callee:_CxxThrowException"),
+#      so the next run reads that plate back out of the body and re-derives the
+#      same verdict from its own output. The documented escape hatch --
+#      `--scan --refresh` -- re-reads the same plate, so it cannot clear it
+#      either. A `LIB_*` classification retires a function from the selector
+#      permanently, which makes an un-clearable false positive permanent too.
+#
+# Stripping comments is the whole fix for both: genuine library code CALLS these
+# helpers in code, so nothing real is lost, and a signal that only ever appeared
+# in prose was never evidence in the first place.
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+
+
+def strip_comments(decompile: Optional[str]) -> str:
+    """Decompiler output with comments removed, for substring evidence.
+
+    Both the hard-callee fallback and the soft body signals must run over CODE.
+    A name that appears only in documentation is a statement ABOUT the function,
+    never a fact about what it calls.
+    """
+    if not decompile:
+        return ""
+    return _LINE_COMMENT_RE.sub(" ", _BLOCK_COMMENT_RE.sub(" ", decompile))
+
+
 def detect_library_code(
     name: Optional[str],
     decompile: Optional[str],
@@ -227,7 +298,10 @@ def detect_library_code(
                 # one hit is enough — don't blow up the reason list
                 break
 
-    body = decompile or ""
+    # CODE ONLY -- see strip_comments. The decompile carries the plate and every
+    # inline comment a previous pass wrote, and matching those made the detector
+    # confirm its own output.
+    body = strip_comments(decompile)
     # Cheap-callee substring search as a fallback when call-graph data isn't
     # populated yet. Each HARD_CALLEE_NAMES entry inside the body counts as a
     # hard hit because these symbols are never legitimate user-code call
@@ -273,6 +347,7 @@ def format_plate(result: DetectionResult) -> str:
 __all__ = [
     "DetectionResult",
     "detect_library_code",
+    "strip_comments",
     "format_plate",
     "LIBRARY_PLATE_TEMPLATE",
     "HARD_NAME_PATTERNS",

@@ -63,11 +63,18 @@ def test_security_check_cookie_alone_not_enough():
     )
 
 
-def test_hard_callee_invoke_watson_flags_as_library():
-    """_invoke_watson is the MSVC invalid-parameter handler (CRT only)."""
+def test_invoke_watson_alone_no_longer_flags_as_library():
+    """SUPERSEDED BY MEASUREMENT 2026-08-06. This test previously asserted the
+    opposite, on the belief that `_invoke_watson` is "CRT only". It is not:
+    MSVC emits it into ordinary functions through /GS and secure-CRT parameter
+    validation. Scored against a binary whose original source we have, the
+    signal ran 34 STL / 16 authored = 0.68 precision, and the authored
+    casualties were plain game code (`DrawLeftInterfaceBarBackground`,
+    `mapi::GamePatch::MakeGameBranchPatch`). It is now a SOFT signal and needs
+    corroboration -- see the calibration block at the end of this file."""
     body = "void func() { _invoke_watson(0,0,0,0,0); }"
     result = detect_library_code("FUN_bbbb", body)
-    assert result.is_library
+    assert not result.is_library
 
 
 def test_cxx_throw_flags_as_library():
@@ -218,13 +225,18 @@ def test_hard_callee_names_set_is_nonempty_and_canonical():
     intentionally live in SOFT_BODY_SIGNALS instead."""
     expected_canonical = {
         "__SEH_prolog4", "__except_handler4",
-        "_invoke_watson", "_CxxThrowException",
+        "_CxxThrowException",
         "_Xinvalid_argument",
     }
     assert expected_canonical.issubset(HARD_CALLEE_NAMES)
     # /GS helpers must NOT be hard — would false-positive on user code.
     assert "__security_check_cookie" not in HARD_CALLEE_NAMES
     assert "__chkstk" not in HARD_CALLEE_NAMES
+    # MEASURED false positives on authored code -- demoted to SOFT 2026-08-06.
+    # Restoring either without re-running the calibration re-opens a defect
+    # that permanently retired 17 authored functions on one binary.
+    assert "_invoke_watson" not in HARD_CALLEE_NAMES
+    assert "_Xout_of_range" not in HARD_CALLEE_NAMES
 
 
 def test_v591_locale_atexit_patterns_added():
@@ -367,3 +379,122 @@ def test_ParseSignedShort_with_iostream_body_still_classifies():
     """
     result = detect_library_code("ParseSignedShort", body)
     assert result.is_library
+
+
+# ---------------------------------------------------------------------------
+# The body is decompiler output, and decompiler output CARRIES COMMENTS
+# ---------------------------------------------------------------------------
+# MEASURED 2026-08-06 against SGD2FreeRes-GDI.dll, a binary whose original
+# source we have. `d2::CelFile_Api::GetCel` is three authored lines:
+#
+#     Cel_View CelFile_Api::GetCel(unsigned int direction, unsigned int frame) {
+#       CelFile_Wrapper wrapper(this->Get_());
+#       return wrapper.GetCel(direction, frame);
+#     }
+#
+# It was classified `hard_callee:_CxxThrowException` and permanently retired
+# from the selector. The only occurrences of that string in its decompile were
+# an inline comment written by an earlier documentation pass and the detector's
+# own stamped plate. The CODE never mentions it.
+#
+# A `LIB_*` classification retires a function forever, so this is not a missed
+# skip -- it is authored code silently removed from the workload.
+
+
+def test_a_name_that_appears_only_in_a_comment_is_not_evidence():
+    """The measured GetCel case, reduced. A statement ABOUT a function is
+    never a fact about what it calls."""
+    body = """
+    /* Failure branch (status == 0xFF): jump to thunk_FUN_10001e60 which
+       calls _CxxThrowException -- does not return. */
+    puVar1 = InitializeRecordHeader(&local_20, *(uint *)this);
+    return BuildLookupResult(puVar1, param_1, param_2);
+    """
+    assert not detect_library_code("FUN_1001e1f0", body).is_library
+
+
+def test_a_line_comment_is_stripped_too():
+    body = "iVar1 = Helper(a, b);   // calls __SEH_prolog4 on the error path\n"
+    assert not detect_library_code("DoWork", body).is_library
+
+
+def test_the_detectors_own_plate_must_not_re_confirm_it():
+    """SELF-CONFIRMATION. The stamped plate embeds the reason string verbatim,
+    so an unfiltered body lets the next run re-derive the verdict from its own
+    output -- and `--scan --refresh`, the documented escape hatch, re-reads
+    that same plate. An un-clearable false positive is a permanent one."""
+    from library_code_detector import LIBRARY_PLATE_TEMPLATE, format_plate
+    from library_code_detector import DetectionResult
+
+    plate = format_plate(DetectionResult(
+        is_library=True, confidence=0.8,
+        reasons=["hard_callee:_CxxThrowException", "soft_body:_CxxThrowException"]))
+    body = f"/* {plate} */\n\nvoid FUN_1001e1f0(void) {{ Helper(); return; }}\n"
+    assert not detect_library_code("FUN_1001e1f0", body).is_library
+
+
+def test_a_real_call_in_code_still_classifies():
+    """The mirror of the guard above: a detector that stopped claiming
+    anything would pass every false-positive test while being dead."""
+    body = """
+    /* documentation mentioning nothing in particular */
+    __SEH_prolog4();
+    iVar1 = _Xout_of_range("bad");
+    """
+    assert detect_library_code("FUN_10052ba0", body).is_library
+
+
+def test_code_survives_stripping():
+    from library_code_detector import strip_comments
+    out = strip_comments("a(); /* x */ b(); // y\nc();")
+    assert "a()" in out and "b()" in out and "c()" in out
+    assert "x" not in out and "y" not in out
+
+
+def test_stripping_none_is_empty_not_an_exception():
+    from library_code_detector import strip_comments
+    assert strip_comments(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# `_invoke_watson` / `_Xout_of_range` are NOT hard evidence
+# ---------------------------------------------------------------------------
+# CALIBRATED 2026-08-06 against SGD2FreeRes-GDI.dll, whose original source we
+# have. Per-signal precision over 377 authored + 285 STL functions:
+#
+#     _invoke_watson      34 STL / 16 authored   0.68
+#     _Xout_of_range       3 STL /  3 authored   0.50
+#     _CxxThrowException   7 STL /  0 authored   1.00   (still hard)
+#     _Xlength_error       5 STL /  0 authored   1.00   (still hard)
+#
+# MSVC emits `_invoke_watson` into ordinary functions via /GS and secure-CRT
+# validation, and `_Xout_of_range` arrives inlined with `std::vector::at`.
+# Demoting the two took false positives 17/377 -> 0/377 at 22.1% -> 9.8% recall.
+
+
+def test_invoke_watson_alone_is_not_enough():
+    """`DrawLeftInterfaceBarBackground` and `MakeGameBranchPatch` are authored
+    game code that was being permanently retired on this signal alone."""
+    body = "iVar1 = Draw(a, b);\n  _invoke_watson(0, 0, 0, 0, 0);\n  return iVar1;"
+    assert not detect_library_code("FUN_10011940", body).is_library
+
+
+def test_Xout_of_range_alone_is_not_enough():
+    """Arrives inlined with std::vector::at in ordinary user code."""
+    body = "if (idx >= n) { _Xout_of_range(\"invalid vector subscript\"); }\n  return v[idx];"
+    assert not detect_library_code("FUN_10003eb0", body).is_library
+
+
+def test_invoke_watson_still_counts_when_corroborated():
+    """Demoted, not deleted -- it remains in SOFT_BODY_SIGNALS, so a soft name
+    pattern plus this body signal still classifies. A signal removed outright
+    would have cost recall the measurement says we do not need to spend."""
+    body = "_invoke_watson(0,0,0,0,0);"
+    assert detect_library_code("ParseSignedShort", body).is_library
+
+
+def test_the_clean_hard_signals_are_untouched():
+    """Precision 1.00 on the measured corpus -- demoting these would cost
+    recall for no false-positive benefit."""
+    for callee in ("_CxxThrowException", "_Xlength_error", "__std_exception_copy"):
+        assert detect_library_code("FUN_10000000", f"  {callee}(x);", None).is_library, callee
