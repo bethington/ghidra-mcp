@@ -143,6 +143,21 @@ class NameVerdict:
 # identified constructor must not read as a partial miss.
 _STRUCTOR_SUFFIXES = {"ctor", "constructor", "dtor", "destructor"}
 
+# A constructor also has no VERB of its own -- `Class::Class` names the class
+# twice and nothing else -- so a documented `InitializeFooPatch` is penalised
+# for saying what the function does. MEASURED 2026-08-06: five constructors in
+# the blind sample scored `partial`, four of them with missed=[] (FULL recall),
+# solely for the words below. Constructing and initializing are the same act,
+# and these already sit in one _VERB_SYNONYMS group; the constructor simply has
+# no token for them to match against.
+#
+# Scoped to constructors and destructors only. The fifth row genuinely dropped
+# "Get" from GetGlobalEquipmentSlotLayoutPatch and correctly stays partial --
+# the rule credits the missing verb, not a missing concept.
+_STRUCTOR_VERBS = {"initialize", "initialise", "init", "construct", "create",
+                   "build", "setup", "make",
+                   "destroy", "free", "release", "cleanup", "dispose"}
+
 
 def _is_structor(truth: str) -> bool:
     """Does the truth name a C++ constructor or destructor?
@@ -170,7 +185,8 @@ def compare_names(documented: str, truth: str) -> NameVerdict:
     if _is_structor(truth):
         # The suffix IS the operation the truth expresses by repeating the class
         # name; crediting it is reading the same fact, not relaxing the bar.
-        invented = [d for d in invented if d not in _STRUCTOR_SUFFIXES]
+        allowed = _STRUCTOR_SUFFIXES | _STRUCTOR_VERBS
+        invented = [d for d in invented if d not in allowed]
     return NameVerdict(truth=truth, documented=documented, truth_tokens=tt,
                        doc_tokens=dt, matched=matched, missed=missed,
                        invented=invented)

@@ -214,3 +214,38 @@ def test_the_credit_does_not_leak_to_ordinary_functions():
 def test_a_genuinely_wrong_constructor_is_still_wrong():
     v = gtr.compare_names("SomethingElse_ctor", _CTOR_TRUTH)
     assert v.verdict == "wrong"
+
+
+# --- constructor VERBS, not just suffixes ------------------------------------
+# MEASURED 2026-08-06: five constructors in the blind sample scored `partial`,
+# four with missed=[] (FULL recall), penalised solely for saying `Initialize` or
+# `Build`. C++ gives a constructor no verb of its own -- `Class::Class` names
+# the class twice -- so there is no token for a correct verb to match against.
+
+def test_a_constructor_verb_is_credited():
+    v = gtr.compare_names("InitializeSetScreenShiftPatch109D",
+                          "sgd2fr::d2client::SetScreenShiftPatch_1_09D::SetScreenShiftPatch_1_09D")
+    assert v.verdict == "correct", (v.missed, v.invented)
+
+
+def test_build_counts_as_a_constructor_verb():
+    v = gtr.compare_names(
+        "CLIENT_BuildSetGeneralDisplayWidthAndHeightPatch109D",
+        "sgd2fr::d2client::SetGeneralDisplayWidthAndHeightPatch_1_09D::"
+        "SetGeneralDisplayWidthAndHeightPatch_1_09D")
+    assert v.verdict == "correct", (v.missed, v.invented)
+
+
+def test_a_dropped_concept_still_costs_the_constructor():
+    """The measured fifth row: it lost 'Get'. The rule credits the missing VERB,
+    never a missing concept -- otherwise it would flatter everything."""
+    v = gtr.compare_names(
+        "InitializeGlobalEquipmentSlotLayoutPatch",
+        "sgd2fr::d2common::GetGlobalEquipmentSlotLayoutPatch_1_09D::"
+        "GetGlobalEquipmentSlotLayoutPatch_1_09D")
+    assert v.verdict == "partial" and "get" in v.missed
+
+
+def test_constructor_verbs_are_not_credited_on_ordinary_functions():
+    v = gtr.compare_names("InitializeApplyPatch", "sgd2fr::ApplyPatch")
+    assert "initialize" in v.invented
