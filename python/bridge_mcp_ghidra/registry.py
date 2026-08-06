@@ -273,7 +273,21 @@ def _register_tool_def(tool_def: dict) -> bool:
     handler.__name__ = name
     handler.__doc__ = description
 
-    mcp.tool(name=name, description=description, annotations=_tool_annotations(tool_def))(handler)
+    mcp.tool(
+        name=name,
+        description=description,
+        annotations=_tool_annotations(tool_def),
+        # Every tool here returns the server's response body as text. Left to
+        # infer from the `-> str` annotation, FastMCP declares
+        # outputSchema {"result": {"type": "string"}} and wraps the body in
+        # structuredContent {"result": "<the json>"} — a structured shape whose
+        # single field is an opaque string. That advertises a contract the tool
+        # does not have; a client reading `result` still has to parse the JSON
+        # itself. Declaring truthful per-tool output schemas needs response
+        # shapes described on the Java side, which no endpoint does yet, so the
+        # honest option is to declare none.
+        structured_output=False,
+    )(handler)
     state._dynamic_tool_names.append(name)
     return True
 

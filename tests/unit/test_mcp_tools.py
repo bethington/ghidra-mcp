@@ -680,6 +680,52 @@ class TestFailureDetection(unittest.TestCase):
                 state._dynamic_tool_names.remove(name)
 
 
+class TestNoFakeOutputSchema(unittest.TestCase):
+    """No tool may advertise an output schema it does not have.
+
+    Every tool returns the server's response body as text. Inferred from the
+    `-> str` annotation, FastMCP declares outputSchema
+    {"result": {"type": "string"}} and wraps the body in structuredContent
+    {"result": "<the json>"} — a structured shape whose one field is an opaque
+    string, so a client reading `result` still has to parse the JSON. Truthful
+    per-tool schemas need response shapes declared server-side; until then none
+    is the honest answer, hence structured_output=False everywhere.
+    """
+
+    def test_static_tools_declare_no_output_schema(self):
+        from bridge_mcp_ghidra import config
+        from bridge_mcp_ghidra.server import mcp
+
+        offenders = []
+        for name in sorted(config.STATIC_TOOL_NAMES):
+            tool = mcp._tool_manager._tools.get(name)
+            if tool is not None and tool.output_schema is not None:
+                offenders.append(name)
+        self.assertEqual(offenders, [])
+
+    def test_dynamic_tool_declares_no_output_schema(self):
+        from bridge_mcp_ghidra import state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "output_schema_probe_tool"
+        try:
+            _register_tool_def({
+                "name": name,
+                "endpoint": "/probe",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {"type": "object", "properties": {}},
+                "read_only": True,
+                "destructive": False,
+            })
+            self.assertIsNone(mcp._tool_manager._tools[name].output_schema)
+        finally:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+
 class TestStaticToolsAreAllClassified(unittest.TestCase):
     def test_every_static_tool_declares_annotations(self):
         """A static tool with no annotations is unusable while planning."""
