@@ -91,8 +91,7 @@ def _parse_schema(raw: dict) -> list[dict]:
             if p.get("required", False):
                 required.append(p["name"])
 
-        tool_defs.append(
-            {
+        tool_def = {
                 "name": raw_name,
                 "original_name": raw_name,
                 "endpoint": path,
@@ -105,7 +104,14 @@ def _parse_schema(raw: dict) -> list[dict]:
                     "properties": properties,
                     "required": required,
                 },
-            }
-        )
+        }
+        # Present only for tools the server has classified (@McpTool's
+        # `access`). Absent means "unclassified": the bridge then emits no MCP
+        # annotations at all rather than guessing, because a wrong
+        # readOnlyHint=true lets a mutating tool run unattended.
+        if "read_only" in tool:
+            tool_def["read_only"] = bool(tool["read_only"])
+            tool_def["destructive"] = bool(tool.get("destructive", False))
+        tool_defs.append(tool_def)
 
     return _normalize_tool_def_names(tool_defs)

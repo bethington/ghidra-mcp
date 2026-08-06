@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.ToolAccess;
 import junit.framework.TestCase;
 
 import java.util.ArrayList;
@@ -23,7 +24,7 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
             params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string", false));
         }
         return new AnnotationScanner.ToolDescriptor("/open_project", "POST", "scanner description",
-                "headless", null, params);
+                "headless", null, ToolAccess.WRITE, params);
     }
 
     private static JsonObject entry(String description, String category, String... paramNames) {

@@ -8,10 +8,19 @@ from typing import Annotated
 
 from pydantic import Field
 
+from mcp.types import ToolAnnotations
+
 from . import dispatch
 from . import state
 from . import transport
-from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES, logger
+from .config import (
+    DESTRUCTIVE_TOOL,
+    READ_ONLY_TOOL,
+    STATIC_TOOL_NAMES,
+    WRITE_TOOL,
+    _ALL_STATIC_TOOL_NAMES,
+    logger,
+)
 from .schema import _TYPE_MAP, _normalize_tool_def_names, _parse_schema
 from .server import Context, mcp
 from .validation import sanitize_address, validate_tool_name
@@ -261,9 +270,33 @@ def _register_tool_def(tool_def: dict) -> bool:
     handler.__name__ = name
     handler.__doc__ = description
 
-    mcp.tool(name=name, description=description)(handler)
+    mcp.tool(name=name, description=description, annotations=_tool_annotations(tool_def))(handler)
     state._dynamic_tool_names.append(name)
     return True
+
+
+def _tool_annotations(tool_def: dict) -> ToolAnnotations | None:
+    """Map the server's `access` classification onto MCP tool annotations.
+
+    Clients act on these, and not only cosmetically: Claude Code reads a tool's
+    read-only-ness solely from ``readOnlyHint`` (absent ⇒ false) and, in plan
+    mode, forces a permission prompt for every MCP tool that is not read-only —
+    one no allow-rule can suppress, since the plan gate is evaluated ahead of
+    allow-rules and returns early. The same flag decides whether calls may run
+    concurrently. So an unannotated read is a tool that cannot be used
+    unattended and cannot be parallelised.
+
+    A tool the server has not classified gets no annotations at all: guessing
+    read-only from the HTTP method would be wrong for the mutating GETs
+    (``/switch_program``, ``/save_program``, ``/open_program``,
+    ``/save_all_programs``) and letting one of those run unprompted while an
+    agent is still planning is the failure this is meant to avoid.
+    """
+    if "read_only" not in tool_def:
+        return None
+    if tool_def["read_only"]:
+        return READ_ONLY_TOOL
+    return DESTRUCTIVE_TOOL if tool_def.get("destructive") else WRITE_TOOL
 
 
 def _report_tool_registration_failures(failures: list[str]) -> None:

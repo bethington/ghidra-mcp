@@ -115,7 +115,7 @@ public class CommentService {
      * addresses. Unlike get_plate_comment, this does not require a function at the address --
      * so it can read the plate/EOL comment attached to a global/data symbol.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment", access = ToolAccess.READ_ONLY)
     public Response getComment(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
@@ -165,7 +165,7 @@ public class CommentService {
      * HTTP round trip per function -- thousands of calls for a mid-size DLL. This collapses
      * that to one call per batch, mirroring batch_set_comments' existence for the write side.
      */
-    @McpTool(path = "/batch_get_comments", description = "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    @McpTool(path = "/batch_get_comments", description = "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.READ_ONLY)
     public Response batchGetComments(
             @Param(value = "addresses", description = "Comma-separated addresses, each 0x<hex> (default space) or <space>:<hex>.") String addressesStr,
             @Param(value = "only_with_comments", defaultValue = "false",
@@ -235,7 +235,7 @@ public class CommentService {
      * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
      * comment on a data global via Listing.setComment.
      */
-    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment")
+    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment", access = ToolAccess.WRITE)
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
@@ -261,7 +261,7 @@ public class CommentService {
     /**
      * Batch set multiple comments (decompiler, disassembly, and plate) in a single operation.
      */
-    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.WRITE)
     public Response batchSetComments(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -470,7 +470,7 @@ public class CommentService {
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
      */
-    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.DESTRUCTIVE)
     public Response clearFunctionComments(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "

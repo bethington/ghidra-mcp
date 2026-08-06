@@ -196,7 +196,7 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis")
+    @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response listAnalyzers(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -224,7 +224,7 @@ public class AnalysisService {
     /**
      * Trigger auto-analysis on the current or named program.
      */
-    @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis")
+    @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
     public Response runAnalysis(
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
@@ -269,7 +269,7 @@ public class AnalysisService {
         return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
     }
 
-    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response analyzeDataRegion(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -454,7 +454,7 @@ public class AnalysisService {
         return detectArrayBounds(addressStr, maxScanRange, null);
     }
 
-    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response detectArrayBounds(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -521,7 +521,7 @@ public class AnalysisService {
         return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
     }
 
-    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFieldAccessContext(
             @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -628,7 +628,7 @@ public class AnalysisService {
         return inspectMemoryContent(addressStr, length, detectStrings, null);
     }
 
-    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response inspectMemoryContent(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -758,7 +758,7 @@ public class AnalysisService {
         return detectCryptoConstants(null);
     }
 
-    @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware")
+    @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware", access = ToolAccess.READ_ONLY)
     public Response detectCryptoConstants(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -785,7 +785,7 @@ public class AnalysisService {
         return searchBytePatterns(pattern, mask, null);
     }
 
-    @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis")
+    @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
             @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
@@ -892,7 +892,7 @@ public class AnalysisService {
             + "has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without "
             + "knowing the encoding. Case-insensitive substring match on both fields. Returns "
             + "{address, function, mnemonic, operands, bytes} per match.",
-        category = "analysis")
+        category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchInstructions(
             @Param(value = "mnemonic", defaultValue = "",
                 description = "Case-insensitive mnemonic match (exact, not substring — 'mov' matches 'MOV' but not 'movsd'). Omit to match any mnemonic.") String mnemonic,
@@ -1026,7 +1026,7 @@ public class AnalysisService {
         return findSimilarFunctions(targetFunction, threshold, null);
     }
 
-    @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis")
+    @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findSimilarFunctions(
             @Param(value = "target_function", description = "Function name") String targetFunction,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
@@ -1109,7 +1109,7 @@ public class AnalysisService {
         return analyzeControlFlow(functionName, null);
     }
 
-    @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis")
+    @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeControlFlow(
             @Param(value = "function_name", description = "Function name") String functionName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -1276,7 +1276,7 @@ public class AnalysisService {
         return findDeadCode(functionName, null);
     }
 
-    @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis")
+    @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -1321,7 +1321,7 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis")
+    @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionCompleteness(
             @Param(value = "function_address", paramType = "address", defaultValue = "",
                    description = "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") String functionAddress,
@@ -2101,7 +2101,7 @@ public class AnalysisService {
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
-    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findNextUndefinedFunction(
             @Param(value = "start_address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2188,7 +2188,7 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis")
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
             @Param(value = "name", description = "Function reference (name or address)") String name,
             @Param(value = "include_xrefs", defaultValue = "true",
@@ -2441,7 +2441,7 @@ public class AnalysisService {
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
-    @McpTool(path = "/search_functions_enhanced", description = "Advanced function search with filtering", category = "analysis")
+    @McpTool(path = "/search_functions_enhanced", description = "Advanced function search with filtering", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchFunctionsEnhanced(
             @Param(value = "name_pattern", description = "Name pattern (omit to match all)", defaultValue = "") String namePattern,
             @Param(value = "min_xrefs", description = "Minimum xref count filter (omit for no minimum)", defaultValue = "") Integer minXrefs,
@@ -4251,7 +4251,7 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeForDocumentation(
             @Param(value = "function_address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -4467,7 +4467,7 @@ public class AnalysisService {
                          + "function body. Useful for discovering missed functions in firmware and embedded "
                          + "binaries. Reports each contiguous uncovered range with its size, content type, "
                          + "and the nearest functions on each side.",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findCodeGaps(
             @Param(value = "min_size", defaultValue = "1",
                    description = "Minimum gap size in addressable units to report (increase to filter alignment padding)") int minSize,
@@ -4593,7 +4593,7 @@ public class AnalysisService {
                          + "(Varnode.getDescendants). Terminates at constants, parameters, call boundaries, or max_steps. "
                          + "Phi (MULTIEQUAL) nodes are summarized rather than recursed. On programs with multiple "
                          + "address spaces, prefix addresses with the space name (mem:1000).",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeDataflow(
             @Param(value = "address", paramType = "address",
                    description = "Address inside the target function where the value is observed. "
@@ -5022,7 +5022,7 @@ public class AnalysisService {
 
     @McpTool(path = "/get_function_pcode",
              description = "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFunctionPcode(
             @Param(value = "function_address", paramType = "address",
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
@@ -5103,7 +5103,7 @@ public class AnalysisService {
 
     @McpTool(path = "/get_language_metadata",
              description = "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response getLanguageMetadata(
             @Param(value = "include_registers", defaultValue = "true",
                    description = "Include the full register list (can be hundreds of entries on x86).") boolean includeRegisters,

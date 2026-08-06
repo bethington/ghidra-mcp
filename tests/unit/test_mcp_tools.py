@@ -492,5 +492,98 @@ class TestSchemaFormat(unittest.TestCase):
             self.assertRegex(tool["name"], pattern)
 
 
+class TestToolAccessAnnotations(unittest.TestCase):
+    """readOnlyHint/destructiveHint carried from the server's `access` value.
+
+    These are not decoration. Claude Code derives a tool's read-only-ness
+    solely from readOnlyHint (absent ⇒ false) and, in plan mode, forces a
+    permission prompt for every MCP tool that is not read-only — one an
+    allow-rule cannot suppress. The same flag gates parallel execution.
+    """
+
+    def _parsed(self, tool):
+        from bridge_mcp_ghidra import _parse_schema
+
+        return _parse_schema({"tools": [tool]})[0]
+
+    def test_read_only_flags_survive_parsing(self):
+        parsed = self._parsed(
+            {"path": "/list_functions", "method": "GET", "params": [],
+             "read_only": True, "destructive": False}
+        )
+        self.assertTrue(parsed["read_only"])
+        self.assertFalse(parsed["destructive"])
+
+    def test_unclassified_tool_carries_no_flags(self):
+        parsed = self._parsed({"path": "/mystery", "method": "GET", "params": []})
+        self.assertNotIn("read_only", parsed)
+        self.assertNotIn("destructive", parsed)
+
+    def test_annotations_map_from_flags(self):
+        from bridge_mcp_ghidra.registry import _tool_annotations
+
+        ro = _tool_annotations({"read_only": True, "destructive": False})
+        self.assertTrue(ro.readOnlyHint)
+        self.assertFalse(ro.destructiveHint)
+
+        write = _tool_annotations({"read_only": False, "destructive": False})
+        self.assertFalse(write.readOnlyHint)
+        self.assertFalse(write.destructiveHint)
+
+        destructive = _tool_annotations({"read_only": False, "destructive": True})
+        self.assertFalse(destructive.readOnlyHint)
+        self.assertTrue(destructive.destructiveHint)
+
+    def test_unclassified_tool_gets_no_annotations(self):
+        """Guessing read-only from the HTTP method is what this avoids: several
+        GET endpoints mutate (/switch_program, /save_program, /open_program,
+        /save_all_programs), and one of those running unprompted mid-plan is the
+        failure mode. No classification ⇒ no hint ⇒ client's own default."""
+        from bridge_mcp_ghidra.registry import _tool_annotations
+
+        self.assertIsNone(_tool_annotations({"http_method": "GET"}))
+
+    def test_registered_tool_exposes_its_annotations(self):
+        from bridge_mcp_ghidra import state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "annotation_probe_tool"
+        try:
+            self.assertTrue(
+                _register_tool_def({
+                    "name": name,
+                    "endpoint": "/annotation_probe",
+                    "http_method": "GET",
+                    "description": "probe",
+                    "input_schema": {"type": "object", "properties": {}},
+                    "read_only": True,
+                    "destructive": False,
+                })
+            )
+            tool = mcp._tool_manager._tools[name]
+            self.assertTrue(tool.annotations.readOnlyHint)
+        finally:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+
+class TestStaticToolsAreAllClassified(unittest.TestCase):
+    def test_every_static_tool_declares_annotations(self):
+        """A static tool with no annotations is unusable while planning."""
+        from bridge_mcp_ghidra.server import mcp
+        from bridge_mcp_ghidra import config
+
+        missing = []
+        for name in sorted(config.STATIC_TOOL_NAMES):
+            tool = mcp._tool_manager._tools.get(name)
+            if tool is None:
+                continue  # not registered on this platform (debugger proxies)
+            if tool.annotations is None or tool.annotations.readOnlyHint is None:
+                missing.append(name)
+        self.assertEqual(missing, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,7 @@ import java.lang.annotation.*;
  * <p>Example:
  * <pre>{@code
  * @McpTool(path = "/list_methods", method = "GET",
- *          description = "List all function names with pagination")
+ *          description = "List all function names with pagination", access = ToolAccess.READ_ONLY)
  * public Response getAllFunctionNames(
  *     @Param(value = "offset", defaultValue = "0") int offset,
  *     @Param(value = "limit", defaultValue = "100") int limit,
@@ -35,4 +35,13 @@ public @interface McpTool {
 
     /** Tool category for grouping (e.g., "listing", "function", "analysis"). */
     String category() default "";
+
+    /**
+     * What this tool does to state, which becomes MCP's {@code readOnlyHint} /
+     * {@code destructiveHint}. Declaring it is not cosmetic: clients refuse to
+     * run a non-read-only MCP tool unattended (Claude Code prompts for every
+     * one while planning, and will not parallelise them). Left
+     * {@link ToolAccess#UNSPECIFIED} no hints are emitted at all.
+     */
+    ToolAccess access() default ToolAccess.UNSPECIFIED;
 }

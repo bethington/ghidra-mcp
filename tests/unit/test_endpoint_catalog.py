@@ -171,8 +171,8 @@ class TestBridgeIsDynamic(unittest.TestCase):
 
         content = _bridge_source_text()
         mgmt_count = len(re.findall(r"@mcp\.tool\([^\n]*\)", content))
-        debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
-        oracle_count = len(re.findall(r"@_oracle_tool\(\)", content))
+        debugger_count = len(re.findall(r"@_debugger_tool\([^\n]*\)", content))
+        oracle_count = len(re.findall(r"@_oracle_tool\([^\n]*\)", content))
         tool_count = mgmt_count + debugger_count + oracle_count
         self.assertEqual(
             tool_count,
