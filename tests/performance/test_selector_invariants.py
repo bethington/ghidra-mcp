@@ -837,3 +837,59 @@ def test_auto_dequeue_vetoed_by_contradiction():
     from fun_doc import auto_dequeue_if_done
 
     assert auto_dequeue_if_done("a::1", 100, falsify_status="contradicted") is False
+
+
+import fun_doc as _fd  # noqa: E402
+
+
+# --- bottom-up readiness: unknown is not the same as leaf --------------------
+# MEASURED 2026-08-06. `_callee_readiness` returned 1.0 -- maximum readiness,
+# the value a trivially-ready leaf gets -- for any function whose callee list
+# had never been populated. Only 10,904 of 63,401 corpus functions (17.2%) have
+# one; D2Client (3,679), D2Common (2,507), ProjectDiablo (15,248), glide3x
+# (10,221) and libcrypto (6,996) have ZERO. So the bottom-up ordering the
+# selector documents itself as doing was inert everywhere the scan had not run,
+# and it read as working because it always returned a number.
+#
+# The distinction was already in the data: 50,155 rows have no `callees` key at
+# all, while 2,342 carry an explicit [] meaning "scanned, genuinely a leaf".
+# Same principle as falsify's CONF_BLOCKED and the port classifier's "unknown":
+# cannot tell is not the same as passed.
+
+def _f(addr, **kw):
+    base = {"program": "/P", "program_name": "P.dll", "address": addr,
+            "name": f"FUN_{addr}", "score": 0, "fixable": 5}
+    base.update(kw)
+    return base
+
+
+def test_an_unscanned_function_is_not_called_ready():
+    """The measured defect: no callee list read as maximum readiness."""
+    assert _fd._callee_readiness(_f("1000"), {}) is None
+
+
+def test_an_explicit_empty_list_is_a_real_leaf():
+    assert _fd._callee_readiness(_f("1000", callees=[]), {}) == 1.0
+
+
+def test_readiness_is_the_documented_fraction():
+    funcs = {
+        "/P::2000": _f("2000", score=95),      # documented
+        "/P::3000": _f("3000", score=10),      # not
+    }
+    r = _fd._callee_readiness(_f("1000", callees=["2000", "3000"]), funcs)
+    assert r == 0.5
+
+
+def test_unknown_sorts_between_ready_and_blocked():
+    """Last would stall every unscanned binary -- 50,155 functions, all of
+    D2Client and D2Common. First is what made the ordering inert."""
+    blocked = 0.0
+    assert blocked < _fd._READINESS_UNKNOWN < 1.0
+
+
+def test_an_external_callee_does_not_block():
+    """A callee that is not in state is an import from another DLL we cannot
+    document, so waiting on it would stall the caller forever."""
+    r = _fd._callee_readiness(_f("1000", callees=["deadbeef"]), {})
+    assert r == 1.0

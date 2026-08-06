@@ -3640,6 +3640,11 @@ def populate_call_graph(state, prog_path):
     return stamped
 
 
+# Sorts after a function whose callees are all documented (1.0) and before
+# one with real undocumented dependencies (< this).
+_READINESS_UNKNOWN = 0.75
+
+
 def _callee_readiness(func, all_funcs, good_enough=80):
     """Fraction of this function's callees that are documented (score >= good_enough).
 
@@ -3651,9 +3656,27 @@ def _callee_readiness(func, all_funcs, good_enough=80):
     External callees (address not found in state) are treated as documented —
     they're imports from other DLLs that we can't control.
     """
+    # "callees not yet populated" is NOT the same fact as "this is a leaf", and
+    # collapsing them made this whole ordering inert for most of the corpus.
+    #
+    # MEASURED 2026-08-06: only 10,904 of 63,401 functions (17.2%) have a
+    # populated callee list. D2Client (3,679), D2Common (2,507),
+    # ProjectDiablo (15,248), glide3x (10,221) and libcrypto (6,996) have ZERO.
+    # Every one of those returned 1.0 here -- maximum readiness, sorted as
+    # though it were a trivially-ready leaf -- so the bottom-up sort ordered
+    # nothing at all wherever the scan had not run. It reads as working because
+    # it always returns a number.
+    #
+    # The distinction is already IN the data and was simply not used: 50,155
+    # rows have no `callees` key (never scanned) while 2,342 carry an explicit
+    # [] (scanned, genuinely a leaf). Same principle as falsify's CONF_BLOCKED
+    # rule and the classifier's "unknown" -- cannot tell is not the same as
+    # passed, and must never be rewarded as if it were.
     callees = func.get("callees")
+    if callees is None:
+        return None                    # never scanned: unknown, not ready
     if not callees:
-        return 1.0  # leaf function or callees not yet populated
+        return 1.0                     # explicit []: a real leaf
     prog_path = func.get("program")
     documented = 0
     for callee_addr in callees:
@@ -4446,6 +4469,14 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             #   4. Trunk functions (readiness~0) sort last
             # Within each tier, ROI determines which function to pick.
             readiness = _callee_readiness(func, funcs, good_enough)
+            if readiness is None:
+                # Unknown sorts BETWEEN known-ready and known-blocked. Putting
+                # it last would stall every binary whose call graph has not been
+                # scanned -- 50,155 functions, including all of D2Client and
+                # D2Common -- which is a far worse outcome than a suboptimal
+                # order. Putting it first is what the old code did, and that is
+                # what made the ordering inert.
+                readiness = _READINESS_UNKNOWN
             is_leaf = not func.get("callees")
             roi = fixable * (1 + callers / 10)
             if score < good_enough and fixable > 0:
