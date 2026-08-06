@@ -729,3 +729,66 @@ def test_capability_pending_readmitted_when_capability_turns_on(monkeypatch):
 
 def port_pipeline_select(funcs):
     return pp.select_port_candidates(funcs, set(), limit=10)
+
+
+# --- delegation to unproven callees -----------------------------------------
+# MEASURED 2026-08-05 on SGD2FreeRes. `sgd2fr::patches::Patches::Apply` -- the
+# function that installs every patch the mod applies -- classified `leaf` on a
+# body that is four calls and nothing else. It has no DAT_ global, no `->`, no
+# struct-typed pointer, so it cleared every hard-stateful guard and fell through
+# to "Otherwise -> leaf".
+#
+# `leaf` means "provable via the static /emulate_function harness", and a
+# class-A shadow dispatcher runs the reimpl IN ADDITION TO the original -- so
+# proving this one that way applies every patch a SECOND time.
+#
+# The rule already existed and was only wired to one class: `_callee_is_pure`
+# states "a body that was not supplied cannot be shown pure and returns False --
+# unproven is treated as unsafe", but `_all_callees_pure` was consulted only on
+# the outbuf_leaf path. The plain-leaf fallthrough had no rule about calls.
+
+_DELEGATING_BODY = """void __fastcall FUN_100059e0(int param_1)
+{
+  FUN_10010ba0(param_1);
+  FUN_10010bd0(param_1 + 0x30);
+  FUN_10010bf0(param_1 + 0x54);
+  FUN_10010c20(param_1 + 0x90);
+  return;
+}"""
+
+_PURE_CALLEES = {n: f"int {n}(int a) {{ return a + 1; }}"
+                 for n in ("FUN_10010ba0", "FUN_10010bd0",
+                           "FUN_10010bf0", "FUN_10010c20")}
+
+
+def test_delegation_to_unknown_callees_is_not_a_leaf():
+    """The measured case: a clean-looking body that does all its work elsewhere."""
+    assert pp.classify_function(_DELEGATING_BODY) == "stateful"
+
+
+def test_provable_purity_still_reaches_leaf():
+    """Failing closed must not mean refusing everything -- supply the bodies and
+    the verdict is earned rather than assumed."""
+    assert pp.classify_function(
+        _DELEGATING_BODY, callee_bodies=_PURE_CALLEES) == "leaf"
+
+
+def test_one_dirty_callee_disqualifies_the_caller():
+    dirty = dict(_PURE_CALLEES)
+    dirty["FUN_10010bf0"] = "int FUN_10010bf0(int a) { DAT_10099000 = a; return a; }"
+    assert pp.classify_function(
+        _DELEGATING_BODY, callee_bodies=dirty) == "stateful"
+
+
+def test_a_missing_callee_body_is_unproven_not_pure():
+    """Three of four supplied is not three-quarters safe."""
+    partial = {k: v for k, v in list(_PURE_CALLEES.items())[:3]}
+    assert pp.classify_function(
+        _DELEGATING_BODY, callee_bodies=partial) == "stateful"
+
+
+def test_a_genuinely_callless_body_is_unaffected():
+    """The guard must not sweep up real leaves -- this is the class the static
+    harness exists for."""
+    body = "int FUN_1000(int a, int b) { return (a * 3 + b) & 0xff; }"
+    assert pp.classify_function(body) == "leaf"

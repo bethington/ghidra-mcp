@@ -751,6 +751,30 @@ def classify_function(decompiled_text, variables=None, callee_bodies=None):
     # (g_*/_g_*), it's provable LIVE via the D2MOO resolver (D2MOO_Resolve gives
     # the real running-game address) -- a distinct class the live-prove path
     # handles, not a static-harness candidate. Otherwise it's a pure leaf.
+    # DELEGATION TO UNPROVEN CALLEES -> stateful. A body can be free of every
+    # hard-stateful signal (no DAT_ global, no `->`, no struct pointer) and
+    # still do all of its work somewhere else. `_callee_is_pure` already states
+    # the rule -- "a body that was not supplied cannot be shown pure and returns
+    # False; unproven is treated as unsafe" -- but `_all_callees_pure` was only
+    # ever consulted on the outbuf_leaf path, so the plain-leaf fallthrough had
+    # NO rule about calls at all.
+    #
+    # MEASURED 2026-08-05 on SGD2FreeRes: `sgd2fr::patches::Patches::Apply`
+    # classified `leaf` on a body that is four calls and nothing else --
+    #     FUN_10010ba0(p); FUN_10010bd0(p+0x30);
+    #     FUN_10010bf0(p+0x54); FUN_10010c20(p+0x90);
+    # It applies every patch the mod installs. `leaf` means "provable via the
+    # static /emulate_function harness", and a class-A shadow dispatcher runs
+    # the reimpl IN ADDITION TO the original -- so proving this one that way
+    # applies every patch a second time.
+    #
+    # Fails closed, per this module's own stated design: when the callee bodies
+    # were not supplied, delegation cannot be shown safe, so it is not assumed.
+    # A caller that wants leaf verdicts for delegating functions must pass
+    # `callee_bodies`, which is exactly what makes the purity provable.
+    if _has_delegate_call(body) and not _all_callees_pure(body, callee_bodies):
+        return "stateful"
+
     if _NAMED_GLOBAL_RE.search(text):
         return "global_leaf"
     return "leaf"
