@@ -16,9 +16,32 @@ _orig_init_options = mcp._mcp_server.create_initialization_options
 
 
 def _patched_init_options(**kwargs):
-    return _orig_init_options(
+    options = _orig_init_options(
         notification_options=NotificationOptions(tools_changed=True), **kwargs
     )
+    _drop_unimplemented_capabilities(options)
+    return options
+
+
+def _drop_unimplemented_capabilities(options) -> None:
+    """Stop advertising `prompts` and `resources` while there are none.
+
+    FastMCP registers handlers for both unconditionally, so the handshake
+    claimed both capabilities and then answered `prompts/list` and
+    `resources/list` with empty arrays — clients render dead sections for
+    features this bridge does not provide. Gated on emptiness rather than
+    hardcoded off, so the capability reappears by itself if a prompt or
+    resource is ever registered.
+    """
+    capabilities = getattr(options, "capabilities", None)
+    if capabilities is None:  # pragma: no cover - SDK shape changed
+        return
+    if not mcp._prompt_manager.list_prompts():
+        capabilities.prompts = None
+    resources = mcp._resource_manager.list_resources()
+    templates = mcp._resource_manager.list_templates()
+    if not resources and not templates:
+        capabilities.resources = None
 
 
 mcp._mcp_server.create_initialization_options = _patched_init_options
