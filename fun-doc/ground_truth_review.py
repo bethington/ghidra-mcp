@@ -131,6 +131,32 @@ class NameVerdict:
         return "wrong"
 
 
+# C++ spells a constructor `Class::Class` and a destructor `Class::~Class`, so
+# the class name appears TWICE in the truth and the operation has no verb of its
+# own. A documented name that says `Class_ctor` is not inventing a concept -- it
+# is naming the same thing with the conventional suffix, and it is arguably
+# clearer than the truth.
+#
+# MEASURED 2026-08-06: `GetGlobalBeltRecordPatch_1_09D_ctor` against truth
+# `...::GetGlobalBeltRecordPatch_1_09D::GetGlobalBeltRecordPatch_1_09D` scored
+# `partial` at recall 1.0, penalised solely for the suffix. A correctly
+# identified constructor must not read as a partial miss.
+_STRUCTOR_SUFFIXES = {"ctor", "constructor", "dtor", "destructor"}
+
+
+def _is_structor(truth: str) -> bool:
+    """Does the truth name a C++ constructor or destructor?
+
+    Detected from the SHAPE -- a trailing `A::A` or `A::~A` -- rather than from
+    a name list, because the class name is arbitrary.
+    """
+    parts = [p for p in str(truth or "").split("::") if p]
+    if len(parts) < 2:
+        return False
+    last, prev = parts[-1], parts[-2]
+    return last == prev or last == "~" + prev
+
+
 def compare_names(documented: str, truth: str) -> NameVerdict:
     """Semantic comparison. See the module docstring for why not string equality."""
     tt, dt = tokens(truth), tokens(documented)
@@ -141,6 +167,10 @@ def compare_names(documented: str, truth: str) -> NameVerdict:
         else:
             missed.append(t)
     invented = [d for d in dt if not any(tokens_agree(d, t) for t in tt)]
+    if _is_structor(truth):
+        # The suffix IS the operation the truth expresses by repeating the class
+        # name; crediting it is reading the same fact, not relaxing the bar.
+        invented = [d for d in invented if d not in _STRUCTOR_SUFFIXES]
     return NameVerdict(truth=truth, documented=documented, truth_tokens=tt,
                        doc_tokens=dt, matched=matched, missed=missed,
                        invented=invented)

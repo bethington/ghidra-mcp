@@ -173,3 +173,44 @@ def test_the_module_never_writes_to_ghidra_or_sql():
     for forbidden in ("rename_function", "add_function_tag", "set_comment",
                       "update_function_state", "save_state", "requests.post"):
         assert forbidden not in src, forbidden
+
+
+# --- C++ constructors and destructors ---------------------------------------
+# MEASURED 2026-08-06 during the blind run: `GetGlobalBeltRecordPatch_1_09D_ctor`
+# against truth `...::GetGlobalBeltRecordPatch_1_09D::GetGlobalBeltRecordPatch_1_09D`
+# scored `partial` at recall 1.0 -- penalised solely for the conventional
+# suffix. C++ spells a constructor `Class::Class`, so the operation has no verb
+# of its own and the class name simply repeats; `_ctor` names the same fact and
+# is arguably clearer than the truth. A correctly identified constructor must
+# not read as a partial miss.
+
+_CTOR_TRUTH = "sgd2fr::d2common::GetGlobalBeltRecordPatch_1_09D::GetGlobalBeltRecordPatch_1_09D"
+
+
+def test_a_constructor_suffix_is_not_invention():
+    v = gtr.compare_names("GetGlobalBeltRecordPatch_1_09D_ctor", _CTOR_TRUTH)
+    assert v.verdict == "correct", v.invented
+
+
+def test_a_destructor_suffix_is_not_invention():
+    v = gtr.compare_names("Widget_dtor", "Widget::~Widget")
+    assert v.verdict == "correct", v.invented
+
+
+def test_structors_are_detected_by_shape_not_a_name_list():
+    """The class name is arbitrary, so the rule keys on the trailing A::A."""
+    assert gtr._is_structor("a::b::Thing::Thing")
+    assert gtr._is_structor("Thing::~Thing")
+    assert not gtr._is_structor("ns::Thing::Apply")
+    assert not gtr._is_structor("PrintLicenseNotice")
+
+
+def test_the_credit_does_not_leak_to_ordinary_functions():
+    """`_ctor` on a non-constructor is still an invented concept."""
+    v = gtr.compare_names("ApplyPatch_ctor", "sgd2fr::ApplyPatch")
+    assert "ctor" in v.invented
+
+
+def test_a_genuinely_wrong_constructor_is_still_wrong():
+    v = gtr.compare_names("SomethingElse_ctor", _CTOR_TRUTH)
+    assert v.verdict == "wrong"
