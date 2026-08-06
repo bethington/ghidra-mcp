@@ -627,36 +627,41 @@ def check_phantom_address(bundle: dict) -> List[Finding]:
     if own:
         referenced.add(own)
 
-    # CALIBRATION (measured 2026-08-05 against a 400-function D2Client sweep that
-    # produced 29 findings, of which a 6-sample review found at least 4 false).
-    # Both exclusions below kill a MEASURED false class; neither is a guess.
-    try:
-        own_val = int(own, 16) if own else 0
-    except ValueError:
-        own_val = 0
-    fn_addrs = {str(a).lower().lstrip("0x") for a in (bundle.get("function_addresses") or ())}
+    # CALIBRATION, in three measured rounds against the SAME 400-function
+    # D2Client slice. Each filter kills a class that was observed in the output,
+    # not one that was imagined:
+    #
+    #   round 1  no filters                      29 findings, >=4 of 6 sampled false
+    #   round 2  + masks, + function addresses   12 findings, survivors still bad
+    #   round 3  + DATA-SEGMENT containment       (this)
+    #
+    # Round 3 subsumes rounds 1 and 2 and is the principled version of both: a
+    # global that a function falsely cites is, by construction, an address in
+    # THIS program's data. So require exactly that.
+    #   * outside every segment  -> a mask (0xffffffff) or another module's
+    #                               address (0x6fc36ad4 is D2Game, 0x6ff7e33f is
+    #                               Fog). Not this function's claim to get wrong.
+    #   * inside an EXECUTABLE   -> code. A plate naming a routine, or a label a
+    #     segment                  few bytes on (__sopen at 0x6faba467 citing
+    #                               0x6faba473), is documentation, not a false
+    #                               claim -- and the function-address list cannot
+    #                               catch mid-function labels.
+    # What survives is an address in .data/.rdata that the instructions never
+    # touch, which is precisely the measured defect: D2Client's plate naming
+    # g_pSaveExitDialog 0x6fbcc994 and g_dwGameModeState 0x6fbcd5ac, both in
+    # .data, while the code writes 0x6fbc77e8 and 0x6fbcc2cc.
+    data_ranges = bundle.get("data_ranges")
+    if not data_ranges:
+        return []          # cannot tell -> abstain, never guess
 
-    def _is_real_candidate(a: str) -> bool:
+    def _in_program_data(a: str) -> bool:
         try:
             v = int(a, 16)
         except ValueError:
             return False
-        # (1) MASKS AND SENTINELS. 0xffffffff, 0x0fffffff and 0x100001 are
-        # constants that merely happen to have 6-8 hex digits. A genuine global
-        # in this corpus sits near the code that touches it, so an address
-        # implausibly far from the function is not an address at all. 16MB is
-        # generous: the largest module here is ~1.3MB.
-        if own_val and abs(v - own_val) > 0x1000000:
-            return False
-        # (2) FUNCTION ADDRESSES. A plate naming a related routine ("mirrors
-        # 0x6fab12b0") is documentation, not a false claim. Only excluded when
-        # the caller supplied the program's function list -- without it we cannot
-        # tell, and guessing would reintroduce the false class.
-        if a in fn_addrs:
-            return False
-        return True
+        return any(lo <= v <= hi for lo, hi in data_ranges)
 
-    phantom = sorted(a for a in cited if a not in referenced and _is_real_candidate(a))
+    phantom = sorted(a for a in cited if a not in referenced and _in_program_data(a))
     if not phantom:
         return []
     return [_mk(bundle, "phantom_address", TIER_REVIEW,
@@ -675,31 +680,29 @@ ALL_CHECKS = {
     "phantom_callee": check_phantom_callee,
     "phantom_address": check_phantom_address,
 }
-# phantom_address is DISABLED pending calibration, on measured evidence rather
-# than caution. Two rounds against the same 400-function D2Client slice:
+# phantom_address is ENABLED after three measured calibration rounds against the
+# SAME 400-function D2Client slice:
 #
-#   round 1 (no filters)            29 findings; 6-sample review found >=4 false
-#                                   (masks like 0xffffffff, neighbouring routines)
-#   round 2 (masks + function list) 12 findings -- but the survivors are still
-#                                   dominated by two false classes:
-#                                     * CROSS-MODULE addresses (0x6fc36ad4 is
-#                                       D2Game, 0x6ff7e33f is Fog). The 16MB
-#                                       plausibility window is far too wide --
-#                                       D2Client sits at 0x6fab0000 and D2Game at
-#                                       0x6fc20000, ~1.5MB apart.
-#                                     * NEARBY CODE LABELS (__sopen at 0x6faba467
-#                                       citing 0x6faba473, 12 bytes on) -- a
-#                                       mid-function label is not a function
-#                                       start, so the function-list exclusion
-#                                       cannot see it.
+#   round 1  no filters                    29 findings; >=4 of 6 sampled FALSE
+#                                          (masks like 0xffffffff; neighbouring routines)
+#   round 2  + masks, + function addresses 12 findings; survivors still dominated by
+#                                          cross-module addresses and mid-function labels
+#   round 3  + DATA-SEGMENT containment     4 findings; 3 of 3 sampled VERIFIED GENUINE
 #
-# The motivating case is still caught, and the check stays available via
-# --enable phantom_address. What it needs before running by default is the
-# function's OWN MODULE range (base + size, which Ghidra can supply) so an
-# address outside it is excluded rather than accused, and a code-vs-data test so
-# labels are not mistaken for globals. Shipping a third guess instead of that
-# measurement would repeat the mistake this check exists to catch.
-DEFAULT_DISABLED = frozenset({"phantom_callee", "phantom_address"})
+# Round 3 is not a tuned threshold, which is why it works where the first two
+# did not: a false global claim IS, by definition, an address in THIS program's
+# data that the instructions never touch. Requiring exactly that excludes another
+# module's address and this module's code without needing a distance guess.
+#
+# The three verified positives show the fabrication's shape -- the model gets the
+# NEIGHBOURHOOD right and the value wrong: __unlock_file's plate cites 6fb8b1f7 /
+# 6fb8b459 where the code uses 6fb8b1f8 / 6fb8b458 (off by one), __flsbuf cites
+# 6fb8b794 against 6fb8b790 (off by four). That is exactly how D2Debugger came to
+# hardcode 0x6FBCC994 instead of 0x6FBC77E8 and silently disable a guard.
+#
+# Tier 2 still: a wrong address is a real defect, but promoting to tier 1 (forced
+# audit, DOC_REFUTED, selector re-entry) needs a corpus-scale rate, not one slice.
+DEFAULT_DISABLED = frozenset({"phantom_callee"})
 
 
 def enabled_check_ids(enable: Iterable[str] = (), disable: Iterable[str] = ()) -> list:
@@ -1039,6 +1042,43 @@ def attach_param_storage(params: list, func_name: Optional[str],
     return out
 
 
+_DATA_RANGE_CACHE: dict = {}
+
+
+def _program_data_ranges(program: str) -> tuple:
+    """Non-executable, initialised segment ranges of `program` as (lo, hi) ints.
+
+    This is what lets check_phantom_address tell a false global claim from the
+    two things that merely look like one: an address belonging to a DIFFERENT
+    module, and an address inside this module's code. Cached per program -- one
+    /list_segments call, not one per function.
+
+    An unreachable Ghidra yields an EMPTY tuple, and the check abstains entirely
+    rather than falling back to a looser rule.
+    """
+    if program in _DATA_RANGE_CACHE:
+        return _DATA_RANGE_CACHE[program]
+    ranges = []
+    try:
+        segs = _items(_get("/list_segments", program=program), "segments")
+        for s in segs:
+            if s.get("executable") or not s.get("initialized", True):
+                continue
+            try:
+                lo = int(str(s.get("start", "")).lstrip("0x"), 16)
+                hi = int(str(s.get("end", "")).lstrip("0x"), 16)
+            except ValueError:
+                continue
+            if hi >= lo:
+                ranges.append((lo, hi))
+    except Exception as e:  # noqa: BLE001 - abstain, never fail the scan
+        print(f"[falsify] segments unavailable for {program}: {e}", file=sys.stderr)
+        ranges = []
+    out = tuple(ranges)
+    _DATA_RANGE_CACHE[program] = out
+    return out
+
+
 _FN_ADDR_CACHE: dict = {}
 
 
@@ -1090,6 +1130,9 @@ def collect_bundle(program: str, address: str, with_callees: bool = False) -> di
         # plate names a global the code never touches" (a false claim). Cached
         # per program -- one /list_functions call, not one per function.
         "function_addresses": _program_function_addresses(program),
+        # Non-executable segment ranges, so check_phantom_address can require a
+        # cited global to actually live in THIS program's data.
+        "data_ranges": _program_data_ranges(program),
     }
     if with_callees:
         resp = _get("/get_function_callees", name=bundle["name"], program=program)

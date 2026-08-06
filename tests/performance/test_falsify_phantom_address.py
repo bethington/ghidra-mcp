@@ -43,10 +43,17 @@ Related Globals:
 """
 
 
-def bundle(plate, disasm=REAL_DISASM, address="6fb09980"):
+# D2Client's real non-executable segments (from /list_segments):
+#   .rdata 6fb7e000-6fb8afff,  .data 6fb8b000-6fbd4adb
+# .text (6fab1000-6fb7dfff) is deliberately absent: a cited CODE address is a
+# routine reference, not a false global claim.
+DATA_RANGES = ((0x6fb7e000, 0x6fb8afff), (0x6fb8b000, 0x6fbd4adb))
+
+
+def bundle(plate, disasm=REAL_DISASM, address="6fb09980", data_ranges=DATA_RANGES):
     return {"name": "HandleSaveAndExitDialogConfirm", "address": address,
             "program": "/Mods/PD2-S12/D2Client.dll", "plate": plate,
-            "disasm_text": disasm}
+            "disasm_text": disasm, "data_ranges": data_ranges}
 
 
 def run(b):
@@ -78,13 +85,11 @@ def test_it_is_tier_2_not_tier_1():
     assert f[0].tier == falsify.TIER_REVIEW
 
 
-def test_the_check_is_registered_but_disabled_pending_calibration():
-    """Two measured rounds against the same 400-function slice: 29 findings then
-    12, with the survivors still dominated by cross-module addresses and nearby
-    code labels. Registered and available via --enable; not run by default until
-    it has the module range and a code-vs-data test."""
+def test_the_check_is_enabled_after_three_calibration_rounds():
+    """29 -> 12 -> 4 findings on the same 400-function slice, with 3 of 3 round-3
+    survivors verified genuine against the disassembly."""
     assert "phantom_address" in falsify.ALL_CHECKS
-    assert "phantom_address" in falsify.DEFAULT_DISABLED
+    assert "phantom_address" not in falsify.DEFAULT_DISABLED
 
 
 # --- false-positive guards ---------------------------------------------------
@@ -131,7 +136,14 @@ def test_the_functions_own_address_is_citable():
 # --- abstains rather than guessing -------------------------------------------
 
 def test_no_disassembly_means_no_finding():
-    assert run({"name": "F", "plate": REAL_PLATE, "disasm_text": ""}) == []
+    assert run({"name": "F", "plate": REAL_PLATE, "disasm_text": "",
+                "data_ranges": DATA_RANGES}) == []
+
+
+def test_without_segment_ranges_it_abstains_entirely():
+    """Cannot tell a data global from another module's address or a code label,
+    so it reports nothing rather than falling back to a looser rule."""
+    assert run(bundle(REAL_PLATE, data_ranges=())) == []
 
 
 def test_no_plate_means_no_finding():
@@ -168,14 +180,45 @@ def test_addresses_of_other_functions_are_excluded_when_known():
     assert run(b) == []
 
 
-def test_without_the_function_list_it_does_not_guess():
-    """No list supplied -> the routine-address exclusion cannot apply. Noisier,
-    but never wrong in the consequential direction."""
+def test_the_segment_rule_supersedes_the_function_list():
+    """Round 2 needed the function list to exclude a routine address, and was
+    noisier without it. Round 3's data-segment rule excludes it either way,
+    because 0x6fab12b0 is in .text -- so the finding no longer depends on the
+    caller supplying a list at all."""
     b = bundle("Mirrors the logic at 0x6fab12b0.", address="6fab1300")
-    assert len(run(b)) == 1
+    assert run(b) == []                       # no function list supplied
+    b["function_addresses"] = {"6fab12b0"}
+    assert run(b) == []                       # and with one
 
 
 def test_the_function_list_does_not_hide_a_real_data_global():
     b = bundle("Clears g_pSaveExitDialog (0x6fbcc994) on confirm.")
     b["function_addresses"] = {"6fab12b0", "6fb09980"}
     assert run(b)[0].detail["phantom_addresses"] == ["6fbcc994"]
+
+
+# --- round 3: data-segment containment (the principled calibration) ----------
+# Measured survivors of round 2 that this eliminates, all from the same slice.
+
+def test_another_modules_address_is_excluded():
+    """0x6fc36ad4 is D2Game, 0x6ff7e33f is Fog -- outside every D2Client segment."""
+    for foreign in ("0x6fc36ad4", "0x6ff7e33f", "0x6fbfe368"):
+        assert run(bundle(f"Related: g_thing ({foreign}).")) == [], foreign
+
+
+def test_a_code_address_is_excluded():
+    """__sopen at 0x6faba467 cites 0x6faba473 -- twelve bytes on, inside .text.
+    A mid-function label is not a global, and the function list cannot see it."""
+    for code in ("0x6faba473", "0x6fb7ddb5", "0x6fab12b0"):
+        assert run(bundle(f"Mirrors the logic at {code}.")) == [], code
+
+
+def test_a_data_address_the_code_never_touches_is_still_caught():
+    """The measured defect: both fabricated globals live in .data."""
+    f = run(bundle(REAL_PLATE))
+    assert set(f[0].detail["phantom_addresses"]) == {"6fbcd5ac", "6fbcc994"}
+
+
+def test_an_rdata_address_counts_as_data():
+    f = run(bundle("Reads the table at 0x6fb7f2b8."))
+    assert f and f[0].detail["phantom_addresses"] == ["6fb7f2b8"]
