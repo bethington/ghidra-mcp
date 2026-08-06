@@ -323,9 +323,3 @@ def review_batch(pairs) -> dict:
                                   if r["verdict"] == "structurally_wrong"),
         "reviews": reviews,
     }
-
-
-def load_pdb_truth(path: str | Path) -> dict:
-    """Index a pdb_attribute.py dump by Ghidra address (image base applied)."""
-    rows = json.loads(Path(path).read_text(encoding="utf-8"))
-    return {r["rva"]: r for r in rows}
