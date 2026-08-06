@@ -119,11 +119,6 @@ def classify_documented(audit, address=None):
     return "pending"
 
 
-def counts_as_documented(audit, address=None):
-    """Boolean view of classify_documented — kept for existing callers."""
-    return classify_documented(audit, address) != "pending"
-
-
 # ---------- pure functions: ordering, status, persistence ----------
 
 
