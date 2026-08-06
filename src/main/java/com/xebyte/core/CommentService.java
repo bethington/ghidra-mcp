@@ -69,7 +69,13 @@ public class CommentService {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction(transactionName);
                 try {
-                    program.getListing().setComment(addr, commentType, comment);
+                    // Empty means REMOVE, which is what a caller passing "" is asking for and
+                    // what batch_set_comments already does. Storing "" instead leaves a comment
+                    // record that reads as "no comment" through get_comment (has_comment:false)
+                    // but is very much present: the decompiler renders it as a bare `//` line,
+                    // so every "clear" left a blank comment in the pseudocode.
+                    program.getListing().setComment(addr, commentType,
+                        comment == null || comment.isEmpty() ? null : comment);
                     success.set(true);
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
