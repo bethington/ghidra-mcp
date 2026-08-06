@@ -2182,6 +2182,19 @@ def _assess_tag_addrs(tag, program):
             r = json.loads(r)
         if not isinstance(r, dict):
             return set()
+        # COUPLED NORMALISATION -- must stay byte-identical to
+        # sync_band_tags_sweep's `norm`, which compares against this set.
+        #
+        # `lstrip("0x")` takes a CHARACTER SET, so it also eats leading zeros:
+        # `00401000` -> `0x401000`, and `0000` -> `0x`. library_scope.norm_addr
+        # documents this as a real bug it was written to avoid. Here it is
+        # currently HARMLESS ONLY BECAUSE BOTH SIDES DO IT -- the two mangle
+        # identically and therefore still match. 178 addresses in this corpus
+        # are exposed (175 of them Game.exe, based at 0x00400000).
+        #
+        # So do not "fix" this site alone: correcting one side while the other
+        # keeps lstrip breaks the pairing and silently drops every Game.exe
+        # band tag. Change both together, or neither.
         return {"0x" + str(f.get("address", "")).lower().lstrip("0x")
                 for f in (r.get("functions") or [])}
     except Exception:
@@ -2330,6 +2343,9 @@ def sync_band_tags_sweep(program, emit=print):
     the --assess functions phase; state scores are used as-is (no re-scoring).
     Returns (added, removed, skipped_unscored)."""
     state = load_state()
+    # COUPLED NORMALISATION -- must stay byte-identical to _assess_tag_addrs,
+    # whose output this is compared against. See the note there: lstrip eats
+    # leading zeros, which is harmless here only because both sides do it.
     norm = lambda a: "0x" + str(a).lower().lstrip("0x")
     # addr -> score for this program, from state
     scores = {}

@@ -109,3 +109,30 @@ def test_the_incomplete_endpoint_is_no_longer_CALLED():
     src = inspect.getsource(fd.populate_call_graph)
     code = [ln for ln in src.splitlines() if not ln.strip().startswith("#")]
     assert not any('"/get_full_call_graph"' in ln for ln in code)
+
+
+# --- coupled address normalisation ------------------------------------------
+# `lstrip("0x")` takes a CHARACTER SET, so it eats leading zeros too:
+# `00401000` -> `0x401000`, `0000` -> `0x`. library_scope.norm_addr documents
+# this as a real bug it exists to avoid. In the band-tag sweep it is currently
+# HARMLESS ONLY BECAUSE BOTH SIDES DO IT -- 178 corpus addresses are exposed
+# (175 of them Game.exe, based at 0x00400000) and they still match because they
+# are mangled identically.
+#
+# The hazard is therefore a well-meant half-fix. This pins the coupling so that
+# correcting one side alone fails loudly here instead of silently dropping every
+# Game.exe band tag.
+
+def test_band_tag_normalisation_is_coupled():
+    import inspect
+    a = inspect.getsource(fd._assess_tag_addrs)
+    b = inspect.getsource(fd.sync_band_tags_sweep)[:2000]
+    assert 'lstrip("0x")' in a and 'lstrip("0x")' in b, (
+        "one side of the band-tag comparison changed its address normalisation "
+        "without the other -- see the COUPLED NORMALISATION notes in fun_doc")
+
+
+def test_the_coupling_is_documented_at_both_sites():
+    import inspect
+    assert "COUPLED NORMALISATION" in inspect.getsource(fd._assess_tag_addrs)
+    assert "COUPLED NORMALISATION" in inspect.getsource(fd.sync_band_tags_sweep)[:2000]
