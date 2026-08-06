@@ -5938,6 +5938,72 @@ def _gather_callee_context(afd, program):
     return out
 
 
+# A body this small carries no information of its own -- whatever the function
+# is FOR lives in what it calls. Measured on the case that produced an invented
+# name: `return FUN_10001d70();`, one statement.
+_THIN_WRAPPER_MAX_STATEMENTS = 3
+
+# `return bVar1;` and `int iVar1;` are the same SHAPE -- word, space, word,
+# semicolon -- so a shape-only rule silently swallows return statements and
+# a one-line wrapper counts as zero statements. Keywords first.
+_STMT_KEYWORDS = ("return", "break", "continue", "goto", "case", "default")
+_STMT_DECL_RE = re.compile(r"^[A-Za-z_][\w\s]*\s\*?\w+\s*;\s*$")
+
+
+def _body_statements(decompiled):
+    """Executable statements in a decompiled body -- declarations excluded.
+
+    Ghidra emits a block of local declarations that say nothing about what the
+    function does; counting them would make every function look substantial.
+    """
+    if not decompiled:
+        return []
+    inner = str(decompiled).partition("{")[2]
+    out = []
+    for raw in inner.splitlines():
+        ln = raw.strip()
+        if not ln or ln in ("{", "}") or ln.startswith(("/*", "*", "//")):
+            continue
+        first = ln.split("(")[0].split()[0] if ln.split() else ""
+        if first not in _STMT_KEYWORDS and _STMT_DECL_RE.match(ln):
+            continue
+        out.append(ln)
+    return out
+
+
+def insufficient_evidence(decompiled, callee_context):
+    """Is this function unnameable from what we can currently see?
+
+    TRUE only for the measured shape: a body of at most a few statements whose
+    work is delegated to a callee NOBODY HAS DOCUMENTED. Such a function carries
+    no evidence of its own purpose, and the pipeline has no way to decline --
+    so it produces a confident, well-formed, entirely invented answer.
+    `CLIENT_CheckViewportVisible` for a mouse-over hit test scored well, passed
+    falsify, and was fiction, because nothing in this system was allowed to say
+    "I do not know".
+
+    Deliberately NOT triggered for a large function with an undocumented callee:
+    that function has plenty of its own logic to describe, and deferring it
+    would delay work that would have succeeded.
+
+    Returns (True, reason) or (False, "").
+    """
+    stmts = _body_statements(decompiled)
+    if not stmts or len(stmts) > _THIN_WRAPPER_MAX_STATEMENTS:
+        return False, ""
+    ctx = callee_context or []
+    if not ctx:
+        return False, ""            # no callees: it IS its own evidence
+    undocumented = [c.get("name") for c in ctx if c.get("undocumented")]
+    if len(undocumented) != len(ctx):
+        return False, ""            # something it calls is documented
+    if any(c.get("body") for c in ctx):
+        return False, ""            # we can SEE the callee, which is evidence
+    return True, ("%d-statement wrapper delegating to undocumented %s, whose "
+                  "body could not be read" % (len(stmts), ", ".join(
+                      n for n in undocumented if n) or "callee"))
+
+
 def render_callee_context(callee_context):
     """The prompt section. Kept separate so it is testable without Ghidra."""
     if not callee_context:
@@ -9986,6 +10052,33 @@ def process_function(
             score_after=live_score,
             reason="decompile-heavy endpoint hit read timeout",
         )
+
+    _defer, _defer_reason = insufficient_evidence(
+        data.get("decompiled"), data.get("callee_context"))
+    if _defer and not manual:
+        # ABSTENTION. There is nothing here to document: the body carries no
+        # information of its own and the callee that holds the meaning is
+        # undocumented and unreadable. Without this the pipeline cannot decline,
+        # and a system that cannot decline invents -- measured, this exact shape
+        # produced `CLIENT_CheckViewportVisible` for a mouse-over hit test,
+        # which scored well and passed falsify because it contradicted nothing.
+        #
+        # NOT a failure and NOT durable: no consecutive_fails, no blacklist. The
+        # function becomes documentable the moment its callee is, which is what
+        # the bottom-up ordering exists to arrange -- so this defers work rather
+        # than refusing it.
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = "insufficient_evidence"
+        func["deferred_reason"] = _defer_reason
+        print(f"  INSUFFICIENT EVIDENCE - 0x{address}: {_defer_reason}. "
+              f"Deferring rather than guessing; it becomes documentable once "
+              f"its callee is documented.", flush=True)
+        update_function_state(func_key, func)
+        bus_emit("function_complete",
+                 {"key": func_key, "result": "insufficient_evidence",
+                  "score": live_score})
+        return _finish("blocked", logged_result="insufficient_evidence",
+                       score_after=live_score, reason=_defer_reason)
 
     if data.get("not_a_function"):
         # The priority queue thinks 0x{address} is a function, but Ghidra
