@@ -9732,7 +9732,60 @@ def _extract_marker_reason(output: str, marker: str, max_chars: int = 200) -> st
     return None
 
 
-def process_function(
+def process_function(func_key, func, state, model=None, manual=False,
+                     dry_run=False, provider=None, stop_flag=None,
+                     config_snapshot=None):
+    """Guarded wrapper: a crash RECORDS ITSELF before it propagates.
+
+    MEASURED 2026-08-06. An IndexError in a newly-added predicate killed three
+    documentation runs outright. Each left `last_result='scanned'` -- the
+    initial value, never updated -- and NO runs.jsonl entry, so it presented as
+    a completed-looking skip, indistinguishable from an abstention in the
+    results. It survived an entire 24-function measurement pass before anyone
+    read the outcomes.
+
+    The bug was survivable. The SILENCE is what made it expensive, and that
+    silence applies to every exception on this path, not just that one.
+
+    Deliberately RE-RAISES rather than swallowing: control flow is unchanged, so
+    no caller's error handling is altered and nothing is quietly turned into a
+    success. The only difference is that a crash now leaves a trace.
+    """
+    try:
+        return _process_function_inner(
+            func_key, func, state, model=model, manual=manual, dry_run=dry_run,
+            provider=provider, stop_flag=stop_flag,
+            config_snapshot=config_snapshot)
+    except Exception as exc:
+        import traceback as _tb
+        detail = f"{type(exc).__name__}: {exc}"
+        print(f"  [CRASHED] {func_key}: {detail}", flush=True)
+        print(_tb.format_exc(), flush=True)
+        try:
+            func["last_result"] = "crashed"
+            func["last_error"] = detail[:500]
+            func["last_processed"] = datetime.now().isoformat()
+            update_function_state(func_key, func)
+        except Exception:
+            pass
+        try:
+            _append_run_log({
+                "timestamp": datetime.now().isoformat(),
+                "function": func.get("name"), "address": func.get("address"),
+                "program": func.get("program"), "result": "crashed",
+                "error": detail[:500],
+            })
+        except Exception:
+            pass
+        try:
+            bus_emit("function_complete",
+                     {"key": func_key, "result": "crashed", "error": detail[:200]})
+        except Exception:
+            pass
+        raise
+
+
+def _process_function_inner(
     func_key,
     func,
     state,
