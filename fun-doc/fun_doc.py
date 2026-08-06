@@ -3592,26 +3592,38 @@ def populate_call_graph(state, prog_path):
     Idempotent: re-running overwrites previous callee data cleanly.
     Returns the number of functions stamped.
     """
-    resp = ghidra_get(
-        "/get_full_call_graph",
-        params={"program": prog_path, "format": "json_edges", "limit": "0"},
-        timeout=120,
-    )
-    if not resp or not isinstance(resp, dict):
-        print(f"  WARNING: Could not fetch call graph for {prog_path}", file=sys.stderr)
-        return 0
-
-    edges = resp.get("edges", [])
-    # Build adjacency: caller_addr → set of callee_addrs
-    adjacency = defaultdict(set)
-    for edge in edges:
-        caller = edge.get("caller_addr", "")
-        callee = edge.get("callee_addr", "")
-        if caller and callee:
-            adjacency[caller].add(callee)
-
-    # Stamp each function's state entry with its callee list
+    # EDGES COME FROM REFERENCES, not /get_full_call_graph.
+    #
+    # That endpoint is measurably incomplete -- `__CxxFrameHandler3` has 7
+    # UNCONDITIONAL_CALL xrefs and reports ZERO call-graph edges (recorded in
+    # call_graph.py, which was written after scope analysis hit the same wall).
+    # This mattered more than an under-filled field: the stamp below assigns
+    # `callees` for EVERY function in the program, so a sparse fetch does not
+    # merely under-report, it OVERWRITES good data with empty lists. The
+    # corpus-wide xref backfill (17.2% -> 100% coverage, 2026-08-06) would have
+    # been wiped by the next scan of any program.
+    #
+    # One builder, one answer: call_graph is the same module scope analysis and
+    # backfill_callees use. Two writers of one field with different reliability
+    # is the shape behind several bugs already recorded in this codebase.
     funcs = state.get("functions", {})
+    _prog_funcs = [f for f in funcs.values() if f.get("program") == prog_path]
+    adjacency = defaultdict(set)
+    try:
+        import call_graph as _cg
+        _addrs = ["0x" + str(f.get("address", "")).lower().replace("0x", "")
+                  for f in _prog_funcs if f.get("address")]
+        _referrers = _cg.function_referrers(prog_path, _addrs)
+        for _caller, _callees in _cg.invert(_referrers).items():
+            _c = str(_caller).lower().replace("0x", "")
+            adjacency[_c] = {str(x).lower().replace("0x", "") for x in _callees}
+    except Exception as exc:
+        # REFUSE rather than stamp. An unreadable graph is not "this program has
+        # no calls", and proceeding would blank every callee list in it.
+        print(f"  WARNING: Could not build call graph for {prog_path} "
+              f"({type(exc).__name__}: {exc}) -- callee data left UNCHANGED",
+              file=sys.stderr)
+        return 0
     # Collect addresses — separate scoreable (non-thunk) from all for BFS.
     # BFS layers are computed on non-thunk functions only so they match the
     # dashboard's Call Graph Layers visualization. Thunks participate in
@@ -3671,7 +3683,7 @@ def populate_call_graph(state, prog_path):
         if addr in addr_to_key:
             funcs[addr_to_key[addr]]["call_graph_layer"] = None
 
-    edge_count = resp.get("edge_count", len(edges))
+    edge_count = sum(len(v) for v in adjacency.values())
     assigned = len(depth)
     cyclic = len(prog_addrs) - assigned
     print(
