@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import socket
 
 import uvicorn
@@ -24,6 +25,10 @@ from .static_tools import _auto_connect, _start_auto_connect_retry
 _INITIALIZE_SNIFF_LIMIT = 256 * 1024
 
 _ALLOWED_HTTP_METHODS = "GET, POST, DELETE, OPTIONS"
+
+# Shared secret required on inbound HTTP requests when set. Unset = no inbound
+# authentication, which is the historical behaviour and fine on loopback.
+_INBOUND_TOKEN_ENV = "GHIDRA_MCP_INBOUND_TOKEN"
 
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -276,6 +281,66 @@ def _is_initialize_request(body: bytes) -> bool:
     return isinstance(payload, dict) and payload.get("method") == "initialize"
 
 
+class BearerTokenGuard:
+    """Require ``Authorization: Bearer <token>`` when a token is configured.
+
+    The HTTP transports had no inbound authentication at all: anything that could
+    reach the port could drive every Ghidra tool, including the writes. That is
+    defensible on loopback and indefensible the moment ``--mcp-host`` is not
+    local, which the DNS-rebinding protection does not address — it stops a
+    browser being tricked into making the request, not a client that simply
+    connects.
+
+    This is a static shared secret, deliberately **not** the spec's OAuth 2.1
+    resource-server flow: that needs an authorization server and metadata
+    documents, which is disproportionate for a locally-run RE tool. So no
+    ``/.well-known/oauth-protected-resource`` is served and no OAuth discovery is
+    claimed — a 401 here means "send the token the operator gave you".
+
+    ``OPTIONS`` stays open: a CORS preflight cannot carry credentials, and the
+    method probe it answers reveals nothing but the allowed verbs.
+    """
+
+    def __init__(self, app, *, token: str):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        supplied = headers.get(b"authorization", b"").decode("latin-1")
+        prefix = "Bearer "
+        presented = supplied[len(prefix):] if supplied.startswith(prefix) else ""
+        # compare_digest on both branches: a plain != would leak the token's
+        # length and prefix through response timing.
+        if not secrets.compare_digest(presented, self.token):
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "server-error",
+                    "error": {"code": -32600, "message": "Unauthorized"},
+                }
+            ).encode()
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (b"www-authenticate", b'Bearer realm="ghidra-mcp"'),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
+
+
 class TransportEdgeGuard:
     """ASGI wrapper doing two things the SDK's transport app does not.
 
@@ -391,6 +456,12 @@ def _build_http_app(transport: str, bind_host: str):
     # all. Neither can be guarded by header presence.
     guard_sessions = transport == "streamable-http" and not mcp.settings.stateless_http
     app.add_middleware(TransportEdgeGuard, guard_sessions=guard_sessions)
+    # Sits outside TransportEdgeGuard so an unauthenticated request never
+    # reaches the session manager, and inside CORS so a browser still gets its
+    # preflight answered (which cannot carry credentials).
+    token = os.environ.get(_INBOUND_TOKEN_ENV, "")
+    if token:
+        app.add_middleware(BearerTokenGuard, token=token)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=_cors_origin_regex(bind_host),
@@ -530,6 +601,22 @@ def main():
         )
 
     _host = args.mcp_host
+    if (
+        args.transport in ("sse", "streamable-http")
+        and _host not in {"127.0.0.1", "localhost", "::1"}
+        and not os.environ.get(_INBOUND_TOKEN_ENV)
+    ):
+        # Not fatal: refusing to start would break existing remote setups on
+        # upgrade. But DNS-rebinding protection does not cover this — it stops a
+        # browser being tricked into making the request, not a client that just
+        # connects to the port and starts renaming things.
+        logger.warning(
+            "Binding %s with NO inbound authentication: anything that can reach "
+            "this port can drive every Ghidra tool, writes included. Set %s=<secret> "
+            "to require Authorization: Bearer <secret>.",
+            _host,
+            _INBOUND_TOKEN_ENV,
+        )
     _has_extra_hosts = any(
         host.strip() for host in os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "").split(",")
     )

@@ -553,6 +553,92 @@ class TestStatelessAndJsonResponseFlags(_CliHarness):
         self.assertTrue(any("only affect streamable-http" in m for m in logs.output))
 
 
+class TestInboundBearerToken(unittest.TestCase):
+    """Optional shared-secret gate on the HTTP transports.
+
+    Without it, anything that can reach the port can drive every Ghidra tool
+    including the writes. DNS-rebinding protection does not cover this: it stops
+    a browser being tricked into making the request, not a client that simply
+    connects.
+    """
+
+    TOKEN = "s3cret-token"
+
+    def _client(self, token=TOKEN):
+        import os
+
+        from starlette.testclient import TestClient
+
+        with patch.dict(os.environ, {cli._INBOUND_TOKEN_ENV: token} if token else {}):
+            app = cli._build_http_app("streamable-http", "127.0.0.1")
+        return TestClient(app, base_url="http://localhost:8000")
+
+    def test_no_token_configured_means_no_gate(self):
+        import os
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(cli._INBOUND_TOKEN_ENV, None)
+            app = cli._build_http_app("streamable-http", "127.0.0.1")
+        guards = [m for m in app.user_middleware if m.cls is cli.BearerTokenGuard]
+        self.assertEqual(guards, [])
+
+    def test_missing_token_is_rejected_with_www_authenticate(self):
+        resp = self._client().post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        self.assertEqual(resp.status_code, 401)
+        self.assertIn("Bearer", resp.headers["www-authenticate"])
+        self.assertEqual(resp.json()["error"]["message"], "Unauthorized")
+
+    def test_wrong_token_is_rejected(self):
+        resp = self._client().post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Authorization": "Bearer not-the-token",
+            },
+        )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_correct_token_reaches_the_transport(self):
+        # 400 "Missing session ID" means it got past the gate to the guard.
+        resp = self._client().post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers={
+                "Accept": "application/json, text/event-stream",
+                "Authorization": f"Bearer {self.TOKEN}",
+            },
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Missing session ID", resp.json()["error"]["message"])
+
+    def test_options_stays_open(self):
+        """A CORS preflight cannot carry credentials, and the method probe
+        reveals nothing but the allowed verbs."""
+        self.assertEqual(self._client().options("/mcp").status_code, 204)
+
+
+class TestNonLoopbackBindWarnsWithoutToken(_CliHarness):
+    def test_warns_when_exposed_without_a_token(self):
+        with self.assertLogs(cli.logger, level="WARNING") as logs:
+            self.run_main("--transport", "streamable-http", "--mcp-host", "0.0.0.0")
+        self.assertTrue(any("NO inbound authentication" in m for m in logs.output))
+
+    def test_no_warning_on_loopback(self):
+        with self.assertLogs(cli.logger, level="INFO") as logs:
+            self.run_main("--transport", "streamable-http")
+        self.assertFalse(any("NO inbound authentication" in m for m in logs.output))
+
+    def test_no_warning_when_a_token_is_set(self):
+        with self.assertLogs(cli.logger, level="INFO") as logs:
+            self.run_main(
+                "--transport", "streamable-http", "--mcp-host", "0.0.0.0",
+                env={cli._INBOUND_TOKEN_ENV: "tok"},
+            )
+        self.assertFalse(any("NO inbound authentication" in m for m in logs.output))
+
+
 class TestToolsPageSizeFlag(_CliHarness):
     def test_pagination_is_off_by_default(self):
         with patch.object(cli.server, "enable_tool_pagination") as enable:
