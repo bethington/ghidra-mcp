@@ -125,3 +125,33 @@ def test_the_threshold_is_where_the_measurement_put_it():
 def test_just_over_the_threshold_is_kept():
     body = ("int f(void)\n{\n  a();\n  b();\n  c();\n  d();\n  return 1;\n}")
     assert fd.insufficient_evidence(body, UNDOC_NO_BODY)[0] is False
+
+
+# --- lines that begin with "(" ----------------------------------------------
+# MEASURED 2026-08-06. `first = ln.split("(")[0].split()[0] if ln.split() else ""`
+# guards the RAW line while indexing a DIFFERENT split, so any decompiled line
+# beginning with "(" raised IndexError and crashed the whole documentation run.
+# Three runs in the blind sample died this way, each leaving last_result='scanned'
+# and no runs.jsonl entry -- a completed-looking skip with no record of what
+# happened. A silent-outcome bug inside the fix for silent outcomes.
+
+@pytest.mark.parametrize("line", [
+    "(*pfn)(a, b);",
+    "(void)result;",
+    "(char *)dest = src;",
+    "()",
+    "(",
+])
+def test_a_line_starting_with_a_paren_does_not_crash(line):
+    body = "int f(void)\n{\n  %s\n  return 1;\n}" % line
+    fd._body_statements(body)           # must not raise
+
+
+def test_such_a_line_still_counts_as_a_statement():
+    body = "void f(void)\n{\n  (*pfn)(a);\n}"
+    assert fd._body_statements(body) == ["(*pfn)(a);"]
+
+
+def test_the_predicate_survives_it_end_to_end():
+    body = "void f(void)\n{\n  (*pfn)(a);\n}"
+    fd.insufficient_evidence(body, [{"name": "X", "undocumented": True}])

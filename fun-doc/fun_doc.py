@@ -6006,7 +6006,16 @@ def _body_statements(decompiled):
         ln = raw.strip()
         if not ln or ln in ("{", "}") or ln.startswith(("/*", "*", "//")):
             continue
-        first = ln.split("(")[0].split()[0] if ln.split() else ""
+        # The guard must be on what is INDEXED, not on the raw line. Checking
+        # `ln.split()` while indexing `ln.split("(")[0].split()` raises
+        # IndexError on any line that BEGINS with "(" -- e.g. a continued
+        # expression or a cast on its own line. Measured 2026-08-06: that
+        # crashed three documentation runs outright, each leaving
+        # last_result='scanned' and no runs.jsonl entry, i.e. a completed-looking
+        # skip with no record of what happened. A silent-outcome bug inside the
+        # fix for silent outcomes.
+        head = ln.split("(")[0].split()
+        first = head[0] if head else ""
         if first not in _STMT_KEYWORDS and _STMT_DECL_RE.match(ln):
             continue
         out.append(ln)
