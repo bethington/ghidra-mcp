@@ -2648,41 +2648,19 @@ public class ProgramScriptService {
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
 
-        // Pre-cleanup: remove stale McpInline_*.java files so Ghidra's per-directory
-        // build state doesn't contaminate this run's output with old failures.
-        //
-        // Three cases handled:
-        //  1. Oracle exists (McpInline_*.java_failed)  → confirmed failure from a
-        //     previous run; delete both the .java and the oracle immediately.
-        //  2. No oracle, file older than 60 s          → crash-orphaned (server died
-        //     before the oracle could be written); delete as a safe fallback.
-        //  3. No oracle, file is fresh                 → likely a concurrent parallel
-        //     agent; leave it alone.
-        // Also purge any orphaned oracles whose .java has already been deleted.
-        long now = System.currentTimeMillis();
-        File[] staleJava = scriptsDir.listFiles(
-            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
-        if (staleJava != null) {
-            for (File stale : staleJava) {
-                File oracle = new File(scriptsDir, stale.getName() + "_failed");
-                if (oracle.exists()) {
-                    oracle.delete();
-                    stale.delete();
-                } else if (now - stale.lastModified() > 60_000L) {
-                    stale.delete();
-                }
-            }
-        }
-        File[] orphanOracles = scriptsDir.listFiles(
-            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java_failed"));
-        if (orphanOracles != null) {
-            for (File o : orphanOracles) {
-                String javaName = o.getName().substring(0, o.getName().length() - "_failed".length());
-                if (!new File(scriptsDir, javaName).exists()) o.delete();
-            }
-        }
+        purgeStaleInlineScripts(scriptsDir, System.currentTimeMillis());
 
         File tempScript = new File(scriptsDir, className + ".java");
+        // Refuse to clobber a script this service did not create. `className` comes
+        // from the caller's own `public class Foo`, so without this check an inline
+        // script named after an existing hand-written script silently overwrites it.
+        // A leftover of ours is already gone by now (purge above), so anything still
+        // standing here belongs to the operator.
+        if (tempScript.exists()) {
+            return Response.err("Refusing to overwrite " + tempScript.getName()
+                + " in " + scriptsDir + ": that file was not created by /run_script_inline. "
+                + "Rename the class in your code, or remove the file if it is disposable.");
+        }
 
         // Capture response so the finally block can decide success vs failure.
         Response[] responseHolder = {null};
@@ -2745,6 +2723,69 @@ public class ProgramScriptService {
                 }
             }
         }
+    }
+
+    /** How long an oracle-less inline script may linger before it is presumed orphaned. */
+    public static final long INLINE_SCRIPT_ORPHAN_AGE_MS = 60_000L;
+
+    /**
+     * Remove inline scripts left behind by earlier runs, so Ghidra's per-directory build
+     * state stops replaying their compile errors.
+     *
+     * <p>Ghidra caches "these files failed to compile" per script directory and keeps
+     * reporting them — the stale errors are prefixed onto the output of <em>every</em>
+     * later script, and they survive deleting the file and even restarting Ghidra. So a
+     * single failed script poisons the whole directory until its record is cleared.
+     *
+     * <p>Cases handled, for <em>any</em> class name rather than only {@code McpInline_*}:
+     * <ol>
+     *   <li>An oracle ({@code X.java_failed}) exists → a confirmed failure of ours. Only
+     *       this method writes oracles, so an oracle proves {@code X.java} was written by
+     *       {@code /run_script_inline}; delete both. This is the case that used to be
+     *       missed: a script declaring {@code public class Foo} produced {@code Foo.java},
+     *       which the old {@code McpInline_} prefix filter skipped forever.</li>
+     *   <li>No oracle, name is ours, older than {@link #INLINE_SCRIPT_ORPHAN_AGE_MS} →
+     *       crash-orphaned before the oracle could be written; delete. Restricted to
+     *       generated names, since for a caller-chosen name there is no provenance and
+     *       the file may be the operator's own.</li>
+     *   <li>No oracle, fresh → likely a concurrent run; leave alone.</li>
+     * </ol>
+     * Orphaned oracles whose {@code .java} is already gone are purged too.
+     *
+     * <p>Static, and side-effect-scoped to {@code scriptsDir}, so {@code InlineScriptCleanupTest}
+     * can drive it against a temporary directory. Public only because the offline tests live
+     * in {@code com.xebyte.offline}; it is not part of the endpoint surface.
+     *
+     * @param scriptsDir the script directory to sweep
+     * @param now current time in millis, injected for testability
+     * @return the names of files deleted, for logging/assertions
+     */
+    public static java.util.List<String> purgeStaleInlineScripts(File scriptsDir, long now) {
+        java.util.List<String> removed = new java.util.ArrayList<>();
+        File[] javaFiles = scriptsDir.listFiles((d, n) -> n.endsWith(".java"));
+        if (javaFiles != null) {
+            for (File script : javaFiles) {
+                File oracle = new File(scriptsDir, script.getName() + "_failed");
+                boolean generatedName = script.getName().startsWith("McpInline_");
+                if (oracle.exists()) {
+                    if (oracle.delete()) removed.add(oracle.getName());
+                    if (script.delete()) removed.add(script.getName());
+                } else if (generatedName && now - script.lastModified() > INLINE_SCRIPT_ORPHAN_AGE_MS) {
+                    if (script.delete()) removed.add(script.getName());
+                }
+            }
+        }
+        File[] oracles = scriptsDir.listFiles((d, n) -> n.endsWith(".java_failed"));
+        if (oracles != null) {
+            for (File oracle : oracles) {
+                String javaName = oracle.getName()
+                    .substring(0, oracle.getName().length() - "_failed".length());
+                if (!new File(scriptsDir, javaName).exists() && oracle.delete()) {
+                    removed.add(oracle.getName());
+                }
+            }
+        }
+        return removed;
     }
 
     /**
