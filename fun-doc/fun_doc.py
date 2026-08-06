@@ -3737,52 +3737,6 @@ def _callee_readiness(func, all_funcs, good_enough=80):
 # ---------------------------------------------------------------------------
 
 
-def compute_priority(func):
-    """
-    Compute priority score for a function. Higher = process first.
-
-    Strategy: bottom-up, impact-weighted.
-    - Leaf functions get highest base priority (easiest, unlock callers)
-    - Among leaves, more callers = higher priority (more impact)
-    - Non-leaves get lower base priority, scaled by caller count
-    - Already-documented functions (score >= 90) get priority 0
-    """
-    score = func.get("score", 0)
-
-    # Skip already-documented — UNLESS the falsifier holds a mechanical
-    # contradiction against it. A 100-scoring function carrying a known-false
-    # claim is exactly the one that must come back (score measures hygiene,
-    # not truth).
-    if score >= 90 and func.get("falsify_status") != "contradicted":
-        return 0
-
-    caller_count = func.get("caller_count", 0)
-    is_leaf = func.get("is_leaf", False)
-    fixable = func.get("fixable", 0)
-
-    # Base priority
-    if is_leaf:
-        base = 10000  # Leaves first
-    else:
-        base = 1000  # Non-leaves after
-
-    # Impact: more callers = higher priority
-    impact = caller_count * 10
-
-    # Effort discount: near-complete functions are cheaper to finish
-    if score >= 70:
-        effort_bonus = 500  # Quick fix, high ROI
-    elif score >= 50:
-        effort_bonus = 200
-    else:
-        effort_bonus = 0
-
-    # Fixable deductions bonus: functions with known fixable issues are easier
-    fixable_bonus = int(fixable * 20)
-
-    return base + impact + effort_bonus + fixable_bonus
-
-
 # Per-provider FULL/FIX/VERIFY model defaults. Used to backfill missing
 # providers / modes when normalizing the dashboard config so:
 #   * a fresh priority_queue.json with no provider_models gets every provider
