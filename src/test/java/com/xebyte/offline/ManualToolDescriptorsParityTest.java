@@ -33,8 +33,10 @@ import java.util.regex.Pattern;
  */
 public class ManualToolDescriptorsParityTest extends TestCase {
 
+    // Hand-coded GUI routes are registered through a registrar so they reach every
+    // transport, not just the Sun TCP server, so both spellings count as registration.
     private static final Pattern GUI_CONTEXT = Pattern.compile(
-        "(?:server|httpServer)\\.createContext\\(\\s*\"([^\"]+)\"");
+        "(?:(?:server|httpServer)\\.createContext|reg\\.add)\\(\\s*\"([^\"]+)\"");
     private static final Pattern HEADLESS_CONTEXT = Pattern.compile(
         "safeContext\\(\\s*\"([^\"]+)\"");
 
@@ -73,6 +75,24 @@ public class ManualToolDescriptorsParityTest extends TestCase {
                     + "live but invisible in /mcp/schema. Add it to "
                     + "ManualToolDescriptors.buildAll().",
                 known.contains(path));
+        }
+    }
+
+    public void testSharedRoutesListCoversEveryRegistrarRoute() throws IOException {
+        // A route registered through the registrar is live on TCP *and* UDS, but only
+        // the paths named in SHARED_ROUTES get into the UDS server's schema — and the
+        // bridge offers what the schema lists. Missing one puts it back where all of
+        // these were: reachable by raw path, invisible to an agent.
+        String src = readSource("GhidraMCPPlugin.java");
+        Set<String> registrarPaths = extractPaths(
+            Pattern.compile("reg\\.add\\(\\s*\"([^\"]+)\""), src);
+        assertFalse("expected to find registrar routes in the plugin", registrarPaths.isEmpty());
+        for (String path : registrarPaths) {
+            assertTrue(
+                "\"" + path + "\" is registered on every transport but is not in "
+                    + "ManualToolDescriptors.SHARED_ROUTES, so the UDS server serves it "
+                    + "without advertising it.",
+                ManualToolDescriptors.SHARED_ROUTES.contains(path));
         }
     }
 

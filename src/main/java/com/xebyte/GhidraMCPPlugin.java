@@ -82,7 +82,9 @@ import ghidra.framework.main.AppInfo;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.util.task.TaskMonitor;
 
-import com.sun.net.httpserver.HttpExchange;
+import com.xebyte.core.HttpExchange;
+import com.xebyte.core.UdsHttpServer;
+import com.xebyte.core.SunHttpExchangeAdapter;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.Headers;
 
@@ -358,7 +360,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         boolean udsOk = false;
         if (udsEnabled) {
             try {
-                ServerManager.getInstance().registerTool(tool, null);
+                ServerManager.getInstance().registerTool(tool,
+                    uds -> registerHandCodedRoutes(uds::createContext));
                 udsOk = true;
                 Msg.info(this, "GhidraMCP UDS server active at " + ServerManager.getInstance().getSocketPath());
             } catch (IOException e) {
@@ -505,7 +508,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 StringBuilder started = new StringBuilder();
                 if (uds && !ServerManager.getInstance().isRunning()) {
                     try {
-                        ServerManager.getInstance().registerTool(tool, null);
+                        ServerManager.getInstance().registerTool(tool,
+                            udsServer -> registerHandCodedRoutes(udsServer::createContext));
                         started.append("UDS: ").append(ServerManager.getInstance().getSocketPath());
                     } catch (IOException e) {
                         Msg.showError(getClass(), null, "GhidraMCP", "Failed to start UDS server: " + e.getMessage());
@@ -653,7 +657,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             emulationService, debuggerService, promptPolicyService, functionBundleService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
-            server.createContext(ep.path(), safeHandler(exchange -> {
+            server.createContext(ep.path(), tcp(safeHandler(exchange -> {
                 Map<String, String> query = parseQueryParams(exchange);
                 Map<String, Object> body = "POST".equalsIgnoreCase(exchange.getRequestMethod())
                     ? parseJsonParams(exchange) : Map.of();
@@ -664,26 +668,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
-            }));
+            })));
         }
-        // These routes are registered below via their own server.createContext(...)
-        // calls (utility/server/project/tool endpoints that predate the @McpTool
-        // convention), so they are already live and callable. Without this they
+        // The hand-coded routes (utility/server/project/tool endpoints that predate the
+        // @McpTool convention) are live on every transport via registerHandCodedRoutes,
+        // but the scanner only knows about annotated methods. Without this they
         // stayed invisible in /mcp/schema -- and therefore invisible to the Python
         // bridge's dynamic tool discovery -- even though a caller who knew the raw
         // path could reach them. Found via a live-schema-vs-catalog diff (v6.0.0).
-        com.xebyte.core.ManualToolDescriptors.addAll(scanner,
-            "/batch_apply_documentation", "/check_connection",
-            "/exit_ghidra",
-            "/mcp/health", "/mcp/schema", "/open_project", "/project/info",
-            "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
-            "/server/admin/terminate_checkout", "/server/admin/users", "/server/authenticate",
-            "/server/checkouts", "/server/connect", "/server/disconnect",
-            "/server/repositories", "/server/repository/create", "/server/repository/file",
-            "/server/repository/files", "/server/status", "/server/version_control/add",
-            "/server/version_control/checkin", "/server/version_control/checkout",
-            "/server/version_control/undo_checkout", "/server/version_history",
-            "/tool/goto_address", "/tool/launch_codebrowser", "/tool/running_tools");
+        com.xebyte.core.ManualToolDescriptors.addAll(
+            scanner, com.xebyte.core.ManualToolDescriptors.SHARED_ROUTES);
         // Reflect the live count so /mcp/health.version.endpoint_count matches
         // what /mcp/schema actually serves. Includes both the dispatch-table
         // (@McpTool-scanned) endpoints and the manually-registered routes just
@@ -695,9 +689,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // ==========================================================================
 
         String schemaJson = scanner.generateSchema();
-        server.createContext("/mcp/schema", safeHandler(exchange -> {
+        server.createContext("/mcp/schema", tcp(safeHandler(exchange -> {
             sendResponse(exchange, schemaJson);
-        }));
+        })));
 
         // ==========================================================================
         // INSTANCE INFO ENDPOINT (TCP mirror of the UDS endpoint)
@@ -707,296 +701,17 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // which port without already having to be connected. The body is the
         // same JSON the UDS handler emits via ServerManager.
         // ==========================================================================
-        server.createContext("/mcp/instance_info", safeHandler(exchange -> {
+        server.createContext("/mcp/instance_info", tcp(safeHandler(exchange -> {
             try {
                 String json = ServerManager.getInstance().buildInstanceInfoJson();
                 sendResponse(exchange, json);
             } catch (Exception e) {
                 sendResponse(exchange, com.xebyte.core.Response.err(e.getMessage()).toJson());
             }
-        }));
+        })));
 
-        // ==========================================================================
-        // HEALTH / METRICS ENDPOINT
-        // Exposes HTTP thread pool saturation, active request count, uptime,
-        // memory. Used by the dashboard to show a "server is struggling" badge
-        // and by regression tests to assert healthy baselines.
-        // ==========================================================================
-        server.createContext("/mcp/health", safeHandler(exchange -> {
-            int active = activeRequests.get();
-            long uptimeSec = (System.currentTimeMillis() - serverStartMillis) / 1000L;
-            Runtime rt = Runtime.getRuntime();
-            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
-            long totalMb = rt.totalMemory() / (1024L * 1024L);
-            long maxMb = rt.maxMemory() / (1024L * 1024L);
-
-            int poolSize = -1;
-            int largestPool = -1;
-            long completedTasks = -1;
-            int queueSize = -1;
-            if (httpExecutorRef instanceof java.util.concurrent.ThreadPoolExecutor) {
-                java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) httpExecutorRef;
-                poolSize = tpe.getPoolSize();
-                largestPool = tpe.getLargestPoolSize();
-                completedTasks = tpe.getCompletedTaskCount();
-                queueSize = tpe.getQueue().size();
-            }
-
-            StringBuilder sb = new StringBuilder();
-            sb.append("{");
-            sb.append("\"status\": \"ok\",");
-            sb.append("\"connected\": true,");
-            Program current = getCurrentProgram();
-            if (current != null) {
-                sb.append("\"program\": \"").append(escapeJson(current.getName())).append("\",");
-            } else {
-                sb.append("\"program\": null,");
-            }
-            sb.append("\"version\": {");
-            sb.append("\"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",");
-            sb.append("\"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",");
-            sb.append("\"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",");
-            sb.append("\"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",");
-            sb.append("\"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",");
-            sb.append("\"ghidra_version\": \"").append(VersionInfo.getGhidraVersion()).append("\",");
-            sb.append("\"java_version\": \"").append(System.getProperty("java.version")).append("\",");
-            sb.append("\"endpoint_count\": ").append(VersionInfo.getEndpointCount());
-            sb.append("},");
-            sb.append("\"uptime_seconds\": ").append(uptimeSec).append(",");
-            sb.append("\"active_requests\": ").append(active).append(",");
-            sb.append("\"http_pool\": {");
-            sb.append("\"configured_size\": 3,");
-            sb.append("\"current_size\": ").append(poolSize).append(",");
-            sb.append("\"largest_size\": ").append(largestPool).append(",");
-            sb.append("\"queue_size\": ").append(queueSize).append(",");
-            sb.append("\"completed_tasks\": ").append(completedTasks);
-            sb.append("},");
-            sb.append("\"memory_mb\": {");
-            sb.append("\"used\": ").append(usedMb).append(",");
-            sb.append("\"total\": ").append(totalMb).append(",");
-            sb.append("\"max\": ").append(maxMb);
-            sb.append("}");
-            sb.append("}");
-            sendResponse(exchange, sb.toString());
-        }));
-
-        // ==========================================================================
-        // INFRASTRUCTURE ENDPOINTS (not in service layer)
-        // ==========================================================================
-
-        server.createContext("/check_connection", safeHandler(exchange -> {
-            sendResponse(exchange, checkConnection());
-        }));
-
-        // /open_project — open (or switch to) a Ghidra project from the
-        // FrontEnd plugin programmatically. Mirrors the headless server's
-        // /open_project route but additionally supports an optional
-        // `headless` boolean (default true) that controls whether a
-        // CodeBrowser window is auto-launched for `program` after the
-        // project opens. Without the flag, the project is loaded into the
-        // FrontEnd tool only — useful for automation that wants to access
-        // programs via the `program` query parameter without spawning UI.
-        //
-        // Body: { "path": <.gpr or project dir>, "headless": true|false,
-        //         "program": "<DomainFile path to launch in CodeBrowser>" }
-        server.createContext("/open_project", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String projectPath = params.get("path") != null ? params.get("path").toString() : null;
-            boolean headless = params.get("headless") == null
-                || Boolean.parseBoolean(String.valueOf(params.get("headless")));
-            String programToLaunch = params.get("program") != null ? params.get("program").toString() : null;
-            sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
-        }));
-
-        server.createContext("/exit_ghidra", safeHandler(exchange -> {
-            try {
-                promptPolicyService.enableFor("exit_ghidra", 30);
-                Map<String, Object> saveResult = saveEverythingBeforeExit();
-                sendResponse(exchange, JsonHelper.toJson(JsonHelper.mapOf(
-                    "success", true,
-                    "message", "Saving all open programs and traces, then exiting Ghidra",
-                    "save", saveResult
-                )));
-                // Schedule exit after response is sent
-                new Thread(() -> {
-                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-                    SwingUtilities.invokeLater(() -> {
-                        closeGhidraWithoutSavingToolLayouts();
-                    });
-                }).start();
-            } catch (Throwable e) {
-                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
-            }
-        }));
-
-        // ==========================================================================
-        // PROJECT VERSION CONTROL ENDPOINTS (16 endpoints)
-        // Uses Ghidra's internal Project/DomainFile API - no separate connection needed
-        // ==========================================================================
-
-        // --- Project Status (4 endpoints) ---
-
-        server.createContext("/server/connect", safeHandler(exchange -> {
-            Project project = tool.getProject();
-            if (project == null) {
-                sendResponse(exchange, "{\"error\": \"No project open in Ghidra\"}");
-                return;
-            }
-            ProjectData data = project.getProjectData();
-            boolean isShared = data.getProjectLocator().isTransient() ? false : (getProjectRepository() != null);
-            sendResponse(exchange, "{\"status\": \"connected\", \"project\": \"" + escapeJson(project.getName()) + "\", " +
-                "\"shared\": " + isShared + ", " +
-                "\"message\": \"GUI plugin uses the open Ghidra project directly. No separate connection needed.\"}");
-        }));
-
-        server.createContext("/server/disconnect", safeHandler(exchange -> {
-            sendResponse(exchange, "{\"status\": \"ok\", \"message\": \"GUI plugin uses the open project. No disconnect needed.\"}");
-        }));
-
-        server.createContext("/server/status", safeHandler(exchange -> {
-            sendResponse(exchange, getProjectStatusJson());
-        }));
-
-        server.createContext("/server/repositories", safeHandler(exchange -> {
-            Project project = tool.getProject();
-            if (project == null) {
-                sendResponse(exchange, "{\"error\": \"No project open\"}");
-                return;
-            }
-            sendResponse(exchange, "{\"repositories\": [\"" + escapeJson(project.getName()) + "\"], \"count\": 1, " +
-                "\"message\": \"GUI mode returns the current project. Use headless mode for multi-repo browsing.\"}");
-        }));
-
-        // --- Repository Browsing (3 endpoints) ---
-
-        server.createContext("/server/repository/files", safeHandler(exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String folderPath = params.get("path");
-            if (folderPath == null) folderPath = params.get("folder");
-            if (folderPath == null) folderPath = "/";
-            sendResponse(exchange, listProjectFilesJson(folderPath));
-        }));
-
-        server.createContext("/server/repository/file", safeHandler(exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String filePath = params.get("path");
-            if (filePath == null) {
-                sendResponse(exchange, "{\"error\": \"'path' parameter required\"}");
-                return;
-            }
-            sendResponse(exchange, getProjectFileInfoJson(filePath));
-        }));
-
-        server.createContext("/server/repository/create", safeHandler(exchange -> {
-            sendResponse(exchange, "{\"error\": \"Repository creation not available in GUI mode. Use Ghidra's Project Manager or headless mode.\"}");
-        }));
-
-        // --- Version Control Operations (4 endpoints) ---
-
-        server.createContext("/server/version_control/checkout", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            boolean exclusive = Boolean.parseBoolean(params.getOrDefault("exclusive", "true").toString());
-            sendResponse(exchange, checkoutProjectFile(filePath, exclusive));
-        }));
-
-        server.createContext("/server/version_control/checkin", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            String comment = params.getOrDefault("comment", "Checked in via GhidraMCP").toString();
-            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
-            sendResponse(exchange, checkinProjectFile(filePath, comment, keepCheckedOut));
-        }));
-
-        server.createContext("/server/version_control/undo_checkout", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            boolean keep = Boolean.parseBoolean(params.getOrDefault("keep", "false").toString());
-            sendResponse(exchange, undoCheckoutProjectFile(filePath, keep));
-        }));
-
-        server.createContext("/server/version_control/add", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            String comment = params.getOrDefault("comment", "Added via GhidraMCP").toString();
-            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
-            sendResponse(exchange, addToVersionControl(filePath, comment, keepCheckedOut));
-        }));
-
-        // --- Version History & Checkouts (2 endpoints) ---
-
-        server.createContext("/server/version_history", safeHandler(exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String filePath = params.get("path");
-            sendResponse(exchange, getProjectFileVersionHistory(filePath));
-        }));
-
-        server.createContext("/server/checkouts", safeHandler(exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String folderPath = params.get("path");
-            if (folderPath == null) folderPath = "/";
-            sendResponse(exchange, listProjectCheckouts(folderPath));
-        }));
-
-        // --- Admin Operations (3 endpoints) ---
-
-        server.createContext("/server/admin/terminate_checkout", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            sendResponse(exchange, terminateFileCheckout(filePath));
-        }));
-
-        server.createContext("/server/admin/terminate_all_checkouts", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String folderPath = params.get("path") != null ? params.get("path").toString() : "/";
-            sendResponse(exchange, terminateAllCheckouts(folderPath));
-        }));
-
-        server.createContext("/server/admin/users", safeHandler(exchange -> {
-            sendResponse(exchange, "{\"error\": \"User listing requires headless mode with direct server connection.\"}");
-        }));
-
-        server.createContext("/server/admin/set_permissions", safeHandler(exchange -> {
-            sendResponse(exchange, "{\"error\": \"Permission management requires headless mode with direct server connection.\"}");
-        }));
-
-        // ==========================================================================
-        // PROJECT & TOOL MANAGEMENT ENDPOINTS (4 endpoints)
-        // FrontEnd-level operations for project and tool management
-        // ==========================================================================
-
-        server.createContext("/project/info", safeHandler(exchange -> {
-            sendResponse(exchange, getProjectInfo());
-        }));
-
-        server.createContext("/tool/running_tools", safeHandler(exchange -> {
-            sendResponse(exchange, getRunningTools());
-        }));
-
-        server.createContext("/tool/launch_codebrowser", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            sendResponse(exchange, launchCodeBrowser(filePath));
-        }));
-
-        server.createContext("/tool/goto_address", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String address = params.get("address") != null ? params.get("address").toString() : null;
-            sendResponse(exchange, gotoAddress(address));
-        }));
-
-        server.createContext("/batch_apply_documentation", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            sendResponse(exchange, batchApplyDocumentation(params));
-        }));
-
-        server.createContext("/server/authenticate", safeHandler(exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String username = params.get("username") != null ? params.get("username").toString() : null;
-            String password = params.get("password") != null ? params.get("password").toString() : null;
-            sendResponse(exchange, authenticateServer(username, password));
-        }));
+        // Same hand-coded routes the UDS server gets, adapted to the Sun exchange.
+        registerHandCodedRoutes((path, handler) -> server.createContext(path, tcp(handler)));
 
 
         // Use a fixed thread pool instead of the default single-thread handler.
@@ -1947,7 +1662,317 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return "/mcp/health".equals(path) || "/check_connection".equals(path);
     }
 
-    private com.sun.net.httpserver.HttpHandler safeHandler(com.sun.net.httpserver.HttpHandler handler) {
+    /**
+     * Register the hand-coded routes — the utility / GUI-state / Ghidra-Server
+     * endpoints that predate the {@code @McpTool} convention and have no service
+     * method to scan.
+     *
+     * <p>Defined once and registered on <em>every</em> running transport. They used to
+     * be inlined into the TCP server's setup, so a bridge on the Unix socket — the
+     * transport it prefers — could not reach {@code /exit_ghidra}, {@code /tool/*} or
+     * any of the version-control routes: 208 tools over UDS against 240 over TCP,
+     * measured on one instance. {@code ServerManager.registerTool} has always taken a
+     * hook for exactly this and was being passed {@code null}.
+     *
+     * <p>Handlers take the transport-agnostic {@link com.xebyte.core.HttpExchange}; the
+     * TCP side wraps its Sun exchange in {@link SunHttpExchangeAdapter} at registration.
+     */
+    private void registerHandCodedRoutes(RouteRegistrar reg) {
+        // ==========================================================================
+        // HEALTH / METRICS ENDPOINT
+        // Exposes HTTP thread pool saturation, active request count, uptime,
+        // memory. Used by the dashboard to show a "server is struggling" badge
+        // and by regression tests to assert healthy baselines.
+        // ==========================================================================
+        reg.add("/mcp/health", safeHandler(exchange -> {
+            int active = activeRequests.get();
+            long uptimeSec = (System.currentTimeMillis() - serverStartMillis) / 1000L;
+            Runtime rt = Runtime.getRuntime();
+            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
+            long totalMb = rt.totalMemory() / (1024L * 1024L);
+            long maxMb = rt.maxMemory() / (1024L * 1024L);
+
+            int poolSize = -1;
+            int largestPool = -1;
+            long completedTasks = -1;
+            int queueSize = -1;
+            if (httpExecutorRef instanceof java.util.concurrent.ThreadPoolExecutor) {
+                java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) httpExecutorRef;
+                poolSize = tpe.getPoolSize();
+                largestPool = tpe.getLargestPoolSize();
+                completedTasks = tpe.getCompletedTaskCount();
+                queueSize = tpe.getQueue().size();
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("{");
+            sb.append("\"status\": \"ok\",");
+            sb.append("\"connected\": true,");
+            Program current = getCurrentProgram();
+            if (current != null) {
+                sb.append("\"program\": \"").append(escapeJson(current.getName())).append("\",");
+            } else {
+                sb.append("\"program\": null,");
+            }
+            sb.append("\"version\": {");
+            sb.append("\"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",");
+            sb.append("\"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",");
+            sb.append("\"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",");
+            sb.append("\"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",");
+            sb.append("\"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",");
+            sb.append("\"ghidra_version\": \"").append(VersionInfo.getGhidraVersion()).append("\",");
+            sb.append("\"java_version\": \"").append(System.getProperty("java.version")).append("\",");
+            sb.append("\"endpoint_count\": ").append(VersionInfo.getEndpointCount());
+            sb.append("},");
+            sb.append("\"uptime_seconds\": ").append(uptimeSec).append(",");
+            sb.append("\"active_requests\": ").append(active).append(",");
+            sb.append("\"http_pool\": {");
+            sb.append("\"configured_size\": 3,");
+            sb.append("\"current_size\": ").append(poolSize).append(",");
+            sb.append("\"largest_size\": ").append(largestPool).append(",");
+            sb.append("\"queue_size\": ").append(queueSize).append(",");
+            sb.append("\"completed_tasks\": ").append(completedTasks);
+            sb.append("},");
+            sb.append("\"memory_mb\": {");
+            sb.append("\"used\": ").append(usedMb).append(",");
+            sb.append("\"total\": ").append(totalMb).append(",");
+            sb.append("\"max\": ").append(maxMb);
+            sb.append("}");
+            sb.append("}");
+            sendResponse(exchange, sb.toString());
+        }));
+
+        // ==========================================================================
+        // INFRASTRUCTURE ENDPOINTS (not in service layer)
+        // ==========================================================================
+
+        reg.add("/check_connection", safeHandler(exchange -> {
+            sendResponse(exchange, checkConnection());
+        }));
+
+        // /open_project — open (or switch to) a Ghidra project from the
+        // FrontEnd plugin programmatically. Mirrors the headless server's
+        // /open_project route but additionally supports an optional
+        // `headless` boolean (default true) that controls whether a
+        // CodeBrowser window is auto-launched for `program` after the
+        // project opens. Without the flag, the project is loaded into the
+        // FrontEnd tool only — useful for automation that wants to access
+        // programs via the `program` query parameter without spawning UI.
+        //
+        // Body: { "path": <.gpr or project dir>, "headless": true|false,
+        //         "program": "<DomainFile path to launch in CodeBrowser>" }
+        reg.add("/open_project", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String projectPath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean headless = params.get("headless") == null
+                || Boolean.parseBoolean(String.valueOf(params.get("headless")));
+            String programToLaunch = params.get("program") != null ? params.get("program").toString() : null;
+            sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
+        }));
+
+        reg.add("/exit_ghidra", safeHandler(exchange -> {
+            try {
+                promptPolicyService.enableFor("exit_ghidra", 30);
+                Map<String, Object> saveResult = saveEverythingBeforeExit();
+                sendResponse(exchange, JsonHelper.toJson(JsonHelper.mapOf(
+                    "success", true,
+                    "message", "Saving all open programs and traces, then exiting Ghidra",
+                    "save", saveResult
+                )));
+                // Schedule exit after response is sent
+                new Thread(() -> {
+                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                    SwingUtilities.invokeLater(() -> {
+                        closeGhidraWithoutSavingToolLayouts();
+                    });
+                }).start();
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+            }
+        }));
+
+        // ==========================================================================
+        // PROJECT VERSION CONTROL ENDPOINTS (16 endpoints)
+        // Uses Ghidra's internal Project/DomainFile API - no separate connection needed
+        // ==========================================================================
+
+        // --- Project Status (4 endpoints) ---
+
+        reg.add("/server/connect", safeHandler(exchange -> {
+            Project project = tool.getProject();
+            if (project == null) {
+                sendResponse(exchange, "{\"error\": \"No project open in Ghidra\"}");
+                return;
+            }
+            ProjectData data = project.getProjectData();
+            boolean isShared = data.getProjectLocator().isTransient() ? false : (getProjectRepository() != null);
+            sendResponse(exchange, "{\"status\": \"connected\", \"project\": \"" + escapeJson(project.getName()) + "\", " +
+                "\"shared\": " + isShared + ", " +
+                "\"message\": \"GUI plugin uses the open Ghidra project directly. No separate connection needed.\"}");
+        }));
+
+        reg.add("/server/disconnect", safeHandler(exchange -> {
+            sendResponse(exchange, "{\"status\": \"ok\", \"message\": \"GUI plugin uses the open project. No disconnect needed.\"}");
+        }));
+
+        reg.add("/server/status", safeHandler(exchange -> {
+            sendResponse(exchange, getProjectStatusJson());
+        }));
+
+        reg.add("/server/repositories", safeHandler(exchange -> {
+            Project project = tool.getProject();
+            if (project == null) {
+                sendResponse(exchange, "{\"error\": \"No project open\"}");
+                return;
+            }
+            sendResponse(exchange, "{\"repositories\": [\"" + escapeJson(project.getName()) + "\"], \"count\": 1, " +
+                "\"message\": \"GUI mode returns the current project. Use headless mode for multi-repo browsing.\"}");
+        }));
+
+        // --- Repository Browsing (3 endpoints) ---
+
+        reg.add("/server/repository/files", safeHandler(exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String folderPath = params.get("path");
+            if (folderPath == null) folderPath = params.get("folder");
+            if (folderPath == null) folderPath = "/";
+            sendResponse(exchange, listProjectFilesJson(folderPath));
+        }));
+
+        reg.add("/server/repository/file", safeHandler(exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String filePath = params.get("path");
+            if (filePath == null) {
+                sendResponse(exchange, "{\"error\": \"'path' parameter required\"}");
+                return;
+            }
+            sendResponse(exchange, getProjectFileInfoJson(filePath));
+        }));
+
+        reg.add("/server/repository/create", safeHandler(exchange -> {
+            sendResponse(exchange, "{\"error\": \"Repository creation not available in GUI mode. Use Ghidra's Project Manager or headless mode.\"}");
+        }));
+
+        // --- Version Control Operations (4 endpoints) ---
+
+        reg.add("/server/version_control/checkout", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean exclusive = Boolean.parseBoolean(params.getOrDefault("exclusive", "true").toString());
+            sendResponse(exchange, checkoutProjectFile(filePath, exclusive));
+        }));
+
+        reg.add("/server/version_control/checkin", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            String comment = params.getOrDefault("comment", "Checked in via GhidraMCP").toString();
+            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
+            sendResponse(exchange, checkinProjectFile(filePath, comment, keepCheckedOut));
+        }));
+
+        reg.add("/server/version_control/undo_checkout", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean keep = Boolean.parseBoolean(params.getOrDefault("keep", "false").toString());
+            sendResponse(exchange, undoCheckoutProjectFile(filePath, keep));
+        }));
+
+        reg.add("/server/version_control/add", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            String comment = params.getOrDefault("comment", "Added via GhidraMCP").toString();
+            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
+            sendResponse(exchange, addToVersionControl(filePath, comment, keepCheckedOut));
+        }));
+
+        // --- Version History & Checkouts (2 endpoints) ---
+
+        reg.add("/server/version_history", safeHandler(exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String filePath = params.get("path");
+            sendResponse(exchange, getProjectFileVersionHistory(filePath));
+        }));
+
+        reg.add("/server/checkouts", safeHandler(exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String folderPath = params.get("path");
+            if (folderPath == null) folderPath = "/";
+            sendResponse(exchange, listProjectCheckouts(folderPath));
+        }));
+
+        // --- Admin Operations (3 endpoints) ---
+
+        reg.add("/server/admin/terminate_checkout", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            sendResponse(exchange, terminateFileCheckout(filePath));
+        }));
+
+        reg.add("/server/admin/terminate_all_checkouts", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String folderPath = params.get("path") != null ? params.get("path").toString() : "/";
+            sendResponse(exchange, terminateAllCheckouts(folderPath));
+        }));
+
+        reg.add("/server/admin/users", safeHandler(exchange -> {
+            sendResponse(exchange, "{\"error\": \"User listing requires headless mode with direct server connection.\"}");
+        }));
+
+        reg.add("/server/admin/set_permissions", safeHandler(exchange -> {
+            sendResponse(exchange, "{\"error\": \"Permission management requires headless mode with direct server connection.\"}");
+        }));
+
+        // ==========================================================================
+        // PROJECT & TOOL MANAGEMENT ENDPOINTS (4 endpoints)
+        // FrontEnd-level operations for project and tool management
+        // ==========================================================================
+
+        reg.add("/project/info", safeHandler(exchange -> {
+            sendResponse(exchange, getProjectInfo());
+        }));
+
+        reg.add("/tool/running_tools", safeHandler(exchange -> {
+            sendResponse(exchange, getRunningTools());
+        }));
+
+        reg.add("/tool/launch_codebrowser", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            sendResponse(exchange, launchCodeBrowser(filePath));
+        }));
+
+        reg.add("/tool/goto_address", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = params.get("address") != null ? params.get("address").toString() : null;
+            sendResponse(exchange, gotoAddress(address));
+        }));
+
+        reg.add("/batch_apply_documentation", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            sendResponse(exchange, batchApplyDocumentation(params));
+        }));
+
+        reg.add("/server/authenticate", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String username = params.get("username") != null ? params.get("username").toString() : null;
+            String password = params.get("password") != null ? params.get("password").toString() : null;
+            sendResponse(exchange, authenticateServer(username, password));
+        }));
+    }
+
+    /** Installs one route on whichever transport is doing the registering. */
+    @FunctionalInterface
+    private interface RouteRegistrar {
+        void add(String path, UdsHttpServer.Handler handler);
+    }
+
+    /** Adapt a transport-agnostic handler for the Sun TCP server. */
+    private com.sun.net.httpserver.HttpHandler tcp(UdsHttpServer.Handler handler) {
+        return sun -> handler.handle(new SunHttpExchangeAdapter(sun));
+    }
+
+    private UdsHttpServer.Handler safeHandler(UdsHttpServer.Handler handler) {
         return exchange -> {
             long startNanos = System.nanoTime();
             String path = exchange.getRequestURI().getPath();
