@@ -62,9 +62,12 @@ class LedgerRow:
     discarded_calls: int = 0
     returns_value: bool = True
     raises: bool = False
+    registered: bool = False
 
     @property
     def verdict(self) -> str:
+        if self.registered:
+            return "entry_point"           # called by a framework, not by name
         if self.prod_refs == 0 and self.test_refs == 0:
             return "unreferenced"          # nothing calls it at all
         if self.prod_refs == 0:
@@ -202,6 +205,37 @@ def raises_map(source: str) -> Dict[str, bool]:
     return out
 
 
+def registered_map(source: str) -> Dict[str, bool]:
+    """{function name -> is it registered by a DECORATOR}.
+
+    MEASURED 2026-08-06: 72 of the first 95 `unreferenced` findings were Flask
+    routes and SocketIO handlers -- `@app.route(...)`, `@socketio.on(...)`.
+    They are called by a framework, never by name, so a reference count of zero
+    is exactly what a healthy entry point looks like. Reporting them as dead
+    code buries the real findings under three times their number, and an
+    instrument whose output is mostly noise gets ignored.
+
+    Any decorator that is a CALL or an ATTRIBUTE registers the function
+    somewhere (`@app.route(...)`, `@cli.command()`, `@pytest.fixture`). A bare
+    NAME decorator (`@property`, `@staticmethod`) only modifies it, so those
+    still count as ordinary functions.
+    """
+    out: Dict[str, bool] = {}
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        reg = False
+        for d in node.decorator_list:
+            if isinstance(d, (ast.Call, ast.Attribute)):
+                reg = True
+        out[node.name] = out.get(node.name, False) or reg
+    return out
+
+
 def count_references(source: str, names: Set[str]) -> Dict[str, int]:
     """How many times each name is REFERENCED (called, passed, aliased).
 
@@ -321,15 +355,20 @@ def build_ledger(prod_files: Sequence[Path], test_files: Sequence[Path],
     # sweep did not finish in ten minutes.
     returns: Dict[str, bool] = {}
     raises: Dict[str, bool] = {}
+    registered: Dict[str, bool] = {}
     for f in prod_files:
         src = sources.get(f, "")
         for name, rv in returns_map(src).items():
             returns.setdefault(name, rv)
         for name, rz in raises_map(src).items():
             raises.setdefault(name, rz)
+        for name, rg in registered_map(src).items():
+            if rg:
+                registered[name] = True
     for n, row in rows.items():
         row.returns_value = returns.get(n, False)
         row.raises = raises.get(n, False)
+        row.registered = registered.get(n, False)
         row.prod_refs = max(0, row.prod_refs)
     return list(rows.values())
 

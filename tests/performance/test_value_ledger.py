@@ -238,3 +238,43 @@ def test_raises_is_recorded_on_the_row(tmp_path):
     rows = vl.build_ledger([prod], [], root=tmp_path)
     by = {r.symbol.name: r for r in rows}
     assert by["a"].raises is True and by["b"].raises is False
+
+
+# --- decorator-registered entry points ---------------------------------------
+# MEASURED 2026-08-06: 72 of the first 95 `unreferenced` findings were Flask
+# routes and SocketIO handlers. They are called by a framework, never by name,
+# so a reference count of zero is exactly what a HEALTHY entry point looks like.
+# Reporting them as dead code buries the real findings under three times their
+# number, and an instrument whose output is mostly noise gets ignored -- the
+# same fate as not having one.
+
+def test_a_flask_route_is_an_entry_point_not_dead_code(tmp_path):
+    prod = _write(tmp_path, "web.py",
+                  "app = object()\n\n"
+                  "@app.route('/api/x')\ndef api_x():\n    return {}\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "api_x").verdict == "entry_point"
+
+
+def test_a_socketio_handler_is_an_entry_point(tmp_path):
+    prod = _write(tmp_path, "web.py",
+                  "socketio = object()\n\n"
+                  "@socketio.on('connect')\ndef handle_connect():\n    return None\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "handle_connect").verdict == "entry_point"
+
+
+def test_a_plain_name_decorator_does_not_register(tmp_path):
+    """`@property` and `@staticmethod` MODIFY a function; they do not hand it to
+    a framework. Treating them as entry points would hide genuinely dead code."""
+    prod = _write(tmp_path, "mod.py",
+                  "def memo(f):\n    return f\n\n"
+                  "@memo\ndef orphan():\n    return 1\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "orphan").verdict == "unreferenced"
+
+
+def test_an_undecorated_orphan_is_still_reported(tmp_path):
+    prod = _write(tmp_path, "mod.py", "def orphan():\n    return 1\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "orphan").verdict == "unreferenced"

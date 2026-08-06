@@ -89,3 +89,33 @@ def test_a_broken_recorder_does_not_mask_the_original_error(monkeypatch):
     monkeypatch.setattr(fd, "bus_emit", lambda *a, **k: None)
     with pytest.raises(ValueError, match="original"):
         fd.process_function("/P::1000", _func(), {"functions": {}})
+
+
+# --- best-effort writes must still report failure ----------------------------
+# Found by value_ledger 2026-08-06: _persist_port_transcript returns a path or
+# None and swallowed the exception entirely, while all 6 call sites discard the
+# return. The transcript exists BECAUSE a 500-char tail in runs.jsonl was not
+# enough to diagnose a malformed response (2026-07-14, CHAT_AllocResourceSlot);
+# a silent write failure removes the evidence exactly when it is most wanted.
+
+def test_a_failed_transcript_write_is_reported(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path)
+
+    class _Boom:
+        def __truediv__(self, other):
+            return self
+
+        def mkdir(self, **kw):
+            raise OSError("disk full")
+
+    monkeypatch.setattr(fd, "LOG_DIR", _Boom())
+    out = fd._persist_port_transcript("F", "1000", "draft", 1, "text", {})
+    assert out is None
+    printed = capsys.readouterr().out
+    assert "transcript write FAILED" in printed and "disk full" in printed
+
+
+def test_a_successful_transcript_write_is_quiet(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(fd, "LOG_DIR", tmp_path)
+    out = fd._persist_port_transcript("F", "1000", "draft", 1, "body text", {})
+    assert out and "transcript write FAILED" not in capsys.readouterr().out

@@ -9473,7 +9473,15 @@ def _persist_port_transcript(func_name, address, lane, attempt, text, meta):
                      "```json", m["raw_final_message"], "```"]
         p.write_text("\n".join(body), encoding="utf-8")
         return str(p)
-    except Exception:
+    except Exception as exc:
+        # Non-fatal, but never silent. This transcript exists BECAUSE a 500-char
+        # tail in runs.jsonl was not enough to diagnose a malformed response
+        # (2026-07-14, CHAT_AllocResourceSlot). If the write fails the evidence
+        # is gone exactly when it is most wanted -- and all 6 call sites discard
+        # the return, so nothing else can notice.
+        print(f"  [port] transcript write FAILED for {func_name} @ {address} "
+              f"({type(exc).__name__}: {exc}) -- the model response is NOT "
+              f"saved and cannot be diagnosed later", flush=True)
         return None
 
 
