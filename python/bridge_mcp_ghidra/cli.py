@@ -2,6 +2,7 @@
 
 import argparse
 import hmac
+import json
 import os
 import re
 import socket
@@ -14,6 +15,14 @@ from . import state
 from .config import AUTH_TOKEN, logger
 from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
+
+# Largest body we will buffer while sniffing a session-less POST for the
+# `initialize` handshake. A real initialize is a few hundred bytes; anything
+# past this is either abuse or a client that lost its session id, and both get
+# the same "Missing session ID" answer the SDK would have given.
+_INITIALIZE_SNIFF_LIMIT = 256 * 1024
+
+_ALLOWED_HTTP_METHODS = "GET, POST, DELETE, OPTIONS"
 
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -182,10 +191,187 @@ class _BearerAuthMiddleware:
                 await send({"type": "http.response.body", "body": body})
                 return
         await self.app(scope, receive, send)
+async def _send_json_rpc_error(send, status: int, message: str) -> None:
+    """Reply with the same JSON-RPC error envelope the SDK's transport uses."""
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": "server-error",
+            "error": {"code": -32600, "message": message},
+        }
+    ).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _buffer_body(receive, limit: int) -> bytes | None:
+    """Drain the request body, or return None if it exceeds ``limit``.
+
+    None also covers a client that disconnects mid-body — the caller treats
+    both as "not an initialize request".
+    """
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        message = await receive()
+        if message["type"] != "http.request":
+            return None
+        chunk = message.get("body", b"")
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+        if not message.get("more_body", False):
+            return b"".join(chunks)
+
+
+async def _drop_session(session_id: str) -> None:
+    """Tear down a session whose creating request was rejected.
+
+    ``StreamableHTTPSessionManager`` registers the new transport *before* the
+    transport validates the request, so a handshake refused for a bad ``Accept``
+    header, an unsupported ``MCP-Protocol-Version`` or unparseable JSON leaves a
+    live session behind. The SDK's own reaper (``session_idle_timeout``) is
+    never enabled by FastMCP, so nothing else collects them.
+    """
+    manager = getattr(mcp, "_session_manager", None)
+    instances = getattr(manager, "_server_instances", None)
+    if not isinstance(instances, dict):
+        logger.warning(
+            "Cannot drop session %s: no _server_instances dict on the session "
+            "manager (SDK internals may have changed)",
+            session_id,
+        )
+        return
+    transport = instances.pop(session_id, None)
+    owners = getattr(manager, "_session_owners", None)
+    if isinstance(owners, dict):
+        owners.pop(session_id, None)
+    if transport is None:
+        return
+    try:
+        await transport.terminate()
+    except Exception as e:
+        logger.warning("Failed to terminate rejected session %s: %s", session_id, e)
+
+
+def _is_initialize_request(body: bytes) -> bool:
+    """True when this body is the JSON-RPC ``initialize`` handshake."""
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    # JSON-RPC batching was removed in protocol 2025-11-25, and the SDK never
+    # accepted a batched initialize, so only a lone object can be one.
+    return isinstance(payload, dict) and payload.get("method") == "initialize"
+
+
+class TransportEdgeGuard:
+    """ASGI wrapper doing two things the SDK's transport app does not.
+
+    **Answer a bare ``OPTIONS``.** The transport routes only GET/POST/DELETE,
+    so a plain capability probe drew a 405 whose own ``Allow`` header did not
+    even list OPTIONS. Non-browser clients probe exactly this way before
+    connecting (issue #399, Open WebUI), and ``CORSMiddleware`` does not help
+    them: it answers only a real preflight, which needs both ``Origin`` and
+    ``Access-Control-Request-Method``. CORS sits *outside* this guard, so
+    genuine preflights are handled there and never arrive here.
+
+    **Refuse session-less requests before the session manager sees them.**
+    ``StreamableHTTPSessionManager`` creates a live transport for every request
+    that arrives with no session id — including the ones it is about to reject
+    — and never reaps them. Measured: 50 bare OPTIONS plus 50 session-less
+    pings left 100 permanent sessions, each with its own task group, and a
+    session id handed out with a 405 was afterwards fully usable. A request
+    carrying an *unknown* session id is already handled correctly upstream
+    (404, nothing created), so only a missing header is intercepted here.
+    """
+
+    def __init__(self, app, *, guard_sessions: bool):
+        self.app = app
+        self.guard_sessions = guard_sessions
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "")
+        if method == "OPTIONS":
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [
+                        (b"allow", _ALLOWED_HTTP_METHODS.encode()),
+                        (b"content-length", b"0"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        if not self.guard_sessions or method not in {"GET", "POST", "DELETE"}:
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        if b"mcp-session-id" in headers:
+            await self.app(scope, receive, send)
+            return
+
+        missing = "Bad Request: Missing session ID"
+        if method != "POST":
+            await _send_json_rpc_error(send, 400, missing)
+            return
+
+        # Only `initialize` may arrive without a session id. Buffering happens
+        # solely on this path, so an established session never pays for it.
+        body = await _buffer_body(receive, _INITIALIZE_SNIFF_LIMIT)
+        if body is None or not _is_initialize_request(body):
+            await _send_json_rpc_error(send, 400, missing)
+            return
+
+        replayed = False
+
+        async def replay():
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        # A handshake the transport goes on to reject still leaves its freshly
+        # registered session behind, so watch the status and clean up. Only
+        # sessions created by *this* request can be dropped here.
+        new_session: str | None = None
+        rejected = False
+
+        async def watch(message):
+            nonlocal new_session, rejected
+            if message["type"] == "http.response.start":
+                rejected = message["status"] >= 400
+                for key, value in message.get("headers", []):
+                    if key.lower() == b"mcp-session-id":
+                        new_session = value.decode("latin-1")
+            await send(message)
+
+        await self.app(scope, replay, watch)
+        if rejected and new_session:
+            await _drop_session(new_session)
 
 
 def _build_http_app(transport: str, bind_host: str):
-    """Return the transport's Starlette app wrapped in CORS middleware.
+    """Return the transport's Starlette app wrapped in the bridge's middleware.
 
     Browser-based clients (MCP Inspector) send an OPTIONS preflight before
     every POST and can only read the ``mcp-session-id`` response header if
@@ -193,12 +379,21 @@ def _build_http_app(transport: str, bind_host: str):
     CORS middleware at all, so the preflight got a 405 and the session
     header was invisible to scripts — this wrapper is why the bridge runs
     uvicorn itself instead of delegating to ``mcp.run()``.
+
+    Ordering matters: ``CORSMiddleware`` is added last and therefore runs
+    outermost, so it claims real preflights before ``TransportEdgeGuard``
+    sees them.
     """
     app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+    # The SSE transport carries its session in a query parameter and has no
+    # `mcp-session-id` header; stateless streamable-HTTP has no session at
+    # all. Neither can be guarded by header presence.
+    guard_sessions = transport == "streamable-http" and not mcp.settings.stateless_http
+    app.add_middleware(TransportEdgeGuard, guard_sessions=guard_sessions)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=_cors_origin_regex(bind_host),
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["mcp-session-id", "mcp-protocol-version"],
         max_age=3600,

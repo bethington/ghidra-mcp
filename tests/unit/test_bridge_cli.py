@@ -363,6 +363,191 @@ class TestBridgeBearerAuth(unittest.TestCase):
         with patch.object(cli, "AUTH_TOKEN", "bridge-secret"):
             app = cli._build_http_app("streamable-http", "127.0.0.1")
         self.assertNotIsInstance(app, cli._BearerAuthMiddleware)
+class TestBareOptionsProbe(unittest.TestCase):
+    """A plain OPTIONS with no CORS headers must not 405.
+
+    Non-browser clients probe the endpoint this way before connecting (#399,
+    Open WebUI). CORSMiddleware ignores it — it answers only a request that
+    carries both Origin and Access-Control-Request-Method — so before
+    TransportEdgeGuard the transport itself replied 405 with an Allow header
+    that did not even list OPTIONS.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from starlette.testclient import TestClient
+
+        cls.client = TestClient(cli._build_http_app("streamable-http", "127.0.0.1"))
+
+    def test_bare_options_is_answered(self):
+        resp = self.client.options("/mcp")
+        self.assertEqual(resp.status_code, 204)
+        self.assertIn("OPTIONS", resp.headers["allow"])
+        for method in ("GET", "POST", "DELETE"):
+            self.assertIn(method, resp.headers["allow"])
+
+    def test_options_with_origin_but_no_request_method_is_answered(self):
+        # Not a preflight by the CORS spec, so CORSMiddleware passes it down.
+        resp = self.client.options("/mcp", headers={"Origin": "http://localhost:6274"})
+        self.assertEqual(resp.status_code, 204)
+
+    def test_bare_options_mints_no_session(self):
+        self.assertNotIn("mcp-session-id", self.client.options("/mcp").headers)
+
+    def test_sse_transport_also_answers_options(self):
+        from starlette.testclient import TestClient
+
+        client = TestClient(cli._build_http_app("sse", "127.0.0.1"))
+        self.assertEqual(client.options("/sse").status_code, 204)
+
+
+class TestSessionlessRequestsAreRefusedEarly(unittest.TestCase):
+    """No request may create a session the SDK is about to reject.
+
+    StreamableHTTPSessionManager builds a transport for every request that
+    arrives without a session id and never reaps it, so rejected traffic used
+    to accumulate live sessions (measured: 100 requests, 100 sessions, and a
+    session id issued alongside a 405 was afterwards usable).
+    """
+
+    HEADERS = {"Accept": "application/json, text/event-stream"}
+
+    @classmethod
+    def setUpClass(cls):
+        from starlette.testclient import TestClient
+
+        # The FastMCP singleton caches one session manager and it refuses to
+        # .run() twice, so the lifespan is entered exactly once for the class
+        # (and, by extension, once for this whole test module).
+        # base_url sets the Host header. It needs an explicit port: the default
+        # host policy allows "localhost:*", which does not match a bare
+        # "localhost", and TestClient's own "testserver" is rejected outright.
+        # The session manager is a singleton built by whichever class runs
+        # first, so its host policy cannot be adjusted from here.
+        cls.client = TestClient(
+            cli._build_http_app("streamable-http", "127.0.0.1"),
+            base_url="http://localhost:8000",
+        )
+        cls.client.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.__exit__(None, None, None)
+
+    def _instances(self):
+        return len(mcp._session_manager._server_instances)
+
+    def test_sessionless_post_refused_without_creating_a_session(self):
+        before = self._instances()
+        resp = self.client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers=self.HEADERS,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Missing session ID", resp.json()["error"]["message"])
+        self.assertNotIn("mcp-session-id", resp.headers)
+        self.assertEqual(self._instances(), before)
+
+    def test_sessionless_get_and_delete_refused(self):
+        before = self._instances()
+        self.assertEqual(
+            self.client.get("/mcp", headers={"Accept": "text/event-stream"}).status_code,
+            400,
+        )
+        self.assertEqual(self.client.delete("/mcp").status_code, 400)
+        self.assertEqual(self._instances(), before)
+
+    def test_initialize_still_passes_through_with_its_body_intact(self):
+        resp = self.client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                },
+            },
+            headers=self.HEADERS,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.headers.get("mcp-session-id"))
+        # The replayed body must have reached the server unchanged, or the
+        # handshake would not have produced a result.
+        self.assertIn("protocolVersion", resp.text)
+
+    def test_oversized_sessionless_post_is_refused_not_buffered(self):
+        before = self._instances()
+        resp = self.client.post(
+            "/mcp",
+            content=b'{"jsonrpc":"2.0","id":1,"method":"initialize","params":"'
+            + b"x" * (cli._INITIALIZE_SNIFF_LIMIT + 1)
+            + b'"}',
+            headers=dict(self.HEADERS, **{"Content-Type": "application/json"}),
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self._instances(), before)
+
+    def test_rejected_handshake_leaves_no_session_behind(self):
+        """The transport registers the session before it validates the request.
+
+        An initialize with an Accept header the transport refuses (406) used to
+        leave a live session per attempt — a misconfigured client retrying in a
+        loop grew them without bound.
+        """
+        before = self._instances()
+        resp = self.client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                },
+            },
+            headers={"Accept": "application/json"},  # missing text/event-stream
+        )
+        self.assertEqual(resp.status_code, 406)
+        self.assertEqual(self._instances(), before)
+
+    def test_unknown_session_id_still_reaches_the_transport(self):
+        # The SDK already answers this correctly (404, nothing created); the
+        # guard must not shadow it with its own 400.
+        resp = self.client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers=dict(self.HEADERS, **{"mcp-session-id": "0" * 32}),
+        )
+        self.assertEqual(resp.status_code, 404)
+
+
+class TestSessionGuardScope(unittest.TestCase):
+    """Which transports the session guard may apply to."""
+
+    def test_stateless_disables_the_session_guard(self):
+        """Stateless requests legitimately carry no session id, so guarding on
+        header presence would reject every one of them."""
+        mcp.settings.stateless_http = True
+        try:
+            app = cli._build_http_app("streamable-http", "127.0.0.1")
+            guards = [
+                m for m in app.user_middleware if m.cls is cli.TransportEdgeGuard
+            ]
+            self.assertEqual(len(guards), 1)
+            self.assertFalse(guards[0].kwargs["guard_sessions"])
+        finally:
+            mcp.settings.stateless_http = False
+
+    def test_sse_transport_does_not_guard_sessions(self):
+        # SSE carries its session in a query parameter, not a header.
+        app = cli._build_http_app("sse", "127.0.0.1")
+        guards = [m for m in app.user_middleware if m.cls is cli.TransportEdgeGuard]
+        self.assertFalse(guards[0].kwargs["guard_sessions"])
 
 
 class TestWildcardAllowedHosts(unittest.TestCase):
