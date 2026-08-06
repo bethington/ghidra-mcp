@@ -52,7 +52,37 @@ Source: ..\Source\Module\File.cpp
 
 Algorithm:
 1. [Step with hex magic numbers, e.g., "check type == 0x4E (78)"]
-2. [Each step is one clear action]
+2. [Each step is one clear action the AUTHOR wrote]
+
+DO NOT DESCRIBE COMPILER-GENERATED MACHINERY AS BEHAVIOUR. The decompiler shows
+the compiled form of ordinary C++ language features. These are not steps the
+author wrote and they belong in no plate:
+
+  - SEH frame setup, ExceptionList / FS:[0] chain saves, __try/__except filters,
+    scope tables, "nSehState" -- this is C++ exception handling, present in
+    nearly every function that has a destructor.
+  - Security cookies / stack guard words (`g_dwSecurityCookie ^ EBP`).
+  - `_tls_index` slot indirection, SRW locks, InitOnce, `__onexit`/atexit
+    registration -- this is the compiled form of a FUNCTION-LOCAL STATIC
+    (`static X x;` or `std::call_once`). Say "lazily initialised on first call"
+    and move on.
+  - vftable installs and vector constructor/destructor iterators -- ordinary
+    C++ object construction.
+
+MEASURED 2026-08-06 against the original source of a binary we compile
+ourselves: of the plates that correctly identified their function, ZERO were
+free of invented claims, and this scaffolding was the dominant source. One
+three-line forwarding function --
+
+    void UnloadCelFile(CelFile* f) { UnloadCelFile_1_00((CelFile_1_00*)f); }
+
+-- was documented as "lazy-loads and dispatches the GDI UnloadCelFile API under
+SEH and TLS-gated reference counting", with five algorithm steps about TLS
+blocks, SRW locks and a dispatch table. Every one of those steps is the
+compiler's, not the author's, and together they buried the single thing the
+function actually does.
+
+If removing the scaffolding leaves one step, write one step.
 
 Parameters:
   paramName: Type - purpose description [IMPLICIT EDX if register-passed]

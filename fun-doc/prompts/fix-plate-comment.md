@@ -16,7 +16,17 @@ One-line function summary.
 
 Algorithm:
 1. [Step with hex magic numbers, e.g., "check type == 0x4E (78)"]
-2. [Each step is one clear action]
+2. [Each step is one clear action the AUTHOR wrote]
+
+NOT compiler-generated machinery: SEH frames / ExceptionList saves / __try
+filters, security cookies, `_tls_index` + SRW lock + InitOnce + __onexit (that
+combination IS a function-local static -- say "lazily initialised on first
+call"), vftable installs, vector constructor/destructor iterators. Measured
+2026-08-06: of the plates that identified their function correctly, ZERO were
+free of invented claims and this scaffolding was the dominant source -- a
+three-line forwarding call was written up as "TLS-gated reference counting"
+with five steps about locks and dispatch tables. If removing it leaves one
+step, write one step.
 
 Parameters:
   paramName: Type - purpose description [IMPLICIT EDX if register-passed]
