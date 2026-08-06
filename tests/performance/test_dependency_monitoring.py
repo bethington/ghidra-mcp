@@ -619,3 +619,32 @@ def test_unreachable_shapes_are_unchanged():
     assert dead["state"] == "down" and "not running" in dead["detail"].lower()
     unprobed = _oracle_dot(reachable=None)
     assert unprobed["state"] == "unknown"
+
+
+# --- a notifier that cannot send must say so --------------------------------
+# Found by value_ledger 2026-08-06: notify_transition returns whether a
+# notification was actually sent, and all 6 call sites discard it. `send()` then
+# caught every exception and returned False with NO logging, so a notifier that
+# could not launch PowerShell at all was indistinguishable from one correctly
+# edge-suppressing a repeat. A monitoring channel that fails invisibly is worse
+# than no channel: it reports health by its silence.
+
+def test_a_failed_send_is_reported(monkeypatch, capsys):
+    import notify as _n
+    monkeypatch.setattr(_n, "NOTIFY_ENABLED", True)
+    monkeypatch.setattr(_n.sys, "platform", "win32")
+    monkeypatch.setattr(_n.subprocess, "Popen",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no powershell")))
+    assert _n.send("t", "b") is False
+    out = capsys.readouterr().out
+    assert "send FAILED" in out and "no powershell" in out
+
+
+def test_a_successful_send_is_quiet(monkeypatch, capsys):
+    """The report must fire on failure only, or it becomes noise to scroll past."""
+    import notify as _n
+    monkeypatch.setattr(_n, "NOTIFY_ENABLED", True)
+    monkeypatch.setattr(_n.sys, "platform", "win32")
+    monkeypatch.setattr(_n.subprocess, "Popen", lambda *a, **k: None)
+    assert _n.send("t", "b") is True
+    assert "send FAILED" not in capsys.readouterr().out

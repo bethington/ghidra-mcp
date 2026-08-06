@@ -61,6 +61,7 @@ class LedgerRow:
     test_refs: int = 0
     discarded_calls: int = 0
     returns_value: bool = True
+    raises: bool = False
 
     @property
     def verdict(self) -> str:
@@ -68,7 +69,8 @@ class LedgerRow:
             return "unreferenced"          # nothing calls it at all
         if self.prod_refs == 0:
             return "test_only"             # the measured shape
-        if self.returns_value and self.discarded_calls == self.prod_refs:
+        if (self.returns_value and not self.raises
+                and self.discarded_calls == self.prod_refs):
             return "result_ignored"        # every caller throws the answer away
         return "load_bearing"
 
@@ -166,6 +168,37 @@ def returns_map(source: str) -> Dict[str, bool]:
                     rv = True
                     break
         out[node.name] = rv
+    return out
+
+
+def raises_map(source: str) -> Dict[str, bool]:
+    """{function name -> does it signal failure by RAISING}.
+
+    TRIAGE RESULT, 2026-08-06. The first `result_ignored` list was dominated by
+    false positives of one kind: functions whose failure path is an EXCEPTION
+    and whose return value is merely informational.
+
+        library_scope._checked_post   raises WriteRejected on a rejected write;
+                                      its whole purpose is detecting failure,
+                                      and discarding the return is correct
+        repository.upsert_function    returns a row id; SQLAlchemy raises
+        repository.record_run         likewise
+
+    A discarded return only hides a failure when the return value IS the
+    failure signal -- which was exactly `ghidra_post`'s shape in the
+    /save_program bug. Distinguishing them is what keeps this category worth
+    reading; an instrument whose findings are mostly noise gets ignored, which
+    is the same fate as not having it.
+    """
+    out: Dict[str, bool] = {}
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        out[node.name] = any(isinstance(s, ast.Raise) for s in ast.walk(node))
     return out
 
 
@@ -287,11 +320,16 @@ def build_ledger(prod_files: Sequence[Path], test_files: Sequence[Path],
     # functions) that is hundreds of full AST parses of a large file, and the
     # sweep did not finish in ten minutes.
     returns: Dict[str, bool] = {}
+    raises: Dict[str, bool] = {}
     for f in prod_files:
-        for name, rv in returns_map(sources.get(f, "")).items():
+        src = sources.get(f, "")
+        for name, rv in returns_map(src).items():
             returns.setdefault(name, rv)
+        for name, rz in raises_map(src).items():
+            raises.setdefault(name, rz)
     for n, row in rows.items():
         row.returns_value = returns.get(n, False)
+        row.raises = raises.get(n, False)
         row.prod_refs = max(0, row.prod_refs)
     return list(rows.values())
 

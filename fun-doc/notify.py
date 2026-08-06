@@ -152,7 +152,17 @@ def send(title: str, body: str) -> bool:
             stdin=subprocess.DEVNULL, creationflags=creation,
         )
         return True
-    except Exception:
+    except Exception as exc:
+        # Loud, never silent. Every caller discards notify_transition's return
+        # (6 of 6 call sites, found by value_ledger 2026-08-06), and this
+        # `except` swallowed the reason entirely -- so a notifier that could not
+        # launch PowerShell at all was indistinguishable from one that was
+        # edge-suppressing correctly. Non-fatal, because a failed toast must
+        # never take down a health monitor; but recorded, because a monitoring
+        # channel that fails invisibly is worse than no channel: it reports
+        # health by its silence.
+        print(f"  [notify] send FAILED ({type(exc).__name__}: {exc}) -- "
+              f"desktop alerts are NOT being delivered", flush=True)
         return False
 
 

@@ -197,3 +197,44 @@ def test_counting_a_test_as_production_would_hide_the_finding(tmp_path):
     tests = vl.iter_source_files(tmp_path, tests=True)
     rows = vl.build_ledger(prod, tests, root=tmp_path)
     assert next(r for r in rows if r.symbol.name == "only_tested").verdict == "test_only"
+
+
+# --- failure signalled by exception ------------------------------------------
+# TRIAGE RESULT 2026-08-06. The first result_ignored list was dominated by one
+# kind of false positive: functions whose failure path is an EXCEPTION and whose
+# return value is merely informational -- library_scope._checked_post (raises
+# WriteRejected; detecting failure is its entire purpose), repository's
+# upsert_function and record_run (return a row id; SQLAlchemy raises).
+#
+# A discarded return only hides a failure when the return value IS the failure
+# signal, which was exactly ghidra_post's shape in the /save_program bug. An
+# instrument whose findings are mostly noise gets ignored, which is the same
+# fate as not having it.
+
+def test_a_function_that_raises_is_not_result_ignored(tmp_path):
+    prod = _write(tmp_path, "mod.py",
+                  "def checked_post(x):\n"
+                  "    if x:\n        raise ValueError('rejected')\n"
+                  "    return {'ok': True}\n\n"
+                  "def run():\n    checked_post(1)\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "checked_post").verdict == "load_bearing"
+
+
+def test_a_status_returner_that_never_raises_is_still_flagged(tmp_path):
+    """The /save_program shape survives the refinement: the return value IS the
+    failure signal and every caller discards it."""
+    prod = _write(tmp_path, "mod.py",
+                  "def save():\n    return False\n\n"
+                  "def run():\n    save()\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    assert next(r for r in rows if r.symbol.name == "save").verdict == "result_ignored"
+
+
+def test_raises_is_recorded_on_the_row(tmp_path):
+    prod = _write(tmp_path, "mod.py",
+                  "def a():\n    raise IOError('x')\n\n"
+                  "def b():\n    return 1\n")
+    rows = vl.build_ledger([prod], [], root=tmp_path)
+    by = {r.symbol.name: r for r in rows}
+    assert by["a"].raises is True and by["b"].raises is False
