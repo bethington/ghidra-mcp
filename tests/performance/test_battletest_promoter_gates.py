@@ -544,3 +544,90 @@ def test_sgd2freeres_offsets_resolve_against_its_own_base(rig):
     bp.poll_and_promote(program="SGD2FreeRes.dll")
     assert any(int(str(d["function"]), 16) == ADDR_SGD2FR + 0x1234
                for _, d in rig["writes"] if "function" in d)
+
+
+# --- low-frequency evidence -------------------------------------------------
+# MEASURED 2026-08-05. CLIENT_SetWorldView (SGD2FreeRes) fires exactly twice
+# during process startup and never again -- identical across 3 launches, and
+# unchanged by a full world load and 46,000 rendered frames. It agrees with its
+# reimplementation on every call it will ever make, and it can never reach the
+# 1,000-call volume bar.
+#
+# conf_ladder has carried is_low_frequency/low_frequency_status/
+# effective_volume_floor since that bar was first questioned, with a comment
+# stating the evidence "now accumulates in the logs instead of being invisible".
+# It did not: all three were called from NOWHERE, nothing recorded per-session
+# hit counts, and a below-bar function fell through the gate in total silence.
+# An exemption that can never be calibrated is a dead branch, not a deferred
+# decision.
+
+def test_below_bar_function_reports_low_frequency(rig, capsys):
+    rig["dispatchers"] = [_disp("StartupOnly", 0x1000, hits=2, distinct_inputs=1)]
+    rig["rows"] = [_row("StartupOnly", hex(ADDR_COMMON + 0x1000))]
+    for _ in range(conf_ladder.LOW_FREQUENCY_MIN_SESSIONS_TO_CLASSIFY):
+        bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 0        # relaunch: counters reset
+        bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 2
+    assert "LOW-FREQUENCY" in capsys.readouterr().out
+
+
+def test_reporting_is_not_a_promotion_path(rig):
+    """The whole point of the report is that it grants nothing today."""
+    rig["dispatchers"] = [_disp("StartupOnly", 0x1000, hits=2, distinct_inputs=1)]
+    rig["rows"] = [_row("StartupOnly", hex(ADDR_COMMON + 0x1000))]
+    for _ in range(6):
+        out = bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 0
+        bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 2
+    assert out["promoted"] == []
+    assert _added(rig) == []
+
+
+def test_sessions_and_peak_hits_are_recorded(rig):
+    """The two numbers the exemption needs, neither of which existed before."""
+    rig["dispatchers"] = [_disp("StartupOnly", 0x1000, hits=2, distinct_inputs=1)]
+    rig["rows"] = [_row("StartupOnly", hex(ADDR_COMMON + 0x1000))]
+    bp.poll_and_promote()
+    rig["dispatchers"][0]["hits"] = 0          # session 2
+    bp.poll_and_promote()
+    rig["dispatchers"][0]["hits"] = 2
+    bp.poll_and_promote()
+    m = [v for k, v in rig["marks"].items() if k.endswith("1000")]
+    assert m, rig["marks"].keys()
+    assert m[0]["sessions_observed"] == 2
+    assert m[0]["max_hits_session"] == 2
+
+
+def test_peak_is_the_largest_session_not_the_latest(rig):
+    """A quiet session must not erase evidence that the function CAN go higher --
+    the exemption turns on the ceiling, not on the most recent playthrough."""
+    rig["dispatchers"] = [_disp("Occasional", 0x1000, hits=40, distinct_inputs=3)]
+    rig["rows"] = [_row("Occasional", hex(ADDR_COMMON + 0x1000))]
+    bp.poll_and_promote()
+    rig["dispatchers"][0]["hits"] = 1          # relaunch, barely exercised
+    bp.poll_and_promote()
+    m = [v for k, v in rig["marks"].items() if k.endswith("1000")][0]
+    assert m["max_hits_session"] == 40
+
+
+def test_one_quiet_session_is_not_enough_to_classify(rig, capsys):
+    """One session says more about the playthrough than about the function."""
+    rig["dispatchers"] = [_disp("Unknown", 0x1000, hits=2, distinct_inputs=1)]
+    rig["rows"] = [_row("Unknown", hex(ADDR_COMMON + 0x1000))]
+    bp.poll_and_promote()
+    assert "LOW-FREQUENCY" not in capsys.readouterr().out
+
+
+def test_a_diverging_function_is_never_called_low_frequency(rig, capsys):
+    """Rarity is not evidence of correctness; a refuted function must not be
+    dressed up as a promotion candidate waiting on a bar."""
+    rig["dispatchers"] = [_disp("Bad", 0x1000, hits=2, distinct_inputs=1, divergences=3)]
+    rig["rows"] = [_row("Bad", hex(ADDR_COMMON + 0x1000))]
+    for _ in range(4):
+        bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 0
+        bp.poll_and_promote()
+        rig["dispatchers"][0]["hits"] = 2
+    assert "LOW-FREQUENCY" not in capsys.readouterr().out

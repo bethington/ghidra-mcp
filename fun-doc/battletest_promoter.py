@@ -222,6 +222,7 @@ def _save_registry(rows: list) -> None:
 
 _WARNED_NO_DISTINCT: set = set()
 _WARNED_DOMAIN: set = set()
+_WARNED_LOW_FREQ: set = set()
 
 
 def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
@@ -300,7 +301,26 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
             if hits < m.get("last_hits", 0):
                 m["counted_this_session"] = False
                 m["distinct"] = None          # force a fresh watermark below
+                m["sessions_observed"] = int(m.get("sessions_observed", 1)) + 1
             m["last_hits"] = hits
+
+            # LOW-FREQUENCY EVIDENCE. conf_ladder's exemption needs two numbers,
+            # and nothing was recording either one: how many sessions this
+            # dispatcher has been observed across, and the most calls it ever
+            # made in ONE of them. conf_ladder's own comment says the evidence
+            # "now accumulates in the logs instead of being invisible" -- it did
+            # not, because is_low_frequency/low_frequency_status/
+            # effective_volume_floor were called from nowhere at all. An
+            # exemption that can never be calibrated is not a deferred decision,
+            # it is a dead branch, and the functions it exists for stay stuck in
+            # silence. Measured on CLIENT_SetWorldView (SGD2FreeRes): 2 calls per
+            # session, identical across 3 launches -- it can never reach a
+            # 1,000-call bar no matter how long the game runs.
+            # `hits` is cumulative WITHIN a session and resets on relaunch, so
+            # the running maximum over all polls is exactly the largest single
+            # session's count.
+            m.setdefault("sessions_observed", 1)
+            m["max_hits_session"] = max(int(m.get("max_hits_session", 0)), hits)
 
             # Record the hit count at which distinct last CHANGED; saturation is
             # measured from there. A NEW input also breaks any saturation this
@@ -366,6 +386,30 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
         # promote on volume alone, which is the evidence the plan calls
         # worthless. Loud, so a missing sampler surfaces instead of silently
         # halting all promotion.
+        # BELOW THE VOLUME BAR. Until now this fell straight through the gate
+        # below in total silence, so a function that agrees on every call it
+        # will ever make is indistinguishable from one nobody exercised. Report
+        # it -- and REPORT ONLY: low_frequency_status() grants nothing while
+        # REQUIRED_LOW_FREQUENCY_SESSIONS is uncalibrated, and this must not
+        # become a side door around the bar. What it does buy is the evidence
+        # to calibrate one, which is what was missing.
+        if (is_shadow and ddivs == 0 and dhits < min_hits
+                and d["name"] not in _WARNED_LOW_FREQ):
+            _lm = marks.get(mkey, {})
+            lf = conf_ladder.low_frequency_status(
+                _lm.get("max_hits_session"), _lm.get("sessions_observed"),
+                "CONF_BATTLETESTED")
+            if lf["classified"]:
+                _WARNED_LOW_FREQ.add(d["name"])
+                print(f"  [promoter] {d['name']}: LOW-FREQUENCY -- at most "
+                      f"{lf['max_hits_per_session']} call(s) in any of "
+                      f"{lf['sessions_observed']} observed session(s), against a "
+                      f"{min_hits}-call bar it can never reach. "
+                      + ("Exemption GRANTED." if lf["granted"] else
+                         "Exemption NOT granted: REQUIRED_LOW_FREQUENCY_SESSIONS "
+                         "is uncalibrated, so the flat bar still stands. "
+                         "NOT promoting."))
+
         if is_shadow and ddivs == 0 and dhits >= min_hits and not (r or {}).get("weak_proof"):  # noqa: E501
             argc = d.get("arg_count")
             # argc -1 == the coord family, which predates the sampler and has no
