@@ -446,6 +446,23 @@ def main():
         default=None,
         help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
     )
+    parser.add_argument(
+        "--json-response",
+        action="store_true",
+        default=False,
+        help="streamable-http: answer POSTs with a plain JSON body instead of an "
+        "SSE stream, for clients that cannot read text/event-stream. Rules out "
+        "server-initiated messages on the response, so tools/list_changed and "
+        "progress notifications are not delivered.",
+    )
+    parser.add_argument(
+        "--stateless-http",
+        action="store_true",
+        default=False,
+        help="streamable-http: treat every request as standalone — no session id "
+        "and no server-initiated notifications. Needed to run several bridge "
+        "workers behind a load balancer.",
+    )
     args = parser.parse_args()
 
     # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_LAZY decides, and
@@ -477,6 +494,21 @@ def main():
     mcp.settings.host = args.mcp_host
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
+    # Both are read when the transport app is constructed, so they have to be
+    # installed before _build_http_app() runs.
+    mcp.settings.json_response = args.json_response
+    mcp.settings.stateless_http = args.stateless_http
+    if (args.json_response or args.stateless_http) and args.transport != "streamable-http":
+        logger.warning(
+            "--json-response/--stateless-http only affect streamable-http; ignored for %s",
+            args.transport,
+        )
+    if args.stateless_http and state._lazy_mode:
+        logger.warning(
+            "Stateless HTTP cannot deliver tools/list_changed, so a group loaded by "
+            "load_tool_group() stays invisible to the client. Use --no-lazy (the "
+            "default) when running stateless."
+        )
 
     _host = args.mcp_host
     _has_extra_hosts = any(

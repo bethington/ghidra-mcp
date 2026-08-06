@@ -526,6 +526,33 @@ class TestSessionlessRequestsAreRefusedEarly(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestStatelessAndJsonResponseFlags(_CliHarness):
+    def setUp(self):
+        super().setUp()
+        self._saved_stateless = mcp.settings.stateless_http
+        self._saved_json = mcp.settings.json_response
+
+    def tearDown(self):
+        mcp.settings.stateless_http = self._saved_stateless
+        mcp.settings.json_response = self._saved_json
+        super().tearDown()
+
+    def test_flags_default_off(self):
+        self.run_main("--transport", "streamable-http")
+        self.assertFalse(mcp.settings.stateless_http)
+        self.assertFalse(mcp.settings.json_response)
+
+    def test_flags_are_applied(self):
+        self.run_main("--transport", "streamable-http", "--stateless-http", "--json-response")
+        self.assertTrue(mcp.settings.stateless_http)
+        self.assertTrue(mcp.settings.json_response)
+
+    def test_stdio_transport_warns_that_the_flags_do_nothing(self):
+        with self.assertLogs(cli.logger, level="WARNING") as logs:
+            self.run_main("--json-response")
+        self.assertTrue(any("only affect streamable-http" in m for m in logs.output))
+
+
 class TestSessionGuardScope(unittest.TestCase):
     """Which transports the session guard may apply to."""
 
