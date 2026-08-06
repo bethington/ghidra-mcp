@@ -11,6 +11,7 @@ import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 
+from . import server
 from . import state
 from .config import AUTH_TOKEN, logger
 from .server import mcp
@@ -447,6 +448,15 @@ def main():
         help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
     )
     parser.add_argument(
+        "--tools-page-size",
+        type=int,
+        default=0,
+        help="Serve tools/list in pages of this many tools (0 = one page, the "
+        "default). Only enable it for a client that cannot take a single large "
+        "response: pagination is optional in the MCP spec, and a client that "
+        "ignores nextCursor will see only the first page.",
+    )
+    parser.add_argument(
         "--json-response",
         action="store_true",
         default=False,
@@ -482,6 +492,15 @@ def main():
             "Call search_tools()/load_tool_group() for the rest, or pass "
             "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front.",
             ",".join(sorted(state._default_groups)),
+        )
+    if args.tools_page_size < 0:
+        parser.error("--tools-page-size must be 0 (no pagination) or a positive count")
+    if args.tools_page_size:
+        server.enable_tool_pagination(args.tools_page_size)
+        logger.info(
+            "tools/list paginated at %d per page; a client that ignores "
+            "nextCursor will see only the first page",
+            args.tools_page_size,
         )
     if not _auto_connect():
         # Ghidra may simply not be up yet. Keep looking in the background so a

@@ -553,6 +553,22 @@ class TestStatelessAndJsonResponseFlags(_CliHarness):
         self.assertTrue(any("only affect streamable-http" in m for m in logs.output))
 
 
+class TestToolsPageSizeFlag(_CliHarness):
+    def test_pagination_is_off_by_default(self):
+        with patch.object(cli.server, "enable_tool_pagination") as enable:
+            self.run_main("--transport", "streamable-http")
+        enable.assert_not_called()
+
+    def test_page_size_enables_pagination(self):
+        with patch.object(cli.server, "enable_tool_pagination") as enable:
+            self.run_main("--transport", "streamable-http", "--tools-page-size", "40")
+        enable.assert_called_once_with(40)
+
+    def test_negative_page_size_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("--tools-page-size", "-1")
+
+
 class TestSessionGuardScope(unittest.TestCase):
     """Which transports the session guard may apply to."""
 

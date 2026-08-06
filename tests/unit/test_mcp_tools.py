@@ -681,6 +681,105 @@ class TestFailureDetection(unittest.TestCase):
                 state._dynamic_tool_names.remove(name)
 
 
+class TestToolListPagination(unittest.TestCase):
+    """Opt-in `tools/list` paging.
+
+    Off by default on purpose: paging is optional in the spec and a client that
+    ignores nextCursor would see only the first page of ~250 tools.
+    """
+
+    def setUp(self):
+        from mcp import types
+
+        from bridge_mcp_ghidra.server import mcp
+
+        self._types = types
+        self._saved = mcp._mcp_server.request_handlers.get(types.ListToolsRequest)
+        self._registered = []
+
+    def tearDown(self):
+        from bridge_mcp_ghidra import state
+        from bridge_mcp_ghidra.server import mcp
+
+        if self._saved is not None:
+            mcp._mcp_server.request_handlers[self._types.ListToolsRequest] = self._saved
+        for name in self._registered:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+    def _add_tools(self, count):
+        from bridge_mcp_ghidra.registry import _register_tool_def
+
+        for i in range(count):
+            name = f"pagination_probe_{i:02d}"
+            _register_tool_def({
+                "name": name,
+                "endpoint": f"/probe_{i}",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {"type": "object", "properties": {}},
+                "read_only": True,
+                "destructive": False,
+            })
+            self._registered.append(name)
+
+    def _list(self, cursor=None):
+        from bridge_mcp_ghidra.server import mcp
+
+        types = self._types
+        handler = mcp._mcp_server.request_handlers[types.ListToolsRequest]
+        params = types.PaginatedRequestParams(cursor=cursor) if cursor else None
+        request = types.ListToolsRequest(method="tools/list", params=params)
+        return asyncio.run(handler(request)).root
+
+    def test_default_is_a_single_unpaginated_page(self):
+        self._add_tools(6)
+        result = self._list()
+        self.assertIsNone(result.nextCursor)
+        names = [t.name for t in result.tools]
+        self.assertEqual(len([n for n in names if n.startswith("pagination_probe_")]), 6)
+
+    def test_pages_cover_every_tool_exactly_once(self):
+        from bridge_mcp_ghidra.server import enable_tool_pagination
+
+        self._add_tools(11)
+        enable_tool_pagination(4)
+        seen, cursor, pages = [], None, 0
+        while True:
+            result = self._list(cursor)
+            seen.extend(t.name for t in result.tools)
+            cursor = result.nextCursor
+            pages += 1
+            self.assertLess(pages, 20, "pagination did not terminate")
+            if not cursor:
+                break
+        self.assertGreater(pages, 1)
+        self.assertEqual(len(seen), len(set(seen)), "a tool appeared on two pages")
+        probes = [n for n in seen if n.startswith("pagination_probe_")]
+        self.assertEqual(len(probes), 11, "a tool was skipped between pages")
+
+    def test_cursor_is_a_name_so_a_changed_list_does_not_skip(self):
+        """An index cursor would skip or repeat entries, and the tool list is not
+        fixed here — load_tool_group and a reconnect both rewrite it."""
+        from bridge_mcp_ghidra.server import enable_tool_pagination
+
+        self._add_tools(8)
+        enable_tool_pagination(3)
+        first = self._list()
+        self.assertEqual(first.nextCursor, first.tools[-1].name)
+        after = self._list(first.nextCursor)
+        self.assertTrue(all(t.name > first.nextCursor for t in after.tools))
+
+    def test_stale_cursor_continues_instead_of_failing(self):
+        from bridge_mcp_ghidra.server import enable_tool_pagination
+
+        self._add_tools(6)
+        enable_tool_pagination(3)
+        result = self._list("pagination_probe_02_gone")
+        self.assertTrue(all(t.name > "pagination_probe_02_gone" for t in result.tools))
+
+
 class TestProgressHeartbeat(unittest.TestCase):
     """Long calls report that they are still working.
 
