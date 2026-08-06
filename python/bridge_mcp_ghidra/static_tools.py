@@ -605,6 +605,9 @@ async def import_file(
         payload["compiler_spec"] = compiler_spec
 
     result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
+    # A refused import is a failed tool call, not a successful one that happens
+    # to contain the word "error" (see dispatch.raise_on_failure).
+    dispatch.raise_on_failure(result)
 
     # Parse result to check if analysis was started
     try:

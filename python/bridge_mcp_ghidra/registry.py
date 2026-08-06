@@ -263,7 +263,10 @@ def _register_tool_def(tool_def: dict) -> bool:
         # FastMCP calls synchronous tools directly on its event loop. Keep the
         # blocking Ghidra HTTP lifecycle in a worker thread so one slow request
         # cannot close or starve the entire MCP session.
-        return await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+        result = await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+        # Failures arrive as an ordinary 200 body; raising is what makes the
+        # tool result carry isError instead of looking like a success.
+        return dispatch.raise_on_failure(result)
 
     handler.__signature__ = sync_handler.__signature__
     handler.__annotations__ = sync_handler.__annotations__

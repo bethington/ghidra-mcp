@@ -569,6 +569,117 @@ class TestToolAccessAnnotations(unittest.TestCase):
                 state._dynamic_tool_names.remove(name)
 
 
+class TestFailureDetection(unittest.TestCase):
+    """A failed call must not look like a successful one.
+
+    Every failure — transport, non-200, "not connected", a refused write —
+    arrives as an ordinary 200 body, so without this the tool result carried
+    isError=False and a client branching on it saw every call succeed.
+    """
+
+    def _msg(self, text):
+        from bridge_mcp_ghidra.dispatch import failure_message
+
+        return failure_message(text)
+
+    def test_err_envelope_is_a_failure(self):
+        self.assertEqual(self._msg('{"error": "No function at 0xdead"}'), "No function at 0xdead")
+
+    def test_bridge_transport_failure_is_a_failure(self):
+        self.assertEqual(
+            self._msg('{"error": "No Ghidra instance connected. Use connect_instance() first."}'),
+            "No Ghidra instance connected. Use connect_instance() first.",
+        )
+
+    def test_success_false_payload_is_a_failure(self):
+        # /load_program_from_project reports this way through Response.ok.
+        msg = self._msg('{"success": false, "error": "not checked out", "diagnostics": {}}')
+        self.assertEqual(msg, "not checked out")
+
+    def test_rejected_status_is_a_failure(self):
+        # A plate comment refused by the naming conventions, also via Response.ok.
+        msg = self._msg('{"status": "rejected", "error": "first line too short"}')
+        self.assertEqual(msg, "first line too short")
+
+    def test_successful_payloads_are_not_failures(self):
+        for body in (
+            '{"status": "success", "message": "renamed"}',
+            '{"functions": ["a", "b"]}',
+            '{"error": ""}',            # present but empty
+            '{"error": null}',
+            "[]",
+            '["a", "b"]',
+            "plain text, not JSON",
+            "",
+        ):
+            self.assertIsNone(self._msg(body), body)
+
+    def test_per_item_error_is_not_a_call_failure(self):
+        """/get_bulk_xrefs reports "No instruction at address" per entry; the
+        call itself succeeded and must not be marked isError."""
+        body = '{"results": [{"address": "0x1", "error": "No instruction at address"}]}'
+        self.assertIsNone(self._msg(body))
+
+    def test_raise_on_failure_passes_success_through(self):
+        from bridge_mcp_ghidra.dispatch import raise_on_failure
+
+        body = '{"status": "success"}'
+        self.assertEqual(raise_on_failure(body), body)
+
+    def test_dynamic_tool_call_raises_so_fastmcp_sets_is_error(self):
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        from bridge_mcp_ghidra import dispatch, state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "failing_probe_tool"
+        try:
+            _register_tool_def({
+                "name": name,
+                "endpoint": "/failing_probe",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {"type": "object", "properties": {}},
+                "read_only": True,
+                "destructive": False,
+            })
+            with mock.patch.object(
+                dispatch, "dispatch_get", return_value='{"error": "No function at 0xdead"}'
+            ):
+                with self.assertRaises(ToolError) as caught:
+                    asyncio.run(mcp._tool_manager.call_tool(name, {}))
+            self.assertIn("No function at 0xdead", str(caught.exception))
+        finally:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+    def test_dynamic_tool_call_returns_a_successful_body_unchanged(self):
+        from bridge_mcp_ghidra import dispatch, state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "passing_probe_tool"
+        body = '{"functions": ["main"]}'
+        try:
+            _register_tool_def({
+                "name": name,
+                "endpoint": "/passing_probe",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {"type": "object", "properties": {}},
+                "read_only": True,
+                "destructive": False,
+            })
+            with mock.patch.object(dispatch, "dispatch_get", return_value=body):
+                self.assertEqual(asyncio.run(mcp._tool_manager.call_tool(name, {})), body)
+        finally:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+
 class TestStaticToolsAreAllClassified(unittest.TestCase):
     def test_every_static_tool_declares_annotations(self):
         """A static tool with no annotations is unusable while planning."""
