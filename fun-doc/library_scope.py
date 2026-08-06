@@ -89,6 +89,7 @@ USAGE
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
@@ -688,7 +689,15 @@ def _bulk_xrefs_to(program: str, addrs: Sequence[str],
     """
     out: Dict[str, List[int]] = {}
     for i in range(0, len(addrs), chunk):
-        batch = [a[2:] for a in addrs[i:i + chunk]]
+        # norm_addr, not `a[2:]`. Slicing assumes every caller passes an
+        # 0x-prefixed address and SILENTLY MANGLES anything else: a bare
+        # `6fbf1000` becomes `bf1000`, every lookup misses, and the result is an
+        # empty dict that is indistinguishable from "this binary genuinely has
+        # no references". Measured 2026-08-06 on D2Net.dll -- 174 functions,
+        # zero edges -- and the only thing that caught it was a caller's
+        # refuse-on-empty guard. This is the same class of defect norm_addr's
+        # own docstring describes, one layer up.
+        batch = [norm_addr(a)[2:] for a in addrs[i:i + chunk]]
         try:
             res = _post("/get_bulk_xrefs", program, {"addresses": batch})
         except Exception as e:                                   # noqa: BLE001
@@ -827,14 +836,44 @@ def benchmark_gate(reports: Sequence[ProgramReport]) -> Tuple[bool, List[str]]:
 # Writers
 # --------------------------------------------------------------------------
 
+class WriteRejected(RuntimeError):
+    """The plugin answered 200 and refused the write in the body."""
+
+
+def _checked_post(path: str, program: str, body: dict) -> dict:
+    """POST and treat an `error` in the response body as a FAILURE.
+
+    The plugin answers a rejected write with HTTP 200 and `{"error": ...}`. A
+    caller that only catches exceptions therefore counts every rejection as a
+    success -- which is exactly what happened on the first corpus apply: 5,462
+    `/add_function_tag` calls were sent with `tag=` instead of the required
+    `tags=`, every one came back `{"error": "tags is required"}`, and the sweep
+    reported "tagged 5462 function(s)" with zero failures while Ghidra's
+    LIB_CRT count did not move by a single function.
+
+    Loud failures, never silent. Every write in this module goes through here.
+    """
+    res = _post(path, program, body)
+    if isinstance(res, dict):
+        err = res.get("error")
+        if err:
+            raise WriteRejected(f"{path}: {err}")
+        # some handlers report the same thing as success=false
+        if res.get("success") is False:
+            raise WriteRejected(f"{path}: {res.get('message') or 'success=false'}")
+    return res
+
+
 def apply_function_verdicts(rep: ProgramReport, rename_documented: bool = False
                             ) -> dict:
-    """Write LIB_* tags through each lane's OWN sync_to_ghidra.
+    """Write the LIB_* tag and a durable bookmark for every autonomous verdict.
 
-    This module is not a fourth writer. `crt_identify.sync_to_ghidra` already
-    encodes the rules for its lane (tag + durable bookmark always, name only
-    over a Ghidra default), and duplicating them here is exactly how a fix to
-    one writer silently misses the other -- the conf_ladder lesson.
+    `/add_function_tag` takes **`tags`**, a comma-separated LIST -- not `tag`.
+    Sending the singular is accepted with a 200 and rejected in the body, so it
+    fails silently unless the response is inspected; `_checked_post` is what
+    makes that a real error. The bookmark matters as much as the tag: like
+    FID's, it SURVIVES a later rename, so an overwritten verdict stays
+    recoverable rather than merely detectable.
     """
     stats = {"tagged": 0, "failed": 0, "skipped": 0}
     for v in rep.verdicts.values():
@@ -842,11 +881,10 @@ def apply_function_verdicts(rep: ProgramReport, rename_documented: bool = False
             stats["skipped"] += 1
             continue
         try:
-            _post("/add_function_tag", rep.program,
-                  {"function": v.address, "tag": v.tag})
-            _post("/set_bookmark", rep.program, {
-                "address": v.address, "type": "Analysis",
-                "category": "Library Scope",
+            _checked_post("/add_function_tag", rep.program,
+                          {"function": v.address, "tags": v.tag})
+            _checked_post("/set_bookmark", rep.program, {
+                "address": v.address, "category": "Library Scope",
                 "comment": f"{v.tag} via {v.lane}: {v.evidence}"})
             stats["tagged"] += 1
         except Exception as e:                                   # noqa: BLE001
@@ -874,8 +912,9 @@ def apply_global_scope(rep: ProgramReport) -> dict:
         pass          # already exists is the common case, and is fine
     for g in rep.lib_globals:
         try:
-            _post("/set_property", rep.program,
-                  {"map": SCOPE_MAP, "address": g["address"], "value": TAG_CRT})
+            _checked_post("/set_property", rep.program,
+                          {"map": SCOPE_MAP, "address": g["address"],
+                           "value": TAG_CRT})
             stats["marked"] += 1
         except Exception as e:                                   # noqa: BLE001
             print(f"  ! scope write failed {g['address']}: {e}", flush=True)
@@ -890,16 +929,47 @@ def sync_library_code_flags(reports: Sequence[ProgramReport]) -> dict:
     was only ever re-derived during a full refresh pass -- which is why
     PD2_EXT.dll could carry 272 LIB_CRT tags with all 463 rows still at 0.
     Doing it here makes the tag and the flag agree the moment the sweep applies.
+
+    PER-FUNCTION via `update_function_state`, never `load_state` + mutate +
+    `save_state`. The bulk path is a read-modify-write over every row in the
+    binary, so a Doc worker finishing a function between our load and our save
+    loses its entire result -- the same lost-update shape that made
+    `save_priority_queue` grow a 3-way merge after it silently reverted
+    `globals_audit_provider` twice in one session. This sweep is explicitly
+    something you might run while the fleet is working, so it must not take a
+    whole-binary write lock on a store someone else is appending to.
+
+    `library_code`, `library_code_at` and `library_code_reasons` must all stay
+    listed in BOTH `fun_doc._STATE_DIRECT_FIELDS` and
+    `storage.repository._UPDATABLE_WORKFLOW_FIELDS` -- missing either drops the
+    field with no exception (the CLAUDE.md trap that silently no-op'd
+    `port_status` and `audit_tool_calls`).
     """
     try:
         import fun_doc                                           # noqa: PLC0415
     except Exception as e:                                       # noqa: BLE001
         print(f"  ! cannot import fun_doc to sync flags: {e}", flush=True)
-        return {"updated": 0, "error": str(e)}
+        return {"updated": 0, "missing": 0, "failed": 0, "error": str(e)}
 
-    stats = {"updated": 0, "missing": 0}
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    stats = {"updated": 0, "missing": 0, "failed": 0}
     for rep in reports:
-        if not rep.verdicts:
+        # The flag must mirror the DURABLE tag, not merely this run's finds.
+        # Syncing only `rep.verdicts` leaves every pre-existing tag unflagged,
+        # and the selector reads the FLAG -- measured on D2Client.dll, which
+        # carried 1,020 LIB_* tags against 339 flagged rows, so 681 functions
+        # Ghidra already called library were still being offered to workers.
+        # Same verdicts-UNION-existing-tags rule the globals side uses.
+        #
+        # Computed BEFORE the empty-check: an earlier `if not rep.verdicts:
+        # continue` guard here silently defeated the union, so a reconcile pass
+        # over already-tagged programs reported 0 updated / 0 missing and did
+        # nothing at all.
+        reasons = {a: f"{v.tag} via {v.lane}: {v.evidence}"
+                   for a, v in rep.verdicts.items()}
+        for addr in existing_lib_tags(rep.program):
+            reasons.setdefault(addr, "pre-existing LIB_* Ghidra tag (durable)")
+        if not reasons:
             continue
         try:
             state = fun_doc.load_state(binary_name=rep.binary)
@@ -908,23 +978,30 @@ def sync_library_code_flags(reports: Sequence[ProgramReport]) -> dict:
         except Exception as e:                                   # noqa: BLE001
             print(f"  ! load_state failed for {rep.binary}: {e}", flush=True)
             continue
-        funcs = (state or {}).get("functions", {})
+        # Read-only use of the loaded state: it supplies the key and the
+        # existing record, and is never handed back to save_state.
         by_addr = {}
-        for key, f in funcs.items():
+        for key, f in (state or {}).get("functions", {}).items():
             if f.get("program") != rep.program:
                 continue
             by_addr[norm_addr(f.get("address"))] = (key, f)
-        for addr, v in rep.verdicts.items():
+
+        for addr, reason in reasons.items():
             hit = by_addr.get(addr)
             if not hit:
                 stats["missing"] += 1
                 continue
-            _key, f = hit
-            f["library_code"] = True
-            f["library_code_reasons"] = [f"{v.tag} via {v.lane}: {v.evidence}"]
-            stats["updated"] += 1
-        try:
-            fun_doc.save_state(state)
-        except Exception as e:                                   # noqa: BLE001
-            print(f"  ! save_state failed for {rep.binary}: {e}", flush=True)
+            key, existing = hit
+            if existing.get("library_code"):
+                continue                       # already flagged; nothing to write
+            patch = dict(existing)
+            patch["library_code"] = True
+            patch["library_code_at"] = now
+            patch["library_code_reasons"] = [reason]
+            try:
+                fun_doc.update_function_state(key, patch)
+                stats["updated"] += 1
+            except Exception as e:                               # noqa: BLE001
+                print(f"  ! flag write failed {rep.binary} {addr}: {e}", flush=True)
+                stats["failed"] += 1
     return stats

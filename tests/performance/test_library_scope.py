@@ -170,6 +170,36 @@ class TestBulkXrefs:
         assert got["0x10013d38"] == [0x10013c98]
         assert got["0x10013d6c"] == [0x10001100]
 
+    def test_a_bare_address_is_not_mangled(self, monkeypatch):
+        """MEASURED 2026-08-06 on D2Net.dll: 174 functions, ZERO edges.
+
+        The request built its payload with `a[2:]`, which assumes every caller
+        passes an 0x-prefixed address and silently mangles anything else --
+        `6fbf1000` became `bf1000`, every lookup missed, and the empty result
+        was indistinguishable from "this binary genuinely has no references".
+        Only a caller's refuse-on-empty guard caught it. Same class of defect
+        as the lstrip trap norm_addr's own docstring describes.
+        """
+        sent = {}
+
+        def spy(path, program, payload):
+            sent["addresses"] = list(payload["addresses"])
+            return {"6fbf1000": [{"from": "6fbf2000", "type": "CALL"}]}
+
+        monkeypatch.setattr(ls, "_post", spy)
+        got = ls._bulk_xrefs_to("P", ["6fbf1000"])          # BARE input
+        assert sent["addresses"] == ["6fbf1000"]
+        assert got["0x6fbf1000"] == [0x6fbf2000]
+
+    def test_prefixed_and_bare_produce_the_same_request(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(ls, "_post",
+                            lambda path, program, payload: seen.append(
+                                list(payload["addresses"])) or {})
+        ls._bulk_xrefs_to("P", ["0x6fbf1000"])
+        ls._bulk_xrefs_to("P", ["6fbf1000"])
+        assert seen[0] == seen[1]
+
     def test_drops_symbolic_sources(self, monkeypatch):
         """Ghidra puts "Entry Point" in the same field as real addresses; an
         int(...,16) on one of those used to empty a whole program's globals."""
@@ -444,6 +474,127 @@ class TestApplyIsGatedOnLane:
         assert stats["tagged"] == 0 and stats["skipped"] == 1
         assert calls == []
 
+    def test_flag_sync_never_bulk_writes_state(self, monkeypatch, capsys):
+        """The sweep is explicitly something you run while the fleet is working.
+        A load_state + mutate + save_state round trip is a whole-binary
+        read-modify-write, so a Doc worker finishing between the load and the
+        save loses its entire result -- the lost-update shape that forced
+        save_priority_queue to grow a 3-way merge."""
+        import types
+        calls = {"update": [], "save": 0}
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: {"functions": {
+            "/x/A.dll::1000": {"program": "/x/A.dll", "address": "1000",
+                               "name": "_qsort", "score": 40},
+        }}
+        fake.update_function_state = lambda key, patch: calls["update"].append((key, patch))
+
+        def _save(_state):
+            calls["save"] += 1
+        fake.save_state = _save
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        stats = ls.sync_library_code_flags([r])
+
+        assert calls["save"] == 0, "sync_library_code_flags bulk-wrote state"
+        assert stats["updated"] == 1
+        key, patch = calls["update"][0]
+        assert key == "/x/A.dll::1000"
+        assert patch["library_code"] is True
+        assert patch["library_code_reasons"] and patch["library_code_at"]
+        # the untouched field survives the patch -- we merge, not replace
+        assert patch["score"] == 40
+
+    def test_flag_sync_skips_already_flagged(self, monkeypatch):
+        """Re-running the sweep must not rewrite rows it already set, or every
+        pass churns the store and bumps updated_at on 5,462 rows for nothing."""
+        import types
+        calls = []
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: {"functions": {
+            "/x/A.dll::1000": {"program": "/x/A.dll", "address": "1000",
+                               "library_code": True},
+        }}
+        fake.update_function_state = lambda key, patch: calls.append(key)
+        fake.save_state = lambda _s: None
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        stats = ls.sync_library_code_flags([r])
+        assert calls == [] and stats["updated"] == 0
+
+    def test_flag_sync_covers_pre_existing_tags_not_just_this_run(self, monkeypatch):
+        """The SELECTOR reads the flag, so the flag must mirror the durable tag
+        -- not merely what this run rediscovered. D2Client.dll carried 1,020
+        LIB_* tags against 339 flagged rows: 681 functions Ghidra already called
+        library were still being handed to workers."""
+        import types
+        written = []
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: {"functions": {
+            "/x/A.dll::1000": {"program": "/x/A.dll", "address": "1000"},
+            "/x/A.dll::2000": {"program": "/x/A.dll", "address": "2000"},
+        }}
+        fake.update_function_state = lambda key, patch: written.append((key, patch))
+        fake.save_state = lambda _s: None
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+        # 0x2000 carries a tag from an earlier pass; no lane found it this run.
+        monkeypatch.setattr(ls, "existing_lib_tags", lambda p: {"0x00002000"})
+
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        stats = ls.sync_library_code_flags([r])
+
+        assert stats["updated"] == 2, "pre-existing tag was not synced"
+        keys = {k for k, _ in written}
+        assert keys == {"/x/A.dll::1000", "/x/A.dll::2000"}
+        pre = next(p for k, p in written if k == "/x/A.dll::2000")
+        assert "pre-existing" in pre["library_code_reasons"][0]
+
+    def test_flag_sync_reconciles_a_report_with_no_verdicts(self, monkeypatch):
+        """A pure reconcile pass -- no lanes run, only durable tags. An early
+        `if not rep.verdicts: continue` guard defeated this silently: the pass
+        reported 0 updated / 0 missing and wrote nothing."""
+        import types
+        written = []
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: {"functions": {
+            "/x/A.dll::2000": {"program": "/x/A.dll", "address": "2000"},
+        }}
+        fake.update_function_state = lambda key, patch: written.append(key)
+        fake.save_state = lambda _s: None
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+        monkeypatch.setattr(ls, "existing_lib_tags", lambda p: {"0x00002000"})
+
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")   # no verdicts
+        assert ls.sync_library_code_flags([r])["updated"] == 1
+        assert written == ["/x/A.dll::2000"]
+
+    def test_flag_sync_skips_a_program_with_no_tags_at_all(self, monkeypatch):
+        import types
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: pytest.fail("should not load state")
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+        monkeypatch.setattr(ls, "existing_lib_tags", lambda p: set())
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        assert ls.sync_library_code_flags([r])["updated"] == 0
+
+    def test_flag_sync_counts_rows_it_cannot_find(self, monkeypatch):
+        """A tagged address with no SQL row is reported, not silently dropped."""
+        import types
+        fake = types.ModuleType("fun_doc")
+        fake.load_state = lambda **k: {"functions": {}}
+        fake.update_function_state = lambda key, patch: None
+        fake.save_state = lambda _s: None
+        monkeypatch.setitem(sys.modules, "fun_doc", fake)
+
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        assert ls.sync_library_code_flags([r])["missing"] == 1
+
     def test_tag_failure_is_counted_and_loud(self, monkeypatch, capsys):
         def boom(*a, **k):
             raise OSError("no route to host")
@@ -453,3 +604,56 @@ class TestApplyIsGatedOnLane:
         stats = ls.apply_function_verdicts(r)
         assert stats["failed"] == 1
         assert "tag failed" in capsys.readouterr().out
+
+    def test_a_200_with_an_error_body_is_a_failure(self, monkeypatch, capsys):
+        """THE regression that cost a whole corpus apply. The plugin rejects a
+        malformed write with HTTP 200 and `{"error": ...}`; counting that as
+        success reported "tagged 5462 function(s), 0 failed" while Ghidra's
+        LIB_CRT count did not move by one."""
+        monkeypatch.setattr(ls, "_post",
+                            lambda *a, **k: {"error": "tags is required"})
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        stats = ls.apply_function_verdicts(r)
+        assert stats["tagged"] == 0 and stats["failed"] == 1
+        assert "tag failed" in capsys.readouterr().out
+
+    def test_success_false_is_also_a_failure(self, monkeypatch):
+        monkeypatch.setattr(ls, "_post",
+                            lambda *a, **k: {"success": False, "message": "nope"})
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        assert ls.apply_function_verdicts(r)["failed"] == 1
+
+    def test_tag_write_uses_the_plural_tags_parameter(self, monkeypatch):
+        """/add_function_tag takes `tags` (comma-separated). The singular is
+        accepted with a 200 and rejected in the body."""
+        sent = []
+        monkeypatch.setattr(ls, "_post",
+                            lambda path, prog, body: sent.append((path, body)) or {})
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        ls.apply_function_verdicts(r)
+        tag_call = next(b for p, b in sent if p == "/add_function_tag")
+        assert "tags" in tag_call and "tag" not in tag_call
+
+    def test_scope_writes_are_response_checked_too(self, monkeypatch, capsys):
+        monkeypatch.setattr(ls, "_post",
+                            lambda *a, **k: {"error": "map not found"})
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.lib_globals = [{"address": "0x00009000", "name": "g_x"}]
+        stats = ls.apply_global_scope(r)
+        assert stats["marked"] == 0 and stats["failed"] == 1
+        assert "scope write failed" in capsys.readouterr().out
+
+    def test_bookmark_body_matches_the_endpoint_contract(self, monkeypatch):
+        """/set_bookmark takes address, category, comment -- and the earlier
+        body also sent a `type` key that the endpoint does not declare."""
+        sent = []
+        monkeypatch.setattr(ls, "_post",
+                            lambda path, prog, body: sent.append((path, body)) or {})
+        r = ls.ProgramReport(program="/x/A.dll", binary="A.dll")
+        r.verdicts["0x00001000"] = _v(addr="0x1000")
+        ls.apply_function_verdicts(r)
+        bm = next(b for p, b in sent if p == "/set_bookmark")
+        assert set(bm) == {"address", "category", "comment"}
