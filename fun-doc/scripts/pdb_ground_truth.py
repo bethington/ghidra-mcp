@@ -84,8 +84,37 @@ def main(pdb: str, out: str) -> int:
                 name = f.name or ""
             except Exception:
                 name = ""
-            rows.append({"rva": rva, "name": name, "compiland": comp,
-                         "is_library": lib})
+            rec = {"rva": rva, "name": name, "compiland": comp,
+                   "is_library": lib}
+            # SOURCE LOCATION. The name alone is a summary; scoring generated
+            # documentation against the ORIGINAL CODE needs the code, so record
+            # the file and line span each function was compiled from. Ben's
+            # standing rule for this corpus is that the original is the
+            # measuring stick -- a judge given only a name cannot tell a plate
+            # that describes the right function badly from one that describes it
+            # well.
+            try:
+                length = int(f.length)
+            except Exception:
+                length = 0
+            if length:
+                try:
+                    lines = session.findLinesByRVA(rva, length)
+                    recs = [lines.Item(i) for i in range(lines.Count)]
+                except Exception:
+                    recs = []
+                nums, src = [], ""
+                for ln in recs:
+                    try:
+                        nums.append(int(ln.lineNumber))
+                        src = src or (ln.sourceFile.fileName or "")
+                    except Exception:
+                        continue
+                if nums:
+                    rec["source_file"] = src
+                    rec["line_start"] = min(nums)
+                    rec["line_end"] = max(nums)
+            rows.append(rec)
 
     rows.sort(key=lambda r: r["rva"])
     Path(out).write_text(json.dumps(rows, indent=1), encoding="utf-8")
