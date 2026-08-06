@@ -66,7 +66,7 @@ public class SwingThreadingStrategy implements ThreadingStrategy {
         AtomicReference<Exception> error = new AtomicReference<>();
 
         Runnable writeTask = () -> {
-            int tx = program.startTransaction(txName);
+            WriteTx tx = WriteTx.begin(program, txName);
             boolean success = false;
             try {
                 result.set(action.call());
@@ -75,7 +75,7 @@ public class SwingThreadingStrategy implements ThreadingStrategy {
                 error.set(e);
                 Msg.error(this, "Error during transaction '" + txName + "'", e);
             } finally {
-                program.endTransaction(tx, success);
+                tx.end(success);
             }
 
             // Force event processing to ensure changes propagate

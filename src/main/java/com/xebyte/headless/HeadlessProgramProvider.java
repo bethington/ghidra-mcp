@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.WriteTx;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.plugin.core.archive.HeadlessArchiveBridge;
 import ghidra.app.util.importer.AutoImporter;
@@ -1518,7 +1519,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
             
             // Start a transaction for the analysis
-            int transactionId = program.startTransaction("Auto Analysis");
+            WriteTx tx = WriteTx.begin(program, "Auto Analysis");
             boolean success = false;
             
             try {
@@ -1536,7 +1537,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 
                 success = true;
             } finally {
-                program.endTransaction(transactionId, success);
+                tx.end(success);
             }
             
             long duration = System.currentTimeMillis() - startTime;
@@ -1852,7 +1853,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 Msg.error(this, "Analyzer not found: " + analyzerName);
                 return false;
             }
-            int tx = program.startTransaction("Configure Analyzer");
+            WriteTx tx = WriteTx.begin(program, "Configure Analyzer");
             boolean txSuccess = false;
             try {
                 if (enabled != null) {
@@ -1864,7 +1865,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             } catch (Exception e) {
                 throw e;
             } finally {
-                program.endTransaction(tx, txSuccess);
+                tx.end(txSuccess);
             }
         } catch (Exception e) {
             Msg.error(this, "Error configuring analyzer: " + e.getMessage(), e);

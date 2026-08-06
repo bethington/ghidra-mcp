@@ -212,7 +212,7 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Rename Label");
+            WriteTx tx = WriteTx.begin(program, "Rename Label");
             try {
                 targetSymbol.setName(newName, SourceType.USER_DEFINED);
                 List<String> labelWarnings = NamingConventions.validateLabelName(newName);
@@ -227,7 +227,7 @@ public class SymbolLabelService {
             } catch (Exception e) {
                 return Response.err("Error renaming label: " + e.getMessage());
             } finally {
-                program.endTransaction(transactionId, true);
+                tx.end(true);
             }
 
         } catch (Exception e) {
@@ -292,7 +292,7 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Create Label");
+            WriteTx tx = WriteTx.begin(program, "Create Label");
             try {
                 Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                 if (newSymbol != null) {
@@ -311,7 +311,7 @@ public class SymbolLabelService {
             } catch (Exception e) {
                 return Response.err("Error creating label: " + e.getMessage());
             } finally {
-                program.endTransaction(transactionId, true);
+                tx.end(true);
             }
 
         } catch (Exception e) {
@@ -344,7 +344,7 @@ public class SymbolLabelService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Create Labels");
+                WriteTx tx = WriteTx.begin(program, "Batch Create Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
 
@@ -407,7 +407,7 @@ public class SymbolLabelService {
                     errors.add("Transaction error: " + e.getMessage());
                     Msg.error(this, "Error in batch create labels transaction", e);
                 } finally {
-                    program.endTransaction(tx, successCount.get() > 0);
+                    tx.end(successCount.get() > 0);
                 }
             });
         } catch (Exception e) {
@@ -551,7 +551,7 @@ public class SymbolLabelService {
             final List<String> errors = new ArrayList<>();
 
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Delete Label");
+                WriteTx tx = WriteTx.begin(program, "Delete Label");
                 try {
                     for (Symbol symbol : symbols) {
                         if (symbol.getSymbolType() != SymbolType.LABEL) {
@@ -575,7 +575,7 @@ public class SymbolLabelService {
                 } catch (Exception e) {
                     errors.add("Error during deletion: " + e.getMessage());
                 } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
+                    tx.end(deletedCount.get() > 0);
                 }
             });
 
@@ -619,7 +619,7 @@ public class SymbolLabelService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Delete Labels");
+                WriteTx tx = WriteTx.begin(program, "Batch Delete Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
 
@@ -673,7 +673,7 @@ public class SymbolLabelService {
                 } catch (Exception e) {
                     errors.add("Transaction error: " + e.getMessage());
                 } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
+                    tx.end(deletedCount.get() > 0);
                 }
             });
         } catch (Exception e) {
@@ -766,7 +766,7 @@ public class SymbolLabelService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Rename data");
+                WriteTx tx = WriteTx.begin(program, "Rename data");
                 try {
                     Listing listing = program.getListing();
                     Data data = listing.getDefinedDataAt(addr);
@@ -797,7 +797,7 @@ public class SymbolLabelService {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Rename data error", e);
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    tx.end(success.get());
                 }
             });
         } catch (Exception e) {
@@ -883,7 +883,7 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        int txId = program.startTransaction("Rename Global Variable");
+        WriteTx tx = WriteTx.begin(program, "Rename Global Variable");
         boolean success = false;
         try {
             Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
@@ -917,7 +917,7 @@ public class SymbolLabelService {
             Msg.error(this, "Error renaming global variable: " + e.getMessage());
             return Response.err(e.getMessage());
         } finally {
-            program.endTransaction(txId, success);
+            tx.end(success);
         }
         } catch (Exception e) {
             // try-with-resources close() can throw Exception (checked).
@@ -989,7 +989,7 @@ public class SymbolLabelService {
 
                         try {
                             SwingUtilities.invokeAndWait(() -> {
-                                int tx = program.startTransaction("Rename external location");
+                                WriteTx tx = WriteTx.begin(program, "Rename external location");
                                 try {
                                     Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
                                     finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
@@ -999,7 +999,7 @@ public class SymbolLabelService {
                                     errorMsg.set(e.getMessage());
                                     Msg.error(this, "Error renaming external location: " + e.getMessage());
                                 } finally {
-                                    program.endTransaction(tx, success.get());
+                                    tx.end(success.get());
                                 }
                             });
                         } catch (Exception e) {

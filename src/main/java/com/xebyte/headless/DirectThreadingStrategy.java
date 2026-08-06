@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.ThreadingStrategy;
+import com.xebyte.core.WriteTx;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
@@ -52,11 +53,11 @@ public class DirectThreadingStrategy implements ThreadingStrategy {
         }
 
         globalLock.lock();
-        int tx = -1;
+        WriteTx tx = null;
         boolean success = false;
 
         try {
-            tx = program.startTransaction(txName);
+            tx = WriteTx.begin(program, txName);
             T result = action.call();
             success = true;
             return result;
@@ -64,8 +65,8 @@ public class DirectThreadingStrategy implements ThreadingStrategy {
             Msg.error(this, "Error during transaction '" + txName + "'", e);
             throw e;
         } finally {
-            if (tx != -1) {
-                program.endTransaction(tx, success);
+            if (tx != null) {
+                tx.end(success);
             }
 
             // Force event processing in headless mode
