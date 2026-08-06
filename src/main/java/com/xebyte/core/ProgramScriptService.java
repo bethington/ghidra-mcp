@@ -126,7 +126,7 @@ public class ProgramScriptService {
             // writes go inside the same transaction since they mutate the
             // program too; persistProgram (save) runs AFTER the
             // transaction is closed.
-            int txId = program.startTransaction("GhidraMCP auto-analysis");
+            WriteTx tx = WriteTx.begin(program, "GhidraMCP auto-analysis");
             boolean txOk = false;
             try {
                 ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
@@ -142,7 +142,7 @@ public class ProgramScriptService {
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
-                program.endTransaction(txId, txOk);
+                tx.end(txOk);
             }
             persistProgram(program, AUTO_ANALYSIS_COMPLETION_MESSAGE);
             return true;
@@ -3427,7 +3427,7 @@ public class ProgramScriptService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Create memory block");
+                WriteTx tx = WriteTx.begin(program, "Create memory block");
                 boolean txSuccess = false;
                 try {
                     // Overlay blocks land in a freshly created overlay address space,
@@ -3492,7 +3492,7 @@ public class ProgramScriptService {
                     errorMsg.set(msg);
                     Msg.error(this, "Error creating memory block", e);
                 } finally {
-                    program.endTransaction(tx, txSuccess);
+                    tx.end(txSuccess);
                 }
             });
 
@@ -3560,7 +3560,7 @@ public class ProgramScriptService {
             final String finalCategory = category;
             final String finalComment = comment;
 
-            int transactionId = program.startTransaction("Set bookmark at " + addressStr);
+            WriteTx tx = WriteTx.begin(program, "Set bookmark at " + addressStr);
             boolean txSuccess = false;
             try {
                 // Check if bookmark already exists at this address with this category
@@ -3584,7 +3584,7 @@ public class ProgramScriptService {
             } catch (Exception e) {
                 throw e;
             } finally {
-                program.endTransaction(transactionId, txSuccess);
+                tx.end(txSuccess);
             }
 
         } catch (Exception e) {
@@ -3701,7 +3701,7 @@ public class ProgramScriptService {
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
 
-            int transactionId = program.startTransaction("Delete bookmark at " + addressStr);
+            WriteTx tx = WriteTx.begin(program, "Delete bookmark at " + addressStr);
             boolean txSuccess = false;
             try {
                 int deleted = 0;
@@ -3724,7 +3724,7 @@ public class ProgramScriptService {
             } catch (Exception e) {
                 throw e;
             } finally {
-                program.endTransaction(transactionId, txSuccess);
+                tx.end(txSuccess);
             }
 
         } catch (Exception e) {
@@ -3901,7 +3901,7 @@ public class ProgramScriptService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Set image base");
+                WriteTx tx = WriteTx.begin(program, "Set image base");
                 boolean txSuccess = false;
                 try {
                     Address oldBase = program.getImageBase();
@@ -3936,7 +3936,7 @@ public class ProgramScriptService {
                     errorMsg.set(msg);
                     Msg.error(this, "Error setting image base", e);
                 } finally {
-                    program.endTransaction(tx, txSuccess);
+                    tx.end(txSuccess);
                 }
             });
 

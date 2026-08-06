@@ -236,6 +236,17 @@ public class AnnotationScanner {
                 if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
                     Program program = resolveProgramForDryRun(bindings, query, body);
                     if (program != null) {
+                        // Ghidra nests by counting entries on ONE transaction, so an inner
+                        // rollback aborts the whole thing — with an ambient transaction open,
+                        // "undo just my part" is not something this can honour, and trying
+                        // would silently discard the outer owner's work. Refuse instead:
+                        // a clear error beats destroying an in-progress edit or script run.
+                        if (program.getCurrentTransactionInfo() != null) {
+                            return Response.err("dry_run cannot run while another transaction is "
+                                + "open on " + program.getName() + " (a GUI edit or a script). Its "
+                                + "rollback would abort that transaction too. Retry once the "
+                                + "in-progress operation finishes.");
+                        }
                         // The transaction must be opened on the same thread Ghidra's
                         // threading model actually runs the write on -- the Swing EDT
                         // in GUI mode. Opening it directly here left it on the calling

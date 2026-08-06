@@ -516,7 +516,7 @@ public class DocumentationHashService {
 
             try {
                 SwingUtilities.invokeAndWait(() -> {
-                    int tx = program.startTransaction("Apply Function Documentation");
+                    WriteTx tx = WriteTx.begin(program, "Apply Function Documentation");
                     try {
                         // Apply function name
                         if (functionName != null && !functionName.isEmpty() && !functionName.equals(func.getName())) {
@@ -579,7 +579,7 @@ public class DocumentationHashService {
                     } catch (Exception e) {
                         errorMsg.set(e.getMessage());
                     } finally {
-                        program.endTransaction(tx, success.get());
+                        tx.end(success.get());
                     }
                 });
             } catch (Exception e) {
@@ -1197,8 +1197,8 @@ public class DocumentationHashService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         Runnable mergeTask = () -> {
-            int tx = -1;
-            if (!dryRun) tx = target.startTransaction("Merge from " + source.getName());
+            // Dry run writes nothing, so it needs no transaction at all.
+            WriteTx tx = dryRun ? null : WriteTx.begin(target, "Merge from " + source.getName());
             boolean commit = false;
             try {
                 // ----- 1. Standalone data types (must precede signature/data def merges) -----
@@ -1555,7 +1555,7 @@ public class DocumentationHashService {
             } catch (Throwable t) {
                 errorMsg.set(t.getClass().getSimpleName() + ": " + t.getMessage());
             } finally {
-                if (!dryRun && tx != -1) target.endTransaction(tx, commit);
+                if (tx != null) tx.end(commit);
             }
         };
 
