@@ -792,3 +792,95 @@ def test_a_genuinely_callless_body_is_unaffected():
     harness exists for."""
     body = "int FUN_1000(int a, int b) { return (a * 3 + b) & 0xff; }"
     assert pp.classify_function(body) == "leaf"
+
+
+# --- callee-body supply -----------------------------------------------------
+# MEASURED 2026-08-05/06. Nothing in the codebase ever passed `callee_bodies`:
+# all three production call sites called classify_function(text) with it None.
+# Two consequences, both silent:
+#   * `outbuf_leaf` was UNREACHABLE -- its gate needs _has_delegate_call AND
+#     _all_callees_pure, and with no bodies those can never both hold, so a
+#     class written and tested for delegate-calling mutators never once fired.
+#   * The plain-leaf fallthrough had no call rule, so Patches::Apply was a leaf.
+
+class _FakeGhidra:
+    """Bulk /decompile_function stand-in. Per-name failures come back as STRING
+    VALUES inside a 200 response, which is how the real endpoint behaves."""
+
+    def __init__(self, bodies):
+        self.bodies = bodies
+        self.calls = 0
+
+    def __call__(self, endpoint, params=None, timeout=15):
+        import json as _json
+        self.calls += 1
+        wanted = (params or {}).get("functions", "").split(",")
+        return _json.dumps({n: self.bodies.get(n, "Error: Function not found")
+                            for n in wanted if n})
+
+
+def test_fetch_walks_the_transitive_closure():
+    g = _FakeGhidra({"a": "int a(int x){ return b(x); }", "b": "int b(int x){ return x+1; }"})
+    bodies, complete = pp.fetch_callee_bodies("int f(int x){ return a(x); }", "P", getter=g)
+    assert complete and set(bodies) == {"a", "b"}
+
+
+def test_a_functions_own_name_is_not_a_callee():
+    """The name sits in the signature line, so passing the FULL decompilation
+    makes every function appear to call itself and the closure never closes."""
+    g = _FakeGhidra({})
+    bodies, complete = pp.fetch_callee_bodies("undefined4 FUN_10003eb0(void)\n{\n  return 1;\n}",
+                                              "P", getter=g)
+    assert complete and bodies == {} and g.calls == 0
+
+
+def test_an_error_string_is_unreadable_not_a_body():
+    """{"thunk_X": "Error: Function not found"} arrives inside a 200. Stored as
+    a body it would be analysed for purity, find no brace, and report the
+    caller STATEFUL -- when the truth is that we could not read it."""
+    g = _FakeGhidra({})
+    bodies, complete = pp.fetch_callee_bodies("int f(int x){ return thunk_X(x); }", "P", getter=g)
+    assert not complete and bodies == {}
+
+
+def test_unreadable_callees_abstain_rather_than_accuse():
+    g = _FakeGhidra({})
+    assert pp.classify_function_live("int f(int x){ return mystery(x); }", "P", getter=g) == "unknown"
+
+
+def test_a_callless_function_needs_no_fetch():
+    g = _FakeGhidra({})
+    assert pp.classify_function_live("int f(int a){ return a+1; }", "P", getter=g) == "leaf"
+    assert g.calls == 0
+
+
+# --- static vs live purity --------------------------------------------------
+# A std::vector subscript reaches the allocator, which reaches the OS: measured,
+# sgd2fr::GetMinConfigResolutionId is 20 lines with a 55-body closure bottoming
+# out in malloc/free/_CxxThrowException. Requiring transitive purity through
+# that chain clears no STL-using C++ function at all.
+
+_ALLOCATING = "int f(int n){ return helper(n); }"
+_HELPER = {"helper": "int helper(int n){ void* p = malloc(n); free(p); return n; }"}
+
+
+def test_allocation_is_fatal_on_the_static_path():
+    """The P-code emulator has no heap: a malloc is not a tolerated effect, it
+    is a call that cannot execute."""
+    g = _FakeGhidra(_HELPER)
+    assert pp.classify_function_live(_ALLOCATING, "P", getter=g, live=False) == "stateful"
+
+
+def test_allocation_is_invisible_to_a_live_comparison():
+    """Both implementations allocate their OWN memory, and the comparison
+    observes a return value or an out-buffer -- never the heap."""
+    g = _FakeGhidra(_HELPER)
+    assert pp.classify_function_live(_ALLOCATING, "P", getter=g, live=True) == "leaf"
+
+
+def test_live_mode_does_not_forgive_observable_state():
+    """The relaxation is scoped to effects the comparison cannot see. A global
+    write stays disqualifying in BOTH modes."""
+    g = _FakeGhidra({"helper": "int helper(int n){ DAT_10099000 = n; return n; }"})
+    for live in (False, True):
+        assert pp.classify_function_live(_ALLOCATING, "P", getter=g, live=live) == "stateful"

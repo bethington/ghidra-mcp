@@ -305,6 +305,58 @@ _PURE_EXTERNAL_CALLEES = frozenset({
     "_Init_thread_abort", "_Init_thread_wait",
 })
 
+# LIVE-SAFE EXTERNALS. Externals whose effects exist but are NOT observable to a
+# shadow comparison, and which therefore disqualify a function only on the
+# STATIC path.
+#
+# The distinction is real and it is the difference between "this corpus is
+# provable" and "it is not". MEASURED 2026-08-05: sgd2fr::GetMinConfigResolution
+# Id is twenty lines, and its transitive callee closure is 55 bodies deep,
+# bottoming out in malloc, free, _CxxThrowException, SleepConditionVariableSRW
+# and crt_atexit. That is not a quirk of one function -- a std::vector subscript
+# reaches the allocator, which reaches the OS, so ANY C++ function touching a
+# container bottoms out here. Requiring transitive purity through that chain
+# means no STL-using function can ever be cleared.
+#
+#   STATIC (/emulate_function): allocation is fatal. The P-code emulator has no
+#   heap, so a malloc is not "an effect we tolerate", it is a call that cannot
+#   execute. These names stay disqualifying there -- `_IMPURE_CALLEE_RE` is
+#   unchanged and the plain-leaf class keeps the strict rule.
+#
+#   LIVE (shadow dispatch): the reimpl runs inside the real process, and both
+#   implementations allocate their OWN memory. The comparison observes a return
+#   value or an out-buffer, never the heap, so allocator traffic cannot make the
+#   two disagree.
+#
+# Each entry is a justification, not a convenience. Anything that touches state
+# the comparison CAN observe -- a global, the game's structures, the out-buffer
+# -- stays disqualifying in both modes.
+_LIVE_SAFE_EXTERNAL_CALLEES = frozenset({
+    # Allocation: each implementation gets its own storage.
+    "malloc", "calloc", "realloc", "free", "operator_new", "operator_delete",
+    "_callnewh", "_Xlength_error",
+    # Noreturn error paths: they do not return, so they cannot produce a
+    # divergent result -- and if one fires, the shadow thunk's SEH catches it
+    # and records a fault rather than a false divergence.
+    "_CxxThrowException", "_Xout_of_range", "_Xbad_alloc", "_invoke_watson",
+    "terminate", "abort",
+    # Process-lifetime registration. Runs once, at exit, outside any comparison.
+    "crt_atexit", "atexit", "register_onexit_function", "_onexit",
+    # CRT/OS synchronisation used by magic statics and STL internals. Observable
+    # only as timing, which the comparison does not measure.
+    "SleepConditionVariableSRW", "WakeAllConditionVariable",
+    "EnterCriticalSection", "LeaveCriticalSection",
+    # The one-time-init and SRW-lock primitives MSVC emits for function-local
+    # statics. Same justification as the magic-static helpers already trusted in
+    # _PURE_EXTERNAL_CALLEES: the ORIGINAL runs first and completes the
+    # initialisation, so the reimpl's call finds the guard already set. Measured
+    # as the last four names blocking every STL closure in SGD2FreeRes.
+    "AcquireSRWLockExclusive", "ReleaseSRWLockExclusive",
+    "AcquireSRWLockShared", "ReleaseSRWLockShared",
+    "InitOnceBeginInitialize", "InitOnceComplete",
+})
+
+
 # Names that make a callee impure on sight: it reaches beyond its parameters.
 _IMPURE_CALLEE_RE = re.compile(
     r"\b(malloc|calloc|realloc|free|new|delete|fopen|fclose|fwrite|fread|"
@@ -370,7 +422,7 @@ def _writes_a_global(body):
     return False
 
 
-def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None):
+def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None, live=False):
     """True when a callee's only effects are through its own parameters.
 
     Purity is TRANSITIVE: a callee that is itself clean but calls something
@@ -410,7 +462,11 @@ def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None):
     if _is_magic_static_init(body):
         return True
 
-    if _IMPURE_CALLEE_RE.search(text) or _writes_a_global(body):
+    impure_hits = [m.group(0) for m in _IMPURE_CALLEE_RE.finditer(text)]
+    if live:
+        impure_hits = [h for h in impure_hits
+                       if h not in _LIVE_SAFE_EXTERNAL_CALLEES]
+    if impure_hits or _writes_a_global(body):
         return False
 
     _seen = set() if _seen is None else _seen
@@ -418,13 +474,15 @@ def _callee_is_pure(callee_text, callee_bodies=None, depth=0, _seen=None):
         if name in _PURE_EXTERNAL_CALLEES or name in _seen:
             continue
         _seen.add(name)
+        if name in _LIVE_SAFE_EXTERNAL_CALLEES and live:
+            continue
         if not _callee_is_pure((callee_bodies or {}).get(name),
-                               callee_bodies, depth + 1, _seen):
+                               callee_bodies, depth + 1, _seen, live):
             return False
     return True
 
 
-def _all_callees_pure(body, callee_bodies):
+def _all_callees_pure(body, callee_bodies, live=False):
     """Can EVERY callee be shown side-effect-free beyond its parameters?
 
     `callee_bodies` maps callee name -> its decompiled text, and must contain the
@@ -435,10 +493,11 @@ def _all_callees_pure(body, callee_bodies):
     callees actually run, so an unchecked side effect happens twice per call.
     """
     callee_bodies = callee_bodies or {}
+    skip = _PURE_EXTERNAL_CALLEES | (_LIVE_SAFE_EXTERNAL_CALLEES if live else frozenset())
     for name in _callee_names(body):
-        if name in _PURE_EXTERNAL_CALLEES:
+        if name in skip:
             continue
-        if not _callee_is_pure(callee_bodies.get(name), callee_bodies, 1, {name}):
+        if not _callee_is_pure(callee_bodies.get(name), callee_bodies, 1, {name}, live):
             return False
     return True
 
@@ -522,7 +581,211 @@ _SCALAR_POINTER_BASE_TYPES = {
 }
 
 
-def classify_function(decompiled_text, variables=None, callee_bodies=None):
+# --- callee-body supply ------------------------------------------------------
+# The purity gates below (`_callee_is_pure`, `_all_callees_pure`) need each
+# callee's DECOMPILED BODY, transitively. Nothing ever supplied one: all three
+# production call sites called classify_function(text) with callee_bodies=None,
+# which meant `_all_callees_pure` returned False for any body containing a call.
+#
+# Two consequences, both measured 2026-08-05:
+#   * `outbuf_leaf` was UNREACHABLE. Its gate requires _has_delegate_call AND
+#     _all_callees_pure, and with no bodies those two can never both hold -- so
+#     a class written and tested for delegate-calling out-buffer mutators could
+#     never once fire in production.
+#   * The plain-leaf fallthrough had no call rule at all, so a function that
+#     did all its work in four unknown callees (sgd2fr::patches::Patches::Apply)
+#     was classified `leaf` -- "provable via the static harness", when proving
+#     it via a shadow dispatcher would apply every patch a second time.
+#
+# `/decompile_function` takes `functions=` as a comma-separated bulk request, so
+# a whole depth level costs ONE round trip rather than one per callee.
+
+
+def _body_of(text):
+    """The part after the opening brace -- i.e. excluding the signature line."""
+    _, _, body = _strip_comments(str(text or "")).partition("{")
+    return body
+
+
+_NAME_ADDR_CACHE = {}
+_IMPORT_NAME_CACHE = {}
+
+
+def _import_names(program, getter=None):
+    """Every name this program IMPORTS, fetched once and cached.
+
+    An import has no body in the program by definition, so asking for its
+    decompilation always fails -- and treating that failure as "cannot tell"
+    made every STL-touching function abstain. It is not an unknown: we know
+    exactly what it is. Whether it is TRUSTED is then a policy question
+    (_LIVE_SAFE_EXTERNAL_CALLEES), and anything not on that list is treated as
+    reaching beyond its parameters -- i.e. stateful, a verdict, rather than
+    unknown, an absence of one.
+
+    Discovered by measurement: chasing this one failing name at a time added
+    SleepConditionVariableSRW, then AcquireSRWLockExclusive, then
+    InitOnceBeginInitialize... each round revealing a few more. Enumerating the
+    import table converges instead of iterating.
+    """
+    if program in _IMPORT_NAME_CACHE:
+        return _IMPORT_NAME_CACHE[program]
+    import json as _json
+    get = getter or _ghidra_get
+    names = set()
+    try:
+        raw = get("list_imports", {"program": program, "limit": 20000}, 60)
+        payload = _json.loads(raw)
+        items = payload.get("imports", payload) if isinstance(payload, dict) else payload
+        if isinstance(items, list):
+            for it in items:
+                n = it.get("name") if isinstance(it, dict) else it
+                if n:
+                    names.add(str(n))
+        elif isinstance(items, dict):
+            names.update(str(k) for k in items)
+    except Exception:
+        names = set()
+    _IMPORT_NAME_CACHE[program] = names
+    return names
+
+
+def _name_to_address(program, getter=None):
+    """name -> address map for a program, fetched once and cached.
+
+    Needed because /decompile_function cannot resolve every name it emits:
+    `thunk_FUN_1001d800` appears as a callee in decompiled output and comes back
+    "Error: Function not found" when asked for by name, though it is a real
+    function with a real address. Without the fallback those closures can never
+    be completed, and EVERY function reaching one abstains -- which is a gap in
+    how we ask, not a fact about the code.
+    """
+    if program in _NAME_ADDR_CACHE:
+        return _NAME_ADDR_CACHE[program]
+    import json as _json
+    get = getter or _ghidra_get
+    raw = get("list_functions", {"program": program, "limit": 20000}, 120)
+    mapping = {}
+    try:
+        payload = _json.loads(raw)
+        for f in payload.get("functions", payload if isinstance(payload, list) else []):
+            if isinstance(f, dict) and f.get("name") and f.get("address"):
+                mapping[f["name"]] = f["address"]
+    except Exception:
+        mapping = {}
+    _NAME_ADDR_CACHE[program] = mapping
+    return mapping
+
+
+def fetch_callee_bodies(decompiled_text, program, max_depth=_PURITY_MAX_DEPTH,
+                        getter=None, live=False):
+    """Transitively fetch callee decompilations for the purity gates.
+
+    Returns (bodies, complete). `complete` is False when any callee could not be
+    read -- Ghidra down, a timeout, a name that resolves to nothing. Callers
+    MUST treat that as "cannot tell" rather than "is stateful": those are
+    different facts, and collapsing them is the mistake falsify's CONF_BLOCKED
+    rule exists to prevent. A transient Ghidra hiccup would otherwise silently
+    shrink the provable set with no signal that anything had gone wrong.
+
+    Externals on the pure-callee allowlist are never fetched -- they are already
+    known-pure by name, and most have no body in this program at all.
+    """
+    import json as _json
+
+    get = getter or _ghidra_get
+    bodies, complete = {}, True
+    # Partition on the opening brace exactly as classify_function does. Passing
+    # the FULL decompilation instead puts the function's own name -- which sits
+    # in its signature line, `undefined4 FUN_10003eb0(void)` -- into the callee
+    # set, so every function appears to call itself and the closure can never
+    # be completed.
+    # Never FETCHED in either mode -- these are externals with no body in the
+    # program, so asking for one guarantees an "Error: Function not found" and
+    # would abstain on every allocating function. The mode decides whether they
+    # are TRUSTED (live) or disqualifying (static), which is a purity question,
+    # not a fetching one.
+    trusted = _PURE_EXTERNAL_CALLEES | _LIVE_SAFE_EXTERNAL_CALLEES
+    imports = _import_names(program, getter)
+    known_external = trusted | imports
+    frontier = _callee_names(_body_of(decompiled_text)) - known_external
+    seen = set()
+
+    for _ in range(max(1, int(max_depth))):
+        wanted = sorted(n for n in frontier if n not in seen)
+        if not wanted:
+            break
+        seen.update(wanted)
+        addrs = _name_to_address(program, getter)
+        refs = [("0x" + addrs[n].lstrip("0x")) if n in addrs else n for n in wanted]
+        raw = get("decompile_function",
+                  {"functions": ",".join(refs), "program": program})
+        if not raw or str(raw).startswith("<ghidra fetch failed"):
+            return bodies, False
+        try:
+            payload = _json.loads(raw)
+        except Exception:
+            return bodies, False
+
+        # Bulk mode returns a name-keyed map or a list of records depending on
+        # version; accept either rather than pinning one shape.
+        got = {}
+        src = payload.get("functions", payload) if isinstance(payload, dict) else payload
+        if isinstance(src, dict):
+            for k, v in src.items():
+                got[k] = v if isinstance(v, str) else (v or {}).get("decompiled", "")
+        elif isinstance(src, list):
+            for rec in src:
+                if isinstance(rec, dict) and rec.get("name"):
+                    got[rec["name"]] = rec.get("decompiled") or rec.get("code") or ""
+
+        for name, ref in zip(wanted, refs):
+            body = got.get(name) or got.get(ref) or ""
+            # A per-name failure comes back as a STRING VALUE inside a 200
+            # response -- {"thunk_FUN_1001d800": "Error: Function not found"} --
+            # not as an HTTP error. Storing that as a body means the purity gate
+            # analyses an error message: it finds no `{`, returns False, and the
+            # function is reported STATEFUL when the truth is that we could not
+            # read it. That is precisely the "cannot tell" / "is stateful"
+            # conflation this whole path exists to avoid.
+            if not body or body.lstrip().startswith("Error:") or "{" not in body:
+                complete = False
+                continue
+            bodies[name] = body
+
+        frontier = set()
+        for body in list(bodies.values()):
+            frontier |= _callee_names(_body_of(body))
+        frontier -= known_external | seen
+
+    return bodies, complete
+
+
+def classify_function_live(decompiled_text, program, variables=None, getter=None,
+                           live=True):
+    """classify_function with the callee bodies actually supplied.
+
+    This is what production should call. Returns "unknown" when the callee
+    bodies could not be read -- see fetch_callee_bodies on why that is not
+    "stateful".
+    """
+    if not decompiled_text or str(decompiled_text).startswith("<ghidra fetch failed"):
+        return "unknown"
+    trusted = _PURE_EXTERNAL_CALLEES | _LIVE_SAFE_EXTERNAL_CALLEES
+    if not _callee_names(_body_of(decompiled_text)) - trusted:
+        return classify_function(decompiled_text, variables)   # no calls: nothing to fetch
+    bodies, complete = fetch_callee_bodies(decompiled_text, program, getter=getter, live=live)
+    if not complete:
+        return "unknown"
+    # An import that is not on the live-safe list is a KNOWN external that
+    # reaches beyond its parameters -- give it an empty body so the purity
+    # gate rules on it (stateful) instead of abstaining (unknown).
+    for name in _import_names(program, getter):
+        bodies.setdefault(name, "")
+    return classify_function(decompiled_text, variables, callee_bodies=bodies, live=live)
+
+
+def classify_function(decompiled_text, variables=None, callee_bodies=None,
+                      live=False):
     """Classify a function for the port pipeline. Returns:
       "leaf"        -- pure/leaf, provable via static /emulate_function.
       "global_leaf" -- reads only NAMED globals, provable LIVE via the resolver.
@@ -696,7 +959,7 @@ def classify_function(decompiled_text, variables=None, callee_bodies=None):
             and not _MUTATOR_UNSAFE_DEREF_RE.search(body)
             and not _DAT_GLOBAL_RE.search(text)
             and _has_delegate_call(body)
-            and _all_callees_pure(body, callee_bodies)):
+            and _all_callees_pure(body, callee_bodies, live)):
         ptr_names = _POINTER_PARAM_NAME_RE.findall(params_text) or []
         if ptr_names and outbuf_extent(body, ptr_names[0]) is not None:
             return "outbuf_leaf"
@@ -772,7 +1035,7 @@ def classify_function(decompiled_text, variables=None, callee_bodies=None):
     # were not supplied, delegation cannot be shown safe, so it is not assumed.
     # A caller that wants leaf verdicts for delegating functions must pass
     # `callee_bodies`, which is exactly what makes the purity provable.
-    if _has_delegate_call(body) and not _all_callees_pure(body, callee_bodies):
+    if _has_delegate_call(body) and not _all_callees_pure(body, callee_bodies, live):
         return "stateful"
 
     if _NAMED_GLOBAL_RE.search(text):
