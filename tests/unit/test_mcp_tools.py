@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -674,6 +675,113 @@ class TestFailureDetection(unittest.TestCase):
             })
             with mock.patch.object(dispatch, "dispatch_get", return_value=body):
                 self.assertEqual(asyncio.run(mcp._tool_manager.call_tool(name, {})), body)
+        finally:
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+
+class TestProgressHeartbeat(unittest.TestCase):
+    """Long calls report that they are still working.
+
+    Endpoint timeouts reach 600s (dispatch.get_timeout scales batch renames and
+    comment writes by item count) and nothing was sent during the wait, so a
+    client could not tell a long decompile from a hung session.
+    """
+
+    def _ctx(self, progress_token="tok-1"):
+        sent = []
+
+        class Session:
+            async def send_progress_notification(self, **kwargs):
+                sent.append(kwargs)
+
+        meta = SimpleNamespace(progressToken=progress_token) if progress_token else None
+        request_context = SimpleNamespace(
+            meta=meta, session=Session(), request_id="req-7"
+        )
+        return SimpleNamespace(request_context=request_context), sent
+
+    def test_no_heartbeat_without_a_context(self):
+        from bridge_mcp_ghidra.registry import _start_progress_heartbeat
+
+        self.assertIsNone(_start_progress_heartbeat(None, "some_tool"))
+
+    def test_no_heartbeat_when_the_client_did_not_ask(self):
+        """Without a progressToken the notification is dropped anyway, so
+        spawning a task per call would be pure overhead."""
+        from bridge_mcp_ghidra.registry import _start_progress_heartbeat
+
+        ctx, _ = self._ctx(progress_token=None)
+        self.assertIsNone(_start_progress_heartbeat(ctx, "some_tool"))
+
+    def test_heartbeat_ticks_and_stops_with_the_call(self):
+        from bridge_mcp_ghidra import dispatch, registry, state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "heartbeat_probe_tool"
+        ctx, sent = self._ctx()
+        saved_interval = registry._PROGRESS_INTERVAL_SECONDS
+        registry._PROGRESS_INTERVAL_SECONDS = 0.05
+        try:
+            _register_tool_def({
+                "name": name,
+                "endpoint": "/heartbeat_probe",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {"type": "object", "properties": {}},
+                "read_only": True,
+                "destructive": False,
+            })
+            fn = mcp._tool_manager._tools[name].fn
+            with mock.patch.object(
+                dispatch, "dispatch_get",
+                side_effect=lambda *a, **k: (time.sleep(0.3), '{"ok": 1}')[1],
+            ):
+                result = asyncio.run(fn(ctx=ctx))
+            self.assertEqual(result, '{"ok": 1}')
+            self.assertGreaterEqual(len(sent), 2)
+            first = sent[0]
+            self.assertEqual(first["progress_token"], "tok-1")
+            # Without related_request_id the transport routes the notification to
+            # the standalone GET stream, where a POST-only client never sees it.
+            self.assertEqual(first["related_request_id"], "req-7")
+            # No total: nothing the server returns could produce a fraction.
+            self.assertIsNone(first.get("total"))
+            self.assertLess(sent[0]["progress"], sent[-1]["progress"])
+            # The heartbeat must not outlive the call.
+            count_at_return = len(sent)
+            time.sleep(0.2)
+            self.assertEqual(len(sent), count_at_return)
+        finally:
+            registry._PROGRESS_INTERVAL_SECONDS = saved_interval
+            mcp._tool_manager._tools.pop(name, None)
+            if name in state._dynamic_tool_names:
+                state._dynamic_tool_names.remove(name)
+
+    def test_ctx_is_not_exposed_as_a_tool_parameter(self):
+        from bridge_mcp_ghidra import state
+        from bridge_mcp_ghidra.registry import _register_tool_def
+        from bridge_mcp_ghidra.server import mcp
+
+        name = "ctx_hidden_probe_tool"
+        try:
+            _register_tool_def({
+                "name": name,
+                "endpoint": "/ctx_probe",
+                "http_method": "GET",
+                "description": "probe",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"address": {"type": "string"}},
+                },
+                "read_only": True,
+                "destructive": False,
+            })
+            schema = mcp._tool_manager._tools[name].parameters
+            self.assertIn("address", schema["properties"])
+            self.assertNotIn("ctx", schema["properties"])
         finally:
             mcp._tool_manager._tools.pop(name, None)
             if name in state._dynamic_tool_names:
