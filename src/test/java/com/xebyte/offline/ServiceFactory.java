@@ -51,7 +51,6 @@ public final class ServiceFactory {
         MalwareSecurityService malwareSecurityService = new MalwareSecurityService(provider, ts);
         ProgramScriptService programScriptService = new ProgramScriptService(provider, ts);
         EmulationService emulationService = new EmulationService(provider, ts);
-        PromptPolicyService promptPolicyService = new PromptPolicyService();
 
         HeadlessManagementService headlessManagementService =
             new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager());
@@ -59,6 +58,11 @@ public final class ServiceFactory {
         // DebuggerService uses PluginTool only at runtime; scanner only reflects on
         // method signatures, so a null tool is safe for offline scanning.
         DebuggerService debuggerService = new DebuggerService(provider, ts, null);
+
+        // No collaborators: it only gates Ghidra's own modal prompts. It was missing here,
+        // which left its /prompt_policy endpoint invisible to the access-classification and
+        // catalog-parity tests — the gap ServiceFactoryCoverageTest now prevents.
+        PromptPolicyService promptPolicyService = new PromptPolicyService();
 
         return new Object[] {
             listingService,
