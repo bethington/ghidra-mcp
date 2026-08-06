@@ -795,6 +795,49 @@ def ghidra_post(path, data=None, params=None, timeout=60):
 # Best-effort wrappers — return None on any error so neither the worker hot
 # loop nor the write hook ever fail because the archive is unavailable.
 
+def save_program_checked(program, context="", emit=None, timeout=60):
+    """`/save_program`, with the failure actually detected and reported.
+
+    MEASURED 2026-08-06. Documentation written by a completed run VANISHED when
+    Ghidra went down: `CLIENT_CheckViewportVisible` and two get/set functions
+    reverted to `FUN_*`, while others from the same session survived. The writes
+    live in Ghidra's in-memory program until a save reaches disk, and the save
+    here was fire-and-forget.
+
+    `ghidra_post` NEVER RAISES -- it returns None on failure and prints to
+    stderr -- so the `try/except` around the other save sites could never fire.
+    They looked like loud-failure handling and were dead code. Checking the
+    RETURN VALUE is the only thing that works.
+
+    Non-fatal on purpose: a failed save must not kill a pass that has already
+    done the work. But it must never be silent, because silence is what let a
+    completed function quietly become undocumented again with SQL still saying
+    it scored 90.
+    """
+    resp = ghidra_post("/save_program", params={"program": program},
+                       timeout=timeout)
+    ok = resp is not None and not (
+        isinstance(resp, dict) and resp.get("error"))
+    if not ok:
+        detail = ""
+        if isinstance(resp, dict) and resp.get("error"):
+            detail = f": {resp['error']}"
+        elif resp is None:
+            detail = " (no response -- Ghidra unreachable or the call timed out)"
+        msg = (f"  [SAVE FAILED] {program}{(' ' + context) if context else ''}"
+               f"{detail} -- the documentation is in Ghidra's MEMORY ONLY and "
+               f"will be LOST if it exits. Save the program in Ghidra.")
+        if emit:
+            emit(msg)
+        else:
+            print(msg, flush=True)
+        try:
+            bus_emit("save_failed", {"program": program, "context": context})
+        except Exception:
+            pass
+    return ok
+
+
 def archive_post(path, data, timeout=15):
     """POST to the archive. Returns parsed JSON, or None on error / disabled."""
     if not ARCHIVE_URL:
@@ -933,7 +976,7 @@ def check_archive_for_match(func, func_name, live_score, run_id):
                 data={"address": address, "plate_comment": plate},
                 params={"program": program},
             )
-        ghidra_post("/save_program", params={"program": program})
+        save_program_checked(program)
         bus_emit(
             "archive_applied",
             {
@@ -2420,10 +2463,9 @@ def run_assess_pass(program, count=None, draft_score=None):
         sync_band_tags_sweep(program, emit=emit)
     except Exception as e:
         emit(f"  [warn] band-tag sweep failed: {e}")
-    try:
-        ghidra_post("/save_program", {"program": program}, params=qp)
-    except Exception:
-        emit("  [warn] save_program failed -- DOC_DRAFT tags are in memory; save Ghidra manually")
+    # Checked by RETURN VALUE: ghidra_post never raises, so the try/except this
+    # replaces could not fire and the warning was unreachable.
+    save_program_checked(program, "after DOC_DRAFT stamping", emit=emit)
     emit(f"\nassessed {total}: stamped DOC_DRAFT on {stamped}, left {total - stamped} untagged "
          f"(score < {draft_score})")
     emit("next: the Document lane raises these toward REVIEWED/VERIFIED; run again for the rest")
@@ -2656,7 +2698,7 @@ def run_assess_globals_pass(program, count=None, draft_score=None):
             emit(f"  [{i}/{total}] {g['name']} @ {g['addr']}  ->  effective {eff_s} "
                  f"({band or 'no band'}); needs {miss}")
     try:
-        ghidra_post("/save_program", {"program": program}, params={"program": program})
+        save_program_checked(program, "after rung/band sync", emit=emit)
     except Exception:
         emit("  [warn] save_program failed -- rungs/bands are in memory; save Ghidra manually")
     if not scorer_live:
@@ -11340,7 +11382,7 @@ def process_function(
 
                 # Save program after audit writes
                 if audit_tool_calls != 0:
-                    ghidra_post("/save_program", params={"program": program})
+                    save_program_checked(program, f"after auditing 0x{address}")
 
                 # Stamp per-function audit tracking
                 func["audit_count"] = func.get("audit_count", 0) + 1
@@ -11460,7 +11502,7 @@ def process_function(
 
     # Save program to persist changes in Ghidra
     if result in ("completed", "needs_redo", "partial") and tool_calls_made > 0:
-        ghidra_post("/save_program", params={"program": program})
+        save_program_checked(program, f"after documenting 0x{address}")
 
     # Cross-version doc archive write hook (Phase 2).
     #
@@ -13480,18 +13522,11 @@ GLOBALS_SAVE_EVERY = 10
 def _save_globals_worker_program(prog_path):
     """Best-effort `/save_program` after globals-worker writes. Never
     raises — a failed save is logged and the next checkpoint retries."""
-    try:
-        ghidra_post("/save_program", params={"program": prog_path}, timeout=120)
-        print(
-            f"  [globals-worker] saved {Path(prog_path).name}",
-            flush=True,
-        )
-    except Exception as exc:  # noqa: BLE001 — save must not kill the pass
-        print(
-            f"  [globals-worker] save_program failed for {prog_path}: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True,
-        )
+    # Checked by RETURN VALUE. The previous version printed "saved <name>"
+    # UNCONDITIONALLY and caught exceptions that ghidra_post never raises, so a
+    # failed save reported SUCCESS -- worse than silence.
+    if save_program_checked(prog_path, "globals-worker checkpoint", timeout=120):
+        print(f"  [globals-worker] saved {Path(prog_path).name}", flush=True)
 
 
 def _pick_next_globals_binary(programs, exclude_binaries):
@@ -14739,7 +14774,7 @@ def _post_proof_name_audit(program_name, address, func_name, decompiled, *, prov
                          f"{reason}). Not necessarily canonical -- verify vs a string/xref/D2MOO name; "
                          f"regenerate the resolve/profiler snapshots if this fn is name-resolved.")
                 _ghidra_audit_flag(program_name, address, trail, marker=f"{func_name} -> {proposed}")
-                ghidra_post("/save_program", data={"program": program_name})
+                save_program_checked(program_name)
             log("name_audit_rename", old=func_name, new=proposed, applied=renamed,
                 auto=_is_auto_name(func_name))
             return
@@ -14751,7 +14786,7 @@ def _post_proof_name_audit(program_name, address, func_name, decompiled, *, prov
                 + "a referenced string / xref / D2MOO canonical name before renaming.")
         st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof name check")
         if st == "flagged":
-            ghidra_post("/save_program", data={"program": program_name})
+            save_program_checked(program_name)
         log("name_audit_flag", name=func_name, proposed=proposed, status=st, reason=reason)
     except Exception as e:  # noqa: BLE001  -- a doc audit must never break a proof
         log("name_audit_error", error=str(e))
@@ -14818,7 +14853,7 @@ def _post_proof_type_audit(program_name, address, func_name, decompiled, reimpl_
                             params={"program": program_name})
             ok = not (isinstance(r, dict) and r.get("error"))
             if ok:
-                ghidra_post("/save_program", data={"program": program_name})
+                save_program_checked(program_name)
             log("type_audit_fix", name=func_name, prototype=proto, applied=ok, reason=reason)
             return
         # flag (or a "fix" we won't auto-apply) -> annotate for review.
@@ -14828,7 +14863,7 @@ def _post_proof_type_audit(program_name, address, func_name, decompiled, reimpl_
                 + "exact struct/type before applying.")
         st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof type check")
         if st == "flagged":
-            ghidra_post("/save_program", data={"program": program_name})
+            save_program_checked(program_name)
         log("type_audit_flag", name=func_name, status=st, reason=reason)
     except Exception as e:  # noqa: BLE001 -- must never break a proof
         log("type_audit_error", error=str(e))
@@ -15077,7 +15112,7 @@ def _post_proof_coverage(program_name, address, func_name, decompiled, dispatch_
                     f"them (e.g. other unit types) to strengthen it.")
             st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof coverage")
             if st == "flagged":
-                ghidra_post("/save_program", data={"program": program_name})
+                save_program_checked(program_name)
             log("coverage_flag", uncovered=len(uncovered), seen=seen, status=st)
         else:
             log("coverage_full", seen=seen)
@@ -15152,7 +15187,7 @@ def _post_proof_plate_audit(program_name, address, func_name, decompiled, *, pro
                         data={"address": f"0x{address}", "comment": trail + corrected,
                               "type": "plate"},
                         params={"program": program_name})
-            ghidra_post("/save_program", data={"program": program_name})
+            save_program_checked(program_name)
             log("plate_audit_correct", name=func_name, fix=correction[:80])
             return
         # Couldn't safely rewrite (missing/unsafe corrected_plate) -> flag with the fix.
@@ -15161,7 +15196,7 @@ def _post_proof_plate_audit(program_name, address, func_name, decompiled, *, pro
                 f"(behavior proven CONF_LIVE; prose not auto-edited this pass -- fix the wrong statement).")
         st = _ghidra_audit_flag(program_name, address, note, marker="Post-proof plate check")
         if st == "flagged":
-            ghidra_post("/save_program", data={"program": program_name})
+            save_program_checked(program_name)
         log("plate_audit_flag", name=func_name, status=st)
     except Exception as e:  # noqa: BLE001
         log("plate_audit_error", error=str(e))
