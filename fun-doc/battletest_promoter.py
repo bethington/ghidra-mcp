@@ -410,7 +410,18 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
                          "is uncalibrated, so the flat bar still stands. "
                          "NOT promoting."))
 
-        if is_shadow and ddivs == 0 and dhits >= min_hits and not (r or {}).get("weak_proof"):  # noqa: E501
+        # The early volume filter is a CHEAP PRE-FILTER, not the gate. It must
+        # not reject a function that the canonical gate would admit under a
+        # granted low-frequency exemption -- doing so is why that exemption was
+        # unreachable however it was calibrated: the code that promotes never
+        # asked. `low_frequency_granted` is False while the bar is uncalibrated,
+        # so today this admits exactly what it always did.
+        _pf = marks.get(mkey, {})
+        _lf_pre = conf_ladder.low_frequency_status(
+            _pf.get("max_hits_session"), _pf.get("sessions_observed"),
+            "CONF_BATTLETESTED")
+        _volume_ok = dhits >= min_hits or _lf_pre["granted"]
+        if is_shadow and ddivs == 0 and _volume_ok and not (r or {}).get("weak_proof"):  # noqa: E501
             argc = d.get("arg_count")
             # argc -1 == the coord family, which predates the sampler and has no
             # per-entry storage; distinct is reported as 0 there but means
@@ -453,7 +464,31 @@ def poll_and_promote(*, min_hits: int = BATTLE_MIN_HITS,
                           f"{conf_ladder.REQUIRED_SATURATED_SESSIONS} session(s) -- "
                           f"needs another game session to rule out state-dependent "
                           f"inputs. NOT promoting.")
-            if distinct < floor:
+            # THE CANONICAL GATE -- conf_ladder.meets_promotion_bar is the one
+            # place that says whether a function may promote, both thresholds
+            # and never one. It was called from NOWHERE in production (19 test
+            # references, zero real ones; found by value_ledger 2026-08-06)
+            # while this module re-implemented the volume half inline. Two
+            # implementations of one rule is the documented cause of several
+            # bugs in this codebase.
+            #
+            # `floor` carries the operator's explicit --min-distinct override
+            # and the saturation waiver, which meets_promotion_bar cannot know
+            # about, so it is applied as a SEPARATE constraint rather than being
+            # folded in and silently lost.
+            _canonical_ok = conf_ladder.meets_promotion_bar(
+                target, dhits, distinct, argc=argc, saturated=saturated,
+                low_frequency_granted=_lf_pre["granted"])
+            # An explicit operator override RELAXES the canonical bar; it never
+            # tightens it and never silently disappears. Folding `floor` into
+            # the canonical call instead would let the canonical gate overrule a
+            # deliberately lowered --min-distinct, killing the override without
+            # a word -- which is the failure mode this whole rewiring exists to
+            # remove, reintroduced one layer down.
+            _override_active = (min_distinct != BATTLE_MIN_DISTINCT
+                                or min_hits != BATTLE_MIN_HITS)
+            _override_ok = dhits >= min_hits and distinct >= floor
+            if not _canonical_ok and not (_override_active and _override_ok):
                 continue  # volume without diversity proves little
             if saturated and distinct < BATTLE_MIN_DISTINCT and d["name"] not in _WARNED_DOMAIN:
                 _WARNED_DOMAIN.add(d["name"])

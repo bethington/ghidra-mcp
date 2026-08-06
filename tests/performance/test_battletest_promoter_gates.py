@@ -631,3 +631,48 @@ def test_a_diverging_function_is_never_called_low_frequency(rig, capsys):
         bp.poll_and_promote()
         rig["dispatchers"][0]["hits"] = 2
     assert "LOW-FREQUENCY" not in capsys.readouterr().out
+
+
+# --- the canonical gate actually gates --------------------------------------
+# Found by value_ledger 2026-08-06: `conf_ladder.meets_promotion_bar` -- the one
+# function that says whether anything may reach CONF_BATTLETESTED -- had 19 test
+# references and ZERO production references. This module re-implemented the
+# volume half inline, so the low-frequency exemption could never fire however it
+# was calibrated: the code that promotes never asked. Two implementations of one
+# rule is the documented cause of several bugs in this codebase.
+
+def test_promotion_consults_the_canonical_gate(rig, monkeypatch):
+    """If meets_promotion_bar says no, nothing promotes -- even when the raw
+    numbers would have passed the old inline check."""
+    monkeypatch.setattr(conf_ladder, "meets_promotion_bar",
+                        lambda *a, **k: False)
+    rig["dispatchers"] = [_disp("F", 0x1000)]
+    rig["rows"] = [_row("F", hex(ADDR_COMMON + 0x1000))]
+    out = bp.poll_and_promote()
+    assert out["promoted"] == []
+
+
+def test_the_canonical_gate_is_what_lets_it_through(rig, monkeypatch):
+    seen = {}
+
+    def spy(rung, calls, distinct_inputs, **kw):
+        seen["called"] = True
+        return True
+
+    monkeypatch.setattr(conf_ladder, "meets_promotion_bar", spy)
+    rig["dispatchers"] = [_disp("F", 0x1000)]
+    rig["rows"] = [_row("F", hex(ADDR_COMMON + 0x1000))]
+    out = bp.poll_and_promote()
+    assert seen.get("called") and len(out["promoted"]) == 1
+
+
+def test_an_explicit_override_relaxes_but_the_default_path_does_not(rig):
+    """An operator lowering --min-distinct must still work. Folding that floor
+    into the canonical call would let the canonical gate overrule a deliberate
+    override and kill it without a word."""
+    rig["dispatchers"] = [_disp("F", 0x1000, distinct_inputs=3)]
+    rig["rows"] = [_row("F", hex(ADDR_COMMON + 0x1000))]
+    assert bp.poll_and_promote()["promoted"] == []          # default bar refuses
+    rig["rows"] = [_row("F", hex(ADDR_COMMON + 0x1000))]
+    out = bp.poll_and_promote(min_distinct=2)               # operator relaxes it
+    assert len(out["promoted"]) == 1
