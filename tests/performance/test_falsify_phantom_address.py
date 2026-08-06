@@ -78,9 +78,13 @@ def test_it_is_tier_2_not_tier_1():
     assert f[0].tier == falsify.TIER_REVIEW
 
 
-def test_the_check_is_enabled_by_default():
+def test_the_check_is_registered_but_disabled_pending_calibration():
+    """Two measured rounds against the same 400-function slice: 29 findings then
+    12, with the survivors still dominated by cross-module addresses and nearby
+    code labels. Registered and available via --enable; not run by default until
+    it has the module range and a code-vs-data test."""
     assert "phantom_address" in falsify.ALL_CHECKS
-    assert "phantom_address" not in falsify.DEFAULT_DISABLED
+    assert "phantom_address" in falsify.DEFAULT_DISABLED
 
 
 # --- false-positive guards ---------------------------------------------------
@@ -136,3 +140,42 @@ def test_no_plate_means_no_finding():
 
 def test_a_plate_with_no_addresses_is_silent():
     assert run(bundle("Initialises the viewport rectangles and sets a flag.")) == []
+
+
+# --- calibration (measured against the 400-function D2Client sweep) -----------
+# That sweep produced 29 findings; a 6-sample review found at least 4 false.
+# Both exclusions below kill a MEASURED false class rather than a supposed one.
+
+def test_mask_shaped_constants_are_excluded():
+    """0xffffffff / 0x0fffffff / 0x100001 have 6-8 hex digits and are not addresses.
+    A real global sits near the code that touches it."""
+    for mask in ("0xffffffff", "0x0fffffff", "0x100001", "0x7fffffff"):
+        plate = f"Clamps the value against {mask}."
+        assert run(bundle(plate)) == [], mask
+
+
+def test_a_nearby_global_is_still_caught():
+    """The exclusion must not swallow the real case: 0x6fbcc994 is ~0xC3000
+    from the function at 0x6fb09980 -- well inside the same module."""
+    f = run(bundle("Clears g_pSaveExitDialog (0x6fbcc994) on confirm."))
+    assert len(f) == 1 and f[0].detail["phantom_addresses"] == ["6fbcc994"]
+
+
+def test_addresses_of_other_functions_are_excluded_when_known():
+    """A plate naming a related ROUTINE is documentation, not a false claim."""
+    b = bundle("Mirrors the logic at 0x6fab12b0.", address="6fab1300")
+    b["function_addresses"] = {"6fab12b0", "6fab1300"}
+    assert run(b) == []
+
+
+def test_without_the_function_list_it_does_not_guess():
+    """No list supplied -> the routine-address exclusion cannot apply. Noisier,
+    but never wrong in the consequential direction."""
+    b = bundle("Mirrors the logic at 0x6fab12b0.", address="6fab1300")
+    assert len(run(b)) == 1
+
+
+def test_the_function_list_does_not_hide_a_real_data_global():
+    b = bundle("Clears g_pSaveExitDialog (0x6fbcc994) on confirm.")
+    b["function_addresses"] = {"6fab12b0", "6fb09980"}
+    assert run(b)[0].detail["phantom_addresses"] == ["6fbcc994"]

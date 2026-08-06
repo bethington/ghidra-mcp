@@ -627,7 +627,36 @@ def check_phantom_address(bundle: dict) -> List[Finding]:
     if own:
         referenced.add(own)
 
-    phantom = sorted(a for a in cited if a not in referenced)
+    # CALIBRATION (measured 2026-08-05 against a 400-function D2Client sweep that
+    # produced 29 findings, of which a 6-sample review found at least 4 false).
+    # Both exclusions below kill a MEASURED false class; neither is a guess.
+    try:
+        own_val = int(own, 16) if own else 0
+    except ValueError:
+        own_val = 0
+    fn_addrs = {str(a).lower().lstrip("0x") for a in (bundle.get("function_addresses") or ())}
+
+    def _is_real_candidate(a: str) -> bool:
+        try:
+            v = int(a, 16)
+        except ValueError:
+            return False
+        # (1) MASKS AND SENTINELS. 0xffffffff, 0x0fffffff and 0x100001 are
+        # constants that merely happen to have 6-8 hex digits. A genuine global
+        # in this corpus sits near the code that touches it, so an address
+        # implausibly far from the function is not an address at all. 16MB is
+        # generous: the largest module here is ~1.3MB.
+        if own_val and abs(v - own_val) > 0x1000000:
+            return False
+        # (2) FUNCTION ADDRESSES. A plate naming a related routine ("mirrors
+        # 0x6fab12b0") is documentation, not a false claim. Only excluded when
+        # the caller supplied the program's function list -- without it we cannot
+        # tell, and guessing would reintroduce the false class.
+        if a in fn_addrs:
+            return False
+        return True
+
+    phantom = sorted(a for a in cited if a not in referenced and _is_real_candidate(a))
     if not phantom:
         return []
     return [_mk(bundle, "phantom_address", TIER_REVIEW,
@@ -646,7 +675,31 @@ ALL_CHECKS = {
     "phantom_callee": check_phantom_callee,
     "phantom_address": check_phantom_address,
 }
-DEFAULT_DISABLED = frozenset({"phantom_callee"})
+# phantom_address is DISABLED pending calibration, on measured evidence rather
+# than caution. Two rounds against the same 400-function D2Client slice:
+#
+#   round 1 (no filters)            29 findings; 6-sample review found >=4 false
+#                                   (masks like 0xffffffff, neighbouring routines)
+#   round 2 (masks + function list) 12 findings -- but the survivors are still
+#                                   dominated by two false classes:
+#                                     * CROSS-MODULE addresses (0x6fc36ad4 is
+#                                       D2Game, 0x6ff7e33f is Fog). The 16MB
+#                                       plausibility window is far too wide --
+#                                       D2Client sits at 0x6fab0000 and D2Game at
+#                                       0x6fc20000, ~1.5MB apart.
+#                                     * NEARBY CODE LABELS (__sopen at 0x6faba467
+#                                       citing 0x6faba473, 12 bytes on) -- a
+#                                       mid-function label is not a function
+#                                       start, so the function-list exclusion
+#                                       cannot see it.
+#
+# The motivating case is still caught, and the check stays available via
+# --enable phantom_address. What it needs before running by default is the
+# function's OWN MODULE range (base + size, which Ghidra can supply) so an
+# address outside it is excluded rather than accused, and a code-vs-data test so
+# labels are not mistaken for globals. Shipping a third guess instead of that
+# measurement would repeat the mistake this check exists to catch.
+DEFAULT_DISABLED = frozenset({"phantom_callee", "phantom_address"})
 
 
 def enabled_check_ids(enable: Iterable[str] = (), disable: Iterable[str] = ()) -> list:
@@ -986,6 +1039,30 @@ def attach_param_storage(params: list, func_name: Optional[str],
     return out
 
 
+_FN_ADDR_CACHE: dict = {}
+
+
+def _program_function_addresses(program: str) -> frozenset:
+    """Every function address in `program`, lowercase and unprefixed.
+
+    Cached per program: a sweep calls collect_bundle once per function, and
+    re-listing thousands of functions each time would dominate the run. An
+    unreachable Ghidra yields an EMPTY set, which makes check_phantom_address
+    fall back to not excluding anything -- noisier, never wrong in the
+    consequential direction.
+    """
+    if program in _FN_ADDR_CACHE:
+        return _FN_ADDR_CACHE[program]
+    try:
+        fns = _items(_get("/list_functions", program=program, limit=200000), "functions")
+        addrs = frozenset(str(f.get("address", "")).lower().lstrip("0x") for f in fns)
+    except Exception as e:  # noqa: BLE001 - abstain, never fail the scan
+        print(f"[falsify] function list unavailable for {program}: {e}", file=sys.stderr)
+        addrs = frozenset()
+    _FN_ADDR_CACHE[program] = addrs
+    return addrs
+
+
 def collect_bundle(program: str, address: str, with_callees: bool = False) -> dict:
     """One function's claims + ground truth, from a live Ghidra instance.
 
@@ -1008,6 +1085,11 @@ def collect_bundle(program: str, address: str, with_callees: bool = False) -> di
         "plate": doc.get("plate_comment") or "",
         "disasm_text": render_disasm(dis),
         "prototype": "",
+        # Every function address in this program, so check_phantom_address can
+        # tell "the plate names a related ROUTINE" (documentation) from "the
+        # plate names a global the code never touches" (a false claim). Cached
+        # per program -- one /list_functions call, not one per function.
+        "function_addresses": _program_function_addresses(program),
     }
     if with_callees:
         resp = _get("/get_function_callees", name=bundle["name"], program=program)
