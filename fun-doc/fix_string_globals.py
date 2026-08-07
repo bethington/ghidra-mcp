@@ -54,25 +54,6 @@ def gpost(path, **body):
         return r.text
 
 
-def type_size(t):
-    """Byte size of a current type string, or None if not a string-candidate type."""
-    t = t.strip()
-    m = re.fullmatch(r"char\[(\d+)\]", t)
-    if m:
-        return int(m.group(1))
-    if t == "char":
-        return 1
-    m = re.fullmatch(r"undefined(\d+)", t)
-    if m:
-        return int(m.group(1))
-    if t in ("undefined", "undefined1"):
-        return 1
-    m = re.fullmatch(r"undefined\[(\d+)\]", t)
-    if m:
-        return int(m.group(1))
-    return None  # struct/pointer/string/etc — not a candidate
-
-
 def is_undefined(t):
     return t.strip().startswith("undefined")
 

@@ -61,7 +61,7 @@ import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional
 
 GHIDRA_URL = os.environ.get("GHIDRA_URL", "http://127.0.0.1:8089").rstrip("/")
 
@@ -383,9 +383,15 @@ def sync_to_ghidra(match: BSimMatch, apply_name: bool = True,
     return result
 
 
-def sync_all(matches: Sequence[BSimMatch], apply_name: bool = True,
-             rename_documented: bool = False) -> List[dict]:
-    """Convenience fan-out. Still one writer -- this only loops."""
-    return [sync_to_ghidra(m, apply_name=apply_name,
-                           rename_documented=rename_documented)
-            for m in matches]
+# `sync_all` lived here until 2026-08-06 and was deleted as a TRAP, not as
+# unused lines. Nothing called it -- `bsim_sweep.py`, the one caller it was
+# written for, loops over `sync_to_ghidra` itself, and that loop does four
+# things this wrapper did not: it de-dups by address, it sets `apply_name`
+# PER MATCH (`m in targets`, so an already-documented function is not renamed
+# unless `--rename-documented` was passed), it counts renames and failures, and
+# it PRINTS every write error. `sync_all` applied one `apply_name` uniformly to
+# every match and handed errors back in a list no caller was obliged to read --
+# six lines below the comment above, which exists because a write-back that
+# fails quietly is how the wrong-binary CONF_ bug survived weeks. A future
+# caller reaching for the convenient name would have silently renamed
+# documented functions and swallowed the failures.
