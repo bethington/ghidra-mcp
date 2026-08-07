@@ -129,7 +129,9 @@ except ImportError:
     sys.exit(1)
 
 from event_bus import emit as bus_emit, get_bus, get_worker_id
-from library_code_detector import detect_library_code, format_plate as format_library_plate
+from library_code_detector import (detect_library_code,
+                                   format_plate as format_library_plate,
+                                   strip_comments)
 
 from types import SimpleNamespace
 
@@ -5973,19 +5975,104 @@ _THIN_WRAPPER_MAX_STATEMENTS = 3
 _STMT_KEYWORDS = ("return", "break", "continue", "goto", "case", "default")
 _STMT_DECL_RE = re.compile(r"^[A-Za-z_][\w\s]*\s\*?\w+\s*;\s*$")
 
+# Statements the COMPILER emitted, not the author. Discounted so a three-line
+# forwarder is not mistaken for substantial work.
+#
+# MEASURED 2026-08-06 on `d2::CelFile_Api::GetCel` -- three authored lines --
+# which counted 66 "statements" (comments) and still 20 after stripping them,
+# because NINE were MSVC exception bookkeeping. The abstention gate needs "at
+# most a few statements" to fire, so the compiler's prologue silently disarmed
+# it and the pipeline invented `Sgd2fr_ResolveLookupResult` instead of
+# declining. Zero abstentions in 10,872 completed runs.
+#
+# `in_FS_OFFSET` is the load-bearing token: it is how Ghidra renders the TIB
+# access at the heart of every SEH frame, and unlike the local NAMES (which are
+# `pSehScopeTable` only after a previous pass renamed them, and `puStack_c` on a
+# blinded function) it does not depend on prior documentation.
+#
+# NOT shared with `falsify._SCAFFOLD_RE` on purpose: that one reads PLATE PROSE
+# ("Initialize SEH frame on stack") and this one reads CODE. Same concept, two
+# different input languages -- sharing one pattern would make both worse, which
+# is the opposite of the two-writers-of-one-field rule (that is about one
+# QUESTION with two answers; this is two questions).
+_SCAFFOLD_STMT_RE = re.compile(
+    r"in_FS_OFFSET"
+    r"|\bExceptionList\b|\bpSehScopeTable\b|\bdwSehState\b|\bpSavedExceptionList\b"
+    r"|__security_cookie|\bdwSecurityCookie\b|g_dwSecurityCookie"
+    r"|__security_check_cookie|\b_tls_index\b"
+    r"|\b_(?:local|global)_unwind\b|\bRtlUnwind\b"
+    r"|__CxxFrameHandler|__SEH_(?:pro|epi)log|__EH_(?:pro|epi)log"
+    r"|vector_(?:con|de)structor_iterator",
+    re.I)
 
-def _body_statements(decompiled):
+
+_CALL_RE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+
+
+def _is_scaffolding_statement(stmt):
+    """Is this statement PURELY the compiler's bookkeeping?
+
+    A scaffolding NAME appearing anywhere is not enough. The first cut dropped
+    any statement matching the pattern, which discarded
+
+        pLookupResultBuilt = Sgd2fr_BuildLookupResult(&wrap, &buf, ..., dwSecurityCookie);
+
+    -- the real delegated call, thrown away because the compiler passes the
+    stack cookie as an argument to it. That is the single most important
+    statement in a gate about DELEGATION, so the rule has to be narrower: a
+    statement that CALLS something real is real work, whatever else it mentions.
+    """
+    if not _SCAFFOLD_STMT_RE.search(stmt):
+        return False
+    for name in _CALL_RE.findall(stmt):
+        if name in ("if", "while", "for", "switch", "return", "sizeof"):
+            continue
+        if not _SCAFFOLD_STMT_RE.search(name):
+            return False            # calls real code -> not bookkeeping
+    return True
+
+
+def _body_statements(decompiled, drop_scaffolding=True):
     """Executable statements in a decompiled body -- declarations excluded.
 
     Ghidra emits a block of local declarations that say nothing about what the
     function does; counting them would make every function look substantial.
+
+    COMMENTS ARE STRIPPED FIRST, and that is not cosmetic. `/decompile_function`
+    returns the plate and every inline comment as part of the body, and the old
+    `partition("{")` split on the FIRST brace -- which, for any plate containing
+    one (`receives {pData = ..., bStatus = 0}`), landed INSIDE THE PLATE and
+    handed the rest of the documentation to the statement counter as code. The
+    `startswith("/*", "*", "//")` guard never saw those lines because they do
+    not begin with a comment marker. Same root cause as the library detector
+    reading its own plate: decompiler output is prose plus code, and a consumer
+    that forgets the prose half measures documentation instead of the program.
     """
     if not decompiled:
         return []
-    inner = str(decompiled).partition("{")[2]
-    out = []
+    inner = strip_comments(str(decompiled)).partition("{")[2]
+    # WRAPPED LINES ARE ONE STATEMENT. The decompiler breaks long calls across
+    # lines, so a line counter reports
+    #     pLookupResultBuilt =
+    #     Sgd2fr_BuildLookupResult
+    #     (&dwWrapperPad,&lookupResultBuf,...,dwKey,
+    #     dwSecurityCookie);
+    # as four. Measured on GetCel: 11 counted lines for 8 actual statements.
+    # Accumulate until the text closes on `;`, `{` or `}` -- independent of the
+    # comment and scaffolding problems, and wrong on its own.
+    joined, buf = [], ""
     for raw in inner.splitlines():
-        ln = raw.strip()
+        piece = raw.strip()
+        if not piece:
+            continue
+        buf = f"{buf} {piece}".strip() if buf else piece
+        if buf.endswith((";", "{", "}", ":")):
+            joined.append(buf)
+            buf = ""
+    if buf:
+        joined.append(buf)
+    out = []
+    for ln in joined:
         if not ln or ln in ("{", "}") or ln.startswith(("/*", "*", "//")):
             continue
         # The guard must be on what is INDEXED, not on the raw line. Checking
@@ -5999,6 +6086,8 @@ def _body_statements(decompiled):
         head = ln.split("(")[0].split()
         first = head[0] if head else ""
         if first not in _STMT_KEYWORDS and _STMT_DECL_RE.match(ln):
+            continue
+        if drop_scaffolding and _is_scaffolding_statement(ln):
             continue
         out.append(ln)
     return out
