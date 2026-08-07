@@ -541,3 +541,114 @@ def test_stack_param_count_helper():
         _bundle(params=[_p("a", storage="EDX:4,Stack[0x4]:4")])) == 1
     assert fz._stack_param_count(
         _bundle(params=[{"name": "a"}])) is None
+
+
+# ---------------------------------------------------------------------------
+# F9 -- compiler scaffolding described as an algorithm step
+# ---------------------------------------------------------------------------
+# Exists because the PROMPT rule was measured as a no-op (2026-08-06): the same
+# 8 functions, blinded and re-documented with the rule live in both plate
+# prompts, gave 0-of-5 invention-free plates before AND after, and plates grew
+# 19%. The model complied by LABELLING the scaffolding instead of omitting it --
+# one plate gained a paragraph headed "NOT compiler-generated machinery:"
+# enumerating the SEH prologue it had been told not to describe.
+#
+# Calibrated on 199 random plates of the 20,714 that carry one: 9.0% name
+# scaffolding somewhere, 5.5% name it as an ALGORITHM STEP (~1,100 corpus-wide).
+
+
+def _plate(algorithm="", extra=""):
+    return ("Does a thing.\n\nAlgorithm:\n" + algorithm +
+            "\n\nParameters:\n  None\n\nReturns:\n  void\n" + extra)
+
+
+def test_seh_as_a_step_is_reported():
+    b = {"plate": _plate("1. Save previous SEH frame and install the handler.\n"
+                         "2. Compute the visible tile bounds.\n")}
+    fs = fz.check_compiler_scaffolding(b)
+    assert len(fs) == 1 and fs[0].tier == fz.TIER_REVIEW
+    assert "seh" in fs[0].detail["constructs"]
+
+
+def test_the_function_local_static_cluster_is_reported():
+    b = {"plate": _plate("1. Read _tls_index, take the SRW lock and run InitOnce.\n")}
+    assert fz.check_compiler_scaffolding(b)
+
+
+def test_a_clean_algorithm_is_not_accused():
+    b = {"plate": _plate("1. Read the mouse position.\n2. Test the four bounds.\n")}
+    assert not fz.check_compiler_scaffolding(b)
+
+
+def test_naming_it_in_special_cases_is_CORRECT_and_not_accused():
+    """The load-bearing abstention. A plate that says 'these are compiler-emitted'
+    outside the steps is REFUSING to treat them as behaviour -- the answer we
+    want. Accusing it would punish the correct response and is the difference
+    between the measured 9.0% and 5.5%."""
+    b = {"plate": _plate(
+        "1. Read the mouse position.\n2. Test the four bounds.\n",
+        extra="\nSpecial Cases:\n  - nSehState / pExcListPrev are SEH bookkeeping,\n"
+              "    compiler-emitted, not API-settable.\n")}
+    assert not fz.check_compiler_scaffolding(b)
+
+
+def test_a_plate_with_no_algorithm_section_abstains():
+    assert not fz.check_compiler_scaffolding({"plate": "Just a summary line."})
+    assert not fz.check_compiler_scaffolding({"plate": ""})
+    assert not fz.check_compiler_scaffolding({})
+
+
+# --- the measured false-positive classes, each pinned -----------------------
+
+def test_vftable_is_not_scaffolding():
+    """MEASURED: 2 of 3 sampled `vftable` hits were legitimate object layout.
+    A vtable pointer is a real field of a real C++ object."""
+    for step in ("2. Close and zero the vftable at this+0x24.\n",
+                 "1. Allocate root JSONObject (0x10 bytes) with vftable and empty data.\n"):
+        assert not fz.check_compiler_scaffolding({"plate": _plate(step)}), step
+
+
+def test_a_callee_named_Unwind_is_not_scaffolding():
+    """`Unwind_6fd179c0` is a CALLEE NAME. Matching bare 'unwind' inflated the
+    measured rate from 5.5% to 14.6%."""
+    b = {"plate": _plate("2. Get adjusted coordinates from Game context via "
+                         "Unwind_6fd179c0.\n")}
+    assert not fz.check_compiler_scaffolding(b)
+
+
+def test_the_binarys_own_TLS_data_is_not_scaffolding():
+    """BH.dll genuinely uses thread-local storage for its own purposes;
+    `g_pdwTlsIndexTable3` is that binary's data, not the compiler's."""
+    b = {"plate": _plate("e. Read ordinal from g_pdwTlsIndexTable3 and index "
+                         "the proc table.\n")}
+    assert not fz.check_compiler_scaffolding(b)
+
+
+def test_the_CRT_unwind_spellings_still_fire():
+    """Dropping bare `unwind` must not disarm the check for the real thing."""
+    b = {"plate": _plate("1. Initialize 3 RtlUnwind exception handler resources.\n")}
+    assert fz.check_compiler_scaffolding(b)
+
+
+def test_it_never_earns_tier_1():
+    """A plate describing the wrong LAYER is not claiming anything false about
+    the binary. Tier 1 carries DOC_REFUTED, a forced audit and selector
+    re-entry, none of which is proportionate to verbosity."""
+    b = {"plate": _plate("1. Install the SEH frame with the security cookie.\n")}
+    fs = fz.check_compiler_scaffolding(b)
+    assert fs and all(f.tier == fz.TIER_REVIEW for f in fs)
+    assert not fz.tier1(fs)
+
+
+def test_it_is_registered_and_on_by_default():
+    assert "compiler_scaffolding" in fz.ALL_CHECKS
+    assert "compiler_scaffolding" not in fz.DEFAULT_DISABLED
+    assert "compiler_scaffolding" in fz.enabled_check_ids()
+
+
+def test_the_offending_step_is_quoted_in_the_finding():
+    """A reviewer must not have to go looking for which line tripped it."""
+    b = {"plate": _plate("1. Set up the SEH frame and security cookie.\n"
+                         "2. Do the real work.\n")}
+    f = fz.check_compiler_scaffolding(b)[0]
+    assert "SEH frame" in f.claim

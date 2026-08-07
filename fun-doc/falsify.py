@@ -38,6 +38,8 @@ CHECKS
                                   writer-verb names that write nothing
   library_domain_prefix (T1/T2)   doc_lint's rule, corpus-level only
   phantom_callee (T2, OFF)        plate Algorithm names callees that don't exist
+  compiler_scaffolding (T2)       plate Algorithm describes SEH / TLS-static /
+                                  cookie machinery as a step of the algorithm
 
 Architecture is doc_lint's: PURE check functions over a pre-fetched bundle,
 a thin I/O layer (`collect_bundle`), and a CLI. Standalone -- imports nothing
@@ -671,6 +673,79 @@ def check_phantom_address(bundle: dict) -> List[Finding]:
                 phantom_addresses=phantom)]
 
 
+# F9. The constructs below are the COMPILER'S, not the author's. Naming one as
+# a numbered step describes machinery the source never wrote.
+#
+# WHY A CHECK AND NOT A PROMPT RULE. Both plate prompts were given this rule on
+# 2026-08-06 and it was measured as a NO-OP the same day: the same 8 functions,
+# blinded and re-documented, produced 0-of-5 invention-free plates before and
+# after, and plates grew 19%. The model complied by LABELLING the scaffolding
+# instead of omitting it -- one plate gained a whole new paragraph headed "NOT
+# compiler-generated machinery:" enumerating the SEH prologue it had been told
+# not to describe. "Do not describe X as behaviour" reads as "identify X".
+#
+# CALIBRATED, like every other threshold here, against a measured sample --
+# 199 random plates from the 20,714 that carry one:
+#
+#     scaffolding named ANYWHERE in the plate      18  (9.0%)
+#     scaffolding named as an ALGORITHM STEP       11  (5.5%)   <- the defect
+#
+# extrapolating to roughly 1,100 plates corpus-wide.
+#
+# THREE ABSTENTIONS, each killing a measured false-positive class:
+#
+#   ALGORITHM ONLY. A plate that says "these locals are compiler-emitted" in
+#   Special Cases is REFUSING to treat them as behaviour -- that is the correct
+#   answer and must not be accused. Only the numbered steps are scanned. This
+#   is also what separates 9.0% from 5.5%.
+#
+#   NO `vftable`. Measured: 2 of its 3 sampled hits were legitimate object
+#   layout -- "zero the vftable at this+0x24", "allocate root JSONObject with
+#   vftable and empty data". A vtable pointer is a real field of a real C++
+#   object, and documenting it is not describing the compiler's bookkeeping.
+#
+#   NO bare `unwind` or bare `TLS`. `Unwind_6fd179c0` is a CALLEE NAME, and
+#   "get coordinates via Unwind_6fd179c0" is a step about the program;
+#   `g_pdwTlsIndexTable3` is BH.dll's own data. Both matched in the first pass
+#   and inflated the rate from 5.5% to 14.6%. Only the CRT spellings
+#   (`RtlUnwind`, `_local_unwind`) and `_tls_index` survive.
+#
+# TIER 2, deliberately. This is a hygiene defect, not a contradiction with the
+# disassembly: the plate is not claiming anything FALSE about the binary, it is
+# describing the wrong layer. Tier 1 carries DOC_REFUTED, a forced audit and
+# selector re-entry, and none of that is proportionate to verbosity.
+_SCAFFOLD_RE = re.compile(
+    r"\bSEH\b|__except\b|__try\b|_tls_index|\bSRW\b|InitOnce|__onexit"
+    r"|security[- ]cookie|__security_cookie|stack cookie"
+    r"|vector (?:constructor|destructor) iterator|ExceptionList"
+    r"|exception registration|scope table"
+    r"|RtlUnwind|_(?:local|global)_unwind|unwind the stack"
+    r"|TLS[- ]gated|TLS block", re.I)
+
+
+def check_compiler_scaffolding(bundle: dict) -> List[Finding]:
+    """F9 (tier 2): the plate's Algorithm describes compiler machinery as a step.
+
+    The `_tls_index` + SRW + InitOnce + `__onexit` cluster IS a function-local
+    static; SEH frames and scope tables are C++ exception handling; vector
+    ctor/dtor iterators are ordinary object construction. None of them is
+    something the author wrote, so none of them is a step of the algorithm.
+    """
+    parsed = parse_function_plate(bundle.get("plate") or "")
+    algo = _sec(parsed["sections"], "Algorithm") or ""
+    if not algo.strip():
+        return []
+    hits = sorted({m.group(0).lower() for m in _SCAFFOLD_RE.finditer(algo)})
+    if not hits:
+        return []
+    # The offending step, quoted, so a reviewer does not have to go looking.
+    line = next((ln.strip() for ln in algo.splitlines() if _SCAFFOLD_RE.search(ln)), "")
+    return [_mk(bundle, "compiler_scaffolding", TIER_REVIEW,
+                claim=f"Algorithm describes compiler machinery as a step: {line[:160]}",
+                evidence=f"constructs named: {', '.join(hits[:6])}",
+                constructs=hits)]
+
+
 ALL_CHECKS = {
     "param_mismatch": check_param_mismatch,
     "convention_contradiction": check_convention,
@@ -679,6 +754,7 @@ ALL_CHECKS = {
     "name_verb_contradiction": check_name_verb,
     "phantom_callee": check_phantom_callee,
     "phantom_address": check_phantom_address,
+    "compiler_scaffolding": check_compiler_scaffolding,
 }
 # phantom_address is ENABLED after three measured calibration rounds against the
 # SAME 400-function D2Client slice:
