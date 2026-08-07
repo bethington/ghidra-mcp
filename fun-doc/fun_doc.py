@@ -6383,10 +6383,6 @@ def _find_cli(name):
     return None
 
 
-def find_claude_cli():
-    return _find_cli("claude")
-
-
 def _wrap_result(result):
     """Normalize AI provider return to (text, metadata) tuple."""
     if isinstance(result, tuple):
@@ -11849,7 +11845,15 @@ def main():
         # Best-effort and fully guarded; must never block startup.
         try:
             import orphan_reaper
-            orphan_reaper.reap_orphans()
+            _reaped, _failed = orphan_reaper.reap_orphans()
+            # A kill that FAILED means a wedged provider child is still alive
+            # and still holding its resources -- exactly what this sweep exists
+            # to tell the operator. Dropping the list made the one outcome worth
+            # reporting the only silent one, while the exception path below
+            # printed diligently.
+            if _failed:
+                print(f"  [orphan-reaper] {len(_failed)} orphan(s) SURVIVED the "
+                      f"sweep and are still running: {_failed}", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"  [orphan-reaper] sweep skipped: {e}", flush=True)
 
@@ -12063,14 +12067,24 @@ def main():
         if not prog:
             print("--assess requires a binary: pass --binary <program path>")
             return
+        # Both passes return an EXIT CODE (0 ok / 1 failed) -- that is what
+        # their `return 1` branches mean and what the tests assert. Dropping
+        # them made `--assess` exit 0 no matter what happened, and `web.py`
+        # shells out to this, so a failed assess reported success to the
+        # dashboard. Same rule as everywhere else here: failures must be loud.
+        rc = 0
         if not args.assess_globals_only:
             # draft_score None -> run_assess_pass resolves the live Target (good_enough_score)
-            run_assess_pass(prog, count=args.assess_count, draft_score=args.draft_score)
+            rc |= run_assess_pass(prog, count=args.assess_count,
+                                  draft_score=args.draft_score) or 0
         if not args.assess_functions_only:
             # Globals now use the same budgeted completeness scorer as functions;
             # draft_score None -> run_assess_globals_pass resolves the live Target.
-            run_assess_globals_pass(prog, count=args.assess_count, draft_score=args.draft_score)
-        return
+            rc |= run_assess_globals_pass(prog, count=args.assess_count,
+                                          draft_score=args.draft_score) or 0
+        if rc:
+            print("  [assess] pass reported failure -- exiting non-zero", flush=True)
+        return rc
 
     # Validate state
     if not state.get("functions"):
@@ -17137,4 +17151,7 @@ def run_port_worker_pass(*, worker_id, active_binary, provider, model, count,
 
 
 if __name__ == "__main__":
-    main()
+    # `main()` returns an exit code on the paths that HAVE one (currently
+    # --assess); every other path returns None, which `or 0` maps to success.
+    # Without this the code computed above never reaches the caller.
+    sys.exit(main() or 0)

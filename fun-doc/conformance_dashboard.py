@@ -954,21 +954,14 @@ def types_cache_clear(program: str = None) -> None:
     _TYPES_CACHE.pop(program, None) if program else _TYPES_CACHE.clear()
 
 
-def types_mark_loaded(program: str = None) -> dict:
-    """Stamp the version marker after a successful load and refresh the cached status.
-    NOTE: these POST endpoints read `program` from the QUERY string (not the body), so it must
-    go in the path -- a body-only program silently targets the active program instead."""
-    import unify_types
-    program = program or PROGRAM
-    q = "?program=" + quote(program, safe="")
-    _post("/set_program_option" + q, {"group": unify_types.MARKER_GROUP,
-                                      "name": unify_types.MARKER_OPTION,
-                                      "value": unify_types.unified_marker()})
-    try:
-        _post("/save_program" + q, {})
-    except OSError:
-        pass
-    return types_status(program, force=True)
+# `types_mark_loaded` lived here until 2026-08-06 and was deleted as a SECOND
+# WRITER of the unified-types version marker, not merely as dead code. Nothing
+# called it, and `TypeUnifier.load_unified` already stamps the marker itself
+# (`self.stamp(program)`) on the path that actually loads the types. Two ways to
+# write one field is this codebase's most-repeated defect shape -- see
+# feedback_two_writers_one_field -- and the dashboard copy was the one with no
+# input, so it could only ever have disagreed. `types_status` (which READS the
+# marker) is untouched.
 
 
 _NATIVE_CACHE = {}   # program -> native-type-usage status (globals canary; session-cached)
