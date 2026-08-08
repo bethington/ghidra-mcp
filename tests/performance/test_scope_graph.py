@@ -362,6 +362,24 @@ class TestCascadeControl:
 
 
 class TestGateReport:
+    def test_a_program_that_read_nothing_does_not_exercise_the_gate(self, monkeypatch):
+        """Measured on the first live run: the shell rewrote every `/Mods/...`
+        path, every program came back with zero functions, and the run printed
+        "BENCHMARK GATE: passed" -- because nothing authored had been swept, since
+        nothing at all had. A control whose subject was never loaded must not
+        report as a clean pass."""
+        monkeypatch.setattr(ls, "benchmark_authored_functions", lambda: {"Crc16Compute"})
+        empty = _rep("Benchmark.dll")            # total defaults to 0
+        g = sg.gate_report([empty])
+        assert g["benchmark"]["exercised"] is False
+
+    def test_a_read_benchmark_does_exercise_it(self, monkeypatch):
+        monkeypatch.setattr(ls, "benchmark_authored_functions", lambda: {"Crc16Compute"})
+        rep = _rep("Benchmark.dll", swept=[("0x1", "__ld12tod")])
+        rep.total = 151
+        g = sg.gate_report([rep])
+        assert g["benchmark"]["exercised"] is True and g["passed"] is True
+
     def test_unexercised_is_not_reported_as_passed_overall(self, monkeypatch):
         """`passed` may be True with nothing verified -- which is why the CLI
         checks `exercised` separately and refuses on it."""

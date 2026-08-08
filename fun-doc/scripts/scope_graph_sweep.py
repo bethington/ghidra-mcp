@@ -194,6 +194,19 @@ def main() -> int:
         print("\nno program produced a report -- nothing to do", file=sys.stderr)
         return 1
 
+    # A program that read ZERO functions is not an empty binary, it is a failed
+    # read, and the two look identical in the table. Measured 2026-08-07: a shell
+    # rewrote every `/Mods/...` argument to `C:/Program Files/Git/Mods/...`, all
+    # programs came back empty, and the run still printed a passing benchmark gate.
+    empty = [r.binary for r in reports if r.total == 0]
+    if empty:
+        print(f"\n! {len(empty)} program(s) returned ZERO functions: "
+              f"{', '.join(empty[:6])}", file=sys.stderr)
+        print("  That is a failed read, not an empty binary. Check the program "
+              "path is a GHIDRA PROJECT path and that your shell has not "
+              "rewritten it (MSYS/Git Bash rewrites a leading '/').",
+              file=sys.stderr)
+
     _print_table(reports)
     _print_samples(reports)
 

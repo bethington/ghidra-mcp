@@ -369,10 +369,20 @@ def cascade_control(reports: Sequence[ScopeReport]
 def gate_report(reports: Sequence[ScopeReport]) -> dict:
     """Both controls, as one JSON-able block. The CLI refuses to apply on any
     failure, and refuses on a control that never ran unless told to acknowledge
-    it -- an unexercised control is not a passing one."""
+    it -- an unexercised control is not a passing one.
+
+    "Exercised" for the benchmark means the program was READ, not merely listed.
+    Measured 2026-08-07: a first live run had its project paths mangled by the
+    shell (`/Mods/...` -> `C:/Program Files/Git/Mods/...`), so every program came
+    back with zero functions -- and this block printed "BENCHMARK GATE: passed",
+    because nothing authored had been swept. Nothing at all had been swept. A
+    control whose subject was never loaded reports the same as a clean pass, which
+    is the trap `cascade_control` already guards with its found-the-names check.
+    """
     b_passed, b_bad = benchmark_gate(reports)
     c_passed, c_exercised, c_bad = cascade_control(reports)
-    swept_benchmark = any(r.binary == BENCHMARK_BINARY for r in reports)
+    swept_benchmark = any(r.binary == BENCHMARK_BINARY and r.total > 0
+                          for r in reports)
     return {
         "passed": bool(b_passed and c_passed),
         "benchmark": {"passed": b_passed, "exercised": swept_benchmark,
