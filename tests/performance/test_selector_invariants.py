@@ -839,6 +839,82 @@ def test_auto_dequeue_vetoed_by_contradiction():
     assert auto_dequeue_if_done("a::1", 100, falsify_status="contradicted") is False
 
 
+class _FakeRepo:
+    def __init__(self, row):
+        self._row = row
+
+    def get_function(self, program_path, address):
+        if isinstance(self._row, Exception):
+            raise self._row
+        return self._row
+
+
+def test_auto_dequeue_looks_up_verdict_when_not_supplied(monkeypatch):
+    """When the caller omits falsify_status, the veto must fetch it itself.
+
+    MEASURED 2026-08-08: six of seven call sites never threaded the parameter,
+    so the veto was a gate with no input — the pin_check path dequeued 5
+    freshly-refuted Game.exe functions the moment they were pinned. 'Not
+    supplied' must not silently become 'not contradicted'.
+    """
+    import fun_doc
+
+    monkeypatch.setattr(
+        fun_doc, "_get_storage_repo",
+        lambda: _FakeRepo({"falsify_status": "contradicted"}),
+    )
+    assert fun_doc.auto_dequeue_if_done("/p/Game.exe::00403070", 100) is False
+
+
+def test_auto_dequeue_unreadable_verdict_refuses_dequeue(monkeypatch):
+    """An unreadable verdict must refuse the dequeue, not proceed — 'cannot
+    tell' is not 'not contradicted' (the CONF_BLOCKED rule)."""
+    import fun_doc
+
+    monkeypatch.setattr(
+        fun_doc, "_get_storage_repo",
+        lambda: _FakeRepo(RuntimeError("db locked")),
+    )
+    assert fun_doc.auto_dequeue_if_done("/p/Game.exe::00403070", 100) is False
+
+
+def test_auto_dequeue_clean_verdict_still_dequeues(monkeypatch):
+    """The self-lookup must not break the normal path: a pinned function with
+    a clean (or absent) verdict at/above good_enough still dequeues."""
+    import fun_doc
+
+    key = "/p/Game.exe::00401000"
+    queue = {"pinned": [key], "config": {"good_enough_score": 80}}
+    monkeypatch.setattr(
+        fun_doc, "_get_storage_repo",
+        lambda: _FakeRepo({"falsify_status": "passed"}),
+    )
+    monkeypatch.setattr(fun_doc, "load_priority_queue", lambda: queue)
+    saved = {}
+    monkeypatch.setattr(
+        fun_doc, "save_priority_queue", lambda q: saved.update(q)
+    )
+    monkeypatch.setattr(fun_doc, "bus_emit", lambda *a, **k: None)
+    assert fun_doc.auto_dequeue_if_done(key, 95) is True
+    assert key not in saved["pinned"]
+
+
+def test_score_gate_skip_carved_out_for_contradicted():
+    """process_function's pre-work short-circuit must not skip a contradicted
+    function at any score — otherwise the forced audit that fixes the
+    contradiction never runs and the function churns select→skip forever."""
+    from fun_doc import _score_gate_skips
+
+    # Normal behavior preserved
+    assert _score_gate_skips(95, 80, None) is True
+    assert _score_gate_skips(95, 80, "passed") is True
+    assert _score_gate_skips(50, 80, None) is False
+    assert _score_gate_skips(None, 80, None) is False
+    # The carve-out
+    assert _score_gate_skips(100, 80, "contradicted") is False
+    assert _score_gate_skips(50, 80, "contradicted") is False
+
+
 import fun_doc as _fd  # noqa: E402
 
 

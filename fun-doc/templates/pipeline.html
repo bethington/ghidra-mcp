@@ -691,6 +691,13 @@
     <div class="panel" style="margin-top:.8rem">
       <div class="panel-header inv-head"><h2 style="margin:0">Verification &mdash; Falsifiability</h2>
         <span class="hint" id="falsifyHint" title="Completeness measures presence &amp; form (hygiene); this panel measures whether the claims survive mechanical checks against the disassembly.">truth axis</span>
+        <span style="margin-left:auto;display:inline-flex;gap:.35rem;align-items:center">
+          <span id="falsifySweepStatus" style="font-size:.62rem;color:var(--text-muted)"></span>
+          <button class="btn go tb-btn" id="falsifySweepBtn" onclick="runFalsifySweep('loop')"
+                  title="Run the falsify contradiction checks on the SELECTED binary, apply verdicts (DOC_REFUTED on contradicted), pin the refuted functions and launch correction workers — the full loop in one click.">Run falsify loop</button>
+          <button class="btn tb-btn" id="falsifySweepReportBtn" onclick="runFalsifySweep('report')"
+                  title="Sweep and show findings only — writes nothing, launches nothing (report-first, like the CLI default).">Report only</button>
+        </span>
       </div>
       <div class="panel-content">
         <div id="falsifyStats" style="font-size:.66rem;color:var(--text-secondary);margin-bottom:.5rem">loading&hellip;</div>
@@ -1365,6 +1372,54 @@
     }).join("");
   }
 
+  // ---------- Falsify sweep loop (the panel's one-click trigger) ----------
+  // "Run falsify loop" = sweep the SELECTED binary -> apply verdicts -> pin
+  // contradicted -> launch workers. "Report only" = sweep + render, write
+  // nothing (the report-first escape hatch the CLI lanes default to).
+  let _falsifySweepBusy=false;
+  function _falsifySweepUi(running,msg){
+    const b1=document.getElementById("falsifySweepBtn"),
+          b2=document.getElementById("falsifySweepReportBtn"),
+          st=document.getElementById("falsifySweepStatus");
+    if(b1) b1.disabled=running;
+    if(b2) b2.disabled=running;
+    if(st) st.textContent=msg||"";
+  }
+  async function runFalsifySweep(mode){
+    if(_falsifySweepBusy) return;
+    if(!PROGRAM){ _falsifySweepUi(false,"select a binary first"); return; }
+    const bin=_shortBin(PROGRAM);
+    if(mode==='loop' && !confirm(
+        `Run the full falsify loop on ${bin}?\n\n`+
+        `sweep → apply DOC_REFUTED → pin contradicted → launch workers.\n`+
+        `"Report only" (the other button) writes nothing.`)) return;
+    _falsifySweepBusy=true;
+    _falsifySweepUi(true,`sweeping ${bin}…`);
+    try{
+      const r=await (await fetch("/api/falsify/sweep",{method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({program:PROGRAM,mode})})).json();
+      if(!r.ok){ _falsifySweepBusy=false; _falsifySweepUi(false,r.error||"sweep refused"); return; }
+      // completion arrives via the falsify_sweep_complete socket event
+    }catch(e){ _falsifySweepBusy=false; _falsifySweepUi(false,"sweep request failed"); }
+  }
+  async function _falsifySweepDone(){
+    _falsifySweepBusy=false;
+    let s=null;
+    try{ s=await (await fetch("/api/falsify/sweep_status")).json(); }catch(e){}
+    if(!s){ _falsifySweepUi(false,""); return; }
+    if(s.error){ _falsifySweepUi(false,"sweep failed: "+s.error); return; }
+    const res=s.result||{}, sum=((res.summary||{}).per_binary)||{};
+    const row=Object.values(sum)[0]||{};
+    let msg=`${row.scanned||0} scanned, ${row.contradicted||0} contradicted`;
+    if(res.mode==='loop'){
+      msg+=` · ${res.pinned||0} pinned · ${(res.workers_started||[]).length} workers`;
+      if(res.worker_error) msg+=` (${res.worker_error})`;
+    } else { msg+=" (report only — nothing written)"; }
+    _falsifySweepUi(false,msg);
+    loadFalsify();
+  }
+
   // ---------- canonical D2MOO types: session-cached check + slide-out bar ----------
   const _typesChecked = new Set();   // programs checked this session (once-per-session cadence)
   let _typesBusy = false;
@@ -1864,6 +1919,8 @@
     // or post-audit recheck). Debounced — a busy worker fleet emits often.
     let falsifyTimer;
     socket.on("falsify_complete",()=>{ clearTimeout(falsifyTimer); falsifyTimer=setTimeout(loadFalsify,1200); });
+    socket.on("falsify_sweep_progress",(d)=>{ _falsifySweepUi(true,`${(d&&d.stage)||'working'}…`); });
+    socket.on("falsify_sweep_complete",()=>{ _falsifySweepDone(); });
     let wsTimer;
     socket.on("worker_status",st=>{ renderWorkers(st); clearTimeout(wsTimer); wsTimer=setTimeout(refreshAll,2500); });
     socket.on("worker_started_ack",a=>flash(

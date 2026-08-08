@@ -3936,7 +3936,15 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
                         cfg = load_queue().get("config") or {}
                         good_enough = cfg.get("good_enough_score", 80)
                         if new_score >= good_enough:
-                            if auto_dequeue_if_done(key, new_score, source="pin_check"):
+                            # Pass the falsify verdict from the state entry:
+                            # omitting it made the contradicted-veto a gate
+                            # with no input, and pinning a refuted function
+                            # dequeued it on the spot (measured 2026-08-08,
+                            # 5 of Game.exe's 8 refutations).
+                            if auto_dequeue_if_done(
+                                key, new_score, source="pin_check",
+                                falsify_status=func.get("falsify_status"),
+                            ):
                                 response["status"] = "already_done"
                                 response["good_enough"] = good_enough
         except Exception as e:
@@ -4059,6 +4067,138 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
         except Exception:  # noqa: BLE001
             app.logger.exception("HTTP worker start failed")
             return jsonify({"ok": False, "error": "internal error -- see dashboard server log"}), 500
+
+    # ---- Falsify sweep loop: the UI trigger for scripts/falsify_sweep.py ----
+    # One click on the Falsifiability panel runs the whole correction loop for
+    # the SELECTED binary: sweep -> apply (SQL verdicts + DOC_REFUTED to
+    # Ghidra) -> pin the contradicted functions (pin bypasses the selector's
+    # library skip; the falsify veto keeps them queued at any score) ->
+    # launch workers. mode="report" stops after the sweep — the report-first
+    # escape hatch every other lane defaults to.
+    #
+    # Deliberately per-binary, never per-folder: a whole-corpus sweep from a
+    # browser button is how you end up opening 583 programs (the
+    # library_scope_sweep --max-programs lesson).
+    falsify_sweep_state = {
+        "running": False, "program": None, "mode": None,
+        "started_at": None, "result": None, "error": None,
+    }
+    falsify_sweep_lock = threading.Lock()
+
+    @app.route("/api/falsify/sweep_status")
+    def http_falsify_sweep_status():
+        with falsify_sweep_lock:
+            return jsonify(dict(falsify_sweep_state))
+
+    @app.route("/api/falsify/sweep", methods=["POST"])
+    def http_falsify_sweep():
+        data = request.get_json(silent=True) or {}
+        program = (data.get("program") or "").strip()
+        if not program.startswith("/"):
+            return jsonify({"ok": False,
+                            "error": "program (full project path) required"}), 400
+        mode = data.get("mode") or "loop"
+        if mode not in ("loop", "report"):
+            return jsonify({"ok": False, "error": "mode must be loop|report"}), 400
+        provider = data.get("provider") or "minimax"
+        try:
+            n_workers = max(0, min(10, int(data.get("workers", 3))))
+            per_worker = max(1, min(500, int(data.get("count", 20))))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "workers/count must be ints"}), 400
+        with falsify_sweep_lock:
+            if falsify_sweep_state["running"]:
+                return jsonify({
+                    "ok": False,
+                    "error": f"a sweep is already running on "
+                             f"{falsify_sweep_state['program']}",
+                }), 409
+            falsify_sweep_state.update(
+                running=True, program=program, mode=mode,
+                started_at=datetime.now().isoformat(),
+                result=None, error=None,
+            )
+
+        def run_sweep():
+            result = {"program": program, "mode": mode}
+            try:
+                import falsify as _falsify
+                from scripts import falsify_sweep as _fsweep
+
+                socketio.emit("falsify_sweep_progress",
+                              {"program": program, "stage": "scanning"})
+                enabled = _falsify.enabled_check_ids([], [])
+                verdicts = _falsify.scan_program_verdicts(
+                    program, enabled, limit=0,
+                    pause_every=_fsweep.PAUSE_EVERY,
+                    pause_secs=_fsweep.PAUSE_SECS)
+                vbp = {program: {a: (n, s, fs) for a, n, s, fs in verdicts}}
+                try:
+                    _fsweep.merge_doclint(vbp, [program])
+                except Exception as e:  # noqa: BLE001
+                    result["doclint_error"] = str(e)[:200]
+                summary = _fsweep.summarize(vbp)
+                contradicted = sorted(
+                    (addr, n) for addr, (n, s, _fs) in vbp[program].items()
+                    if s == "contradicted")
+                result["summary"] = summary
+                result["contradicted"] = [
+                    {"address": a, "name": n} for a, n in contradicted]
+
+                if mode == "loop":
+                    from datetime import timezone
+                    socketio.emit("falsify_sweep_progress",
+                                  {"program": program, "stage": "applying"})
+                    now = datetime.now(timezone.utc)
+                    result["sql"] = _fsweep.apply_sql(vbp, now)
+                    result["ghidra"] = _fsweep.apply_ghidra(
+                        vbp, now.date().isoformat())
+                    if contradicted:
+                        from fun_doc import (
+                            load_priority_queue as _lq,
+                            save_priority_queue as _sq,
+                        )
+                        q = _lq()
+                        pinned = list(q.get("pinned", []))
+                        for addr, _n in contradicted:
+                            key = f"{program}::{addr}"
+                            if key not in pinned:
+                                pinned.append(key)
+                        q["pinned"] = pinned
+                        _sq(q)
+                        result["pinned"] = len(contradicted)
+                        started = []
+                        binary = program.rsplit("/", 1)[-1]
+                        for _ in range(n_workers):
+                            try:
+                                started.append(worker_mgr.start_worker(
+                                    provider=provider, count=per_worker,
+                                    binary=binary, mode="functions"))
+                            except ValueError as e:
+                                # MAX_WORKERS or a disabled provider: partial
+                                # fleet is fine, but say so.
+                                result["worker_error"] = str(e)
+                                break
+                        result["workers_started"] = started
+                    else:
+                        result["pinned"] = 0
+                        result["workers_started"] = []
+                with falsify_sweep_lock:
+                    falsify_sweep_state.update(running=False, result=result)
+            except Exception as e:  # noqa: BLE001
+                app.logger.exception("falsify sweep failed")
+                with falsify_sweep_lock:
+                    falsify_sweep_state.update(
+                        running=False, error=str(e)[:300], result=result)
+            socketio.emit("falsify_sweep_complete",
+                          {"program": program, "mode": mode})
+            # The verdict map changed — the panel listens for this already.
+            socketio.emit("falsify_complete", {})
+
+        threading.Thread(target=run_sweep, daemon=True,
+                         name="falsify-sweep").start()
+        return jsonify({"ok": True, "scheduled": True,
+                        "program": program, "mode": mode})
 
     @app.route("/api/worker/stop", methods=["POST"])
     def http_stop_worker():

@@ -4920,7 +4920,28 @@ def drain_done_pinned(state):
     }
 
 
-def auto_dequeue_if_done(func_key, score, source="completed", falsify_status=None):
+def _score_gate_skips(live_score, good_enough, falsify_status):
+    """process_function's pre-work short-circuit: True when the live score is
+    already at/above good_enough AND nothing vetoes the skip.
+
+    Falsifiability carve-out, same as the selector's: a contradicted function
+    must NOT short-circuit at any score. Without it, a high-scoring function
+    refuted by the sweep lane was selected (the selector's carve-out worked),
+    then skipped right before the doc pass — so the forced audit that fixes
+    the contradiction never ran, and the function churned select→skip forever
+    with DOC_REFUTED standing. The score is hygiene; it cannot see a false
+    claim, so it cannot excuse one.
+    """
+    if live_score is None or live_score < good_enough:
+        return False
+    return falsify_status != "contradicted"
+
+
+_FALSIFY_UNSET = object()
+
+
+def auto_dequeue_if_done(func_key, score, source="completed",
+                         falsify_status=_FALSIFY_UNSET):
     """If func_key is currently pinned and score >= good_enough_score, remove
     it from the queue and emit queue_changed. Returns True if dequeued.
 
@@ -4933,9 +4954,32 @@ def auto_dequeue_if_done(func_key, score, source="completed", falsify_status=Non
     A `falsify_status` of 'contradicted' vetoes the dequeue: the score is a
     hygiene metric and cannot see a mechanically false claim — a pinned
     function holding a tier-1 falsify finding is not done at ANY score.
+
+    The verdict is looked up from the workflow store when the caller does not
+    supply it. This is deliberate: six of the seven call sites never threaded
+    the parameter, which made the veto a gate with no input — measured
+    2026-08-08, the pin_check path dequeued 5 freshly-refuted Game.exe
+    functions the moment they were pinned. "Not supplied" must not silently
+    become "not contradicted". Callers that already hold a fresher in-memory
+    verdict (the completed path) still pass it explicitly.
     """
     if score is None:
         return False
+    if falsify_status is _FALSIFY_UNSET:
+        try:
+            repo = _get_storage_repo()
+            if repo is not None and "::" in func_key:
+                prog, addr = func_key.split("::", 1)
+                row = repo.get_function(prog, addr)
+                falsify_status = (row or {}).get("falsify_status")
+            else:
+                falsify_status = None
+        except Exception:
+            # Unreadable verdict: refuse to dequeue rather than risk dropping
+            # a refuted function from the queue — "cannot tell" is not
+            # "not contradicted". The function merely stays pinned until a
+            # later call (typically source="completed") can read the verdict.
+            return False
     if falsify_status == "contradicted":
         return False
     try:
@@ -9397,7 +9441,12 @@ def _run_falsify_pass(func_key, func, program, address, source="worker"):
 def _falsify_prompt_block(findings):
     """The seeded section for a findings-forced audit prompt. Tier-1 only —
     these are mechanical facts, and the auditor's first job is to make the
-    documentation stop contradicting them."""
+    documentation stop contradicting them.
+
+    Accepts both live Finding objects (the worker's in-run falsify pass) and
+    stored dicts (the SQL `falsify_findings` blob a sweep wrote) — a
+    sweep-refuted function's primary pass seeds from storage, not from a
+    fresh scan."""
     lines = [
         "## CONTRADICTIONS FOUND (mechanically derived from the disassembly"
         " — fix these FIRST)",
@@ -9408,11 +9457,25 @@ def _falsify_prompt_block(findings):
         "",
     ]
     for f in findings:
-        if f.tier == 1:
-            lines.append(f"- [{f.check_id}]")
-            lines.append(f"  CLAIM:    {f.claim}")
-            lines.append(f"  EVIDENCE: {f.evidence}")
+        get = f.get if isinstance(f, dict) else lambda k, _f=f: getattr(_f, k, None)
+        if get("tier") == 1:
+            lines.append(f"- [{get('check_id')}]")
+            lines.append(f"  CLAIM:    {get('claim')}")
+            lines.append(f"  EVIDENCE: {get('evidence')}")
     return "\n".join(lines)
+
+
+def _stored_falsify_findings(func):
+    """Parse the SQL falsify_findings blob (JSON string or list) into dicts.
+    Returns [] on anything unreadable — the prompt block is best-effort."""
+    raw = func.get("falsify_findings")
+    if not raw:
+        return []
+    try:
+        rows = json.loads(raw) if isinstance(raw, str) else raw
+        return [r for r in rows if isinstance(r, dict)]
+    except (ValueError, TypeError):
+        return []
 
 
 def _note_shadow_backlog(program, address, func_name, reason):
@@ -10525,7 +10588,25 @@ def _process_function_inner(
         # processing. New behavior: still run the gate for pinned items, but
         # auto-dequeue them when they hit it. That way "I queued this once" no
         # longer means "polish this forever after it's already done."
-        if live_score is not None and live_score >= good_enough:
+        # Falsifiability carve-outs (see _score_gate_skips): a contradicted
+        # function must reach a REAL pass. Three gates below would otherwise
+        # short-circuit it — the score gate, FIX-mode's no-fixable gate, and
+        # VERIFY mode (which in auto mode always skips). Measured 2026-08-08:
+        # 5 sweep-refuted Game.exe functions at score 94-100 churned
+        # select→skip across a 5-worker fleet, ~3 skips/sec, with the forced
+        # audit never running once.
+        is_contradicted = func.get("falsify_status") == "contradicted"
+        if is_contradicted:
+            if live_score is not None and live_score >= good_enough:
+                print(
+                    f"  falsify: contradicted — score gate bypassed at {live_score}% "
+                    "(tier-1 findings are fixed by a pass, not a skip)"
+                )
+            if mode == "VERIFY":
+                # VERIFY is a no-op outside manual mode; a refuted function
+                # needs a pass that actually rewrites documentation.
+                mode = "FIX"
+        if _score_gate_skips(live_score, good_enough, func.get("falsify_status")):
             if original_cached_score is None or original_cached_score == 0:
                 cached_label = "unscored"
             else:
@@ -10552,8 +10633,11 @@ def _process_function_inner(
                 reason=reason,
             )
 
-        # FIX mode only: skip if there's almost nothing fixable regardless of score
-        if mode == "FIX" and fixable_pts < 3:
+        # FIX mode only: skip if there's almost nothing fixable regardless of
+        # score. Contradicted carve-out: "fixable" is a completeness concept —
+        # a false claim leaves nothing fixable by that measure while being the
+        # most important fix in the queue.
+        if mode == "FIX" and fixable_pts < 3 and not is_contradicted:
             reason = f"FIX mode but only {fixable_pts:.1f} fixable pts remaining"
             print(f"  SKIP: {reason}")
             func["last_result"] = "skipped_complete"
@@ -10634,6 +10718,16 @@ def _process_function_inner(
             )
             print("done")
         prompt = build_full_doc_prompt(func_name, address, data, program=program)
+
+    # A sweep-refuted function's primary pass must SEE the contradictions —
+    # without this only the (later, different-provider) audit got the
+    # findings, and the primary pass re-documented blind against the exact
+    # claims the sweep proved false. Stored tier-1 findings ride the SQL
+    # falsify_findings blob; best-effort, [] on anything unreadable.
+    if func.get("falsify_status") == "contradicted" and not manual:
+        _stored = _stored_falsify_findings(func)
+        if any(r.get("tier") == 1 for r in _stored):
+            prompt = _falsify_prompt_block(_stored) + "\n\n" + prompt
 
     # Gemini has native MCP discovery — skip injecting tool block
     effective_provider_for_tools = effective_provider

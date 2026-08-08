@@ -195,6 +195,29 @@ def test_prompt_block_carries_tier1_only():
     assert "DISASSEMBLY IS THE AUTHORITY" in block
 
 
+def test_prompt_block_accepts_stored_dicts():
+    """A sweep-refuted function seeds its primary pass from the SQL
+    falsify_findings blob — plain dicts, not Finding objects."""
+    block = fd._falsify_prompt_block([
+        {"check_id": "arity_contradiction", "tier": 1,
+         "claim": "declared 0 args", "evidence": "RET 0x4 pops 4 bytes"},
+        {"check_id": "compiler_scaffolding", "tier": 2,
+         "claim": "t2", "evidence": "t2"},
+    ])
+    assert "declared 0 args" in block
+    assert "RET 0x4 pops 4 bytes" in block
+    assert "t2" not in block
+
+
+def test_stored_findings_parse_json_and_reject_garbage():
+    good = fd._stored_falsify_findings(
+        {"falsify_findings": '[{"tier": 1, "check_id": "x"}]'})
+    assert good == [{"tier": 1, "check_id": "x"}]
+    assert fd._stored_falsify_findings({"falsify_findings": None}) == []
+    assert fd._stored_falsify_findings({"falsify_findings": "not json"}) == []
+    assert fd._stored_falsify_findings({}) == []
+
+
 # ------------------------------------------------------- config plumbing ----
 
 def test_falsify_enabled_defaults_on_in_config_and_snapshot():
