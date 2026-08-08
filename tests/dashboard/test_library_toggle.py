@@ -49,16 +49,58 @@ class TestFunctionInventoryToggle:
     def test_toggle_adds_them_back_labelled(self, harness):
         out = _inv(harness, lib="1")
         assert out["include_library"] is True
-        assert out["total"] == fg.N_IN_SCOPE + out["library_total"]
+        assert out["total"] == (fg.N_IN_SCOPE + out["library_total"]
+                                + out["scope_excluded_total"])
         lib_rows = [r for r in out["rows"] if r.get("library")]
         assert lib_rows, "toggle on but no library rows returned"
-        assert all(r["library"] == "LIB_CRT" for r in lib_rows)
+        assert {r["library"] for r in lib_rows} == {"LIB_CRT", "SCOPE_EXCLUDED"}
 
     def test_the_two_states_reconcile(self, harness):
-        """off.total + library_total == on.total. If these ever disagree, one of
-        the two views is lying about the size of the binary."""
+        """off.total + everything hidden == on.total. If these ever disagree, one
+        of the two views is lying about the size of the binary."""
         off, on = _inv(harness), _inv(harness, lib="1")
-        assert off["total"] + off["library_total"] == on["total"]
+        assert (off["total"] + off["library_total"]
+                + off["scope_excluded_total"]) == on["total"]
+
+
+class TestProofAndInferenceAreCountedApart:
+    """`library_total` means a lane MATCHED an artifact; `scope_excluded_total`
+    means scope_graph only INFERRED it from the reference graph -- which is also
+    true, by construction, of every mod entry point the CRT calls. Summing them
+    renders a guess as a proof on the panel an operator uses to decide what is
+    worth documenting."""
+
+    def test_both_counts_are_reported_separately(self, harness):
+        out = _inv(harness)
+        assert out["library_total"] == fg.N_LIBRARY
+        assert out["scope_excluded_total"] == fg.N_SCOPE_EXCLUDED
+
+    def test_neither_count_absorbs_the_other(self, harness):
+        out = _inv(harness)
+        assert out["library_total"] != out["library_total"] + out["scope_excluded_total"]
+        assert out["scope_excluded_total"] > 0, \
+            "the fake corpus lost its inferred population -- this test proves nothing"
+
+    def test_inferred_rows_are_labelled_with_their_own_tag(self, harness):
+        """The per-row chip is the auditable part: an operator can see WHY a
+        function is out of scope, and that an inference is an inference."""
+        rows = [r for r in _inv(harness, lib="1")["rows"]
+                if r.get("library") == "SCOPE_EXCLUDED"]
+        assert len(rows) == fg.N_SCOPE_EXCLUDED
+        # Game-styled names: the population a name-based classifier cannot catch.
+        assert any(r["name"].startswith(("UNIT_", "MEMMGR_", "STRING_"))
+                   for r in rows)
+
+    def test_inferred_functions_are_out_of_the_default_view(self, harness):
+        names = {r["name"] for r in _inv(harness)["rows"]}
+        assert "UNIT_GetUnitFlags2" not in names
+
+    def test_they_are_excluded_from_the_in_scope_denominator(self, harness):
+        """Panels divide tagged counts by in_scope. A numerator computed over a
+        wider population is how the bars read 105.3% and 172.6%."""
+        r = harness.client.get("/api/conformance/bands")
+        assert r.status_code == 200
+        assert r.get_json()["in_scope"] == fg.N_IN_SCOPE
 
     def test_library_rows_sort_last(self, harness):
         """The toggle is for inspection. Burying the actual work under CRT rows

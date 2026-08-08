@@ -82,6 +82,13 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "library_code",
     "library_code_at",
     "library_code_reasons",
+    # graph-inferred scope exclusion (migration 0008) — scope_graph_sweep writes
+    # these per function through update_function_state, deliberately never via a
+    # bulk load/mutate/save (that path is a read-modify-write over every row in
+    # the binary, so a Doc worker finishing mid-sweep loses its whole result).
+    "scope_excluded",
+    "scope_excluded_at",
+    "scope_excluded_reasons",
     # OpenD2 conformance port pipeline (Sec 14 of EMULATION_CONFORMANCE_PLAN.md)
     "port_status",
     "port_attempts",

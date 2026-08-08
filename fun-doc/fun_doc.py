@@ -129,6 +129,7 @@ except ImportError:
     sys.exit(1)
 
 from event_bus import emit as bus_emit, get_bus, get_worker_id
+import scope_tags as _scope_tags   # canonical exclusion vocabulary; constants only
 from library_code_detector import (detect_library_code,
                                    format_plate as format_library_plate,
                                    strip_comments)
@@ -1238,6 +1239,11 @@ _STATE_DIRECT_FIELDS = (
     "decompile_timeout",
     "not_a_function",
     "library_code",
+    # graph-inferred scope exclusion (migration 0008). Sibling of library_code,
+    # NOT a merge into it: that column means a lane matched an artifact, this one
+    # means the reference graph inferred it with nothing matched. The selector
+    # skips on either; only one is a claim about what the function IS.
+    "scope_excluded",
     "deductions",
     "callees",
     "snapshot_provider",
@@ -1331,6 +1337,10 @@ def _state_func_to_row(func_key, rec):
         out["library_code_at"] = _parse_state_ts(rec["library_code_at"])
     if "library_code_reasons" in rec:
         out["library_code_reasons"] = rec["library_code_reasons"]
+    if "scope_excluded_at" in rec:
+        out["scope_excluded_at"] = _parse_state_ts(rec["scope_excluded_at"])
+    if "scope_excluded_reasons" in rec:
+        out["scope_excluded_reasons"] = rec["scope_excluded_reasons"]
     if "last_audited" in rec:
         out["last_audited_at"] = _parse_state_ts(rec["last_audited"])
     if "last_escalated" in rec:
@@ -1394,6 +1404,11 @@ def _row_to_state_func(row):
         out["library_code_at"] = v.isoformat() if hasattr(v, "isoformat") else v
     if row.get("library_code_reasons") is not None:
         out["library_code_reasons"] = row["library_code_reasons"]
+    if row.get("scope_excluded_at") is not None:
+        v = row["scope_excluded_at"]
+        out["scope_excluded_at"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("scope_excluded_reasons") is not None:
+        out["scope_excluded_reasons"] = row["scope_excluded_reasons"]
     if row.get("last_audited_at") is not None:
         v = row["last_audited_at"]
         out["last_audited"] = v.isoformat() if hasattr(v, "isoformat") else v
@@ -2171,8 +2186,19 @@ def _fetch_function_list(prog_path):
     return all_funcs
 
 
-# Library scope tags (mirrors conformance/tools/scope_tag_library) + the DOC rung ladder.
-_ASSESS_LIB_TAGS = ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")
+# Library scope tags + the DOC rung ladder. The tag vocabulary comes from
+# scope_tags, the one module that declares it -- this was a local literal, one of
+# six copies, two of which had already drifted.
+#
+# The two sets stay SEPARATE all the way down to their SQL columns. A LIB_* tag
+# means a lane matched an artifact (masked bytes against a real .lib, a FID hit, a
+# BSim match past calibrated floors), and feeds `library_code`. SCOPE_EXCLUDED
+# means only that the reference graph found every referrer to be library code --
+# which is also true, by construction, of every mod entry point the CRT calls --
+# and feeds `scope_excluded`. Both retire a function from work; only one is a
+# claim about what the function IS.
+_ASSESS_LIB_TAGS = _scope_tags.KNOWN_LIB_TAGS
+_ASSESS_INFERRED_TAGS = _scope_tags.INFERRED_TAGS
 _ASSESS_DOC_TAGS = ("DOC_DRAFT", "DOC_REVIEWED", "DOC_VERIFIED")
 
 
@@ -2396,11 +2422,31 @@ def _lib_tagged_addrs(program):
     survive renaming, unlike the name-based runtime `detect_library_code`. The
     refresh path re-syncs the resettable `library_code` state flag from this set
     so a renamed CRT function that carries a LIB_* tag stays excluded from the
-    selector instead of being re-worked every cycle."""
+    selector instead of being re-worked every cycle.
+
+    LIB_* ONLY -- `SCOPE_EXCLUDED` is deliberately not unioned in. This set feeds
+    the `library_code` column, whose name asserts a lane MATCHED an artifact.
+    Folding the graph inference in here would record "this is library code" for a
+    function nothing was ever matched against, and a later correction would then
+    be a reason-string parse rather than a boolean flip. The inference has its own
+    reader (`_scope_excluded_addrs`) and its own column."""
     lib = set()
     for t in _ASSESS_LIB_TAGS:
         lib |= _assess_tag_addrs(t, program)
     return lib
+
+
+def _scope_excluded_addrs(program):
+    """Addresses carrying an INFERENCE tag ('0x<hex>') -- scope_graph's verdicts.
+
+    Sibling of `_lib_tagged_addrs`, kept separate for the reason spelled out
+    there. Same durability argument applies: the tag lives on the address and
+    survives a rename, so it is the authority and the `scope_excluded` column is
+    a cache of it."""
+    out = set()
+    for t in _ASSESS_INFERRED_TAGS:
+        out |= _assess_tag_addrs(t, program)
+    return out
 
 
 def run_assess_pass(program, count=None, draft_score=None):
@@ -4321,6 +4367,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
     - Skip funcs with recovery_pass_done (complexity-forced recovery already ran)
     - Skip funcs with decompile_timeout (pathological, one-shot blacklist)
     - Skip funcs with library_code (CRT/STL/iostream — auto-classified, plate-stamped)
+    - Skip funcs with scope_excluded (scope_graph: every referrer is library code)
     - Skip funcs with >=3 stagnation_runs (no-progress / regression safety net)
     - When require_scored is on, treat unscored funcs as top priority so the
       worker scores them on first contact instead of leaving them stranded
@@ -4417,6 +4464,17 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # function isn't user-authored code. Cleared by the same refresh
         # paths as the other one-shots; pinning bypasses.
         if func.get("library_code") and not is_pinned:
+            continue
+
+        # Graph-inferred scope exclusion (scope_graph): every function that
+        # references this one is library code, to a fixed point. Same skip as
+        # library_code and for the same reason -- documenting it spends provider
+        # calls on code nobody wrote -- but a SEPARATE flag, because nothing was
+        # matched against an artifact here and the panels must be able to say so.
+        # Only written after a reviewed --apply; pinning bypasses, which is the
+        # escape hatch for the one case the graph provably cannot judge (an
+        # authored entry point whose only caller is the CRT's DllMain).
+        if func.get("scope_excluded") and not is_pinned:
             continue
 
         # Archive-apply terminal: when the cross-version doc archive (re-kb)
@@ -4609,6 +4667,10 @@ def refresh_candidate_scores(
         # name and must stay excluded. Fetch once per program (cheap) and
         # re-derive the flag from tag membership instead of blindly False.
         lib_addrs = _lib_tagged_addrs(prog)
+        # Same argument for the graph inference, read separately so the two never
+        # merge: a refresh must not turn a SCOPE_EXCLUDED verdict into a
+        # library_code claim, nor silently clear one because the other is absent.
+        scope_addrs = _scope_excluded_addrs(prog)
         prog_refreshed = 0
         prog_stale = 0
         for c in items:
@@ -4647,6 +4709,17 @@ def refresh_candidate_scores(
                 func["library_code"] = False
                 func["library_code_at"] = None
                 func["library_code_reasons"] = None
+            # Re-derive the inference flag from ITS tag, same rule: the durable
+            # Ghidra tag is the authority and the column is a cache of it. Kept in
+            # its own branch so a program with LIB_* tags and no sweep (or the
+            # reverse) cannot have one flag answer for the other.
+            if _norm_addr in scope_addrs:
+                func["scope_excluded"] = True
+                func["scope_excluded_reasons"] = ["SCOPE_EXCLUDED Ghidra tag (durable)"]
+            else:
+                func["scope_excluded"] = False
+                func["scope_excluded_at"] = None
+                func["scope_excluded_reasons"] = None
             func["stagnation_runs"] = 0
             prog_refreshed += 1
             if abs(info["score"] - old_score) >= 5:

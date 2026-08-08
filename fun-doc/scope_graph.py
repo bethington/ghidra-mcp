@@ -67,8 +67,12 @@ Swept functions get `SCOPE_EXCLUDED`, deliberately NOT `LIB_CRT`. A `LIB_*` tag
 is a claim backed by a matched artifact -- that is what makes the identification
 lanes worth trusting -- and an inference must not be able to forge one. A swept
 function is also not necessarily CRT: it may be third-party, or authored and
-unreachable. The tag records what we actually know. The `Scope` property carries
-the reason, the same map `scope_tag_library` and the globals lane already use.
+unreachable. The tag records what we actually know, and a durable bookmark
+carries the referrer reason (it survives a rename, as FID's do).
+
+NOT the `Scope` property map, which the globals lane uses: every reader of that
+map treats an entry as a DATA address, and the globals panel takes the map's
+SIZE as its hidden-globals count. See `apply_scope`.
 """
 
 from __future__ import annotations
@@ -84,13 +88,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import library_scope as ls                                       # noqa: E402
 import call_graph as _cg                                         # noqa: E402
+import scope_tags as _st                                         # noqa: E402
 
 # The inference tag. Separate from KNOWN_LIB_TAGS on purpose -- see MARKING.
-SCOPE_EXCLUDED = "SCOPE_EXCLUDED"
-
-# Consumers must exclude on this too. Kept here so there is one place to read
-# when wiring a new consumer, rather than a literal scattered across modules.
-ALL_EXCLUDING_TAGS = ls.KNOWN_LIB_TAGS + (SCOPE_EXCLUDED,)
+# Declared in scope_tags, where every consumer reads it from; re-exported for
+# this module's own callers and tests.
+SCOPE_EXCLUDED = _st.SCOPE_EXCLUDED
+ALL_EXCLUDING_TAGS = _st.ALL_EXCLUDING_TAGS
 
 
 # EmptyGraph and function_referrers now live in call_graph, because
@@ -281,11 +285,176 @@ def sweep_program(program: str, extra_seeds: Optional[Iterable[str]] = None
 
 
 # --------------------------------------------------------------------------
+# the controls
+# --------------------------------------------------------------------------
+
+#: Benchmark.dll is the only binary in the corpus with ground truth: 9 functions
+#: whose C source we wrote. Shared with `library_scope`, same authored list.
+BENCHMARK_BINARY = ls.BENCHMARK_BINARY
+
+#: The binary where the cascade was MEASURED (2026-08-04). Its four authored
+#: functions form a chain each of whose only referrer is the one above it, rooted
+#: at the CRT's DllMain -- so it is the one place a live sweep can demonstrate
+#: that the boundary guard still works. The offline test proves the logic against
+#: a mocked graph; only this proves it against a real one.
+CASCADE_CONTROL_BINARY = "PD2_EXT.dll"
+
+#: The chain, top to bottom. A name-based control is fine where a name-based
+#: CLASSIFIER is not: when this fires, a human reads it.
+CASCADE_CONTROL_AUTHORED = (
+    "PD2EXT_LoadModAfterGameDataInit",
+    "PD2EXT_InstallBootstrapHook",
+    "PD2EXT_InstallGameAndFogHooks",
+    "PD2EXT_RemoveLastPathComponent",
+)
+
+
+def benchmark_gate(reports: Sequence[ScopeReport]) -> Tuple[bool, List[str]]:
+    """(passed, violations). Sweeping an authored Benchmark.dll function fails.
+
+    Deliberately no override parameter, exactly as `library_scope.benchmark_gate`
+    has none: a control you can wave through is not a control.
+    """
+    authored = ls.benchmark_authored_functions()
+    if not authored:
+        return True, []
+    bad: List[str] = []
+    for rep in reports:
+        if rep.binary != BENCHMARK_BINARY:
+            continue
+        for s in rep.swept:
+            if s.get("name") in authored:
+                bad.append(f"{s['name']} @ {s['address']} swept -- {s.get('reason', '')}")
+    return (not bad), bad
+
+
+def cascade_control(reports: Sequence[ScopeReport]
+                    ) -> Tuple[bool, bool, List[str]]:
+    """(passed, exercised, violations) for the PD2_EXT authored chain.
+
+    `exercised` is the half that matters most. A sweep that returns NOTHING
+    passes a "was anything authored swept?" check while being completely dead --
+    the same trap the CRT detector's control has (claim nothing, pass the
+    positive control), which is why that one is paired with a mirror test. Here
+    the mirror is built in: the control only counts as exercised if the four
+    authored names were actually FOUND in the program, so an empty or failed
+    sweep reports "not exercised" rather than "passed".
+    """
+    violations: List[str] = []
+    exercised = False
+    for rep in reports:
+        if rep.binary != CASCADE_CONTROL_BINARY:
+            continue
+        seen = {s["name"] for s in rep.swept}
+        seen |= {x["name"] for x in rep.in_scope}
+        seen |= {p["name"] for p in rep.protected}
+        found = [n for n in CASCADE_CONTROL_AUTHORED if n in seen]
+        if len(found) < len(CASCADE_CONTROL_AUTHORED):
+            missing = [n for n in CASCADE_CONTROL_AUTHORED if n not in seen]
+            print(f"  ! cascade control NOT exercised on {rep.binary}: "
+                  f"{len(missing)} authored function(s) not found "
+                  f"({', '.join(missing[:4])}). Renamed, or the sweep read "
+                  f"nothing.", flush=True)
+            continue
+        exercised = True
+        swept_names = {s["name"] for s in rep.swept}
+        for n in CASCADE_CONTROL_AUTHORED:
+            if n in swept_names:
+                violations.append(
+                    f"{n} swept on {rep.binary} -- the CRT-handoff guard is not "
+                    f"holding, and this is the head of a 3-function cascade")
+    return (not violations), exercised, violations
+
+
+def gate_report(reports: Sequence[ScopeReport]) -> dict:
+    """Both controls, as one JSON-able block. The CLI refuses to apply on any
+    failure, and refuses on a control that never ran unless told to acknowledge
+    it -- an unexercised control is not a passing one."""
+    b_passed, b_bad = benchmark_gate(reports)
+    c_passed, c_exercised, c_bad = cascade_control(reports)
+    swept_benchmark = any(r.binary == BENCHMARK_BINARY for r in reports)
+    return {
+        "passed": bool(b_passed and c_passed),
+        "benchmark": {"passed": b_passed, "exercised": swept_benchmark,
+                      "violations": b_bad},
+        "cascade": {"passed": c_passed, "exercised": c_exercised,
+                    "violations": c_bad},
+        "violations": b_bad + c_bad,
+    }
+
+
+# --------------------------------------------------------------------------
+# drift: the reviewed set must be the written set
+# --------------------------------------------------------------------------
+
+def swept_index(reports: Sequence[ScopeReport]) -> Dict[str, Set[str]]:
+    """{program -> set(addresses swept)}. The unit the review is about."""
+    return {r.program: {s["address"] for s in r.swept} for r in reports}
+
+
+def saved_swept_index(saved: dict) -> Dict[str, Set[str]]:
+    """Same shape, read back out of a report JSON written by the sweep."""
+    out: Dict[str, Set[str]] = {}
+    for p in (saved or {}).get("programs") or []:
+        prog = p.get("program")
+        if not prog:
+            continue
+        out[prog] = {s.get("address") for s in (p.get("swept") or [])
+                     if isinstance(s, dict) and s.get("address")}
+    return out
+
+
+def report_drift(saved: dict, fresh: Sequence[ScopeReport]) -> List[str]:
+    """Human-readable differences between a reviewed report and a fresh sweep.
+
+    `--apply` writes the addresses in the FILE, but only after checking the
+    binary still produces them. Without this the review is decorative: the graph
+    is recomputed from live Ghidra state, so a rename, a re-analysis or another
+    lane's tags landing in between can move the verdict, and the operator would
+    be approving one set while a different set got written.
+
+    Empty list means the report is still an accurate description of the binary.
+    """
+    old, new = saved_swept_index(saved), swept_index(fresh)
+    out: List[str] = []
+    for prog in sorted(set(old) | set(new)):
+        if prog not in old:
+            out.append(f"{prog}: not in the reviewed report at all "
+                       f"({len(new[prog])} swept now)")
+            continue
+        if prog not in new:
+            out.append(f"{prog}: in the reviewed report but not in this sweep")
+            continue
+        added = sorted(new[prog] - old[prog])
+        gone = sorted(old[prog] - new[prog])
+        if added:
+            out.append(f"{prog}: {len(added)} address(es) swept now that were "
+                       f"not in the report ({', '.join(added[:6])})")
+        if gone:
+            out.append(f"{prog}: {len(gone)} address(es) in the report are no "
+                       f"longer swept ({', '.join(gone[:6])})")
+    return out
+
+
+# --------------------------------------------------------------------------
 # the writer
 # --------------------------------------------------------------------------
 
 def apply_scope(rep: ScopeReport) -> dict:
-    """Write SCOPE_EXCLUDED + the `Scope` reason for every swept function.
+    """Write the SCOPE_EXCLUDED tag + a durable bookmark for every swept function.
+
+    The bookmark matters as much as the tag: like FID's, it SURVIVES a later
+    rename, so an overwritten verdict stays recoverable rather than merely
+    detectable -- and it is where the referrer reason lives.
+
+    Deliberately NOT the `Scope` property map, even though the globals lane and
+    this module's own MARKING note reach for it. Every reader of that map in this
+    repo treats an entry as a DATA address: `conformance_dashboard`'s globals
+    panel takes `len(_scope_excluded_globals(program))` as its hidden-globals
+    count, so writing 119 function addresses into the map would have inflated
+    that number by 119 and told the operator a binary's globals were being
+    excluded when nothing of the sort had happened. The map is for globals; a
+    function's durable record is its tag and its bookmark.
 
     Goes through `library_scope._checked_post`, which treats an `error` in a
     200 body as a failure. Without that, a corpus apply reported "tagged 5462"
@@ -294,18 +463,10 @@ def apply_scope(rep: ScopeReport) -> dict:
     stats = {"tagged": 0, "failed": 0}
     if not rep.swept:
         return stats
-    try:
-        ls._post("/create_property_map", rep.program,
-                 {"name": ls.SCOPE_MAP, "type": "string"})
-    except Exception:                                            # noqa: BLE001
-        pass                                   # already exists is the normal case
     for s in rep.swept:
         try:
             ls._checked_post("/add_function_tag", rep.program,
                              {"function": s["address"], "tags": SCOPE_EXCLUDED})
-            ls._checked_post("/set_property", rep.program,
-                             {"map": ls.SCOPE_MAP, "address": s["address"],
-                              "value": SCOPE_EXCLUDED})
             ls._checked_post("/set_bookmark", rep.program, {
                 "address": s["address"], "category": "Library Scope",
                 "comment": f"{SCOPE_EXCLUDED}: {s['reason']}"})
@@ -314,4 +475,102 @@ def apply_scope(rep: ScopeReport) -> dict:
             print(f"  ! scope tag failed {s['address']} ({s['name']}): {e}",
                   flush=True)
             stats["failed"] += 1
+    return stats
+
+
+def existing_scope_tags(program: str) -> Set[str]:
+    """Addresses already carrying SCOPE_EXCLUDED in Ghidra.
+
+    Deliberately NOT unioned into the sweep's SEED SET. Within one run the
+    fixed-point iteration is bounded and the whole of it lands in a report a human
+    reads; across runs, seeding from a previous inference would let one wrong
+    verdict become the premise for the next, compounding silently with nothing to
+    review. Seeds stay proof-only (`ls.existing_lib_tags`), which also makes the
+    sweep deterministic -- re-running produces the same set, which is exactly what
+    the `--apply` drift check depends on.
+
+    What this IS for: reconciling the SQL flag with the durable tag.
+    """
+    out: Set[str] = set()
+    for tag in _st.INFERRED_TAGS:
+        try:
+            res = ls._get("/search_functions_by_tag", program=program, tag=tag,
+                          limit=200000)
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  ! cannot read {tag} on {program}: {e}", flush=True)
+            continue
+        for f in ls._items(res, "functions"):
+            if isinstance(f, dict) and f.get("address"):
+                out.add(ls.norm_addr(f["address"]))
+    return out
+
+
+def sync_scope_excluded_flags(reports: Sequence[ScopeReport]) -> dict:
+    """Mirror the durable SCOPE_EXCLUDED tag into `functions_workflow`.
+
+    The selector reads the COLUMN, not the tag, so a tag written without this is
+    inert -- the exact 681-function gap measured on D2Client.dll, where 1,020
+    LIB_* tags faced 339 flagged rows and the difference was still being handed to
+    workers.
+
+    PER-FUNCTION via `update_function_state`, never load_state + mutate +
+    save_state. The bulk path is a read-modify-write over every row in the binary,
+    so a Doc worker finishing a function between our load and our save loses its
+    entire result. This sweep is explicitly something you might run while the
+    fleet is working.
+
+    Verdicts UNION the durable tags, computed BEFORE the empty check, for the
+    same reason `library_scope.sync_library_code_flags` does it: syncing only
+    this run's finds leaves every pre-existing verdict unflagged, and an
+    empty-check ahead of the union makes a reconcile pass over an already-swept
+    program report 0 updated and do nothing at all.
+    """
+    try:
+        import fun_doc                                           # noqa: PLC0415
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  ! cannot import fun_doc to sync flags: {e}", flush=True)
+        return {"updated": 0, "missing": 0, "failed": 0, "error": str(e)}
+
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    stats = {"updated": 0, "missing": 0, "failed": 0}
+    for rep in reports:
+        reasons = {s["address"]: s.get("reason") or "all referrers are library code"
+                   for s in rep.swept}
+        for addr in existing_scope_tags(rep.program):
+            reasons.setdefault(addr, "pre-existing SCOPE_EXCLUDED tag (durable)")
+        if not reasons:
+            continue
+        try:
+            state = fun_doc.load_state(binary_name=rep.binary)
+            if not state:
+                state = fun_doc.load_state()
+        except Exception as e:                                   # noqa: BLE001
+            print(f"  ! load_state failed for {rep.binary}: {e}", flush=True)
+            continue
+        # Read-only use of the loaded state: it supplies the key and the existing
+        # record, and is never handed back to save_state.
+        by_addr = {}
+        for key, f in (state or {}).get("functions", {}).items():
+            if f.get("program") != rep.program:
+                continue
+            by_addr[ls.norm_addr(f.get("address"))] = (key, f)
+
+        for addr, reason in reasons.items():
+            hit = by_addr.get(addr)
+            if not hit:
+                stats["missing"] += 1
+                continue
+            key, existing = hit
+            if existing.get("scope_excluded"):
+                continue                       # already flagged; nothing to write
+            patch = dict(existing)
+            patch["scope_excluded"] = True
+            patch["scope_excluded_at"] = now
+            patch["scope_excluded_reasons"] = [reason]
+            try:
+                fun_doc.update_function_state(key, patch)
+                stats["updated"] += 1
+            except Exception as e:                               # noqa: BLE001
+                print(f"  ! flag write failed {rep.binary} {addr}: {e}", flush=True)
+                stats["failed"] += 1
     return stats

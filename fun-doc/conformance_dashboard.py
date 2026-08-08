@@ -25,6 +25,7 @@ import urllib.request
 from urllib.parse import urlencode, quote
 
 import d2moo_types   # placeholder-type vocabulary; import is lazy (load() reads no files)
+import scope_tags    # the canonical exclusion vocabulary; constants only, no I/O
 
 GHIDRA = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
@@ -32,8 +33,11 @@ PROGRAM = os.environ.get("FUNDOC_GHIDRA_PROGRAM", "/Mods/PD2-S12/D2Common.dll")
 CONF_RUNGS = ["CONF_REGRESSION", "CONF_BATTLETESTED", "CONF_LIVE", "CONF_VECTORS", "CONF_DRAFT"]  # best->worst
 DOC_RUNGS = ["DOC_VERIFIED", "DOC_REVIEWED", "DOC_DRAFT"]                                        # best->worst
 # tags that drop a function OUT of the "real game work" scope: library + trivial dispositions.
-LIB_TAGS = ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")
-EXCLUDE_TAGS = LIB_TAGS + ("STUB", "THUNK", "EXTERNAL")
+# From scope_tags, the one module that declares the vocabulary -- these were local
+# literals and had drifted from conf_ladder's copy by two tags.
+LIB_TAGS = scope_tags.KNOWN_LIB_TAGS            # a lane matched an artifact
+INFERRED_TAGS = scope_tags.INFERRED_TAGS        # the reference graph inferred it
+EXCLUDE_TAGS = scope_tags.OUT_OF_SCOPE_TAGS     # both, plus STUB/THUNK/EXTERNAL
 OPT_GROUP, OPT_NAME = "Program Information", "Conformance.summary"
 
 
@@ -244,7 +248,15 @@ def inventory(search: str = "", limit: int = 6000, program: str = None,
     you can see WHY something is out of scope, not just that it is. `library_total` is
     reported either way, so the caller can render "191 in scope (272 library hidden)" without
     a second request; a hidden count that is invisible is how the operator ends up believing
-    a binary is smaller than it is."""
+    a binary is smaller than it is.
+
+    `library_total` and `scope_excluded_total` are reported SEPARATELY and never
+    summed into one "library" number. The first means a lane matched an artifact
+    (masked bytes against a real .lib, a FID hit, a BSim match past calibrated
+    floors); the second means only that `scope_graph` found every referrer to be
+    library code -- an inference that is also satisfied, by construction, by every
+    mod entry point the CRT calls. Folding them would render a guess as a proof,
+    on the one panel an operator uses to decide what is worth documenting."""
     program = program or PROGRAM
     conf_sets = {r: _tag_addrs(r, program) for r in CONF_RUNGS}
     doc_sets = {r: _tag_addrs(r, program) for r in DOC_RUNGS}
@@ -252,17 +264,25 @@ def inventory(search: str = "", limit: int = 6000, program: str = None,
     # tag that excluded it, which is the auditable part.
     lib_by_tag = {t: _tag_addrs(t, program) for t in EXCLUDE_TAGS}
     lib = set().union(*lib_by_tag.values()) if lib_by_tag else set()
+    inferred = set().union(*(lib_by_tag[t] for t in INFERRED_TAGS
+                             if t in lib_by_tag)) if INFERRED_TAGS else set()
     s = search.lower()
     rows = []
     seen = set()
     lib_total = 0
+    inferred_total = 0
     for a, name in _function_rows(program):
         if a in seen:                      # dedup: one row per address
             continue
         seen.add(a)
         is_lib = a in lib
         if is_lib:
-            lib_total += 1
+            # Counted apart, not as a subset: an inferred exclusion is not an
+            # identification and must never be reported as one.
+            if a in inferred:
+                inferred_total += 1
+            else:
+                lib_total += 1
             if not include_library:
                 continue
         if s and s not in name.lower():
@@ -280,7 +300,9 @@ def inventory(search: str = "", limit: int = 6000, program: str = None,
     rows.sort(key=lambda r: (bool(r.get("library")), r["conf"] == "none",
                              r["name"].lower()))
     return {"rows": rows[:limit], "total": total, "shown": min(len(rows), limit),
-            "library_total": lib_total, "include_library": bool(include_library)}
+            "library_total": lib_total,
+            "scope_excluded_total": inferred_total,
+            "include_library": bool(include_library)}
 
 
 from pathlib import Path as _Path
@@ -801,14 +823,23 @@ def globals_inventory(search: str = "", limit: int = 100, program: str = None,
     bar -- band distribution plus a reviewed count.
 
     `include_library=True` is the same toggle the function inventory carries. `library_total`
-    is reported either way so the caller can say how many are hidden without a second call."""
+    is reported either way so the caller can say how many are hidden without a second call.
+
+    That count is derived from the GLOBALS THEMSELVES, not from the size of the
+    `Scope` property map. The map is keyed by address and nothing stops a future
+    writer putting a non-global address in it -- `scope_graph` nearly did, which
+    would have added 119 function addresses to a number labelled "globals hidden"
+    and sent the operator looking for globals that were never excluded. Counting
+    the rows we actually resolved cannot drift that way, and costs no extra call:
+    one `include_library=True` fetch answers both the count and the row set."""
     program = program or PROGRAM
     img = _image_range(program) or (_IMG_LO, _IMG_HI)
     bandmap = _complete_map_bands(program, img)
     reviewed = _review_flags(program, img)
-    allrows = _global_rows(program, include_library=include_library)
-    lib_total = (sum(1 for g in allrows if g.get("library")) if include_library
-                 else len(_scope_excluded_globals(program)))
+    allrows = _global_rows(program, include_library=True)
+    lib_total = sum(1 for g in allrows if g.get("library"))
+    if not include_library:
+        allrows = [g for g in allrows if not g.get("library")]
 
     scope = len(allrows)
     counts = {t: 0 for t in BAND_TAGS}

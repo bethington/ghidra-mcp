@@ -16,6 +16,10 @@ Standalone -- imports nothing from fun_doc, so fun_doc may import it freely.
 
 from __future__ import annotations
 
+# The exclusion vocabulary. Constants only, no I/O and no fun_doc dependency, so
+# importing it keeps this module standalone as documented above.
+import scope_tags
+
 # Ladder, low -> high. Index = rung strength.
 CONF_LADDER = [
     "CONF_DRAFT",
@@ -57,10 +61,13 @@ CONF_PROPERTY_MAP = "Conf"
 
 # Excluded from the ladder AND from the in-scope denominator (taxonomy v2
 # "Scope"): the CRT comes from the toolchain, thunks are linker-generated.
-OUT_OF_SCOPE_TAGS = [
-    "LIB_CRT", "LIB_MSVC_EH", "LIB_MSVC", "LIB_SECURITY",
-    "THUNK", "STUB", "EXTERNAL",
-]
+#
+# From scope_tags now, and the move FIXES a live drift: this list was a local
+# literal missing LIB_MATH and LIB_UNKNOWN, so a function carrying either one
+# counted as in-scope for conformance while every other panel counted it as
+# library. It also picks up SCOPE_EXCLUDED, which belongs here for the same
+# reason the LIB_* tags do -- an out-of-scope function cannot climb the ladder.
+OUT_OF_SCOPE_TAGS = list(scope_tags.OUT_OF_SCOPE_TAGS)
 
 # --- port_status -> rung ----------------------------------------------------
 PORT_STATUS_TO_RUNG = {

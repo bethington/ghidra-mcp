@@ -53,9 +53,18 @@ from typing import Any
 IMAGE_BASE = 0x6FD50000
 IMAGE_END = 0x6FD90000
 
-N_FUNCTIONS = 50
+N_FUNCTIONS = 53
 N_LIBRARY = 10
-N_IN_SCOPE = N_FUNCTIONS - N_LIBRARY  # 40
+# Graph-inferred exclusions (scope_graph's SCOPE_EXCLUDED). A SEPARATE
+# population on purpose: the panels must be able to report "identified library"
+# apart from "inferred out of scope", so a corpus where the two are the same set
+# would let a fold-them-together bug pass. These are named like game code,
+# because that is the case that matters -- 143 of PD2_EXT's CRT survivors had
+# already been renamed `UNIT_*`/`STRING_*` by documentation workers, which is
+# exactly why the sweep keys on references instead of names.
+N_SCOPE_EXCLUDED = 3
+N_IN_SCOPE = N_FUNCTIONS - N_LIBRARY - N_SCOPE_EXCLUDED  # 40, unchanged
+
 
 N_GLOBALS = 20
 N_GLOBALS_EXCLUDED = 2
@@ -98,14 +107,24 @@ class FakeGhidra:
         ]
         for offset, name in enumerate(crt_names):
             self.functions[N_IN_SCOPE + offset]["name"] = name
+        # The graph-inferred block sits after the identified runtime and wears
+        # GAME-STYLE names, since that is the population names cannot catch.
+        for offset, name in enumerate(("UNIT_GetUnitFlags2",
+                                       "MEMMGR_DetectSimdCapabilities",
+                                       "STRING_CopyBounded")):
+            self.functions[N_IN_SCOPE + N_LIBRARY + offset]["name"] = name
 
         in_scope = [f["address"] for f in self.functions[:N_IN_SCOPE]]
-        library = [f["address"] for f in self.functions[N_IN_SCOPE:]]
+        library = [f["address"] for f in
+                   self.functions[N_IN_SCOPE:N_IN_SCOPE + N_LIBRARY]]
+        scope_excluded = [f["address"] for f in
+                          self.functions[N_IN_SCOPE + N_LIBRARY:]]
 
         # tag -> addresses. Rungs are mutually exclusive on each axis, which is
         # what `matrix()` assumes when it takes the FIRST matching rung.
         self.tags: dict[str, list[str]] = {
             "LIB_CRT": library,
+            "SCOPE_EXCLUDED": scope_excluded,
             "DOC_VERIFIED": in_scope[0:6],
             "DOC_REVIEWED": in_scope[6:16],
             "DOC_DRAFT": in_scope[16:28],
@@ -152,7 +171,9 @@ class FakeGhidra:
             "Conformance.summary": json.dumps(
                 {
                     "in_scope": N_IN_SCOPE,
-                    "excluded_lib": N_LIBRARY,
+                    # The sync tool's own count -- both exclusion families, since
+                    # `in_scope` is defined-minus-everything-out-of-scope.
+                    "excluded_lib": N_LIBRARY + N_SCOPE_EXCLUDED,
                     "total_all": N_FUNCTIONS,
                     "generated": "2026-08-03T00:00:00Z",
                 }

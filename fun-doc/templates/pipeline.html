@@ -1131,9 +1131,17 @@
     const inv=await api("/inventory?q="+encodeURIComponent(q)+"&limit=6000"+(lib?"&lib=1":""))||SAMPLE.inventory;
     // Always state how many are hidden. A count that silently shrinks reads as
     // "this binary is smaller than I thought", not "library code is excluded".
+    // Two numbers, never one: `library` means a lane MATCHED an artifact (bytes,
+    // FID, BSim), `scope-excluded` means scope_graph only INFERRED it from the
+    // reference graph -- which is also true of every mod entry point the CRT
+    // calls. Summing them would render a guess as a proof.
     const hidden=inv.library_total||0;
-    document.getElementById("invHint").textContent=
-      `${inv.shown} of ${inv.total}`+(hidden?(lib?` · ${hidden} library shown`:` · ${hidden} library hidden`):"");
+    const inferred=inv.scope_excluded_total||0;
+    const verb=lib?"shown":"hidden";
+    const parts=[`${inv.shown} of ${inv.total}`];
+    if(hidden)parts.push(`${hidden} library ${verb}`);
+    if(inferred)parts.push(`${inferred} scope-excluded ${verb}`);
+    document.getElementById("invHint").textContent=parts.join(" · ");
     (inv.rows||[]).forEach(f=>{ NAME_BY_ADDR[bareAddr(f.address)]=f.name; });
     renderPins();
     document.getElementById("invBody").innerHTML=inv.rows.map(f=>

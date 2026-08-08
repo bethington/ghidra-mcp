@@ -108,6 +108,15 @@ def build_metadata(schema: str | None = None) -> MetaData:
         Column("library_code", Boolean, default=False),
         Column("library_code_at", DateTime(timezone=True)),
         Column("library_code_reasons", JSON),
+        # graph-inferred scope exclusion (migration 0008) — scope_graph's
+        # "every referrer is library code" verdict. SEPARATE from library_code
+        # on purpose: that column means a lane matched an artifact, this one
+        # means nothing was matched and the reference graph inferred it. The
+        # rule is satisfied by construction by every mod entry point the CRT
+        # calls, so a swept function may not be library code at all.
+        Column("scope_excluded", Boolean, default=False),
+        Column("scope_excluded_at", DateTime(timezone=True)),
+        Column("scope_excluded_reasons", JSON),
         # name-source provenance (#204) — drives the "skip propagated
         # CRT/STL with no archive backing" gate in the selector
         Column("name_source", String, default="scan"),

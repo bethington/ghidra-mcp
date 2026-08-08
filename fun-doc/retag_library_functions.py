@@ -19,10 +19,13 @@ selector reads the flag; the assess pass reads the tag).
 """
 import argparse, json, re, urllib.request
 import fun_doc
+import scope_tags
 
 GH = "http://127.0.0.1:8089"
 PROGRAM = "/Mods/PD2-S12/D2Common.dll"
-LIB_TAGS = ("LIB_CRT", "LIB_MSVC_EH", "LIB_SECURITY", "LIB_MATH", "LIB_MSVC", "LIB_UNKNOWN")
+# From scope_tags -- this lane matches names against a real runtime, so it reads
+# and writes CLAIMS only. scope_graph's inference tag is not in this set.
+LIB_TAGS = scope_tags.KNOWN_LIB_TAGS
 
 # Core D2 re-implementation binaries the doc/fix workers actually target. The
 # same statically-linked CRT is duplicated into each, so a CRT name tagged in

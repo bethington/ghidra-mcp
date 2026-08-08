@@ -107,18 +107,20 @@ from library_code_detector import detect_library_code            # noqa: E402
 
 GHIDRA_URL = os.environ.get("GHIDRA_MCP_URL", "http://127.0.0.1:8089")
 
-# The tag vocabulary the CONSUMERS already read. conformance_dashboard.LIB_TAGS
-# and fun_doc._ASSESS_LIB_TAGS must stay supersets of whatever we emit, or an
-# exclusion written here is invisible to the panel that renders it.
-TAG_CRT = "LIB_CRT"
-TAG_EH = "LIB_MSVC_EH"
-TAG_MSVC = "LIB_MSVC"
-KNOWN_LIB_TAGS = (TAG_CRT, TAG_EH, "LIB_SECURITY", "LIB_MATH", TAG_MSVC, "LIB_UNKNOWN")
-
-# The property map the globals inventory already reads
-# (conformance_dashboard._scope_excluded_globals). Its value is the tag that
-# justified the exclusion, so the map is self-documenting when read raw.
-SCOPE_MAP = "Scope"
+# The tag vocabulary, from the ONE module that declares it. This used to be a
+# local literal, and so did the same tuple in five other modules -- two of which
+# had already drifted apart. Re-exported here because callers and tests reach for
+# `ls.KNOWN_LIB_TAGS`; the values live in scope_tags.
+#
+# Note what is NOT imported: SCOPE_EXCLUDED. This module's lanes match artifacts,
+# so everything they emit is a claim; the inference tag belongs to scope_graph.
+from scope_tags import (                                         # noqa: E402
+    KNOWN_LIB_TAGS,
+    SCOPE_MAP,
+    TAG_CRT,
+    TAG_EH,
+    TAG_MSVC,
+)
 
 # Benchmark.dll's authored functions -- the positive control. Sourced from the
 # benchmark's own ground truth rather than retyped, so the two cannot drift.
