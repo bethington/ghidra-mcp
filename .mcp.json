@@ -4,6 +4,9 @@
       "command": "uv",
       "args": [
         "run",
+        "--no-sync",
+        "--directory",
+        "c:/Users/benam/source/mcp/ghidra-mcp",
         "bridge-mcp-ghidra",
         "--transport",
         "stdio"

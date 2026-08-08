@@ -188,6 +188,206 @@ class TestTcpPortScan(unittest.TestCase):
         self.assertIsNone(bridge._scan_tcp_for_project(None))
 
 
+class TestTcpPortScanConcurrency(unittest.TestCase):
+    """The TCP scan must probe ports CONCURRENTLY.
+
+    A port that is dropped rather than refused costs the full timeout. On a
+    Windows host whose firewall drops, a serial scan of the default 16-port
+    range measured 15.2s of the bridge's 16.8s startup -- close enough to an
+    MCP client's start timeout to fail the connection outright, which presents
+    as "the Ghidra tools are missing" with a demonstrably healthy Ghidra.
+    """
+
+    def _make_slow_conn(self, delay, responding_ports):
+        """HTTPConnection stand-in where every port sleeps `delay` in connect(),
+        simulating a dropped (not refused) connection."""
+        import time as _time
+
+        class FakeResponse:
+            def __init__(self, body):
+                self.status = 200
+                self._body = body
+
+            def read(self):
+                return self._body.encode("utf-8")
+
+        class SlowConn:
+            def __init__(self, host, port, timeout=None):
+                self.port = port
+
+            def connect(self):
+                _time.sleep(delay)
+                if self.port not in responding_ports:
+                    raise TimeoutError(f"dropped on {self.port}")
+
+            def request(self, method, url):
+                pass
+
+            def getresponse(self):
+                return FakeResponse(json.dumps({"project": responding_ports[self.port]}))
+
+            def close(self):
+                pass
+
+        return SlowConn
+
+    def test_scan_is_concurrent_not_serial(self):
+        """16 ports each stalling 0.25s must finish far faster than 4.0s."""
+        import time as _time
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import discovery
+
+        SlowConn = self._make_slow_conn(0.25, {})
+        with patch("http.client.HTTPConnection", SlowConn):
+            t0 = _time.time()
+            found = list(discovery._iter_tcp_instances(start_port=8089, range_size=16, timeout=1.0))
+            elapsed = _time.time() - t0
+
+        self.assertEqual(found, [])
+        # Serial would be 16 * 0.25 = 4.0s. Concurrent should be ~0.25s;
+        # allow generous headroom for slow CI while still failing a
+        # regression back to serial scanning.
+        self.assertLess(elapsed, 2.0, f"scan took {elapsed:.2f}s -- looks serial, not concurrent")
+
+    def test_concurrent_scan_still_yields_in_port_order(self):
+        """Callers depend on lowest-port-wins, so results must be yielded in
+        ascending port order even though probes complete out of order."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import discovery
+
+        # Higher ports finish FIRST (shorter sleeps would be ideal, but a
+        # constant delay plus scheduler jitter already reorders completions);
+        # the yielded order must still be ascending by port.
+        SlowConn = self._make_slow_conn(0.05, {8089: "first", 8091: "second", 8093: "third"})
+        with patch("http.client.HTTPConnection", SlowConn):
+            found = list(discovery._iter_tcp_instances(start_port=8089, range_size=8, timeout=1.0))
+
+        self.assertEqual(
+            [url for url, _ in found],
+            ["http://127.0.0.1:8089", "http://127.0.0.1:8091", "http://127.0.0.1:8093"],
+        )
+
+    def test_empty_range_yields_nothing(self):
+        """range_size=0 must not spin up a pool or raise."""
+        from bridge_mcp_ghidra import discovery
+
+        self.assertEqual(list(discovery._iter_tcp_instances(start_port=8089, range_size=0)), [])
+
+
+class TestAutoConnectRetry(unittest.TestCase):
+    """A bridge that starts BEFORE Ghidra must still get its tools.
+
+    `_auto_connect()` runs once at startup. Without a retry, a bridge launched
+    before Ghidra registered zero dynamic tools and had no path to notice
+    Ghidra arriving -- observed as a bridge sitting beside a healthy Ghidra
+    for four days serving only the static tools.
+    """
+
+    def test_auto_connect_reports_failure_as_false(self):
+        """No instances and an unreachable TCP fallback -> False, not None."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools.discovery, "discover_instances", return_value=[]),
+            patch.object(static_tools.registry, "_fetch_schema", side_effect=OSError("connection refused")),
+        ):
+            self.assertIs(static_tools._auto_connect(), False)
+
+    def test_auto_connect_reports_success_as_true(self):
+        """A successful registration must report True so the caller skips the
+        retry thread entirely."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools.discovery, "discover_instances", return_value=[]),
+            patch.object(static_tools.registry, "_fetch_schema", return_value={}),
+            patch.object(static_tools.registry, "register_tools_from_schema", return_value=7),
+            patch.object(static_tools.state, "set_connection_snapshot"),
+        ):
+            self.assertIs(static_tools._auto_connect(), True)
+
+    def test_retry_stops_after_first_success(self):
+        """The retry loop must exit permanently once connected, and must emit
+        tools/list_changed so clients re-fetch the late-registered tools."""
+        import threading as _threading
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        attempts = []
+        done = _threading.Event()
+
+        def fake_auto_connect():
+            attempts.append(1)
+            # Fail once, then succeed.
+            return len(attempts) > 1
+
+        notified = []
+
+        with (
+            patch.object(static_tools, "_auto_connect", side_effect=fake_auto_connect),
+            patch.object(
+                static_tools.state,
+                "notify_tools_changed_from_worker",
+                side_effect=lambda: (notified.append(1), done.set()),
+            ),
+            patch.object(static_tools.state, "_transport_mode", "none"),
+        ):
+            thread = static_tools._start_auto_connect_retry(interval=0.01)
+            done.wait(timeout=5)
+            thread.join(timeout=5)
+
+        self.assertFalse(thread.is_alive(), "retry thread must exit after success")
+        self.assertEqual(len(attempts), 2, "should retry until success, then stop")
+        self.assertEqual(len(notified), 1, "must emit tools/list_changed exactly once")
+
+    def test_retry_exits_when_something_else_connects(self):
+        """An explicit connect_instance() while the retry is sleeping must end
+        the loop without a further auto-connect attempt."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        attempts = []
+
+        with (
+            patch.object(static_tools, "_auto_connect", side_effect=lambda: (attempts.append(1), False)[1]),
+            patch.object(static_tools.state, "_transport_mode", "tcp"),
+        ):
+            thread = static_tools._start_auto_connect_retry(interval=0.01)
+            thread.join(timeout=5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(attempts, [], "must not attempt auto-connect when already connected")
+
+    def test_retry_survives_an_exception(self):
+        """A throwing attempt must not kill the retry thread."""
+        import threading as _threading
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        attempts = []
+        done = _threading.Event()
+
+        def flaky():
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError("transient")
+            return True
+
+        with (
+            patch.object(static_tools, "_auto_connect", side_effect=flaky),
+            patch.object(static_tools.state, "notify_tools_changed_from_worker", side_effect=done.set),
+            patch.object(static_tools.state, "_transport_mode", "none"),
+        ):
+            thread = static_tools._start_auto_connect_retry(interval=0.01)
+            done.wait(timeout=5)
+            thread.join(timeout=5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(attempts), 2, "must keep retrying after an exception")
+
+
 class TestConnectInstanceTcpFallback(unittest.TestCase):
     """Test connect_instance project matching across UDS and TCP discovery."""
 

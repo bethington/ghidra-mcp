@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 from . import state
 from .config import logger
 from .server import mcp
-from .static_tools import _auto_connect
+from .static_tools import _auto_connect, _start_auto_connect_retry
 
 
 def _wildcard_allowed_hosts() -> list[str]:
@@ -143,7 +143,12 @@ def main():
 
     if not state._lazy_mode:
         logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
-    _auto_connect()
+    if not _auto_connect():
+        # Ghidra may simply not be up yet. Keep looking in the background so a
+        # bridge that wins the startup race still gets its tools, instead of
+        # serving only the static ones for the life of the process.
+        logger.info("No Ghidra tools registered at startup; retrying in the background")
+        _start_auto_connect_retry()
 
     mcp.settings.log_level = "INFO"
     mcp.settings.host = args.mcp_host

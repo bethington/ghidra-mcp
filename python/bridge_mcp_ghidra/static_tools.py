@@ -3,6 +3,8 @@
 import asyncio
 import json
 import os
+import threading
+import time
 
 from . import discovery
 from . import dispatch
@@ -582,8 +584,13 @@ async def import_file(
     return result
 
 
-def _auto_connect():
-    """Try to auto-connect to a single running instance on startup."""
+def _auto_connect() -> bool:
+    """Try to auto-connect to a single running instance on startup.
+
+    Returns True only if dynamic tools were actually registered from a live
+    Ghidra. Callers use that to decide whether to keep retrying in the
+    background — see `_start_auto_connect_retry`.
+    """
     # Try UDS first
     instances = discovery.discover_instances()
     if len(instances) == 1:
@@ -609,7 +616,7 @@ def _auto_connect():
                         connected_project=inst.get("project"),
                     )
                 logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
-                return
+                return True
             except Exception as e:
                 logger.warning(f"UDS auto-connect schema fetch failed: {e}")
         elif inst.get("url") and validate_server_url(inst["url"]):
@@ -638,7 +645,7 @@ def _auto_connect():
                         connected_project=inst.get("project"),
                     )
                 logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
-                return
+                return True
             except Exception as e:
                 logger.warning(f"TCP auto-connect schema fetch failed: {e}")
     elif len(instances) > 1:
@@ -649,13 +656,13 @@ def _auto_connect():
         # third instance entirely) right after telling the user to choose.
         # Stay unconnected until connect_instance() is called explicitly,
         # matching connect_instance's own multi-instance refusal logic.
-        return
+        return False
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
     if not validate_server_url(tcp_url):
         logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
-        return
+        return False
     try:
         candidate = state.build_connection_snapshot(mode="tcp", active_tcp=tcp_url)
         schema = registry._fetch_schema(connection=candidate)
@@ -671,6 +678,53 @@ def _auto_connect():
                 connected_project=None,
             )
         logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+        return True
     except Exception:
         if not instances:
             logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
+    return False
+
+
+# How often the background retry re-attempts auto-connect. One attempt costs
+# roughly a single port-scan timeout now that the scan is concurrent, so a
+# short interval is cheap.
+AUTO_CONNECT_RETRY_INTERVAL_SEC = 15.0
+
+
+def _start_auto_connect_retry(interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC) -> threading.Thread:
+    """Retry `_auto_connect()` in the background until Ghidra shows up.
+
+    `_auto_connect()` runs exactly once during startup, so a bridge launched
+    BEFORE Ghidra registered zero dynamic tools and had no way to notice
+    Ghidra arriving afterwards. That is not hypothetical: a bridge started
+    2026-08-04 sat beside a Ghidra started 2026-08-06 for four days holding
+    only the static tools, which presents to the operator as "the Ghidra MCP
+    tools are missing" while Ghidra itself is demonstrably healthy.
+
+    The thread is a daemon and stops permanently on the first success, after
+    which it emits tools/list_changed so clients re-fetch the tool list.
+    """
+
+    def _loop() -> None:
+        while True:
+            time.sleep(interval)
+            if state._transport_mode != "none":
+                # Something else connected us (e.g. an explicit
+                # connect_instance call) — nothing left to retry.
+                return
+            try:
+                connected = _auto_connect()
+            except Exception as e:  # never let the retry thread die silently
+                logger.debug(f"Auto-connect retry attempt failed: {e}")
+                continue
+            if connected:
+                logger.info("Auto-connect retry succeeded — Ghidra tools are now registered")
+                try:
+                    state.notify_tools_changed_from_worker()
+                except Exception as e:
+                    logger.debug(f"tools/list_changed notification failed after retry: {e}")
+                return
+
+    thread = threading.Thread(target=_loop, name="GhidraMCP-AutoConnectRetry", daemon=True)
+    thread.start()
+    return thread
