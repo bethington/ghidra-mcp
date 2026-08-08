@@ -1,7 +1,7 @@
-# Visual C++ 6.0 SP6 toolchain lives in this directory on your local
-# machine but is NOT redistributed via git — see README.md + NOTICE.md.
-# The three tracked files below explain what should be here and how to
-# populate the directory from your own licensed source media.
+# The era toolchains (VC6 SP6 and VS .NET 2003) live in this directory on
+# your local machine but are NOT redistributed via git — see README.md,
+# README-TOOLCHAIN.md + NOTICE.md. The tracked files below explain what
+# should be here and how to populate it from your own licensed media.
 
 # Ignore everything by default
 *
@@ -9,4 +9,5 @@
 # Re-include the tracked explanatory files
 !.gitignore
 !README.md
+!README-TOOLCHAIN.md
 !NOTICE.md
