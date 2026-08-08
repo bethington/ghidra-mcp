@@ -43,6 +43,17 @@ import pytest
 
 _FUNDOC_DIR = Path(__file__).resolve().parent.parent.parent / "fun-doc"
 _DEFAULT_STATE_DB = _FUNDOC_DIR / "state.db"
+
+# The autouse fixtures below import fun-doc modules (`event_log`, `fun_doc`),
+# so fun-doc has to be importable for ANY test in this directory — not only
+# the ones that put it on sys.path themselves. Without this, running a single
+# file that doesn't (e.g. `pytest tests/performance/test_benchmark_scorer.py`)
+# fails every test at fixture setup with `ModuleNotFoundError: event_log`,
+# while the same file passes inside a full-suite run because some earlier
+# module happened to insert the path. A suite whose result depends on which
+# other files ran is a suite people stop believing.
+if str(_FUNDOC_DIR) not in sys.path:
+    sys.path.insert(0, str(_FUNDOC_DIR))
 # Anything larger than this is treated as a real user database, not a
 # stray test artifact. A fresh-bootstrap schema-only SQLite file is
 # typically ~50-150 KB; we use 512 KB as a comfortable threshold.

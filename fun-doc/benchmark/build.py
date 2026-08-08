@@ -136,6 +136,62 @@ TOOLCHAINS = {
             "/MAP",
         ],
     },
+    "vs2003": {
+        "description": (
+            "Visual Studio .NET 2003 SP1: cl.exe 13.10.3077 (build 6030) "
+            "+ link.exe 7.10. THE toolchain D2 1.13c was actually built "
+            "with -- not an approximation of it."
+        ),
+        # Why this entry exists, and why it is not `vc6sp6`:
+        #
+        # Every shipped binary names its own compiler in its Rich header,
+        # and they all say the same thing. Game.exe: 89 x Utc1310_C build
+        # 6030, 20 x masm 6030, 2 x Utc1310_CPP 6030, and ZERO VC6 (VC6 SP6
+        # is build 8804). D2Common/D2Client/D2Game/Fog/Storm: identical
+        # finding. Build 6030 is VS .NET 2003 SP1.
+        #
+        # Confirmed at the byte level 2026-08-08: all 103 FID-identified CRT
+        # functions in Game.exe are byte-identical (relocations masked) to
+        # their objects in VS7/Lib/libcmt.lib, while VC98/LIB/LIBCMT.LIB
+        # matches 11/103 -- and those 11 are tiny SEH/mbcs helpers genuinely
+        # shared by both toolchains.
+        #
+        # `vc6sp6` pairs VC6's COMPILER with VS2003's LINKER, which is not a
+        # stylistic choice: VS7/Bin/cl.exe could not run at all until
+        # msvcp71.dll was vendored (c1.dll imports six std::basic_string
+        # symbols from it), while link.exe needed only mspdb71 + msvcr71.
+        # That pairing reproduces the PE/Rich SHAPE but not compiler codegen,
+        # so it cannot byte-match authored D2 code. Keep `vc6sp6` for
+        # comparison and for the historical baseline; prefer this entry when
+        # the question is "would the original toolchain emit these bytes".
+        "cl_path": str(VS7_ROOT / "Bin" / "cl.exe"),
+        "link_path": str(VS7_ROOT / "Bin" / "link.exe"),
+        "extra_path": [str(VS7_ROOT / "Bin")],
+        # VS2003's own CRT/C++ headers, plus VC6's Include for the Win32
+        # Platform SDK headers (windows.h and friends) -- the VS2003 Pro
+        # media carries no Platform SDK of its own. Order matters: VS7
+        # first so its CRT headers win.
+        "include": [str(VS7_ROOT / "Include"), str(VC6_ROOT / "Include")],
+        "lib": [str(VS7_ROOT / "Lib"), str(VC6_ROOT / "Lib")],
+        "cl_flags": [
+            "/nologo",
+            "/W3",
+            "/O2",
+            "/GF",
+            "/MT",
+            "/Gy",
+            "/LD",
+        ],
+        "link_flags": [
+            "/NOLOGO",
+            "/MACHINE:IX86",
+            "/SUBSYSTEM:WINDOWS,4.00",
+            "/BASE:0x6FD50000",
+            "/OPT:REF",
+            "/OPT:ICF",
+            "/MAP",
+        ],
+    },
 }
 
 
