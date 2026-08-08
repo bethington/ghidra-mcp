@@ -87,6 +87,28 @@ def test_vc6sp6_is_still_a_mixture_and_says_so():
     assert Path(tc["cl_path"]).parent != Path(tc["link_path"]).parent
 
 
+def test_vs2003_description_does_not_claim_to_be_sp1():
+    """Two different facts, easy to conflate — and they were, in the first
+    version of this entry.
+
+    D2's binaries were built with VS2003 **SP1** (Rich header build 6030).
+    The toolchain vendored here is **RTM** (`cl.exe` reports 13.10.3077);
+    SP1 was a separate download and is not on the Pro media. RTM is
+    byte-exact everywhere it has been checked — all 103 CRT functions and a
+    hand-written authored function — so it is good enough to certify with.
+    But the gap must stay visible, because "install SP1" is the one variable
+    left to try when a function refuses to match for no other reason.
+    """
+    desc = build.TOOLCHAINS["vs2003"]["description"]
+    assert "RTM" in desc, "the vs2003 entry must say which release it is"
+    assert not (desc.startswith("Visual Studio .NET 2003 SP1")
+                or "2003 SP1:" in desc), (
+        "vs2003 describes itself as SP1, but the vendored compiler is RTM "
+        "(13.10.3077). D2's binaries are SP1 (6030) — that is a fact about "
+        "the binaries, not about this toolchain."
+    )
+
+
 def test_toolchain_names_are_cli_selectable():
     """`--toolchain` builds its choices from the registry keys, so a new
     entry is reachable from the CLI the moment it is added."""

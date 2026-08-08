@@ -138,9 +138,9 @@ TOOLCHAINS = {
     },
     "vs2003": {
         "description": (
-            "Visual Studio .NET 2003 SP1: cl.exe 13.10.3077 (build 6030) "
-            "+ link.exe 7.10. THE toolchain D2 1.13c was actually built "
-            "with -- not an approximation of it."
+            "Visual Studio .NET 2003 RTM: cl.exe + link.exe 13.10/7.10.3077. "
+            "The toolchain FAMILY D2 1.13c was built with. D2's binaries are "
+            "SP1 (build 6030); this is RTM (3077) -- see the note below."
         ),
         # Why this entry exists, and why it is not `vc6sp6`:
         #
@@ -164,6 +164,17 @@ TOOLCHAINS = {
         # so it cannot byte-match authored D2 code. Keep `vc6sp6` for
         # comparison and for the historical baseline; prefer this entry when
         # the question is "would the original toolchain emit these bytes".
+        #
+        # RTM vs SP1 -- a real gap, empirically small. Our vendored compiler
+        # reports 13.10.3077 (RTM); D2's Rich headers say build 6030 (SP1).
+        # Measured 2026-08-08, RTM is nonetheless byte-exact where it has
+        # been checked: all 103 FID-identified CRT functions in Game.exe match
+        # RTM's OWN VS7/Lib/libcmt.lib exactly, and hand-written C compiled by
+        # RTM's cl reproduced DATATBLS_FindConfigOptionIndex (0x004078e0) to
+        # the byte. So RTM is good enough to certify with -- but if a function
+        # ever refuses to match for no other discernible reason, installing
+        # VS2003 SP1 (a separate download, not on the Pro media) is the next
+        # thing to try before concluding the source form is wrong.
         "cl_path": str(VS7_ROOT / "Bin" / "cl.exe"),
         "link_path": str(VS7_ROOT / "Bin" / "link.exe"),
         "extra_path": [str(VS7_ROOT / "Bin")],

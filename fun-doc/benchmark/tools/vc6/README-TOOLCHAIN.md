@@ -5,9 +5,29 @@ toolchains, and **VS2003 is the one that matters for D2**.
 
 | Dir | What | Role |
 | --- | --- | --- |
-| `VS7/` | Visual Studio .NET 2003 (7.1) — `cl.exe` 13.10.3077, `link.exe` 7.10 | **Primary.** The compiler that actually built D2 1.13c. |
+| `VS7/` | Visual Studio .NET 2003 **RTM** — `cl.exe` 13.10.3077, `link.exe` 7.10.3077 | **Primary.** The compiler family that built D2 1.13c. |
 | `VC98/` | Visual C++ 6.0 SP6 — `cl.exe`, headers, libs | Fallback; also the only source of Win32 Platform SDK headers (`windows.h`, `winbase.h`) here. |
 | `COMMON/` | shared VC6 bits | — |
+
+### RTM vs SP1 — a real gap, empirically small
+
+D2's Rich headers say build **6030** = VS2003 **SP1**. What is vendored here
+is **RTM (3077)**; SP1 was a separate download and is not on the Pro media.
+
+Measured 2026-08-08, RTM is byte-exact everywhere it has been checked:
+
+* all 103 FID-identified CRT functions in `Game.exe` match RTM's own
+  `VS7/Lib/libcmt.lib` **exactly**, so whatever SP1 changed, it was not
+  these CRT objects;
+* hand-written C compiled by RTM's `cl` reproduced
+  `DATATBLS_FindConfigOptionIndex` to the byte.
+
+So RTM is good enough to certify `CONF_BYTEMATCH` with. But if some function
+refuses to match for no other discernible reason, **install VS2003 SP1
+before concluding the source form is wrong** — that is the one variable this
+tree cannot currently rule out. A freshly built `Benchmark.dll` shows the
+difference plainly: its Rich header carries build **3077** where D2's
+carries **6030**.
 
 ## Why VS2003 is the right compiler (measured, not assumed)
 
