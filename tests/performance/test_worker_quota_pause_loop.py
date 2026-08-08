@@ -155,6 +155,13 @@ def _stub_loop_deps(fun_doc_module, monkeypatch, results):
     monkeypatch.setattr(
         fun_doc_module, "load_priority_queue", lambda *a, **k: {"config": {}, "meta": {}}
     )
+    # Stub the SAVE too. The loop's reset_handoff_counter() does
+    # load_priority_queue() -> save_priority_queue(), and with only the load
+    # stubbed the save wrote this stub's minimal dict over the OPERATOR'S REAL
+    # priority_queue.json — config survived the 3-way merge, but `pinned` is
+    # last-writer-wins and was erased (measured 2026-08-08: a live session's 8
+    # falsify pins vanished mid-fleet because the test suite ran in between).
+    monkeypatch.setattr(fun_doc_module, "save_priority_queue", lambda *a, **k: None)
     monkeypatch.setattr(fun_doc_module, "get_auto_escalation_provider", lambda *a, **k: None)
     monkeypatch.setattr(fun_doc_module, "refresh_candidate_scores", lambda *a, **k: {})
     return calls

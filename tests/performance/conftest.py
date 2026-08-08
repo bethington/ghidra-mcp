@@ -153,3 +153,31 @@ def _isolate_event_log(tmp_path_factory, monkeypatch):
     log = tmp_path_factory.mktemp("event_log") / "events.jsonl"
     monkeypatch.setattr(event_log, "_EVENT_LOG_FILE", log)
     yield log
+
+
+@pytest.fixture(autouse=True)
+def _isolate_priority_queue(tmp_path, monkeypatch):
+    """Redirect fun-doc's priority_queue.json to a temp file for EVERY test.
+
+    Same discipline as _isolate_event_log, for the same reason: nothing
+    errors when a test writes the real file, it just quietly destroys
+    operator state. Measured 2026-08-08: test_worker_quota_pause_loop
+    stubbed load_priority_queue but not save; the worker loop's
+    reset_handoff_counter() then saved the stub's minimal dict over the
+    REAL priority_queue.json. `config` survived the 3-way merge — but
+    `pinned` is last-writer-wins, and a live session's 8 falsify pins
+    (queued to route refuted Game.exe functions past the selector's
+    library skip) were silently erased mid-fleet.
+
+    Patches the module ATTRIBUTE, so a test that redirects
+    fun_doc.PRIORITY_QUEUE_FILE itself (test_queue_config_merge) simply
+    wins — its setattr is applied later, innermost-wins, exactly like the
+    event-log fixture above.
+    """
+    if "fun_doc" in sys.modules:
+        fd = sys.modules["fun_doc"]
+        monkeypatch.setattr(
+            fd, "PRIORITY_QUEUE_FILE", tmp_path / "priority_queue.json",
+            raising=False,
+        )
+    yield
