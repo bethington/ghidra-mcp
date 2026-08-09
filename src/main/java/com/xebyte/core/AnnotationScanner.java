@@ -170,8 +170,15 @@ public class AnnotationScanner {
                     }
                 }
 
-                // Dry-run support: wrap POST endpoints in a transaction that always rolls back
-                if (isWrite && "true".equalsIgnoreCase(query.get("dry_run")) && programProvider != null) {
+                // Dry-run support: wrap POST endpoints in a transaction that always rolls back.
+                // Must check BOTH the query string and the JSON body -- this project's own
+                // convention (CLAUDE.md "Code Conventions") is that most POST params live in
+                // the body, and a caller following that convention for dry_run too got a SILENT
+                // real write here: the query-only check below was always false, so this whole
+                // rollback branch never ran and every dry_run body param fell through to
+                // method.invoke(...) unguarded. Confirmed live 2026-08-09 on /batch_set_comments
+                // (see reference_dry_run_silently_writes.md).
+                if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
                     Program program = resolveProgramForDryRun(bindings, query);
                     if (program != null) {
                         int tx = program.startTransaction("[DRY RUN] " + tool.path());
@@ -195,6 +202,20 @@ public class AnnotationScanner {
                 return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
             }
         };
+    }
+
+    /**
+     * True if the caller asked for a dry run, whether "dry_run" arrived as a query
+     * param (?dry_run=true, what the Python bridge's registry.py synthesizes) or as
+     * a JSON body field (what a direct-HTTP caller sends when it follows this
+     * project's own "POST params go in the body" convention).
+     */
+    private static boolean isDryRunRequested(Map<String, String> query, Map<String, Object> body) {
+        if ("true".equalsIgnoreCase(query.get("dry_run"))) return true;
+        Object raw = body != null ? body.get("dry_run") : null;
+        if (raw instanceof Boolean b) return b;
+        if (raw instanceof String s) return "true".equalsIgnoreCase(s);
+        return false;
     }
 
     /**

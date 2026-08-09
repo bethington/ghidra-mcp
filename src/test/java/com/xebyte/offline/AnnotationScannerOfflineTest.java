@@ -11,14 +11,23 @@ import com.xebyte.core.Param;
 import com.xebyte.core.ParamSource;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.Response;
+import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Pure-reflection tests for {@link AnnotationScanner}.
@@ -258,6 +267,78 @@ public class AnnotationScannerOfflineTest extends TestCase {
             lastBodyLength = length;
             lastBodyStrict = strict;
             return Response.ok("ok");
+        }
+    }
+
+    /**
+     * Regression test for the 2026-08-09 incident: a raw-HTTP caller that follows this
+     * project's own "POST params go in the JSON body" convention (CLAUDE.md "Code
+     * Conventions") and puts {@code dry_run} in the body got a REAL write with a
+     * response that still looked like a preview. Root cause: the dry-run gate at
+     * {@code AnnotationScanner.createHandler} checked only {@code query.get("dry_run")},
+     * never the parsed body map, so body-supplied dry_run was silently ignored and the
+     * rollback-wrapped branch never ran. Confirmed live against /batch_set_comments,
+     * where it overwrote a verified-good plate comment before being caught and reverted.
+     *
+     * <p>This exercises the real dry-run wrapper end-to-end: a mocked {@link Program}
+     * stands in for the transaction the wrapper starts/rolls back, and the fixture's
+     * write method itself is invoked either way (the wrapper can only undo Ghidra
+     * transaction state, not arbitrary Java side effects) -- what distinguishes a
+     * genuine dry run is that {@code endTransaction} is called with {@code commit=false}.
+     */
+    public void testDryRunHonoredFromJsonBody() throws Exception {
+        DryRunWriteFixture fixture = new DryRunWriteFixture();
+        Program program = mock(Program.class);
+        when(program.startTransaction(org.mockito.ArgumentMatchers.anyString())).thenReturn(42);
+
+        ProgramProvider provider = mock(ProgramProvider.class);
+        when(provider.getProgram("Test.dll")).thenReturn(program);
+
+        AnnotationScanner fixtureScanner = new AnnotationScanner(provider, new Object[] { fixture });
+        EndpointDef endpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_dry_run_write".equals(ep.path())) endpoint = ep;
+        }
+        assertNotNull("Fixture endpoint not found", endpoint);
+
+        // dry_run supplied ONLY in the JSON body -- exactly the shape that was silently
+        // ignored before the fix (query still carries "program" so the wrapper CAN
+        // resolve a Program to roll back on; only dry_run itself is body-only).
+        Map<String, String> query = new HashMap<>();
+        query.put("program", "Test.dll");
+        Map<String, Object> body = new HashMap<>();
+        body.put("dry_run", Boolean.TRUE);
+        endpoint.handler().handle(query, body);
+
+        assertTrue("Fixture method must still be invoked under dry-run (only the transaction is rolled back)",
+            fixture.invoked);
+        verify(program).endTransaction(anyInt(), eq(false));
+
+        // Control: no dry_run anywhere -> real invocation, no dry-run rollback wrapper.
+        Program program2 = mock(Program.class);
+        ProgramProvider provider2 = mock(ProgramProvider.class);
+        when(provider2.getProgram("Test.dll")).thenReturn(program2);
+        DryRunWriteFixture fixture2 = new DryRunWriteFixture();
+        AnnotationScanner fixtureScanner2 = new AnnotationScanner(provider2, new Object[] { fixture2 });
+        EndpointDef endpoint2 = null;
+        for (EndpointDef ep : fixtureScanner2.getEndpoints()) {
+            if ("/test_dry_run_write".equals(ep.path())) endpoint2 = ep;
+        }
+        endpoint2.handler().handle(query, Collections.emptyMap());
+        assertTrue("Fixture method must be invoked on a real (non-dry-run) call", fixture2.invoked);
+        verify(program2, never()).endTransaction(anyInt(), eq(false));
+    }
+
+    /** Tiny fixture service scanned by {@link #testDryRunHonoredFromJsonBody}. */
+    static class DryRunWriteFixture {
+        volatile boolean invoked;
+
+        @McpTool(path = "/test_dry_run_write", method = "POST",
+                 description = "Fixture: a write endpoint used to prove dry_run routing")
+        public Response write(
+                @Param(value = "program", defaultValue = "") String program) {
+            invoked = true;
+            return Response.ok("wrote");
         }
     }
 }
