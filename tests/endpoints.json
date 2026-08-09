@@ -989,6 +989,7 @@
         "memory",
         "max_steps",
         "return_registers",
+        "read_memory_after",
         "program"
       ],
       "description": "Emulate a single function with controlled register/memory inputs. Returns final register state after execution. Ideal for understanding hash functions, crypto routines, or any pure-computation code path."

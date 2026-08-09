@@ -86,7 +86,29 @@ public final class JsonHelper {
     public static int getInt(Object obj, int defaultValue) {
         if (obj instanceof Number n) return n.intValue();
         if (obj instanceof String s) {
-            try { return Integer.parseInt(s); } catch (NumberFormatException e) { return defaultValue; }
+            try {
+                return Integer.parseInt(s);
+            } catch (NumberFormatException e) {
+                // toMapStringList (below) stringifies every value with
+                // String.valueOf(Object), and Gson parses JSON numbers as
+                // Double -- so an integer field that passed through THAT
+                // path (the bare-array fallback in
+                // ServiceUtils.convertToMapList, not the direct-object path)
+                // arrives here as "16.0", not "16". Integer.parseInt rejects
+                // the decimal point outright. Fall back to a double parse so
+                // a caller reading an int out of a Map<String,String> built
+                // that way is not silently handed the default instead of
+                // the real value -- found via emulate_function's
+                // read_memory_after: identical requests succeeded when
+                // wrapped as {"regions":[...]} (bypasses toMapStringList's
+                // stringification) and failed, silently, sent as a bare
+                // array with the SAME integer field.
+                try {
+                    return (int) Double.parseDouble(s);
+                } catch (NumberFormatException e2) {
+                    return defaultValue;
+                }
+            }
         }
         return defaultValue;
     }
