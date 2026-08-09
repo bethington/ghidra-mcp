@@ -67,6 +67,13 @@ TCP_PORT_SCAN_RANGE = 16
 # standalone debugger server's default port.
 DEBUGGER_URL = os.getenv("GHIDRA_DEBUGGER_URL", "http://127.0.0.1:8099")
 
+# D2Debugger in-process oracle (D2MOO's D2Debugger.dll, compiled into the running
+# Game.exe and serving 127.0.0.1:8790). Unlike DEBUGGER_URL this is not a debugger
+# at all -- it is an HTTP surface *inside* the live game, so it answers while the
+# game runs and needs no elevation on the client side (loopback TCP is not gated
+# by integrity level). Env name matches the one fun-doc/D2MOO tooling already uses.
+ORACLE_URL = os.getenv("D2DBG_MCP_URL", "http://127.0.0.1:8790")
+
 # ==========================================================================
 # Logging
 # ==========================================================================
@@ -124,9 +131,21 @@ DEBUGGER_TOOL_NAMES = {
     "debugger_watch_log",
 }
 
+# D2Debugger in-process oracle proxy tools. Registered conditionally (see
+# oracle._oracle_enabled()) for the same reason as the debugger names: reserved
+# in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming stays
+# identical everywhere, but only registered where the oracle can actually exist.
+ORACLE_TOOL_NAMES = {
+    "oracle_status",
+    "oracle_modules",
+    "oracle_read_memory",
+    "oracle_call_function",
+    "oracle_prove_function",
+}
+
 # Full structural set: every tool name the bridge may define. Used for
 # name-collision detection / reservation so dynamic tool names are platform-stable.
-_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES
+_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES | ORACLE_TOOL_NAMES
 
 # Active set: static tools actually registered with this process. Debugger names
 # are added by bridge_mcp_ghidra.debugger (once DEBUGGER_URL is known) only when
