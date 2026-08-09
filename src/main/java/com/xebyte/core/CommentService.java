@@ -159,6 +159,78 @@ public class CommentService {
     }
 
     /**
+     * Bulk reader for get_comment: fetch listing comments at MANY addresses in one call.
+     * get_comment is one-address-per-call, which made whole-program contamination/quality
+     * sweeps (e.g. auditing every function's plate for stale cross-version content) cost one
+     * HTTP round trip per function -- thousands of calls for a mid-size DLL. This collapses
+     * that to one call per batch, mirroring batch_set_comments' existence for the write side.
+     */
+    @McpTool(path = "/batch_get_comments", description = "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    public Response batchGetComments(
+            @Param(value = "addresses", description = "Comma-separated addresses, each 0x<hex> (default space) or <space>:<hex>.") String addressesStr,
+            @Param(value = "only_with_comments", defaultValue = "false",
+                   description = "If true, omit addresses where has_comment is false -- keeps sweep responses to just the interesting subset.") boolean onlyWithComments,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressesStr == null || addressesStr.trim().isEmpty()) {
+            return Response.err("addresses parameter is required (comma-separated)");
+        }
+
+        Listing listing = program.getListing();
+        List<Map<String, Object>> results = new java.util.ArrayList<>();
+        List<String> addressErrors = new java.util.ArrayList<>();
+        int requested = 0;
+        int withComments = 0;
+
+        for (String rawToken : addressesStr.split(",")) {
+            String token = rawToken.trim();
+            if (token.isEmpty()) continue;
+            requested++;
+
+            Address addr = ServiceUtils.parseAddress(program, token);
+            if (addr == null) {
+                addressErrors.add(token + ": " + ServiceUtils.getLastParseError());
+                continue;
+            }
+
+            String plate = listing.getComment(CodeUnit.PLATE_COMMENT, addr);
+            String pre = listing.getComment(CodeUnit.PRE_COMMENT, addr);
+            String eol = listing.getComment(CodeUnit.EOL_COMMENT, addr);
+            String post = listing.getComment(CodeUnit.POST_COMMENT, addr);
+            String repeatable = listing.getComment(CodeUnit.REPEATABLE_COMMENT, addr);
+            String best = firstNonEmpty(plate, pre, eol, post, repeatable);
+            boolean hasComment = best != null && !best.trim().isEmpty();
+            if (hasComment) withComments++;
+            if (onlyWithComments && !hasComment) continue;
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.putAll(ServiceUtils.addressToJson(addr, program));
+            entry.put("plate", plate);
+            entry.put("pre", pre);
+            entry.put("eol", eol);
+            entry.put("post", post);
+            entry.put("repeatable", repeatable);
+            entry.put("comment", best);
+            entry.put("has_comment", hasComment);
+            results.add(entry);
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("requested", requested);
+        out.put("returned", results.size());
+        out.put("with_comments", withComments);
+        out.put("results", results);
+        if (!addressErrors.isEmpty()) out.put("address_errors", addressErrors);
+        // Same null-preserving Gson as get_comment: absent-means-null is the shared
+        // convention elsewhere, but plate/pre/eol/post/repeatable need null (never set)
+        // distinguishable from "" (explicitly cleared) per-entry, same as the single-address form.
+        return Response.text(GSON_WITH_NULLS.toJson(out));
+    }
+
+    /**
      * Symmetric writer for get_comment: set a listing comment of a given kind at ANY address,
      * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
      * comment on a data global via Listing.setComment.
