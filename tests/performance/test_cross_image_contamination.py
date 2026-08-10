@@ -441,3 +441,34 @@ def test_report_records_when_inline_was_skipped(monkeypatch, tmp_path):
     cic.main(["--programs", "/V/A.dll", "--corpus-folders", "/M", "--plates-only",
               "--json", str(out)])
     assert json.loads(out.read_text())[0]["scanned_inline"] is False
+
+
+def test_the_tools_own_audit_note_silences_the_finding_it_records():
+    """Stamping suppresses re-detection, so a re-scan is not a re-measurement.
+
+    The note written by --apply contains "propagated from", which the repair-note
+    rule matches deliberately: re-flagging a plate that cites a foreign address in
+    order to REFUTE it would make a binary look worse after repair than before.
+
+    Pinned as a test because the consequence is easy to misread. Measured on
+    /Vanilla/1.00/D2Net.dll: 25 findings pre-stamp, 6 on re-scan. That 6 is "what
+    is still open", not a corrected rate.
+    """
+    plate = "Stores the flag at 0x6fcd1c20 before returning."
+    assert cic.check_program_function(plate, RANGES) is not None
+    stamped = (
+        "[AUDIT falsify:cross_image_contamination 2026-08-10] REVIEW: the plate cites "
+        "foreign address(es) 0x6fcd1c20 -- but they fall outside every segment of this "
+        "program and inside another binary in this corpus, so this text was propagated "
+        "from that image; check the NAME too, not just the prose.\n\n" + plate
+    )
+    assert cic.check_program_function(stamped, RANGES) is None
+
+
+def test_an_inline_finding_is_not_silenced_by_the_plate_marker():
+    """The marker goes in the PLATE, so inline text keeps reporting until it is
+    fixed -- which is why 5 of D2Net's 6 re-scan findings were inline. It also
+    means a run's "already flagged" tally mixes "repaired" with "same function,
+    different comment"."""
+    inline = "Loads the table at 0x6fcd1c20 into esi."
+    assert cic.check_program_function(inline, RANGES, name="X") is not None

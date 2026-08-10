@@ -37,6 +37,22 @@ propagated plate's addresses are, by construction, OUTSIDE this program. The two
 checks are complements, not duplicates. Widening F8 to cover this would
 re-introduce the false-positive class its three calibration rounds removed.
 
+A RE-SCAN OF A STAMPED BINARY IS NOT A RE-MEASUREMENT -- PUBLISH RATES ONLY FROM
+A BINARY'S FIRST, PRE-STAMP SCAN. The audit note this tool writes contains the
+words "propagated from", which _REFUTATION_RE matches BY DESIGN: a plate citing a
+foreign address in order to refute it is a repair note, and re-flagging it would
+make a binary look worse after being fixed than before. So stamping silences the
+findings it recorded. Measured on /Vanilla/1.00/D2Net.dll: 25 findings before,
+6 on re-scan -- 19 correctly gone quiet, NOT a corrected rate.
+
+Of the 6 that survived, 5 were INLINE findings, because the marker goes in the
+PLATE and plate-level abstention does not cover inline text. That is the desired
+behaviour (an inline comment keeps reporting until the inline comment is fixed),
+but it means a run's "already flagged" tally mixes "this is repaired" with "same
+function, different comment". A re-scan answers "what is newly visible", nothing
+more -- which is exactly what it is good for: widening the corpus and re-running
+found ValidateHeapIntegrity citing 0x0041384c (Game.exe), invisible before.
+
 STRUCTURAL BLIND SPOT -- EVERY COUNT THIS TOOL PRODUCES IS A FLOOR. Detection
 requires the cited address to fall OUTSIDE the receiving program, so
 contamination between two images that share a base is invisible. Every D2 v1.00
