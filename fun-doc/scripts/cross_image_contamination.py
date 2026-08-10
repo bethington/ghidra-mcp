@@ -396,15 +396,21 @@ def _load_checkpoint(path) -> dict:
 
 def scan_program(program: str, limit: int | None = None,
                  sibling_ranges=None, scan_inline: bool = True,
-                 checkpoint_path=None, done_addrs=None) -> dict:
+                 checkpoint_path=None, done_addrs=None, prior_findings=None,
+                 prior_plated: int = 0) -> dict:
+    # RESUME MUST CARRY THE PRIOR FINDINGS FORWARD. Seeding only `done_addrs`
+    # made a resumed run skip every already-scanned function and report ZERO --
+    # so resuming a COMPLETED scan would have silently overwritten a good report
+    # with an empty one. Caught before it landed, but only because the run was
+    # watched; the failure is silent by construction.
     done_addrs = set(done_addrs or ())
-    scanned_addrs = []
+    scanned_addrs = list(done_addrs)
     ranges = program_ranges(program)
     if not ranges:
         return {"program": program, "error": "no segments; cannot tell", "findings": []}
     resp = falsify._get("/list_functions_enhanced", program=program, limit=100000) or {}
     funcs = resp.get("functions") or []
-    findings, plated = [], 0
+    findings, plated = list(prior_findings or ()), int(prior_plated or 0)
     for fn in funcs[: limit or len(funcs)]:
         addr = str(fn.get("address") or "")
         if not addr or addr in done_addrs:
@@ -492,12 +498,16 @@ def main(argv=None) -> int:
     prior = _load_checkpoint(args.json) if (args.resume and args.json) else {}
     reports = []
     for prog in programs:
-        done = set(prior.get(prog, {}).get("scanned_addrs") or ())
+        prev = prior.get(prog, {})
+        done = set(prev.get("scanned_addrs") or ())
         if done:
-            print(f"{prog}: resuming, {len(done)} function(s) already scanned")
+            print(f"{prog}: resuming, {len(done)} function(s) already scanned, "
+                  f"{len(prev.get('findings') or ())} finding(s) carried forward")
         reports.append(scan_program(prog, args.limit, siblings,
                                     not args.plates_only,
-                                    checkpoint_path=args.json, done_addrs=done))
+                                    checkpoint_path=args.json, done_addrs=done,
+                                    prior_findings=prev.get("findings"),
+                                    prior_plated=prev.get("plated_total", 0)))
     total = sum(r.get("findings_count", len(r.get("findings", []))) for r in reports)
     for r in reports:
         if r.get("error"):

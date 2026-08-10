@@ -300,3 +300,22 @@ def test_load_checkpoint_tolerates_missing_and_corrupt(tmp_path):
 def test_write_partial_never_raises(tmp_path):
     """Checkpointing is best-effort: it must not be able to kill a long run."""
     cic._write_partial(tmp_path / "no" / "such" / "dir" / "r.json", "/A", [], 0, [])
+
+
+def test_resume_carries_prior_findings_forward(tmp_path, monkeypatch):
+    """Seeding only done_addrs made a resumed run skip every already-scanned
+    function and report ZERO findings -- so resuming a COMPLETED scan would
+    overwrite a good report with an empty one. Silent by construction: the run
+    exits 0 and prints a plausible number."""
+    monkeypatch.setattr(cic, "program_ranges", lambda p: RANGES)
+    monkeypatch.setattr(cic.falsify, "_get",
+                        lambda ep, **kw: {"functions": [{"address": "10001000",
+                                                         "name": "A"}]})
+    prior = [{"address": "10002000", "name": "Old", "source": "plate",
+              "foreign_addresses": ["6fc99e70"], "foreign_bases": ["6fc9"]}]
+    out = cic.scan_program("/p", sibling_ranges=None, scan_inline=False,
+                           done_addrs={"10001000"}, prior_findings=prior,
+                           prior_plated=7)
+    assert out["findings_count"] == 1, "prior finding was dropped on resume"
+    assert out["findings"][0]["address"] == "10002000"
+    assert out["plated_total"] == 7, "prior plated count was dropped"
