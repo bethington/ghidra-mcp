@@ -372,8 +372,33 @@ def corpus_ranges(folders: list) -> list:
     return out
 
 
+def _write_partial(path, program, findings, plated, scanned_addrs) -> None:
+    """Merge this program's partial result into the report file on disk."""
+    try:
+        existing = _load_checkpoint(path)
+        row = {"program": program, "findings": findings, "partial": True,
+               "scanned_addrs": scanned_addrs}
+        row.update(summarize(findings, plated))
+        existing[program] = row
+        Path(path).write_text(json.dumps(list(existing.values()), indent=2),
+                              encoding="utf-8")
+    except Exception as e:                 # never let checkpointing kill the run
+        print(f"  checkpoint WARN: {e}", file=sys.stderr)
+
+
+def _load_checkpoint(path) -> dict:
+    """Partial results from an interrupted run, keyed by program."""
+    try:
+        return {r["program"]: r for r in json.loads(Path(path).read_text("utf-8"))}
+    except Exception:                      # missing/corrupt -> start clean
+        return {}
+
+
 def scan_program(program: str, limit: int | None = None,
-                 sibling_ranges=None, scan_inline: bool = True) -> dict:
+                 sibling_ranges=None, scan_inline: bool = True,
+                 checkpoint_path=None, done_addrs=None) -> dict:
+    done_addrs = set(done_addrs or ())
+    scanned_addrs = []
     ranges = program_ranges(program)
     if not ranges:
         return {"program": program, "error": "no segments; cannot tell", "findings": []}
@@ -382,7 +407,7 @@ def scan_program(program: str, limit: int | None = None,
     findings, plated = [], 0
     for fn in funcs[: limit or len(funcs)]:
         addr = str(fn.get("address") or "")
-        if not addr:
+        if not addr or addr in done_addrs:
             continue
         c = falsify._get("/get_comment", program=program, address=addr,
                          comment_type="plate") or {}
@@ -409,8 +434,19 @@ def scan_program(program: str, limit: int | None = None,
                 hit["address"] = addr
                 hit["source"] = source
                 findings.append(hit)
-    out = {"program": program, "findings": findings}
+        scanned_addrs.append(addr)
+        # CHECKPOINT. Ghidra restarts: three distinct PIDs in one session, and
+        # three multi-thousand-call sweeps died mid-run and lost EVERYTHING
+        # because nothing was written until the end. Partial results on disk beat
+        # a perfect report that never arrives.
+        if checkpoint_path and len(scanned_addrs) % 250 == 0:
+            _write_partial(checkpoint_path, program, findings, plated,
+                           scanned_addrs)
+    out = {"program": program, "findings": findings, "partial": False,
+           "scanned_addrs": scanned_addrs}
     out.update(summarize(findings, plated))
+    if checkpoint_path:
+        _write_partial(checkpoint_path, program, findings, plated, scanned_addrs)
     return out
 
 
@@ -420,6 +456,10 @@ def main(argv=None) -> int:
     ap.add_argument("--folder", default=None)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--resume", action="store_true",
+                    help="Continue an interrupted sweep from --json, skipping "
+                         "addresses already scanned. Ghidra restarts mid-sweep; "
+                         "without this a 3,500-function run loses everything.")
     ap.add_argument("--apply", action="store_true",
                     help="Stamp an idempotent tier-2 plate note on each finding via "
                          "falsify.flag_finding. NEVER rewrites or deletes existing "
@@ -449,8 +489,15 @@ def main(argv=None) -> int:
         print("nothing to scan: pass --programs or --folder", file=sys.stderr)
         return 2
 
-    reports = [scan_program(p, args.limit, siblings, not args.plates_only)
-               for p in programs]
+    prior = _load_checkpoint(args.json) if (args.resume and args.json) else {}
+    reports = []
+    for prog in programs:
+        done = set(prior.get(prog, {}).get("scanned_addrs") or ())
+        if done:
+            print(f"{prog}: resuming, {len(done)} function(s) already scanned")
+        reports.append(scan_program(prog, args.limit, siblings,
+                                    not args.plates_only,
+                                    checkpoint_path=args.json, done_addrs=done))
     total = sum(r.get("findings_count", len(r.get("findings", []))) for r in reports)
     for r in reports:
         if r.get("error"):

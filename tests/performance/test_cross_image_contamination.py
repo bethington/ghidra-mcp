@@ -265,3 +265,38 @@ def test_to_finding_is_tier2_and_carries_the_source():
 def test_to_finding_survives_a_sparse_hit():
     f = cic.to_finding({"address": "1000", "foreign_addresses": []}, "/p")
     assert f.tier == 2 and f.function == ""
+
+
+# --- checkpoint / resume ----------------------------------------------------
+
+def test_checkpoint_round_trips_and_merges_by_program(tmp_path):
+    """Ghidra restarted three times in one session (three distinct PIDs) and
+    killed three multi-thousand-call sweeps that wrote nothing until the end.
+    Partial results on disk beat a perfect report that never arrives."""
+    f = tmp_path / "r.json"
+    cic._write_partial(f, "/A", [{"address": "1000"}], 10, ["1000", "1004"])
+    cic._write_partial(f, "/B", [], 5, ["2000"])
+    cp = cic._load_checkpoint(f)
+    assert set(cp) == {"/A", "/B"}
+    assert cp["/A"]["partial"] is True
+    assert cp["/A"]["scanned_addrs"] == ["1000", "1004"]
+    assert cp["/A"]["findings_count"] == 1
+    # re-writing one program must not drop the other
+    cic._write_partial(f, "/A", [{"address": "1000"}, {"address": "1008"}], 10,
+                       ["1000", "1004", "1008"])
+    cp = cic._load_checkpoint(f)
+    assert set(cp) == {"/A", "/B"}
+    assert cp["/A"]["findings_count"] == 2
+
+
+def test_load_checkpoint_tolerates_missing_and_corrupt(tmp_path):
+    """A corrupt checkpoint must start clean, never crash the sweep."""
+    assert cic._load_checkpoint(tmp_path / "nope.json") == {}
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert cic._load_checkpoint(bad) == {}
+
+
+def test_write_partial_never_raises(tmp_path):
+    """Checkpointing is best-effort: it must not be able to kill a long run."""
+    cic._write_partial(tmp_path / "no" / "such" / "dir" / "r.json", "/A", [], 0, [])
