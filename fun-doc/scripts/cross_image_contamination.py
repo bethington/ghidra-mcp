@@ -72,8 +72,20 @@ the CLI refuses only if the flag resolves to nothing, not if you omit it.
 
 Scanning is TWO HTTP calls per function (plate + body comments), so a 3,500-
 function binary is thousands of round trips. Sweep ONE program at a time: two
-multi-binary runs in this session died to a Ghidra restart mid-sweep and lost all
-their progress, since nothing is written until the end.
+multi-binary runs in this session died to a Ghidra restart mid-sweep.
+
+--resume EXISTS FOR INTERRUPTED RUNS ONLY, AND IS NOT TRUSTED FOR --apply.
+Resuming writes the merged result back over --json, so if the resume path is
+wrong in any way it destroys the very report it was meant to preserve. That
+happened: a completed 23-finding report came back 0 findings / 0 scanned after a
+`--resume --apply`, and the cause was never established (the obvious candidate,
+findings not being carried forward, was fixed and tested first, and the run still
+produced an empty file). Until that is understood:
+
+    to stamp a binary, do a FRESH scan with --apply in ONE pass.
+
+It costs a full re-scan and cannot silently eat a good report. If you do use
+--resume, write to a DIFFERENT --json than the one you are resuming from.
 """
 from __future__ import annotations
 
@@ -463,9 +475,10 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--json", default=None)
     ap.add_argument("--resume", action="store_true",
-                    help="Continue an interrupted sweep from --json, skipping "
+                    help="Continue an INTERRUPTED sweep from --json, skipping "
                          "addresses already scanned. Ghidra restarts mid-sweep; "
-                         "without this a 3,500-function run loses everything.")
+                         "without this a 3,500-function run loses everything. "
+                         "NOT for a completed report -- see the warning below.")
     ap.add_argument("--apply", action="store_true",
                     help="Stamp an idempotent tier-2 plate note on each finding via "
                          "falsify.flag_finding. NEVER rewrites or deletes existing "
