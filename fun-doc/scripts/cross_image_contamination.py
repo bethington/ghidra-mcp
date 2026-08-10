@@ -412,6 +412,74 @@ def program_ranges(program: str) -> list:
     return ranges
 
 
+def same_named_programs(program: str, folders: list) -> list:
+    """Every OTHER program in the corpus sharing this one's basename.
+
+    These are the only programs a basename mix-up can reach, which is why they
+    are the ones worth reading back from. Not hypothetical: `flag_finding` once
+    reduced `program` to its basename and put 21 stamps into
+    /Mods/PD2-S12/D2Net.dll while reporting success -- see
+    reference_basename_is_not_a_program_id.
+    """
+    base = str(program).rsplit("/", 1)[-1].lower()
+    out = []
+    for folder in folders or []:
+        resp = falsify._get("/list_project_files", folder=folder) or {}
+        for f in (resp.get("files") or []):
+            if str(f.get("content_type")) != "Program":
+                continue
+            path = f["path"]
+            if path != program and path.rsplit("/", 1)[-1].lower() == base:
+                out.append(path)
+    return out
+
+
+def _carries_marker(program: str, address: str) -> bool:
+    resp = falsify._get("/get_comment", program=program, address=address,
+                        comment_type="plate") or {}
+    text = (resp.get("plate") or "") + (resp.get("pre") or "")
+    return f"falsify:{CHECK_ID}" in text
+
+
+def verify_placement(reports: list, corpus_folders: list) -> int:
+    """Read every stamp back from the program that was TARGETED, and from every
+    same-named program that was not. Returns the number of problems found.
+
+    This runs automatically after --apply because it is the only check that has
+    ever caught a mis-targeted write. Ghidra ACCEPTS a comment write to an
+    address that does not exist in a program and reports success, so a run's own
+    "N stamped, 0 FAILED" says nothing about WHERE it wrote -- 21 stamps once
+    landed in the wrong D2Net.dll under exactly that banner. Doing it by hand
+    works and is what caught every incident here; the reason it is code is that
+    it only helps on the runs where someone remembers.
+    """
+    problems = 0
+    for r in reports:
+        program = r.get("program")
+        addrs = sorted({h["address"] for h in r.get("findings", [])})
+        if not program or not addrs:
+            continue
+        siblings = same_named_programs(program, corpus_folders)
+        missing = [a for a in addrs if not _carries_marker(program, a)]
+        strays = {s: [a for a in addrs if _carries_marker(s, a)] for s in siblings}
+        strays = {s: v for s, v in strays.items() if v}
+        print(f"verify {program}: {len(addrs) - len(missing)}/{len(addrs)} present"
+              + (f", {len(siblings)} same-named sibling(s) checked" if siblings
+                 else ", NO same-named sibling in corpus"))
+        for a in missing:
+            print(f"  MISSING  {program} {a} -- stamp reported success but is not there",
+                  file=sys.stderr)
+            problems += 1
+        for s, v in strays.items():
+            print(f"  STRAY    {s} carries {len(v)} of our marker(s): {v[:5]}",
+                  file=sys.stderr)
+            problems += len(v)
+    if problems:
+        print(f"\nPLACEMENT PROBLEMS: {problems}. Do not trust the applied counts.",
+              file=sys.stderr)
+    return problems
+
+
 def looks_like_project_path(p: str) -> bool:
     """A Ghidra project path is absolute and has NO drive letter.
 
@@ -657,7 +725,8 @@ def main(argv=None) -> int:
                           file=sys.stderr)
         print(f"\napplied: {stamped} stamped, {skipped} already flagged, "
               f"{failed} FAILED")
-        return 1 if failed else 0
+        misplaced = verify_placement(reports, args.corpus_folders)
+        return 1 if (failed or misplaced) else 0
     # Repair still needs a human: the NAME usually has to move too, and a tier-2
     # finding is evidence, not a verdict.
     print(f"\n{total} finding(s). Dry run -- no writes; pass --apply to stamp. "

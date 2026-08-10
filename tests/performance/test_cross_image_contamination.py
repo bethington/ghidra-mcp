@@ -472,3 +472,74 @@ def test_an_inline_finding_is_not_silenced_by_the_plate_marker():
     different comment"."""
     inline = "Loads the table at 0x6fcd1c20 into esi."
     assert cic.check_program_function(inline, RANGES, name="X") is not None
+
+
+# --- placement verification -------------------------------------------------
+#
+# Runs automatically after --apply. It is the ONLY check that has ever caught a
+# mis-targeted write: Ghidra accepts a comment write to an address that does not
+# exist in a program and reports success, so "N stamped, 0 FAILED" says nothing
+# about WHERE it wrote. 21 stamps once landed in /Mods/PD2-S12/D2Net.dll under
+# exactly that banner. Doing it by hand works; the point of doing it in code is
+# that a manual step only helps on the runs where someone remembers.
+
+def test_same_named_programs_finds_only_the_basename_collisions(monkeypatch):
+    monkeypatch.setattr(cic.falsify, "_get", lambda ep, **kw: {"files": [
+        {"path": "/Mods/PD2-S12/D2Net.dll", "content_type": "Program"},
+        {"path": "/Mods/PD2-S12/D2Game.dll", "content_type": "Program"},
+        {"path": "/Mods/PD2-S12/notes.txt", "content_type": "TextFile"},
+    ]})
+    got = cic.same_named_programs("/Vanilla/1.00/D2Net.dll", ["/Mods/PD2-S12"])
+    assert got == ["/Mods/PD2-S12/D2Net.dll"]
+
+
+def test_same_named_programs_excludes_the_target_itself(monkeypatch):
+    monkeypatch.setattr(cic.falsify, "_get", lambda ep, **kw: {"files": [
+        {"path": "/Vanilla/1.00/D2Net.dll", "content_type": "Program"}]})
+    assert cic.same_named_programs("/Vanilla/1.00/D2Net.dll", ["/Vanilla/1.00"]) == []
+
+
+def _placement_env(monkeypatch, marked):
+    """marked: {(program, address)} that carry our marker."""
+    def _get(ep, **kw):
+        if ep == "/list_project_files":
+            return {"files": [{"path": "/Mods/X/A.dll", "content_type": "Program"}]}
+        if ep == "/get_comment":
+            key = (kw["program"], kw["address"])
+            return {"plate": ("[AUDIT falsify:cross_image_contamination] x"
+                              if key in marked else "ordinary plate")}
+        return {}
+    monkeypatch.setattr(cic.falsify, "_get", _get)
+
+
+REPORT = [{"program": "/V/A.dll", "findings": [{"address": "1000"},
+                                               {"address": "2000"}]}]
+
+
+def test_verify_passes_when_every_stamp_is_in_the_target(monkeypatch, capsys):
+    _placement_env(monkeypatch, {("/V/A.dll", "1000"), ("/V/A.dll", "2000")})
+    assert cic.verify_placement(REPORT, ["/Mods/X"]) == 0
+    assert "2/2 present" in capsys.readouterr().out
+
+
+def test_verify_catches_a_stamp_that_reported_success_but_is_not_there(monkeypatch, capsys):
+    _placement_env(monkeypatch, {("/V/A.dll", "1000")})
+    assert cic.verify_placement(REPORT, ["/Mods/X"]) == 1
+    assert "MISSING" in capsys.readouterr().err
+
+
+def test_verify_catches_the_wrong_binary_case(monkeypatch, capsys):
+    """The measured incident: stamps present in a same-named sibling."""
+    _placement_env(monkeypatch, {("/V/A.dll", "1000"), ("/V/A.dll", "2000"),
+                                 ("/Mods/X/A.dll", "1000")})
+    assert cic.verify_placement(REPORT, ["/Mods/X"]) == 1
+    assert "STRAY" in capsys.readouterr().err
+
+
+def test_verify_says_so_when_there_is_no_sibling_to_check(monkeypatch, capsys):
+    """Silence must not read as 'the sibling was clean' when none was examined."""
+    monkeypatch.setattr(cic.falsify, "_get", lambda ep, **kw: (
+        {"files": []} if ep == "/list_project_files"
+        else {"plate": "[AUDIT falsify:cross_image_contamination] x"}))
+    assert cic.verify_placement(REPORT, ["/Mods/X"]) == 0
+    assert "NO same-named sibling in corpus" in capsys.readouterr().out
