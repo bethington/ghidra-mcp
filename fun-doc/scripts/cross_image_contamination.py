@@ -56,9 +56,24 @@ plate even read "despite the name". A corrected plate over a wrong name is a hal
 fix, because the name is what every caller, listing and search shows. The report
 therefore flags name-derivation risk separately.
 
-Usage:
-    python -m scripts.cross_image_contamination --programs /Vanilla/1.00/D2Game.dll --json report.json
-    python -m scripts.cross_image_contamination --folder /Vanilla/1.00 --json report.json
+Usage -- ALWAYS pass --corpus-folders. Without it, "foreign" degrades to "outside
+this program", which is what rounds 1-2 showed admits every compiler constant;
+the CLI refuses only if the flag resolves to nothing, not if you omit it.
+
+    python -m scripts.cross_image_contamination \
+        --programs /Vanilla/1.00/D2Game.dll \
+        --corpus-folders /Mods/PD2-S12 --json report.json
+
+    # dry run first, review, THEN stamp
+    python -m scripts.cross_image_contamination \
+        --folder /Vanilla/1.00 --corpus-folders /Mods/PD2-S12 --json report.json
+    python -m scripts.cross_image_contamination \
+        --folder /Vanilla/1.00 --corpus-folders /Mods/PD2-S12 --apply
+
+Scanning is TWO HTTP calls per function (plate + body comments), so a 3,500-
+function binary is thousands of round trips. Sweep ONE program at a time: two
+multi-binary runs in this session died to a Ghidra restart mid-sweep and lost all
+their progress, since nothing is written until the end.
 """
 from __future__ import annotations
 
