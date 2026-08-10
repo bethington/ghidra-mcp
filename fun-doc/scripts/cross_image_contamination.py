@@ -210,6 +210,25 @@ def foreign_addresses(plate: str, ranges) -> list:
     return sorted(set(out))
 
 
+def inline_comment_text(doc: dict) -> str:
+    """All body comments of a function, joined, so they can be scanned like a plate.
+
+    MEASURED NECESSITY (2026-08-10). D2Net's StoreSehContext carries a stale
+    0x6fd48dc0 -- a 0x6F...... address in a 0x10000000-based binary -- in an
+    INLINE comment, not its plate. A plate-only scan reports that function clean,
+    so every plate-only sweep figure is an undercount. Contamination propagates
+    with the whole documentation payload, and inline comments are part of it.
+    """
+    out = []
+    for c in (doc or {}).get("comments") or []:
+        for k in ("eol_comment", "pre_comment", "post_comment", "comment",
+                  "repeatable_comment"):
+            v = c.get(k)
+            if v:
+                out.append(str(v))
+    return "\n".join(out)
+
+
 def check_program_function(plate: str, ranges, *, is_thunk: bool = False,
                            name: str = "", sibling_ranges=None) -> dict | None:
     """Return a finding dict, or None to abstain.
@@ -271,8 +290,13 @@ def summarize(findings: list, plated_total: int) -> dict:
     # NOT "findings" -- the report dict already holds the finding LIST under that
     # key, and out.update(summarize(...)) would overwrite the list with a count.
     # (Caught by the first live run; two writers of one key, in miniature.)
+    by_source = {}
+    for f in findings:
+        k = f.get("source", "plate")
+        by_source[k] = by_source.get(k, 0) + 1
     return {
         "plated_total": plated_total,
+        "by_source": by_source,
         "findings_count": len(findings),
         "rate": round(len(findings) / plated_total, 4) if plated_total else 0.0,
         "by_foreign_base": dict(sorted(by_base.items(), key=lambda kv: -kv[1])),
@@ -311,7 +335,7 @@ def corpus_ranges(folders: list) -> list:
 
 
 def scan_program(program: str, limit: int | None = None,
-                 sibling_ranges=None) -> dict:
+                 sibling_ranges=None, scan_inline: bool = True) -> dict:
     ranges = program_ranges(program)
     if not ranges:
         return {"program": program, "error": "no segments; cannot tell", "findings": []}
@@ -325,15 +349,28 @@ def scan_program(program: str, limit: int | None = None,
         c = falsify._get("/get_comment", program=program, address=addr,
                          comment_type="plate") or {}
         plate = c.get("plate") or c.get("comment") or ""
-        if not plate:
+        inline = ""
+        if scan_inline:
+            doc = falsify._get("/get_function_documentation", program=program,
+                               address=addr) or {}
+            inline = inline_comment_text(doc)
+        if not plate and not inline:
             continue
-        plated += 1
-        hit = check_program_function(plate, ranges, is_thunk=bool(fn.get("isThunk")),
-                                     name=fn.get("name") or "",
-                                     sibling_ranges=sibling_ranges)
-        if hit:
-            hit["address"] = addr
-            findings.append(hit)
+        if plate:
+            plated += 1
+        is_thunk = bool(fn.get("isThunk"))
+        # Scan the two sources SEPARATELY so the report says which one is dirty --
+        # repairing a plate does not touch inline comments and vice versa.
+        for source, text in (("plate", plate), ("inline", inline)):
+            if not text:
+                continue
+            hit = check_program_function(text, ranges, is_thunk=is_thunk,
+                                         name=fn.get("name") or "",
+                                         sibling_ranges=sibling_ranges)
+            if hit:
+                hit["address"] = addr
+                hit["source"] = source
+                findings.append(hit)
     out = {"program": program, "findings": findings}
     out.update(summarize(findings, plated))
     return out
@@ -345,6 +382,8 @@ def main(argv=None) -> int:
     ap.add_argument("--folder", default=None)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--plates-only", action="store_true",
+                    help="Skip inline/EOL comments. NOT recommended: a stale address in an inline comment is the same defect, and plate-only figures undercount.")
     ap.add_argument("--corpus-folders", nargs="*", default=[],
                     help="Folders whose programs' image ranges count as 'another "
                          "binary'. STRONGLY RECOMMENDED: without it every number "
@@ -367,7 +406,8 @@ def main(argv=None) -> int:
         print("nothing to scan: pass --programs or --folder", file=sys.stderr)
         return 2
 
-    reports = [scan_program(p, args.limit, siblings) for p in programs]
+    reports = [scan_program(p, args.limit, siblings, not args.plates_only)
+               for p in programs]
     total = sum(r.get("findings_count", len(r.get("findings", []))) for r in reports)
     for r in reports:
         if r.get("error"):

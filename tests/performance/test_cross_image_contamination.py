@@ -207,3 +207,33 @@ def test_round4_crypto_constants(v, why):
     modules are based at 0x10000000), so corpus containment does not exclude
     them. Containment narrows the constant problem; it does not end it."""
     assert cic.looks_like_mask(v), why
+
+
+# --- inline/EOL comments carry the same defect ------------------------------
+
+def test_inline_comment_text_joins_all_comment_kinds():
+    doc = {"comments": [
+        {"relative_offset": 3, "eol_comment": "base is 0x6fd48dc0"},
+        {"relative_offset": 9, "pre_comment": "loop over slots"},
+        {"relative_offset": 12},
+    ]}
+    txt = cic.inline_comment_text(doc)
+    assert "0x6fd48dc0" in txt
+    assert "loop over slots" in txt
+
+
+def test_inline_comment_text_tolerates_missing_and_empty():
+    assert cic.inline_comment_text({}) == ""
+    assert cic.inline_comment_text({"comments": []}) == ""
+    assert cic.inline_comment_text(None) == ""
+
+
+def test_foreign_address_in_an_inline_comment_is_a_finding():
+    """MEASURED NECESSITY: D2Net's StoreSehContext hid a stale 0x6fd48dc0 in an
+    INLINE comment while its plate was clean, so the plate-only scan called it
+    healthy. Every plate-only sweep figure is an undercount."""
+    doc = {"comments": [{"eol_comment": "Load context structure base (0x6fd48dc0)"}]}
+    txt = cic.inline_comment_text(doc)
+    hit = cic.check_program_function(txt, RANGES, sibling_ranges=[(0x6F000000, 0x6FFFFFFF)])
+    assert hit is not None
+    assert "6fd48dc0" in hit["foreign_addresses"]
