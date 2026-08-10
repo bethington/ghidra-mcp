@@ -599,6 +599,21 @@ def check_phantom_address(bundle: dict) -> List[Finding]:
         an immediate, so a documented constant is not accused.
     Tier 2 rather than 1 on first release: the rule is sound but unmeasured at
     corpus scale, and phantom_callee set the precedent for earning tier 1.
+
+    NOT COVERED, BY DESIGN -- cross-image contamination. The data-segment
+    containment filter below means this check CANNOT see a plate propagated
+    wholesale from another binary, because such a plate's addresses are, by
+    construction, outside this program. Measured 2026-08-09 on
+    /Vanilla/1.00/D2Game.dll: 44 of 745 plated functions (~6%) document a
+    0x6F......-based image while the program is based at 0x10000000, clustered
+    12% inside the statically-linked CRT (byte-identical CRT is exactly what a
+    hash propagator matches, and it drags absolute addresses along).
+    That class belongs to scripts/cross_image_contamination.py, which discriminates
+    on ATTRIBUTION (a benign cross-module reference NAMES the module; a propagated
+    plate does not). Do NOT widen the containment filter here to try to cover it --
+    that would re-introduce the false-positive class rounds 1-3 removed. The two
+    checks are complements: F8 owns "invented a global of MINE", the sweep owns
+    "this text is not about my binary at all".
     """
     disasm = bundle.get("disasm_text")
     if not disasm:
