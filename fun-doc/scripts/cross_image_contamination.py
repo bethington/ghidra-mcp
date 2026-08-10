@@ -371,17 +371,47 @@ def program_ranges(program: str) -> list:
     return ranges
 
 
-def corpus_ranges(folders: list) -> list:
+def looks_like_project_path(p: str) -> bool:
+    """A Ghidra project path is absolute and has NO drive letter.
+
+    This exists because of a measured near-miss: these paths are passed on a
+    command line, and under Git Bash an argument beginning with `/` is rewritten
+    by MSYS path conversion -- `/Vanilla/1.00` arrived as
+    `C:/Program Files/Git/Vanilla/1.00`. Every folder then resolved to no
+    programs, the corpus came back empty, and only the all-or-nothing guard below
+    stopped an unconstrained run. Had ONE folder survived mangling the run would
+    have proceeded against a partial corpus and reported compiler constants as
+    contamination. Prefix the command with MSYS_NO_PATHCONV=1.
+    """
+    s = str(p)
+    return s.startswith("/") and not re.match(r"^/?[A-Za-z]:", s)
+
+
+def corpus_ranges(folders: list) -> tuple:
     """Image ranges of every program in the given folders -- the set of binaries
-    an address could legitimately have been propagated FROM."""
-    out = []
+    an address could legitimately have been propagated FROM.
+
+    Returns (ranges, unresolved). `unresolved` is every program whose segments
+    could not be read. It is returned rather than swallowed because a SHORT
+    corpus is not a smaller answer, it is a WRONG one: "foreign" is defined as
+    "inside another binary in this corpus", so each missing binary converts its
+    own addresses into findings. A silent partial here manufactures exactly the
+    false positives three calibration rounds removed.
+    """
+    out, unresolved = [], []
     for folder in folders or []:
         resp = falsify._get("/list_project_files", folder=folder) or {}
-        for f in (resp.get("files") or []):
-            if str(f.get("content_type")) != "Program":
-                continue
-            out.extend(program_ranges(f["path"]))
-    return out
+        files = [f for f in (resp.get("files") or [])
+                 if str(f.get("content_type")) == "Program"]
+        if not files:
+            unresolved.append(f"{folder} (no programs)")
+        for f in files:
+            got = program_ranges(f["path"])
+            if got:
+                out.extend(got)
+            else:
+                unresolved.append(f["path"])
+    return out, unresolved
 
 
 def _write_partial(path, program, findings, plated, scanned_addrs) -> None:
@@ -493,10 +523,32 @@ def main(argv=None) -> int:
                          "masks come back as findings.")
     args = ap.parse_args(argv)
 
-    siblings = corpus_ranges(args.corpus_folders)
+    mangled = [p for p in (list(args.programs) + list(args.corpus_folders)
+                           + ([args.folder] if args.folder else []))
+               if not looks_like_project_path(p)]
+    if mangled:
+        print("these are not Ghidra project paths: " + ", ".join(mangled),
+              file=sys.stderr)
+        print("a project path is absolute with no drive letter (/Vanilla/1.00/Fog.dll).",
+              file=sys.stderr)
+        print("under Git Bash, prefix the command with MSYS_NO_PATHCONV=1 -- it rewrites "
+              "a leading-slash argument into a Windows path.", file=sys.stderr)
+        return 2
+
+    siblings, unresolved = corpus_ranges(args.corpus_folders)
     if args.corpus_folders and not siblings:
         print("--corpus-folders resolved to no ranges; refusing to run unconstrained",
               file=sys.stderr)
+        return 2
+    if unresolved:
+        # Not a warning. Every unreadable binary turns its own addresses into
+        # findings, because "foreign" means "inside another binary in this corpus".
+        print(f"could not read segments for {len(unresolved)} corpus program(s); "
+              "refusing to run against a partial corpus:", file=sys.stderr)
+        for u in unresolved[:10]:
+            print(f"    {u}", file=sys.stderr)
+        if len(unresolved) > 10:
+            print(f"    ... and {len(unresolved) - 10} more", file=sys.stderr)
         return 2
 
     programs = list(args.programs)

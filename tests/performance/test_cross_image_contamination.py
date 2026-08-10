@@ -319,3 +319,81 @@ def test_resume_carries_prior_findings_forward(tmp_path, monkeypatch):
     assert out["findings_count"] == 1, "prior finding was dropped on resume"
     assert out["findings"][0]["address"] == "10002000"
     assert out["plated_total"] == 7, "prior plated count was dropped"
+
+
+# --- corpus integrity -------------------------------------------------------
+#
+# Both guards below come from ONE near-miss, 2026-08-10. These paths travel on a
+# command line, and Git Bash rewrites a leading-slash argument via MSYS path
+# conversion: `--corpus-folders /Vanilla/1.00` arrived as
+# `C:/Program Files/Git/Vanilla/1.00`. Every folder resolved to no programs, so
+# the corpus came back EMPTY and the all-or-nothing check refused. That was luck.
+# Had a single folder survived mangling, the run would have proceeded against a
+# partial corpus -- and since "foreign" is defined as "inside another binary in
+# this corpus", every missing binary converts its own addresses into findings.
+
+@pytest.mark.parametrize("p", [
+    "/Vanilla/1.00",
+    "/Vanilla/1.00/Fog.dll",
+    "/Mods/PD2-S12/D2Game.dll",
+])
+def test_project_paths_are_accepted(p):
+    assert cic.looks_like_project_path(p)
+
+
+@pytest.mark.parametrize("p, why", [
+    ("C:/Program Files/Git/Vanilla/1.00", "the exact Git Bash mangling observed"),
+    ("/C:/Program Files/Git/Vanilla/1.00", "same, with the slash MSYS sometimes leaves"),
+    (r"C:\Vanilla\1.00", "a Windows path typed by hand"),
+    ("Vanilla/1.00", "relative -- a project path is always absolute"),
+])
+def test_windows_paths_are_rejected(p, why):
+    assert not cic.looks_like_project_path(p), why
+
+
+def test_corpus_ranges_reports_programs_it_could_not_read(monkeypatch):
+    """An unreadable corpus binary must be REPORTED, not skipped.
+
+    A short corpus is not a smaller answer, it is a wrong one: the missing
+    binary's own addresses become 'foreign' and get flagged.
+    """
+    monkeypatch.setattr(cic.falsify, "_get", lambda ep, **kw: {
+        "files": [{"path": "/F/Good.dll", "content_type": "Program"},
+                  {"path": "/F/Unreadable.dll", "content_type": "Program"},
+                  {"path": "/F/notes.txt", "content_type": "TextFile"}]})
+    monkeypatch.setattr(cic, "program_ranges",
+                        lambda p: [(0x10000000, 0x1000FFFF)] if p == "/F/Good.dll" else [])
+    ranges, unresolved = cic.corpus_ranges(["/F"])
+    assert ranges == [(0x10000000, 0x1000FFFF)]
+    assert unresolved == ["/F/Unreadable.dll"], "non-Program entries must not count"
+
+
+def test_corpus_ranges_flags_a_folder_with_no_programs(monkeypatch):
+    """The mangled-path failure mode: the folder resolves, but to nothing."""
+    monkeypatch.setattr(cic.falsify, "_get", lambda ep, **kw: {"files": []})
+    ranges, unresolved = cic.corpus_ranges(["/C:/Program Files/Git/Vanilla/1.00"])
+    assert ranges == []
+    assert len(unresolved) == 1 and "no programs" in unresolved[0]
+
+
+def test_main_refuses_a_mangled_path_before_touching_ghidra(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(cic, "corpus_ranges", lambda f: called.append(f) or ([], []))
+    rc = cic.main(["--programs", "C:/Program Files/Git/Vanilla/1.00/Fog.dll",
+                   "--corpus-folders", "/Mods/PD2-S12"])
+    assert rc == 2
+    assert not called, "must refuse before doing any work"
+    err = capsys.readouterr().err
+    assert "MSYS_NO_PATHCONV" in err, "the error must name the actual fix"
+
+
+def test_main_refuses_a_partial_corpus(monkeypatch, capsys):
+    """The guard that would have caught this had one folder survived mangling."""
+    monkeypatch.setattr(cic, "corpus_ranges",
+                        lambda f: ([(0x10000000, 0x1000FFFF)], ["/F/Missing.dll"]))
+    scanned = []
+    monkeypatch.setattr(cic, "scan_program", lambda *a, **k: scanned.append(a))
+    rc = cic.main(["--programs", "/V/A.dll", "--corpus-folders", "/F"])
+    assert rc == 2
+    assert not scanned, "a partial corpus must not be scanned"
+    assert "/F/Missing.dll" in capsys.readouterr().err
