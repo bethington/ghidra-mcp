@@ -574,6 +574,17 @@ def main(argv=None) -> int:
                                     prior_findings=prev.get("findings"),
                                     prior_plated=prev.get("plated_total", 0)))
     total = sum(r.get("findings_count", len(r.get("findings", []))) for r in reports)
+    # A count from this tool is meaningless without the corpus it was measured
+    # against: "foreign" is defined as "inside another binary in this corpus", so
+    # WIDENING the corpus finds more. Measured 2026-08-10 -- adding /Vanilla/1.00
+    # (which holds Game.exe at the default EXE base 0x00400000) made a whole class
+    # of contaminated setlocale plates in Fog.dll visible for the first time, and
+    # took its count from 24 to 50. Two runs of this tool are not comparable
+    # unless these fields match, so they travel INSIDE the report.
+    for r in reports:
+        r["corpus_folders"] = list(args.corpus_folders)
+        r["corpus_range_count"] = len(siblings)
+        r["scanned_inline"] = not args.plates_only
     for r in reports:
         if r.get("error"):
             print(f"{r['program']}: SKIPPED ({r['error']})")
@@ -581,6 +592,8 @@ def main(argv=None) -> int:
         print(f"{r['program']}: {len(r['findings'])} finding(s) "
               f"of {r['plated_total']} plated ({r['rate']:.1%})"
               + (f"  bases={list(r['by_foreign_base'])[:5]}" if r["by_foreign_base"] else ""))
+    print(f"corpus: {len(siblings)} range(s) from {args.corpus_folders or 'NOTHING'}"
+          f"; inline={'yes' if not args.plates_only else 'NO'}")
     if args.json:
         Path(args.json).write_text(json.dumps(reports, indent=2), encoding="utf-8")
         print(f"report -> {args.json}")

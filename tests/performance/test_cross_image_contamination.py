@@ -8,6 +8,7 @@ has come back.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -397,3 +398,46 @@ def test_main_refuses_a_partial_corpus(monkeypatch, capsys):
     assert rc == 2
     assert not scanned, "a partial corpus must not be scanned"
     assert "/F/Missing.dll" in capsys.readouterr().err
+
+
+def test_report_records_the_corpus_it_was_measured_against(monkeypatch, tmp_path):
+    """A finding count without its corpus is not reproducible.
+
+    "Foreign" means "inside another binary in this corpus", so widening the
+    corpus finds MORE. Measured 2026-08-10: adding /Vanilla/1.00 -- which holds
+    Game.exe at the default EXE base 0x00400000 -- made a class of contaminated
+    setlocale plates in Fog.dll visible for the first time and took its count
+    from 24 to 50. Nothing about the binary changed. Two runs are comparable
+    only if corpus_folders and scanned_inline match, so they are recorded.
+    """
+    monkeypatch.setattr(cic, "corpus_ranges",
+                        lambda f: ([(0x00400000, 0x0041FFFF), (0x6F000000, 0x6FFFFFFF)], []))
+    monkeypatch.setattr(cic, "scan_program",
+                        lambda *a, **k: {"program": "/V/A.dll", "findings": [],
+                                         "plated_total": 0, "rate": 0.0,
+                                         "by_foreign_base": {}, "findings_count": 0})
+    out = tmp_path / "r.json"
+    rc = cic.main(["--programs", "/V/A.dll", "--corpus-folders", "/Vanilla/1.00",
+                   "--json", str(out)])
+    assert rc == 0
+    rep = json.loads(out.read_text())[0]
+    assert rep["corpus_folders"] == ["/Vanilla/1.00"]
+    assert rep["corpus_range_count"] == 2
+    assert rep["scanned_inline"] is True
+
+
+def test_report_records_when_inline_was_skipped(monkeypatch, tmp_path):
+    """--plates-only undercounts, and the report must say so on its face.
+
+    D2Game post-repair measured 1 plate finding and 22 inline: a plate-only
+    re-scan of that binary reads as almost clean while 22 defects remain.
+    """
+    monkeypatch.setattr(cic, "corpus_ranges", lambda f: ([(0x6F000000, 0x6FFFFFFF)], []))
+    monkeypatch.setattr(cic, "scan_program",
+                        lambda *a, **k: {"program": "/V/A.dll", "findings": [],
+                                         "plated_total": 0, "rate": 0.0,
+                                         "by_foreign_base": {}, "findings_count": 0})
+    out = tmp_path / "r.json"
+    cic.main(["--programs", "/V/A.dll", "--corpus-folders", "/M", "--plates-only",
+              "--json", str(out)])
+    assert json.loads(out.read_text())[0]["scanned_inline"] is False
