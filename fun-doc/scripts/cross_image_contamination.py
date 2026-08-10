@@ -129,6 +129,15 @@ _SENTINELS = {
     0xE06D7363,   # MSVC C++ exception code, 'msc' | 0xE0000000
     0x7EFEFEFF, 0x81010100, 0x80808080, 0x01010101,   # strlen/strchr byte scans
     0xCCCCCCCD, 0x51EB851F, 0xAAAAAAAB, 0x66666667,   # reciprocal-multiply divisors
+    # ROUND 4: crypto initialisation vectors. MEASURED -- the corpus sweep flagged
+    # Fog.dll's ComputeSha1Hash for citing 0x10325476, which is SHA-1's H2, not an
+    # address. These slip past corpus containment because several PD2-S12 modules
+    # are based at 0x10000000, so the 0x10xxxxxx band IS a real sibling range.
+    # Containment narrows the problem; it does not eliminate constants that happen
+    # to land inside a sibling image.
+    0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0,   # SHA-1 / MD5 IV
+    0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6,               # SHA-1 round K
+    0xD76AA478, 0xE8C7B756, 0x242070DB,                           # MD5 table head
 }
 
 # The lowest plausible Windows image base (an EXE at 0x400000). Anything below is

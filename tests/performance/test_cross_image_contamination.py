@@ -194,3 +194,16 @@ def test_without_siblings_the_check_is_deliberately_looser():
     --corpus-folders resolves to nothing."""
     plate = "Compares against 0x40000000."
     assert cic.check_program_function(plate, RANGES) is not None
+
+
+@pytest.mark.parametrize("v,why", [
+    (0x67452301, "SHA-1/MD5 H0"),
+    (0x10325476, "SHA-1/MD5 H2 -- measured FP on Fog.dll ComputeSha1Hash"),
+    (0xC3D2E1F0, "SHA-1 H4"),
+    (0x5A827999, "SHA-1 round constant K1"),
+])
+def test_round4_crypto_constants(v, why):
+    """ROUND 4: crypto IVs land INSIDE a sibling image range (several PD2-S12
+    modules are based at 0x10000000), so corpus containment does not exclude
+    them. Containment narrows the constant problem; it does not end it."""
+    assert cic.looks_like_mask(v), why
