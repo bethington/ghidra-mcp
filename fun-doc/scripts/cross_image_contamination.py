@@ -37,6 +37,31 @@ propagated plate's addresses are, by construction, OUTSIDE this program. The two
 checks are complements, not duplicates. Widening F8 to cover this would
 re-introduce the false-positive class its three calibration rounds removed.
 
+STRUCTURAL BLIND SPOT -- EVERY COUNT THIS TOOL PRODUCES IS A FLOOR. Detection
+requires the cited address to fall OUTSIDE the receiving program, so
+contamination between two images that share a base is invisible. Every D2 v1.00
+DLL is based at 0x10000000. Measured 2026-08-10 on /Vanilla/1.00/D2Lang.dll
+(ends ~0x10013fff): it catches text propagated from LARGER 0x10000000 siblings --
+ParseCommandLineArguments cites "character lookup table at 0x1003cbc0",
+InitializeLocaleDataBuffers cites seven addresses around 0x1003ca..-0x1003cc.., all
+past D2Lang's end and inside D2Common's -- while the reverse direction, a
+D2Common plate landing on D2Lang and citing 0x10005000, is indistinguishable from
+D2Lang's own address and cannot be caught by containment at all.
+
+The bias is systematic, not random: a SMALL binary catches contamination from big
+donors, a LARGE one catches almost nothing from its own base class. So
+D2Lang's 18.2% and D2Common's rate are not comparable to each other, and neither
+is an upper bound. Reading a low rate here as "this binary is clean" is wrong.
+
+AND THE CORPUS DECIDES WHAT IS VISIBLE. "Foreign" means "inside another binary in
+this corpus", so widening the corpus finds MORE with nothing about the binary
+changed. Fog.dll went 24 -> 50 when /Vanilla/1.00 was added, because that folder
+holds Game.exe at the default EXE base 0x00400000 and a whole class of
+contaminated setlocale plates cites 0x0040..../0x0041..... The CRT is statically
+linked into the EXEs and the DLLs alike, so the propagator matches it straight
+across the EXE/DLL boundary. Reports therefore record corpus_folders,
+corpus_range_count and scanned_inline; compare two runs only when those match.
+
 DISCRIMINATOR. A foreign address is not by itself a defect -- a plate may
 legitimately say "calls Fog.dll's ordinal 10021 at 0x6ff7e33f". The measured
 separator is ATTRIBUTION: benign cross-module references NAME the module; a
