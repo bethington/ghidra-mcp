@@ -1818,37 +1818,90 @@ public class ProgramScriptService {
                 return Response.err("Failed to open program: " + path);
             }
 
-            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+            // getDomainObject registered US (tool) as a consumer. ProgramManager
+            // takes its OWN consumer in openProgram below, so ours must be handed
+            // back -- otherwise the DomainObject keeps a consumer forever and the
+            // DomainFile stays permanently "in use": undoCheckout then fails with
+            // "<name> is in use" and keeps failing until Ghidra restarts, while
+            // close_program reports success with released_cache=false because
+            // neither the ProgramManager nor the provider cache holds the stray
+            // reference. Measured 2026-08-10: 140 exclusive checkouts stranded on
+            // a shared project by a read-only verification sweep, clearable only
+            // by restarting Ghidra.
+            try {
+                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
 
-            boolean analyzed = false;
-            if (autoAnalyze) {
-                analyzed = runAutoAnalysisAndPersistFlags(program, true);
-            } else {
-                try {
-                    suppressAnalysisPrompt(program);
-                } catch (Exception e) {
-                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                boolean analyzed = false;
+                if (autoAnalyze) {
+                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
+                } else {
+                    try {
+                        suppressAnalysisPrompt(program);
+                    } catch (Exception e) {
+                        Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                    }
                 }
+
+                // Capture before releasing: after the release our only guarantee
+                // that the Program is still alive is the ProgramManager's consumer.
+                String programName = program.getName();
+                int functionCount = program.getFunctionManager().getFunctionCount();
+
+                // Open after the analysis flags are persisted so CodeBrowser does not prompt.
+                Program finalProgram = program;
+                SwingUtilities.invokeAndWait(() -> {
+                    pm.openProgram(finalProgram);
+                    pm.setCurrentProgram(finalProgram);
+                });
+
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "message", "Program opened successfully",
+                    "name", programName,
+                    "path", path,
+                    "auto_analyzed", analyzed,
+                    "function_count", functionCount
+                ));
+            } finally {
+                // Unconditional: on the failure paths nothing else holds the
+                // program, so releasing is both correct and the only way the
+                // checkout can ever be undone.
+                program.release(tool);
             }
-
-            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
-            Program finalProgram = program;
-            SwingUtilities.invokeAndWait(() -> {
-                pm.openProgram(finalProgram);
-                pm.setCurrentProgram(finalProgram);
-            });
-
-            return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "message", "Program opened successfully",
-                "name", program.getName(),
-                "path", path,
-                "auto_analyzed", analyzed,
-                "function_count", program.getFunctionManager().getFunctionCount()
-            ));
         } catch (Exception e) {
-            return Response.err("Failed to open program: " + e.getMessage());
+            return Response.err("Failed to open program: " + describeOpenFailure(e, path));
         }
+    }
+
+    /**
+     * Turn an open failure into something the caller can act on.
+     *
+     * <p>A program built against an older SLEIGH language revision opens read-ONLY
+     * but refuses a read-write open, surfacing here as a bare
+     * {@code "Minor language change 4.6 -> 4.7"}. That names the symptom and not
+     * the cure, and this code path cannot perform the cure itself: every
+     * FrontEnd-side open passes {@code okToUpgrade=false}, and an upgrade also
+     * needs an exclusive checkout. Point at the tool that does both.
+     */
+    public static String describeOpenFailure(Exception e, String path) {
+        String message = e.getMessage() != null ? e.getMessage() : e.toString();
+        if (message.contains("language change") || message.contains("older version of Ghidra")) {
+            return message
+                + " -- " + path + " was built against an older SLEIGH language revision than this"
+                + " Ghidra ships, so it can only be opened read-only until it is upgraded."
+                + " An upgrade requires an exclusive checkout and cannot be done from here."
+                + " Run: python scripts/upgrade_project_language.py --apply --folder "
+                + parentFolderOf(path);
+        }
+        return message;
+    }
+
+    private static String parentFolderOf(String path) {
+        if (path == null) {
+            return "/";
+        }
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash > 0 ? path.substring(0, lastSlash) : "/";
     }
 
     // ========================================================================
