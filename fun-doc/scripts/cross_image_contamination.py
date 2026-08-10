@@ -282,6 +282,29 @@ def check_program_function(plate: str, ranges, *, is_thunk: bool = False,
     }
 
 
+def to_finding(hit: dict, program: str) -> "falsify.Finding":
+    """Convert a report row into the shared Finding shape so --apply can go
+    through falsify.flag_finding -- the SAME idempotent plate-note path the
+    cross-version harvester uses. Do not grow a second writer here; that is the
+    conf_ladder lesson."""
+    src = hit.get("source", "plate")
+    return falsify.Finding(
+        check_id=CHECK_ID,
+        tier=2,
+        program=program,
+        address=str(hit.get("address") or ""),
+        function=hit.get("name") or "",
+        claim=f"the {src} cites foreign address(es) "
+              f"0x{', 0x'.join(hit.get('foreign_addresses', [])[:5])}",
+        evidence="they fall outside every segment of this program and inside "
+                 "another binary in this corpus, so this text was propagated "
+                 "from that image; check the NAME too, not just the prose",
+        detail={k: hit.get(k) for k in
+                ("foreign_addresses", "foreign_bases", "source",
+                 "name_derivation_risk")},
+    )
+
+
 def summarize(findings: list, plated_total: int) -> dict:
     by_base = {}
     for f in findings:
@@ -382,6 +405,11 @@ def main(argv=None) -> int:
     ap.add_argument("--folder", default=None)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--apply", action="store_true",
+                    help="Stamp an idempotent tier-2 plate note on each finding via "
+                         "falsify.flag_finding. NEVER rewrites or deletes existing "
+                         "prose, and never touches falsify_status -- a propagated "
+                         "plate is evidence, not a verdict. Default is dry-run.")
     ap.add_argument("--plates-only", action="store_true",
                     help="Skip inline/EOL comments. NOT recommended: a stale address in an inline comment is the same defect, and plate-only figures undercount.")
     ap.add_argument("--corpus-folders", nargs="*", default=[],
@@ -419,9 +447,29 @@ def main(argv=None) -> int:
     if args.json:
         Path(args.json).write_text(json.dumps(reports, indent=2), encoding="utf-8")
         print(f"report -> {args.json}")
-    # REPORT ONLY. Repair needs a human: the NAME usually has to move too, and a
-    # tier-2 finding is not a verdict.
-    print(f"\n{total} finding(s). Report only -- no writes. "
+
+    if args.apply:
+        stamped = skipped = failed = 0
+        for r in reports:
+            for hit in r.get("findings", []):
+                res = falsify.flag_finding(r["program"], hit["address"],
+                                           to_finding(hit, r["program"]))
+                if res == "flagged":
+                    stamped += 1
+                elif res == "already-flagged":
+                    skipped += 1
+                else:
+                    failed += 1
+                    # LOUD: a silent write-back failure is how the wrong-binary
+                    # bug stayed hidden for a week.
+                    print(f"  FLAG FAILED {r['program']} {hit['address']}: {res}",
+                          file=sys.stderr)
+        print(f"\napplied: {stamped} stamped, {skipped} already flagged, "
+              f"{failed} FAILED")
+        return 1 if failed else 0
+    # Repair still needs a human: the NAME usually has to move too, and a tier-2
+    # finding is evidence, not a verdict.
+    print(f"\n{total} finding(s). Dry run -- no writes; pass --apply to stamp. "
           f"Repair must move the function/parameter NAMES, not just the plate.")
     return 0
 

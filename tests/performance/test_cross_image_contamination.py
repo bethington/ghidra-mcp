@@ -237,3 +237,31 @@ def test_foreign_address_in_an_inline_comment_is_a_finding():
     hit = cic.check_program_function(txt, RANGES, sibling_ranges=[(0x6F000000, 0x6FFFFFFF)])
     assert hit is not None
     assert "6fd48dc0" in hit["foreign_addresses"]
+
+
+# --- --apply goes through the shared idempotent writer -----------------------
+
+def test_to_finding_is_tier2_and_carries_the_source():
+    """--apply must reuse falsify.flag_finding, the SAME idempotent plate-note
+    path the cross-version harvester uses. A second writer for one job is the
+    conf_ladder mistake; this conversion is what keeps there being only one."""
+    import falsify
+    hit = {"address": "10036740", "name": "SetCalculatedStats", "source": "inline",
+           "foreign_addresses": ["6fc99e70"], "foreign_bases": ["6fc9"],
+           "name_derivation_risk": True}
+    f = cic.to_finding(hit, "/Vanilla/1.00/D2Game.dll")
+    assert f.tier == 2, "propagated text is evidence, not a verdict -- never tier 1"
+    assert f.check_id == cic.CHECK_ID
+    assert f.address == "10036740"
+    assert "inline" in f.claim, "the report must say WHICH source is dirty"
+    assert "6fc99e70" in f.claim
+    # The note must tell the fixer the name is suspect, not just the prose.
+    assert "NAME" in f.evidence
+    text = falsify.finding_flag_text(f, "2026-08-10")
+    assert falsify.flag_marker(cic.CHECK_ID) in text
+    assert "REVIEW" in text          # tier-2 wording, not CONTRADICTION
+
+
+def test_to_finding_survives_a_sparse_hit():
+    f = cic.to_finding({"address": "1000", "foreign_addresses": []}, "/p")
+    assert f.tier == 2 and f.function == ""
