@@ -3600,6 +3600,15 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         sb.append(", \"is_checked_out_exclusive\": ").append(f.isCheckedOutExclusive());
         sb.append(", \"is_read_only\": ").append(f.isReadOnly());
         if (f.isCheckedOut()) {
+            // Whether a checkout still holds UNCOMMITTED local work is the one
+            // thing that decides if it is safe to release -- and it was not
+            // observable through any endpoint, so the only way to answer it was
+            // to read icons in the Ghidra GUI. On a shared project that work
+            // exists solely in the local project directory: no server copy, no
+            // backup. Surface it so a tool can tell "idle checkout" (safe to
+            // undo) from "holds work" (must be checked in first).
+            sb.append(", \"modified_since_checkout\": ").append(f.modifiedSinceCheckout());
+            sb.append(", \"is_hijacked\": ").append(f.isHijacked());
             try {
                 ItemCheckoutStatus status = f.getCheckoutStatus();
                 if (status != null) {
