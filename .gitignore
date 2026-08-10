@@ -664,3 +664,8 @@ fun-doc/SGD2FreeResolution.json
 
 # BSim credentials (see ghidra_scripts/db.env.example)
 ghidra_scripts/db.env
+
+# A wheel downloaded into the repo root is never a source file. Build output
+# already goes to /dist/; this catches strays like packaging-*.whl that
+# otherwise sit in `git status` forever and invite being committed by accident.
+/*.whl
