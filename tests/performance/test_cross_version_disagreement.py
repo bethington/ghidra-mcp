@@ -128,7 +128,15 @@ def test_flag_finding_tier2_wording_and_idempotency(monkeypatch):
                    program="/a/x.dll", address="6fd51000", function="Alpha",
                    claim="name 'Alpha'", evidence="others say Beta")
     assert fz.flag_finding("/a/x.dll", "6fd51000", f, date="2026-08-02") == "flagged"
-    assert posts[0][2]["program"] == "x.dll", "program rides the query string"
+    # FULL PATH, not the basename. This assertion used to demand "x.dll", and
+    # that basename reduction silently wrote to the wrong binary: MEASURED
+    # 2026-08-10, stamping 21 findings for /Vanilla/1.00/D2Net.dll sent every one
+    # to /Mods/PD2-S12/D2Net.dll (base 0x6fbf0000), creating plates at 0x1000xxxx
+    # addresses that do not exist there, while reporting "21 stamped, 0 FAILED".
+    # THIS lane is the most exposed of all -- it compares the same DLL across
+    # versions, so duplicate basenames are guaranteed, not incidental.
+    assert posts[0][2]["program"] == "/a/x.dll", \
+        "program rides the query string, and must stay a full path"
     assert "REVIEW:" in posts[0][1]["comment"]
     assert "CONTRADICTION" not in posts[0][1]["comment"], \
         "tier-2 wording must not claim mechanical certainty"

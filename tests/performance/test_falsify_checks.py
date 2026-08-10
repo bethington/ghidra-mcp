@@ -652,3 +652,23 @@ def test_the_offending_step_is_quoted_in_the_finding():
                          "2. Do the real work.\n")}
     f = fz.check_compiler_scaffolding(b)[0]
     assert "SEH frame" in f.claim
+
+
+def test_flag_finding_passes_the_full_program_path(monkeypatch):
+    """MEASURED 2026-08-10: flag_finding reduced `program` to its BASENAME, so
+    stamping 21 findings for /Vanilla/1.00/D2Net.dll wrote every one to
+    /Mods/PD2-S12/D2Net.dll -- a different image at base 0x6fbf0000 -- creating
+    plates at 0x1000xxxx addresses that do not exist there. It reported
+    "21 stamped, 0 FAILED" and the intended binary was untouched.
+
+    Duplicate basenames are GUARANTEED for the lanes this function serves: the
+    cross-version harvester compares the same DLL across versions."""
+    import falsify
+    seen = {}
+    monkeypatch.setattr(falsify, "_get", lambda ep, **kw: seen.setdefault("get", kw) and {} or {})
+    monkeypatch.setattr(falsify, "_post", lambda ep, body, **kw: seen.setdefault("post", kw))
+    f = falsify.Finding(check_id="c", tier=2, program="/Vanilla/1.00/D2Net.dll",
+                        address="10002fe0", function="fn", claim="c", evidence="e")
+    falsify.flag_finding("/Vanilla/1.00/D2Net.dll", "10002fe0", f, date="2026-01-01")
+    assert seen["get"]["program"] == "/Vanilla/1.00/D2Net.dll", "read went to the wrong binary"
+    assert seen["post"]["program"] == "/Vanilla/1.00/D2Net.dll", "WRITE went to the wrong binary"

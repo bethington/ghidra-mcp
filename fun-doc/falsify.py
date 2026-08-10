@@ -910,8 +910,22 @@ def flag_finding(program: str, address: str, f: Finding,
     verdict machinery — for lanes that record evidence but don't own the
     falsify_status (e.g. the cross-version disagreement harvester, whose
     tier-2 findings are report-only by design). Returns 'flagged' |
-    'already-flagged' | 'error:<msg>'."""
-    prog = program.rsplit("/", 1)[-1]
+    'already-flagged' | 'error:<msg>'.
+
+    PASS THE FULL PROJECT PATH. This used to reduce `program` to its BASENAME,
+    which is ambiguous in this project and silently wrote to the wrong binary.
+    MEASURED 2026-08-10: stamping 21 findings for `/Vanilla/1.00/D2Net.dll` sent
+    every one to `/Mods/PD2-S12/D2Net.dll` — a different image at base
+    0x6fbf0000 — creating plate comments at 0x1000xxxx addresses that do not
+    exist there. Ghidra accepted the writes, the run reported "21 stamped, 0
+    FAILED", and the intended binary was untouched. Nothing warned.
+
+    The lanes most exposed are exactly the ones this function exists for: the
+    cross-version harvester runs across MULTIPLE VERSIONS of the same DLL, so
+    duplicate basenames (`D2Net.dll`, `D2Game.dll`, `Fog.dll`, …) are guaranteed,
+    not incidental. See project_port_live_prove_wrong_binary_fix for the previous
+    instance of this same bug class."""
+    prog = program
     a = address if str(address).startswith("0x") else "0x" + str(address)
     if date is None:
         import datetime as _dt
