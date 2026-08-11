@@ -1,4 +1,0 @@
-before: AudioEndpointBuilder=Running Audiosrv=Running
-during: Audiosrv=Stopped AudioEndpointBuilder=Stopped
-after: Audiosrv=Running AudioEndpointBuilder=Running
-DONE

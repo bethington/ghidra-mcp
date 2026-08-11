@@ -46,6 +46,18 @@ was to give it a home in D2MOO, not to attach 22 unrelated files to this
 project's history. If something needs rescuing and does not fit the list above,
 move it to the repo where it belongs.
 
+Those 22 files were **removed on 2026-08-11** (919 lines). History was
+deliberately not rewritten, so nothing is lost — recover the directory with:
+
+```text
+git log --all --diff-filter=D -1 --format=%H -- scripts/d2probe   # the deleting commit
+git checkout <that-sha>^ -- scripts/d2probe                       # restore into a worktree
+```
+
+They still have no owning repo. Restoring them into D2MOO (or their own) is
+the outstanding half of the fix; deleting them here only stopped this repo
+from being the answer by default.
+
 ## Architecture
 
 ```
