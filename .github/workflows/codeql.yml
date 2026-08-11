@@ -5,7 +5,7 @@
 # Two languages because we ship both:
 #   * java-kotlin → covers src/main/java/com/xebyte/ (the GhidraMCP
 #     plugin + headless server, ~20K LOC)
-#   * python → covers python/bridge_mcp_ghidra/ + tools/setup/ + fun-doc/
+#   * python → covers python/bridge_mcp_ghidra/ + tools/setup/
 #
 # Build mode "none" for both: CodeQL extracts source directly. The
 # Java side compiles against Ghidra jars that aren't on Maven Central

@@ -222,117 +222,6 @@ jobs:
       run: |
         uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
-  python-offline-regression:
-    name: Python Offline Regression (fun-doc)
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
-      with:
-        enable-cache: true
-
-    - name: Set up Python
-      run: uv python install 3.12
-
-    - name: Run offline performance/regression tests
-      env:
-        UV_RUN: uv run --python 3.12 --group test --group fun-doc
-      run: |
-        # These suites guard fun-doc (fun_doc.py, storage/, audit/, library detector,
-        # selector, etc.) and run without a live Ghidra server. The autouse fixture in
-        # tests/performance/conftest.py isolates every test from the real fun-doc DB
-        # (forces FUN_DOC_DB_URL to a per-test SQLite + resets the repo singleton), so the
-        # whole suite is collectible in a single process — no per-file isolation needed.
-        #
-        # Excluded from this CI tier:
-        #   * the four live-Ghidra files (need http://127.0.0.1:8089) — integration tier
-        #     (batch_scoring_consistency, health_endpoint, http_concurrency, listing_consistency)
-        #   * the benchmark tests — "manual only" by design (CLAUDE.md); they depend on local
-        #     benchmark assets not tracked in the repo (e.g. fun-doc/benchmark/extract_truth.py),
-        #     a live Ghidra (Benchmark.dll), or an LLM judge, none of which exist in CI.
-        # --cov=fun-doc adds the fun-doc tree to the default coverage sources.
-        # The fail-under floor is a RATCHET: measured baseline was 29% on
-        # 2026-07-03 with these exclusions — raise it as fun_doc.py/web.py
-        # subsystems get extracted and tested, never lower it.
-        # The denominator excludes vendored code and live-only one-shot
-        # operational scripts via [tool.coverage.run] omit in pyproject.toml
-        # (re-measured 31.85% on 2026-07-24, after the worker quota-pause tests
-        # and pruning six live-only diagnostic CLIs from the denominator)
-        # — see the policy comment there before adding entries.
-        # NOTE when re-measuring: this job's denominator is NOT fun-doc alone.
-        # pyproject's addopts add --cov=bridge_mcp_ghidra/tools/debugger on top
-        # of the --cov=fun-doc below, and those are largely unexercised here, so
-        # a local run with `-o addopts=""` reads several points HIGHER than CI.
-        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=30 \
-          --ignore=tests/performance/test_batch_scoring_consistency.py \
-          --ignore=tests/performance/test_health_endpoint.py \
-          --ignore=tests/performance/test_http_concurrency.py \
-          --ignore=tests/performance/test_listing_consistency.py \
-          --ignore=tests/performance/test_benchmark_extract_truth.py \
-          --ignore=tests/performance/test_benchmark_ghidra_bridge.py \
-          --ignore=tests/performance/test_benchmark_haiku_judge.py \
-          --ignore=tests/performance/test_benchmark_scorer.py
-        echo "✅ Offline regression suite passed"
-
-    - name: Upload coverage
-      if: ${{ always() && hashFiles('tests/coverage.xml') != '' }}
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v5
-      with:
-        files: ./tests/coverage.xml
-        flags: fundoc
-        fail_ci_if_error: false
-
-  fundoc-dashboard-hermetic:
-    name: fun-doc Dashboard (hermetic) + benchmark floors
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
-      with:
-        enable-cache: true
-
-    - name: Set up Python
-      run: uv python install 3.12
-
-    - name: Dashboard route contract + fault injection
-      env:
-        UV_RUN: uv run --python 3.12 --group test --group fun-doc
-      run: |
-        # tests/dashboard builds the REAL Flask app with a fake Ghidra behind
-        # `conformance_dashboard._get`/`._post` and fake health monitors, so it
-        # needs no Ghidra, no browser, no dashboard process and no provider.
-        # That is why it is the only dashboard tier that can run here — and it
-        # is the tier that matters most in CI, because it is what still works
-        # when the fleet is down.
-        #
-        # Two strict xfails are expected and are NOT failures; they record
-        # real, currently-unfixed defects (eight panels 500 during a Ghidra
-        # restart; a broken oracle probe 500s the whole health strip). Being
-        # strict, they turn into failures the moment either bug is fixed,
-        # which is what stops them from outliving the defect.
-        $UV_RUN python -m pytest tests/dashboard/ -q --no-cov
-        echo "✅ dashboard route contract passed"
-
-    - name: Benchmark floors + mock documentation pipeline
-      env:
-        UV_RUN: uv run --python 3.12 --group test --group fun-doc
-      run: |
-        # The offline half of the undocumented -> documented gate: the floor
-        # rules themselves (proven in both directions — each catches the
-        # defect it exists for) and the full mock pipeline, which runs the
-        # real runner + real scorer over committed fixtures.
-        #
-        # The Ghidra-backed and --real-provider tiers self-skip here; they are
-        # manual, and documented in tests/benchmark_e2e/README.md.
-        $UV_RUN python -m pytest tests/benchmark_e2e/ -q --no-cov
-        echo "✅ benchmark floors + mock pipeline passed"
-
   code-quality:
     # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
     # fallback), so this job surfaces lint/format drift without ever failing CI.
@@ -392,13 +281,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, python-offline-regression, fundoc-dashboard-hermetic, pester-tests ]
+    needs: [ java-build, python-tests, python-tests-windows, pester-tests ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.python-offline-regression.result }}" = "success" ] && [ "${{ needs.fundoc-dashboard-hermetic.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else
