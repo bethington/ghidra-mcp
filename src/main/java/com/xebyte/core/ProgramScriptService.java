@@ -131,7 +131,11 @@ public class ProgramScriptService {
                     mgr.reAnalyzeAll(null);
                 }
                 mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+                // Through the guarded helper, never mgr.waitForAnalysis
+                // directly -- see awaitAnyPendingAnalysis. An unguarded call
+                // here is one of the two paths that wedged all three HTTP
+                // threads for 7.8 CPU-hours on 2026-08-11.
+                awaitAnyPendingAnalysis(program);
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
@@ -219,7 +223,51 @@ public class ProgramScriptService {
         }
     }
 
+    /**
+     * Re-entrancy guard for {@link AutoAnalysisManager#waitForAnalysis}.
+     *
+     * <p>{@code waitForAnalysis(null, monitor)} can re-enter ITSELF. Measured
+     * from a live thread dump on 2026-08-11, after Ghidra had been
+     * unresponsive for hours:</p>
+     *
+     * <pre>
+     *   AutoAnalysisManager.scheduleWorker(1350)
+     *     -&gt; waitForAnalysis(518)
+     *       -&gt; analysisWorkerCallback(523)
+     *         -&gt; AnalysisWorkerCommand.applyTo(1694)
+     *           -&gt; applyToWithTransaction
+     *             -&gt; scheduleWorker(1350)   ... and round again
+     * </pre>
+     *
+     * <p>All THREE GhidraMCP-HTTP threads -- the entire pool -- were stuck in
+     * that loop, 317 frames deep, having burned ~9,400 CPU-seconds EACH
+     * (7.8 CPU-hours between them). They never return, so the pool is
+     * permanently consumed and every one of the 253 endpoints times out. The
+     * symptom presents as "Ghidra is slow", not as an error, and the only
+     * recovery is a restart.</p>
+     *
+     * <p>A thread that is already inside a wait does not need to start
+     * another one: the outer call is still going to wait for the same
+     * analysis to finish. So a nested call on the same thread returns
+     * immediately and the recursion cannot form. This is deliberately the
+     * smallest fix that provably terminates -- it changes no semantics for
+     * the outer wait, and if it is wrong the failure mode is a save racing
+     * analysis, which {@code saveWithRetry} already handles and which is
+     * vastly preferable to a wedged server.</p>
+     */
+    // Package-visible on purpose: FrontEndProgramProvider shares this ONE
+    // guard. Two separate ThreadLocals would not guard each other, and the
+    // recursion can cross both classes on a single thread.
+    static final ThreadLocal<Boolean> IN_ANALYSIS_WAIT =
+            ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     private void awaitAnyPendingAnalysis(Program program) {
+        if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
+            // Already waiting further up this same thread's stack. Starting
+            // another wait here is what forms the infinite recursion above.
+            return;
+        }
+        IN_ANALYSIS_WAIT.set(Boolean.TRUE);
         try {
             AutoAnalysisManager.getAnalysisManager(program)
                     .waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
@@ -227,6 +275,8 @@ public class ProgramScriptService {
             // Best-effort: let the save call itself surface any real failure
             // rather than mask it with a wait-side error here.
             Msg.warn(this, "awaitAnyPendingAnalysis failed, proceeding to save anyway: " + e.getMessage());
+        } finally {
+            IN_ANALYSIS_WAIT.set(Boolean.FALSE);
         }
     }
 

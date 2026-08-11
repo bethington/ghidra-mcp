@@ -142,7 +142,23 @@ public class FrontEndProgramProvider implements ProgramProvider {
                     final int maxAttempts = 4;
                     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                         try {
-                            AutoAnalysisManager.getAnalysisManager(p).waitForAnalysis(null, monitor);
+                            // GUARDED. waitForAnalysis(null, ...) can re-enter
+                            // itself via scheduleWorker -> analysisWorkerCallback
+                            // -> applyTo -> scheduleWorker, with nothing bounding
+                            // the loop. Measured 2026-08-11: all three
+                            // GhidraMCP-HTTP threads stuck 317 frames deep,
+                            // ~9,400 CPU-seconds each, server unrecoverable
+                            // without a restart. A thread already inside a wait
+                            // does not need a second one.
+                            if (!Boolean.TRUE.equals(ProgramScriptService.IN_ANALYSIS_WAIT.get())) {
+                                ProgramScriptService.IN_ANALYSIS_WAIT.set(Boolean.TRUE);
+                                try {
+                                    AutoAnalysisManager.getAnalysisManager(p)
+                                            .waitForAnalysis(null, monitor);
+                                } finally {
+                                    ProgramScriptService.IN_ANALYSIS_WAIT.set(Boolean.FALSE);
+                                }
+                            }
                         } catch (Exception ignored) {
                             // Best-effort: fall through and let save() surface any real failure.
                         }
