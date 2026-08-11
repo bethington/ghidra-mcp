@@ -648,9 +648,6 @@ fun-doc/benchmark/bh/source/
 # and ~700KB each -- recoverable state, not source.
 fun-doc/backups/
 
-# Third-party ScyllaHide (anti-anti-debug) binaries -- obtain per tools/scyllahide/README.md
-/tools/scyllahide/*
-!/tools/scyllahide/README.md
 
 # Runtime artifacts the GAME and its mods write into fun-doc/, which is their
 # working directory when the dashboard launches them. Not project source.
@@ -669,3 +666,9 @@ ghidra_scripts/db.env
 # already goes to /dist/; this catches strays like packaging-*.whl that
 # otherwise sit in `git status` forever and invite being committed by accident.
 /*.whl
+
+# Third-party ScyllaHide binaries. The tooling that used them moved to the
+# d2-game-exe repo on 2026-08-11, but the binaries stay on disk here because
+# a SCYLLAHIDE_DIR may still point at this path. Never track them: they are
+# third-party redistributables, not ours.
+/tools/scyllahide/

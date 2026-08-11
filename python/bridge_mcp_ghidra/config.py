@@ -63,7 +63,8 @@ AUTH_TOKEN = (os.getenv("GHIDRA_MCP_AUTH_TOKEN") or "").strip()
 # having to set GHIDRA_MCP_URL per instance. See issue #175 + Copilot review.
 TCP_PORT_SCAN_RANGE = 16
 
-# Debugger proxy target (debugger/server.py). Empty/default points at the
+# Debugger proxy target (the debugger server, which lives in the d2-game-exe
+# repo since 2026-08-11). Empty/default points at the
 # standalone debugger server's default port.
 DEBUGGER_URL = os.getenv("GHIDRA_DEBUGGER_URL", "http://127.0.0.1:8099")
 
@@ -101,7 +102,7 @@ MANAGEMENT_TOOL_NAMES = {
 }
 
 # WinDbg debugger proxy tools (Phase 1+2+3). The standalone debugger server
-# (debugger/server.py) wraps dbgeng via pybag and only runs on Windows, so these
+# (in the d2-game-exe repo) wraps dbgeng via pybag and only runs on Windows, so these
 # are registered conditionally — see debugger._debugger_enabled(). The names stay
 # reserved in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming is
 # identical everywhere (a Ghidra /debugger/status endpoint -> debugger_status_2

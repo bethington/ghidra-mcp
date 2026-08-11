@@ -172,11 +172,12 @@ jobs:
       run: |
         # Run only unit tests (integration tests require a running MCP server).
         # uv installs the bridge package (editable) + test group from the lock.
-        # Coverage sources (bridge_mcp_ghidra, tools, debugger) come from the
-        # addopts in pyproject.toml. The fail-under floor is a RATCHET: it sits
-        # a few points below the measured baseline (61% on 2026-07-24, after
-        # static_tools.py and debugger/tracing.py went to 100%) to absorb
-        # platform/version skew — raise it as coverage improves, never lower it.
+        # Coverage sources (bridge_mcp_ghidra, tools) come from the addopts in
+        # pyproject.toml. The fail-under floor is a RATCHET: it sits a few
+        # points below the measured baseline (63.6% on 2026-08-11, measured
+        # after the debugger package moved to d2-game-exe and left the
+        # denominator) to absorb platform/version skew — raise it as coverage
+        # improves, never lower it.
         uv run --python ${{ matrix.python-version }} --group test \
           pytest tests/unit/ -v --tb=short --cov-fail-under=58
 

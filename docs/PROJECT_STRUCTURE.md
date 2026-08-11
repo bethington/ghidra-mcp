@@ -19,11 +19,10 @@ ghidra-mcp/
 ├── docs/                        # Maintained documentation
 ├── src/                         # Java plugin/headless server source
 ├── tests/                       # Python tests
-├── debugger/                    # Standalone debugger bridge package
 ├── tools/                       # Python utilities and setup helpers
 ├── ghidra_scripts/              # Scripts that run inside Ghidra
 ├── docker/                      # Container assets
-├── d2-analysis/                 # Diablo II workflow material
+├── d2-analysis/                 # Diablo II workflow material (GITIGNORED, not part of the repo)
 ├── dll_exports/                 # Export lists and reference data
 └── examples/                    # Examples and sample inputs
 ```
@@ -55,14 +54,19 @@ ghidra-mcp/
 - Scripts intended to run inside Ghidra's Script Manager
 - Distinct from the Python MCP bridge and external repo tooling
 
-### `debugger/`
+### `debugger/` — moved out 2026-08-11
 
-- Standalone Python debugger server used by the bridge when debugger support is enabled
+- The standalone Python debugger server now lives in `d2-game-exe`; its
+  `d2/conventions.py` made it game-side
+- The bridge keeps 22 proxy tools that forward to `GHIDRA_DEBUGGER_URL`, so
+  debugger support is still reachable — it is just no longer hosted here
 
-### `d2-analysis/`
+### `d2-analysis/` — local only, never tracked
 
 - Diablo II-specific notes, examples, outputs, and workflow material
-- Not part of the core build/deploy path
+- **Gitignored** (14,768 files on disk, 0 tracked). It is not part of this
+  repo and not part of the build/deploy path; it is scratch material that
+  happens to live in the working directory. Nothing here should depend on it.
 
 ## Supported Operator Workflow
 

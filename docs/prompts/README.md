@@ -8,7 +8,7 @@ Battle-tested prompts for reverse engineering binary code in Ghidra using MCP to
 |------|--------|-------------|
 | **Document a function** | [FUNCTION_DOC_WORKFLOW_V5.md](FUNCTION_DOC_WORKFLOW_V5.md) | Primary workflow. 7-step process with Hungarian notation, type auditing, and verification scoring. |
 | **Find undiscovered code** | [ORPHANED_CODE_DISCOVERY_WORKFLOW.md](ORPHANED_CODE_DISCOVERY_WORKFLOW.md) | Automated scanner for functions hiding in gaps between known code. |
-| **Investigate data types** | [DATA_TYPE_INVESTIGATION_WORKFLOW.md](DATA_TYPE_INVESTIGATION_WORKFLOW.md) | Systematic structure discovery and field analysis. |
+| **Investigate data types** | [DATA_TYPE_INVESTIGATION_QUICK.md](DATA_TYPE_INVESTIGATION_QUICK.md) | Structure discovery and field analysis. |
 
 ## Function Documentation (V5 Workflow)
 
@@ -32,18 +32,16 @@ The V5 workflow is the current standard. It addresses every failure mode encount
 
 | File | Purpose |
 |------|---------|
-| [DATA_TYPE_INVESTIGATION_WORKFLOW.md](DATA_TYPE_INVESTIGATION_WORKFLOW.md) | Full structure discovery workflow |
-| [DATA_TYPE_INVESTIGATION_QUICK.md](DATA_TYPE_INVESTIGATION_QUICK.md) | Abbreviated version for simple types |
+| [DATA_TYPE_INVESTIGATION_QUICK.md](DATA_TYPE_INVESTIGATION_QUICK.md) | Structure discovery for simple types |
 | [DATA_SECTION_WORKFLOW.md](DATA_SECTION_WORKFLOW.md) | Workflow for .data/.rdata section analysis |
 | [GLOBAL_DATA_ANALYSIS_WORKFLOW.md](GLOBAL_DATA_ANALYSIS_WORKFLOW.md) | Global data naming and analysis |
 
-## Cross-Binary Workflows
+## Moved to `d2-game-exe` (2026-08-11)
 
-| File | Purpose |
-|------|---------|
-| [CROSS_VERSION_MATCHING_COMPREHENSIVE.md](CROSS_VERSION_MATCHING_COMPREHENSIVE.md) | Full hash-based function matching workflow |
-| [CROSS_VERSION_FUNCTION_MATCHING.md](CROSS_VERSION_FUNCTION_MATCHING.md) | Quick cross-version matching guide |
-| [BINARY_DOCUMENTATION_ORDER.md](BINARY_DOCUMENTATION_ORDER.md) | Optimal order for documenting binary families |
+Four workflows described documenting one specific corpus rather than operating
+this server, and went with the D2 tooling:
+`DATA_TYPE_INVESTIGATION_WORKFLOW`, `BINARY_DOCUMENTATION_ORDER`,
+`CROSS_VERSION_FUNCTION_MATCHING`, `CROSS_VERSION_MATCHING_COMPREHENSIVE`.
 
 ## Archive
 

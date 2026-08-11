@@ -1,224 +1,136 @@
-# Refocus plan — reduce this repo to the Ghidra MCP server
+# Refocus — reducing this repo to the Ghidra MCP server
 
-**Status:** draft for review. Nothing in the "needs sign-off" tables has been
-executed. Two safe items were executed on 2026-08-11 and are marked DONE.
+**Status:** executed 2026-08-11. This is the record of what moved, what stayed,
+and the two measurement errors found along the way. The receiving half is
+branch `import/ghidra-mcp-tooling` in `d2-game-exe` (commit `af2ebda`),
+left unmerged for review.
 
-**Decisions this plan implements** (agreed 2026-08-11):
+## Decisions
 
 | Decision | Choice |
 | --- | --- |
-| Destination for evicted work | Decide per item |
-| Boundary | **Strict core** — server + bridge only |
-| History | Remove going forward, **keep history** (no rewrite) |
-| Execution | Plan doc + safe quick wins now; the rest waits for sign-off |
+| Boundary | Strict core — server + bridge |
+| Destination | `d2-game-exe`, one destination for everything |
+| History | Remove going forward, keep history (no rewrite) |
+| Landing | Dedicated branch in a fresh worktree, not onto a dirty `main` |
+| Sequencing | Copy → verify byte-identical → remove, same session |
+| Duplicates | Delete the superseded copy, keep the category-prefixed one |
 
-No history rewrite means every removal stays recoverable with
-`git checkout <deleting-commit>^ -- <path>`, and the 7 open PRs are unaffected.
-That is the whole reason the choice matters: a rewrite would have invalidated
-every outstanding contributor branch.
+No history rewrite means every removal is recoverable and the 7 open PRs are
+untouched. The recovery command was **verified working**, not assumed:
 
----
+```text
+git log --all --diff-filter=D -1 --format=%H -- <path>   # the deleting commit
+git checkout <that-sha>^ -- <path>                       # restore
+```
 
-## 1. Where the repo actually stands
+## What moved (84 files + a provenance note)
 
-Tracked files by top-level directory, measured 2026-08-11 *after* the d2probe
-removal below:
-
-| Dir | Files | Verdict |
+| Area | Files | Why it went |
 | --- | --- | --- |
-| `tests/` | 183 | **Core** (but see §4 — some tests move with their subject) |
-| `ghidra_scripts/` | 172 | **Split** — 118 D2-specific, 42 generic, 12 misc |
-| `src/` | 118 | **Core** — the Ghidra plugin itself |
-| `docs/` | 81 | **Split** — workflow prompts are fun-doc's, not the server's |
-| `scripts/` | 16 | **Mostly moves** |
-| `tools/` | 17 | **Split** — `setup/` is core, the rest is not |
-| `python/` | 15 | **Core** — the bridge |
-| `debugger/` | 11 | **Moves** (largest judgement call; see §3) |
-| `.github/` | 11 | Core |
-| `docker/` | 6 | Core |
+| `ghidra_scripts/` | 48 | Hardcoded D2 addresses, D2 binary names, D2 domain nouns |
+| `debugger/` | 11 | `d2/conventions.py` is game-side; one package, so it moved whole |
+| `scripts/fid/` | 9 | VC6/VS2003 FID work serves the D2 corpus. Its measured knowledge went too, as `scripts/fid/KNOWLEDGE.md` |
+| `tests/unit/` | 7 | The debugger's tests |
+| `docs/prompts/` | 4 | Workflows describing one corpus, not this server |
+| `tests/conformance/` | 1 | `corpus/debugger_live.yaml` |
+| `tools/scyllahide/` | 1 | Anti-anti-debug for the PD2-S12 oracle |
+| root `.ps1` | 3 | `start-debugger`, `start-oracle`, `install-debugger-scheduled-task` |
 
-Two big items already left and need no further action:
+Every file was verified **byte-identical (sha256)** at the destination before
+anything was deleted here.
 
-- **`fun-doc/`** — already untracked; 0 tracked files. CLAUDE.md records the
-  2026-08-11 move to `d2-game-exe`. Only gitignored runtime droppings remain on
-  disk (`logs/`, `state.db`, `priority_queue.json`). Safe to delete locally
-  whenever; git does not see them.
-- **`d2-analysis/`** — gitignored, 14,768 files, never tracked.
+## Two measurement errors, both caught before they did damage
 
----
+### 1. The classifier was detecting headers, not D2-specificity
 
-## 2. Executed now (safe, unambiguous)
+The first pass grepped each script for `D2Common|Diablo|UnitAny|…` and reported
+**118 D2-specific / 42 generic**. That number was wrong, and the recommendation
+built on it was nearly inverted.
 
-### DONE — `scripts/d2probe/` removed
+These scripts carry a documentation header containing `@category Diablo 2.X`.
+Grepping the raw file therefore matches "Diablo" in the *header* of any script
+that has one — so the classifier was really measuring **header presence**.
+Older, unprefixed copies lack the header and scored "generic" while being the
+same script.
 
-22 files, 919 lines. This is the exact cautionary tale CLAUDE.md's scope
-section already names: committed 2026-08-02 *after* being identified as
-out-of-scope in its own README, on the reasoning that the wrong repo beat no
-repo. Nothing outside itself referenced it except that CLAUDE.md paragraph,
-which has been updated to past tense with the recovery command.
+Stripping the leading comment block before classifying, and judging only on
+evidence that survives it — a hardcoded D2 load address (`0x6f8xxxxx`), a D2
+binary name, a D2 domain noun — gives the real split:
 
-**Outstanding:** these files still have no owning repo. Deleting them here only
-stopped this repo from being the answer by default; it did not give them a
-home. Restoring them into D2MOO is the other half of the fix.
-
-### DONE — dangling `fun-doc` references in tests
-
-`tests/unit/test_no_default_data_egress.py` was **failing on disk right now**,
-not merely in CI: it did `_read("fun-doc/fun_doc.py")` against a path that no
-longer exists. Fixed by dropping the fun-doc assertion (that check travels with
-fun-doc) and removing `"fun-doc"` from `checked_roots`. The Java-side
-assertions — which are what this repo actually ships — are untouched. Suite is
-green (4 passed).
-
-The other three hits are **comments only** and compile/run fine:
-`tests/integration/conftest.py`, `tests/integration/test_endpoint_registration_parity.py`,
-`tests/conformance/run_conformance.py`. They mention "fun-doc worker fleet" as
-rationale. Recommend leaving the text as-is — it explains *why* a concurrency
-assumption exists, and that reasoning is still true of any external client.
-
----
-
-## 3. Needs sign-off — the real extractions
-
-### 3a. `ghidra_scripts/` — split, do not move wholesale
-
-This is the item where the strict-core boundary is most expensive, so it gets
-the most evidence.
-
-Measured by **content** (grep for `D2Common|D2Client|D2Game|Diablo|UnitAny|d2moo|PD2|Storm.dll|Fog.dll`),
-not filename — filename classification undercounts by 20× (6 vs 118):
-
-| Class | Count | Recommendation |
+| | first claim | measured |
 | --- | --- | --- |
-| D2-specific `.java` | 118 | → D2MOO or a `d2-ghidra-scripts` repo |
-| Generic `.java` | 42 | **Stay** — these are legitimate companions to a Ghidra MCP server |
-| `.py` + misc | 12 | Triage individually |
+| D2-specific | 118 | **48** |
+| Generic | 42 | **87** |
+| Superseded duplicates | — | **25** |
 
-**A correction worth recording:** I initially reported the Java server as
-*depending* on `ghidra_scripts/`. It does not. All twelve references in
-`GhidraMCPPlugin.java`, `ProgramScriptService.java`,
-`GhidraMCPHeadlessServer.java` and `HeadlessEndpointHandler.java` resolve
-`~/ghidra_scripts` (user home) or `./ghidra_scripts/` as a **runtime search
-path** for the `run_ghidra_script` endpoint. Moving the directory would not
-break the build or the server — it would only mean the repo ships no scripts.
+Filename classification was worse still: it found 6.
 
-**Coupling that does break:** `tests/unit/test_no_default_data_egress.py` has
-two guards that read this directory — `test_bsim_scripts_have_no_default_destination`
-(asserts BSim scripts carry no literal destination URL) and
-`test_bsim_credentials_file_is_not_committed` (asserts `db.env` is untracked
-and `db.env.example` exists). Both assert-on-empty is *not* protected in the
-first case: it does `assert scripts, "glob is matching nothing"`, which is
-correct and will fail loudly rather than silently pass. **If the 17 BSim
-scripts move out, that guard must move with them** — it is a real
-password-leak guard, and its docstring records that a rename already retired it
-once before.
+### 2. `docs/prompts/` was assigned by guesswork
 
-**Recommendation:** move the 118 D2-specific scripts; keep the 42 generic ones
-plus `README.md`; move `db.env.example` + both BSim guards along with the BSim
-scripts to wherever they land.
+The first plan named `FUNCTION_DOC_WORKFLOW_V5.md` and
+`STRING_LABELING_CONVENTION.md` as movers. Counting D2 references shows they
+are generic (1 and 3 hits) and they stayed. The actual movers were
+`BINARY_DOCUMENTATION_ORDER.md` (48 hits) and
+`CROSS_VERSION_MATCHING_COMPREHENSIVE.md` (45), neither of which the plan
+mentioned.
 
-### 3b. `debugger/` — the largest judgement call
+## What deliberately stayed
 
-11 tracked files, a standalone HTTP server on port 8099. Strict core says it
-goes. Three facts argue for care:
+- **87 generic Ghidra scripts.** Convention detection, orphan-code discovery,
+  function-parameter repair, padding analysis — they work on any binary and are
+  legitimate companions to a Ghidra MCP server.
+- **14 of the 17 BSim scripts** and **all three egress/credentials guards.**
+  The decision recorded was to move the guards; that decision rested on the
+  wrong classification, which said the BSim scripts were leaving. They are not
+  — only the three D2-specific `Analyze_BSimStep{1,3,4}` moved. The stated
+  principle behind the choice was *"the guards live with what they guard"*, and
+  applying that principle to the corrected facts keeps them here. Moving them
+  would have left 14 BSim scripts in a public repo with nothing watching for a
+  hardcoded private address — the exact leak the guard's own docstring records
+  having happened once already.
+- **`tools/context_analysis/`.** It measures this server's own MCP tool catalog
+  against an LLM context window. That is core server work; the plan was wrong
+  to list it as a mover.
+- **The 22 debugger proxy tools** in `python/bridge_mcp_ghidra/debugger.py`.
+  They are bridge code and forward to whatever `GHIDRA_DEBUGGER_URL` names, so
+  they work fine with the server hosted elsewhere. The existing env gate means
+  they register only when configured.
+- **The `debugger` dependency group** in `pyproject.toml`. It looked dead, but
+  `tools/setup/ghidra.py` needs it for the *Ghidra TraceRmi* backend — a
+  different debugger that stays. Only `--cov=debugger` was removed, the package
+  it pointed at being gone.
 
-- The **bridge proxies 22 debugger tools** via `GHIDRA_DEBUGGER_URL`. Those
-  proxy definitions live in `python/bridge_mcp_ghidra/debugger.py`, which is
-  core and would stay. Moving the server without the proxies leaves 22 tools
-  pointing at a service this repo no longer contains.
-- **5 unit test files** move with it: `test_debugger_engine.py`,
-  `test_debugger_server.py`, `test_address_map.py`, `test_d2_conventions.py`,
-  `test_windbg.py`.
-- `debugger/d2/` is explicitly D2-convention code — unambiguously game-side.
+## 25 superseded duplicates, deleted
 
-**Recommendation:** move it, and move the 22 bridge proxy tools' *registration*
-behind the existing `GHIDRA_DEBUGGER_URL` env gate so the bridge degrades
-cleanly to "not configured" rather than advertising tools with no server. The
-gate already exists (`TestDebuggerEnabled` / `TestDebuggerToolRegistration`
-cover platform gating), so this is a small change, not a rewrite.
+Exact code duplicates (header stripped) where one copy carried a category
+prefix and the other an older `//@author GhidraMCP` stub — e.g.
+`ClearAllComments` / `Document_ClearAllComments`. Two files for one script is a
+live hazard: edit one, run the other, and the difference is invisible. The
+prefixed copy was kept in all 25 cases; the rule was verified by hand against
+every pair, not just asserted.
 
-Also moves with it: `start-debugger.ps1`, `install-debugger-scheduled-task.ps1`,
-`start-oracle.ps1`, `tests/conformance/corpus/debugger_live.yaml`.
+## What this cost
 
-### 3c. `scripts/` — 16 files
+1. **The single-commit/single-CI relationship is gone**, now for the debugger
+   as well as fun-doc. The debugger's HTTP surface is a cross-repo contract:
+   a route or payload change there breaks the bridge's proxies from a distance.
+   `tests/unit/test_bridge_utils.py::TestDebuggerEnabled` and
+   `::TestDebuggerToolRegistration` are what remain, and they only prove the
+   proxies register — not that the far end still speaks the same protocol.
 
-| Path | Files | Recommendation |
-| --- | --- | --- |
-| `scripts/fid/` | 9 | Move — VC6/VS2003 FID database building is D2-toolchain work |
-| `scripts/bsim/` | 2 | Move with the BSim scripts (3a) |
-| `scripts/ghidra/` | 2 | **Stay** — Ghidra project utilities |
-| `scripts/upgrade_project_language.py` | 1 | **Stay** — SLEIGH language upgrades; has a unit test; CLAUDE.md documents it as the fix for a Ghidra-upgrade failure mode |
-| `scripts/launch-ghidra-scoped.ps1` | 1 | **Stay** |
-| `scripts/ghidra_server_health_check.py` | 1 | **Stay** |
+2. **Coverage denominator changed.** Measured after removal: **63.62%**,
+   against a CI floor of 58%. The ratchet holds, and the stale comment naming
+   `debugger/tracing.py` was corrected.
 
-### 3d. `tools/` — 17 files
+3. **`scripts/fid/`'s measured knowledge nearly evaporated.** The CLAUDE.md row
+   holding the VS2003-vs-VC6 diagnosis was removed with the code; it was
+   written to `scripts/fid/KNOWLEDGE.md` in the destination instead of lost.
 
-| Path | Recommendation |
-| --- | --- |
-| `tools/setup/` | **Stay** — the build/deploy backend; core |
-| `tools/gen_readme_api_reference.py` | **Stay** |
-| `tools/context_analysis/` (3) | Move or delete — LLM context measurement, not server work |
-| `tools/scyllahide/` (1 README) | Move — anti-anti-debug tooling is game-side |
+## Still open
 
-### 3e. `docs/` — 81 files
-
-`docs/prompts/` holds `FUNCTION_DOC_WORKFLOW_V5.md`,
-`DATA_TYPE_INVESTIGATION_WORKFLOW.md`, `STRING_LABELING_CONVENTION.md`. These
-describe **fun-doc's** documentation workflow, not the server's API. They
-should follow fun-doc to `d2-game-exe`.
-
-`docs/prompts/TOOL_USAGE_GUIDE.md` **stays** — it is the operator guide for
-this server's 253 tools and CLAUDE.md names it as authoritative.
-
----
-
-## 4. What this costs — stated plainly
-
-Splitting is not free, and the plan should say so rather than only list wins:
-
-1. **The single-commit/single-CI relationship is gone.** CLAUDE.md already
-   records this for fun-doc. Today a response-envelope change and its consumer
-   fix land in one commit and one CI run. After the split they cannot. A
-   contract change here can break a consumer at a distance, silently.
-   *Mitigation:* the response-contract tests (`test_response_schemas.py`,
-   `test_response_contract_callers.py`) become the interface guard and should
-   be treated as such — they are no longer just internal hygiene.
-
-2. **`tests/` shrinks by more than the moved directories suggest.** Debugger
-   alone takes 5 unit test files. The BSim guards take real security coverage
-   with them. A refocus that *reduces* this repo's security-test surface has
-   gone wrong; those guards must land somewhere, not evaporate.
-
-3. **The 42 generic Ghidra scripts are an asset**, not residue. A Ghidra MCP
-   server that ships zero Ghidra scripts is a narrower product than one that
-   ships 42 useful ones.
-
----
-
-## 5. Recommended order
-
-1. ~~`scripts/d2probe/`~~ — DONE
-2. ~~dangling `fun-doc` test references~~ — DONE
-3. `tools/scyllahide/`, `tools/context_analysis/` — 4 files, zero coupling
-4. `docs/prompts/` workflow docs → `d2-game-exe` (keep `TOOL_USAGE_GUIDE.md`)
-5. `scripts/fid/` → D2MOO or `d2-game-exe`
-6. `ghidra_scripts/` split — 118 out, 42 stay, **BSim guards move with BSim**
-7. `debugger/` + its 5 tests + 3 `.ps1` files, with the bridge proxy gated
-8. Update CLAUDE.md's scope list, `AGENTS.md`, and `README.md` to match
-
-Steps 3–5 are low-risk and independently reversible. Step 6 needs the
-egress-guard decision made first. Step 7 is the only one that changes what the
-bridge advertises to MCP clients, and should be its own PR.
-
----
-
-## 6. Open question for you
-
-`ghidra_scripts/` is the one place where strict-core and usefulness genuinely
-conflict. The 42 generic scripts (convention detection, orphan-code finding,
-function-parameter repair, padding analysis) are exactly the kind of thing
-someone installing a Ghidra MCP server would want, and they are not D2 work.
-
-My recommendation is the split in 3a — keep them. The alternative, moving all
-172 for a clean boundary, trades a real capability for a tidier tree. Say the
-word if you'd rather have the clean boundary and I'll take all 172.
+- `scripts/d2probe/` (removed earlier, 22 files) **still has no owning repo**.
+  Deleting it here only stopped this repo being the answer by default.
+  Restoring it into D2MOO is the outstanding half of that fix.
+- The import branch is **unmerged**. Until it is, the moved files live on a
+  local branch plus `ghidra-mcp` history.

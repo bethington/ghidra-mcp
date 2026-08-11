@@ -1,6 +1,7 @@
 """Debugger proxy tools — forward to the standalone debugger server.
 
-Each tool proxies an HTTP request to ``debugger/server.py`` on
+Each tool proxies an HTTP request to the standalone debugger server (which
+lives in the ``d2-game-exe`` repo) on
 ``GHIDRA_DEBUGGER_URL`` (see :data:`bridge_mcp_ghidra.config.DEBUGGER_URL`).
 """
 
@@ -31,7 +32,7 @@ def _debugger_enabled(
 ) -> bool:
     """Whether to register the WinDbg debugger proxy tools on this host.
 
-    The standalone debugger server (debugger/server.py) wraps dbgeng/WinDbg via
+    The standalone debugger server (d2-game-exe repo) wraps dbgeng/WinDbg via
     pybag and only runs on Windows. Registering ~22 proxy tools that can never
     work just clutters the tool list, so registration is gated:
 

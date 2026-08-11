@@ -1725,7 +1725,7 @@ class TestUnixHTTPConnection(unittest.TestCase):
 class TestDebuggerEnabled(unittest.TestCase):
     """_debugger_enabled gates the WinDbg debugger proxy tools.
 
-    The standalone debugger server (debugger/server.py) wraps dbgeng and only
+    The standalone debugger server (d2-game-exe repo) wraps dbgeng and only
     runs on Windows, so a *local* debugger URL can never serve on a non-Windows
     host. Registration is gated accordingly to keep the tool list uncluttered.
     """
