@@ -1019,9 +1019,25 @@ def reset_benchmark_fixture(repo_root: Path, mcp_url: str) -> None:
     _terminate_dbgeng_launcher_processes()
     _terminate_processes_by_name("BenchmarkDebug.exe")
     if not benchmark_dll.is_file() or not benchmark_debug_exe.is_file():
+        build_script = repo_root / "fun-doc" / "benchmark" / "build.py"
+        if not build_script.is_file():
+            # fun-doc moved to the d2-game-exe repo on 2026-08-11 and took the
+            # benchmark fixture with it. Say so plainly: without this guard the
+            # only symptom is a CalledProcessError with exit status 2 from a
+            # subprocess.run on a path that does not exist, which reads as a
+            # build failure rather than a relocation.
+            raise RuntimeError(
+                f"Benchmark fixture source is missing: {build_script}\n"
+                "fun-doc (and its benchmark/) moved to the d2-game-exe "
+                "repository. The release-regression modes that reset this "
+                "fixture cannot run from this repo any more.\n"
+                "Either run them from d2-game-exe, or deploy without the "
+                "benchmark-backed --test modes (endpoint-catalog and "
+                "selected-contract do not need it)."
+            )
         print("Benchmark binary output missing; building it now.")
         subprocess.run(
-            [sys.executable, str(repo_root / "fun-doc" / "benchmark" / "build.py")],
+            [sys.executable, str(build_script)],
             cwd=repo_root,
             check=True,
         )
