@@ -54,9 +54,11 @@ git log --all --diff-filter=D -1 --format=%H -- scripts/d2probe   # the deleting
 git checkout <that-sha>^ -- scripts/d2probe                       # restore into a worktree
 ```
 
-They still have no owning repo. Restoring them into D2MOO (or their own) is
-the outstanding half of the fix; deleting them here only stopped this repo
-from being the answer by default.
+**They now have an owning repo:** D2MOO `tools/d2probe/` (commit `c9438d6`, on
+`master` and `pd2-focus`, pushed). Verified 21 of the 22 files byte-identical to
+what was removed here; the 22nd is `README.md`, deliberately rewritten for the
+new home instead of still declaring itself out of scope. Deleting them here only
+stopped this repo being the answer by default — the rehoming is what finished it.
 
 ## Architecture
 
