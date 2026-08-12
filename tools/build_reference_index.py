@@ -33,15 +33,15 @@ unattended runs awkward; pipe it on stdin, or stay on H2 for local work.
 USAGE
 
     # one binary (its .pdb must sit beside it to get names)
-    python scripts/bsim/build_reference_index.py \
+    python tools/build_reference_index.py \
         --index C:/bsim/refindex --add F:/refs/libcrypto-1_1.dll
 
     # several, into the same index
-    python scripts/bsim/build_reference_index.py --index C:/bsim/refindex \
+    python tools/build_reference_index.py --index C:/bsim/refindex \
         --add F:/refs/BH.dll --add F:/refs/ddraw.dll
 
     # what is in there now
-    python scripts/bsim/build_reference_index.py --index C:/bsim/refindex --list
+    python tools/build_reference_index.py --index C:/bsim/refindex --list
 
 A binary already present in the index is SKIPPED unless --force: BSim keys
 executables by md5, and committing the same one twice is how an index grows
@@ -319,7 +319,7 @@ def main() -> int:
 
     where = index if is_url(index) else index + ".mv.db"
     print(f"\nindexed {added} of {len(args.add)} binaries into {where}")
-    print("verify with --list, then query with scripts/bsim/Analyze_BSimIdentifyDump.java")
+    print("verify with --list, then query with ghidra_scripts/Analyze_BSimIdentifyDump.java")
     return 0
 
 
