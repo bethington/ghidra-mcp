@@ -6,6 +6,35 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — `program` in a POST body was silently ignored, sending writes to the wrong program
+
+`@Param.source()` defaults to `ParamSource.QUERY`. On a POST tool that declares
+its other parameters as `BODY`, any parameter left at that default was looked
+for in the query string only — so a caller following this project's own "POST
+params go in the body" convention had it dropped. **192 `program` declarations
+across 103 POST tools** have that shape.
+
+For `program` the consequence was not a missing argument but a wrong target:
+resolution fell through to `getProgramOrError(provider, "")`, i.e. the *current*
+program. A `set_bookmark`, `set_comment` or rename addressed to one program
+landed in whichever program happened to be active, and the response said
+`success` — with no `program` field to reveal where it actually went.
+
+Observed in the field: **16,442 bookmarks describing one DLL were written into
+another**, across two separate publishing runs, without a single error. The
+callers were correct; every one named its target program in the body.
+
+`resolveParam` now falls back to the other source when the declared one does not
+carry the parameter at all. The declared source still wins when it has a value,
+so the Python bridge's synthesized query params are unaffected. This generalises
+what `isDryRunRequested` already did by hand for `dry_run` — same root cause,
+found earlier, where a query-only check meant a dry run performed a real write.
+`resolveProgramForDryRun` was reading `query.get("program")` only and is fixed
+the same way.
+
+Covered by `AnnotationScannerParamSourceTest`, which fails against the previous
+behaviour (`expected:<D2Common.dll> but was:<null>`).
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

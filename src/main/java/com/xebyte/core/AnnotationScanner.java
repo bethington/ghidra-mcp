@@ -179,7 +179,7 @@ public class AnnotationScanner {
                 // method.invoke(...) unguarded. Confirmed live 2026-08-09 on /batch_set_comments
                 // (see reference_dry_run_silently_writes.md).
                 if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
-                    Program program = resolveProgramForDryRun(bindings, query);
+                    Program program = resolveProgramForDryRun(bindings, query, body);
                     if (program != null) {
                         int tx = program.startTransaction("[DRY RUN] " + tool.path());
                         try {
@@ -221,11 +221,19 @@ public class AnnotationScanner {
     /**
      * Resolve the Program for dry-run wrapping by finding the "program" param binding.
      */
-    private Program resolveProgramForDryRun(ParamBinding[] bindings, Map<String, String> query) {
+    private Program resolveProgramForDryRun(ParamBinding[] bindings, Map<String, String> query,
+            Map<String, Object> body) {
         // Look for a @Param(value = "program") binding
         for (ParamBinding binding : bindings) {
             if (binding != null && "program".equals(binding.param.value())) {
+                // Query first, then body -- a POST caller following this project's
+                // "POST params go in the body" convention puts it there, and reading
+                // only the query made a dry run preview the wrong program.
                 String programName = query.get("program");
+                if (programName == null || programName.isEmpty()) {
+                    Object raw = body != null ? body.get("program") : null;
+                    if (raw != null) programName = String.valueOf(raw);
+                }
                 if (programName != null && !programName.isEmpty()) {
                     return programProvider.getProgram(programName);
                 }
@@ -252,13 +260,55 @@ public class AnnotationScanner {
     // Parameter resolution
     // ==================================================================
 
-    private static Object resolveParam(ParamBinding binding, Map<String, String> query,
+    /**
+     * Resolve a parameter from its declared source, falling back to the other one
+     * when the declared source does not carry it at all.
+     *
+     * {@link Param#source()} defaults to {@link ParamSource#QUERY}. On a POST tool
+     * that declares its other parameters as BODY, any parameter left at the default
+     * -- {@code program} on 192 declarations across 103 POST tools -- is therefore
+     * looked for in the query string and silently missed when the caller puts it in
+     * the JSON body alongside everything else. For {@code program} the consequence
+     * is not a missing argument but a WRONG TARGET: resolution falls through to the
+     * current program, so a bookmark, comment or rename addressed to one program
+     * lands in whichever program happens to be active, and the response says
+     * success. That is how 16442 bookmarks describing D2Common were written into
+     * D2Game without a single error.
+     *
+     * This generalises what {@code isDryRunRequested} already does by hand for
+     * {@code dry_run}, and for the same reason it gives: the Python bridge
+     * synthesizes query params while a direct-HTTP caller follows this project's
+     * own "POST params go in the body" convention. Both are legitimate; a parameter
+     * should be found wherever the caller put it.
+     *
+     * The declared source still wins when it has a value, so nothing that works
+     * today changes meaning.
+     */
+    static Object resolveParam(ParamBinding binding, Map<String, String> query,
             Map<String, Object> body) {
-        if (binding.param.source() == ParamSource.QUERY) {
-            return resolveQueryParam(binding, query);
-        } else {
-            return resolveBodyParam(binding, body);
+        boolean declaredQuery = binding.param.source() == ParamSource.QUERY;
+        boolean inDeclared = declaredQuery ? presentIn(binding, query) : presentIn(binding, body);
+        if (!inDeclared) {
+            boolean inOther = declaredQuery ? presentIn(binding, body) : presentIn(binding, query);
+            if (inOther) {
+                return declaredQuery ? resolveBodyParam(binding, body)
+                                     : resolveQueryParam(binding, query);
+            }
         }
+        return declaredQuery ? resolveQueryParam(binding, query)
+                             : resolveBodyParam(binding, body);
+    }
+
+    /** Whether a map actually carries this parameter, under its name or any alias. */
+    static boolean presentIn(ParamBinding binding, Map<String, ?> values) {
+        if (values == null || values.isEmpty()) return false;
+        if (values.containsKey(binding.param.value())) return true;
+        if (binding.aliases != null) {
+            for (String alias : binding.aliases) {
+                if (values.containsKey(alias)) return true;
+            }
+        }
+        return false;
     }
 
     private static Object resolveQueryParam(ParamBinding binding, Map<String, String> query) {
@@ -537,7 +587,8 @@ public class AnnotationScanner {
     // Internal binding record
     // ==================================================================
 
-    private record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
+    /** Package-private so AnnotationScannerParamSourceTest can build one directly. */
+    record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
         ParamBinding(Param param, Class<?> javaType) {
             this(param, javaType, param.aliases());
         }
