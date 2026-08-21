@@ -1768,6 +1768,17 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
 
         currentTool.close();
+
+        // Closing every tool does NOT exit Ghidra -- the front end outlives them
+        // and the JVM stays up. Measured: /exit_ghidra saved 5 programs, stopped
+        // both servers, deregistered all 3 tools, and then sat there with the
+        // project window still on screen, while the caller had already been told
+        // "exiting Ghidra". Exit is the front end's own operation.
+        try {
+            AppInfo.exitGhidra();
+        } catch (Throwable e) {
+            Msg.error(this, "Tools closed but Ghidra did not exit: " + e.getMessage(), e);
+        }
     }
 
     private Map<String, Object> saveAllOpenDebuggerTraces() {
