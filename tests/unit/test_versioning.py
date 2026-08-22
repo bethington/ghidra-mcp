@@ -16,6 +16,7 @@ from tools.setup.versioning import is_ghidra_version_compatible
     [
         ("12.1", "12.1.2"),   # #293: pinned minor, patch install
         ("12.1", "12.1"),     # exact
+        ("12.1.2", "12.1.3"), # pinned previous patch, newer patch install
         ("12.1", "12.1.0"),   # explicit .0 patch
         ("12.1.2", "12.1"),   # pinned patch, minor install — same series
         ("12.1.0", "12.1.9"), # patch drift within series
