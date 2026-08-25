@@ -410,6 +410,28 @@ _dynamic_tool_names: list[str] = []
 _full_schema: list[dict] = []  # Complete parsed schema
 _loaded_groups: set[str] = set()
 
-# CLI-configurable: --lazy keeps only default groups, otherwise load all
-_lazy_mode = False  # default: eager (load all groups on connect)
+# CLI-configurable: --lazy keeps only default groups, --no-lazy loads all.
+#
+# DEFAULT IS LAZY (#440). Eager was the default until 2026-08-25 and made the
+# bridge advertise all 253 endpoints in one tools/list. That is not merely
+# expensive -- it is over a hard limit for at least one major provider. Gemini
+# compiles function declarations into a constrained-decoding state machine and
+# rejects the whole request before any tool is ever called:
+#
+#     400 INVALID_ARGUMENT
+#     "The specified schema produces a constraint that has too many states
+#      for serving"
+#
+# So the eager default did not degrade Gemini clients, it broke them outright,
+# and no amount of client-side configuration could work around a server that
+# only ever offered the full set. CORE_GROUPS (listing/function/program) is 57
+# endpoints + 8 static tools, which fits.
+#
+# Eager only ever existed for clients that ignore tools/list_changed and would
+# therefore never see a later load_tool_group() registration. That notification
+# actually works as of a7f5936, and the always-present static tools
+# (search_tools / check_tools) hand the model the exact load_tool_group(...)
+# call it needs, so discovery no longer depends on advertising everything up
+# front. Clients that still want the old behaviour pass --no-lazy.
+_lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)

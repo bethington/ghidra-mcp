@@ -120,14 +120,18 @@ def main():
     parser.add_argument(
         "--lazy",
         action="store_true",
-        default=False,
-        help="Only load default tool groups on connect (not recommended for Claude Code)",
+        default=True,
+        help="Only load default tool groups on connect (default). Keeps the "
+        "advertised tool set small enough for providers that cap function "
+        "declarations; use search_tools/load_tool_group to pull in more.",
     )
     parser.add_argument(
         "--no-lazy",
         dest="lazy",
         action="store_false",
-        help="Load all tool groups on connect (default)",
+        help="Load all tool groups on connect. Needed only by clients that "
+        "ignore tools/list_changed; rejected outright by the Gemini API "
+        "(400 INVALID_ARGUMENT, too many states for serving).",
     )
     parser.add_argument(
         "--default-groups",
@@ -143,6 +147,13 @@ def main():
 
     if not state._lazy_mode:
         logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
+    else:
+        logger.info(
+            "Lazy tool loading: only %s on connect. "
+            "Call search_tools()/load_tool_group() for the rest, or pass "
+            "--no-lazy to advertise every group up front.",
+            ",".join(sorted(state._default_groups)),
+        )
     if not _auto_connect():
         # Ghidra may simply not be up yet. Keep looking in the background so a
         # bridge that wins the startup race still gets its tools, instead of
