@@ -131,6 +131,9 @@ testing nothing.
 
 ### Fixed
 
+- **The headless Docker image builds on current Ubuntu Noble-based Temurin
+  images.** Container user creation now allocates available numeric IDs instead
+  of assuming UID and GID 1000 are unused by the base image.
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
   now stay responsive.
 - **`debugger_launch`** failed for reasons that had been misattributed to the
