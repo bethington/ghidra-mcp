@@ -8,8 +8,11 @@ Subprocess-calling functions are stubbed via monkeypatch.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -729,7 +732,7 @@ def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    monkeypatch.setattr(cli, "shutil", SimpleNamespace(which=lambda name: None))
 
     result = cli.cmd_preflight(_args())
     assert result == 1
@@ -750,8 +753,13 @@ def test_cmd_preflight_maven_passes_without_ghidra_path(tmp_path, monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
     monkeypatch.setattr(
-        cli.shutil, "which", lambda name: "/usr/bin/java" if name == "java" else None
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
     )
 
     result = cli.cmd_preflight(_args(ghidra_path=None))
@@ -918,3 +926,241 @@ def test_main_run_tests_maven(monkeypatch):
     monkeypatch.setattr(cli, "run_maven", lambda root, goals, dry_run=False: 0)
 
     assert cli.main(["run-tests"]) == 0
+
+
+# ===========================================================================
+# tools.setup.spawn — MCP client launcher resolution (issue #441)
+#
+# An MCP client launched from a systemd user service or a GUI session inherits
+# that launcher's PATH, which routinely lacks ~/.local/bin, so the documented
+# "command": "uv" dies with `spawn uv ENOENT` before any bridge code runs.
+# Every test below drives a monkeypatched PATH, so the result never depends on
+# what happens to be installed on the machine running the suite.
+# ===========================================================================
+
+
+def _make_launcher(directory: Path, name: str) -> Path:
+    """Create a file shutil.which will accept as an executable on this OS."""
+    if os.name == "nt":
+        target = directory / f"{name}.EXE"
+        target.write_text("")
+    else:
+        target = directory / name
+        target.write_text("#!/bin/sh\n")
+        target.chmod(0o755)
+    return target
+
+
+@pytest.fixture
+def isolated_path(tmp_path, monkeypatch):
+    """A PATH containing exactly one directory we control."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+    return bin_dir
+
+
+def test_resolve_spawn_command_found_returns_absolute_path(isolated_path):
+    from tools.setup import spawn
+
+    launcher = _make_launcher(isolated_path, "uv")
+
+    resolution = spawn.resolve_spawn_command("uv")
+
+    assert resolution.found is True
+    assert Path(resolution.path) == launcher
+    assert Path(resolution.path).is_absolute()
+    assert resolution.searched == (str(isolated_path),)
+
+
+def test_resolve_spawn_command_not_found_records_searched_path(isolated_path):
+    from tools.setup import spawn
+
+    resolution = spawn.resolve_spawn_command("uv")
+
+    assert resolution.found is False
+    assert resolution.path is None
+    assert resolution.searched == (str(isolated_path),)
+
+
+def test_search_path_entries_drops_blanks_and_duplicates(monkeypatch):
+    from tools.setup import spawn
+
+    sep = os.pathsep
+    monkeypatch.setenv("PATH", sep.join(["/a", "", "/b", "/a", " /c "]))
+
+    assert spawn.search_path_entries() == ("/a", "/b", "/c")
+
+
+def test_report_prints_every_searched_path_entry_when_not_found(
+    tmp_path, monkeypatch, capsys
+):
+    """The whole point of issue #441: say which PATH was actually walked."""
+    from tools.setup import spawn
+
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    third = tmp_path / "three"
+    for directory in (first, second, third):
+        directory.mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join(str(d) for d in (first, second, third)))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".COM;.EXE")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "NOT FOUND on this PATH" in out
+    assert "PATH searched (3 entries):" in out
+    # every entry, one per line, in order
+    printed = [line.strip() for line in out.splitlines()]
+    for directory in (first, second, third):
+        assert str(directory) in printed
+    assert "https://docs.astral.sh/uv/getting-started/installation/" in out
+
+
+def test_report_names_the_empty_path_rather_than_printing_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import spawn
+
+    monkeypatch.setenv("PATH", "")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "PATH searched (0 entries):" in out
+    assert "PATH is empty" in out
+
+
+def test_report_admits_it_cannot_speak_for_the_client_environment(
+    tmp_path, isolated_path, capsys
+):
+    """A pass here is evidence, not proof — the report must never imply proof."""
+    from tools.setup import spawn
+
+    _make_launcher(isolated_path, "uv")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "does NOT prove" in out
+    assert "systemd user service" in out
+    assert "issue #441" in out
+
+
+def test_report_emits_a_pasteable_config_with_an_absolute_command(
+    tmp_path, isolated_path, capsys
+):
+    from tools.setup import spawn
+
+    launcher = _make_launcher(isolated_path, "uv")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    snippet = out[out.index("{") :]
+    parsed = json.loads(snippet[: snippet.rindex("}") + 1])
+    command = parsed["mcpServers"]["ghidra-mcp"]["command"]
+    assert Path(command) == launcher
+    assert Path(command).is_absolute()
+    assert str(tmp_path) in parsed["mcpServers"]["ghidra-mcp"]["args"]
+
+
+def test_config_snippet_falls_back_to_a_marked_placeholder(tmp_path, isolated_path):
+    from tools.setup import spawn
+
+    resolutions = spawn.resolve_spawn_commands()
+    assert all(not r.found for r in resolutions)
+
+    parsed = json.loads(spawn.client_config_snippet(resolutions, tmp_path))
+    assert parsed["mcpServers"]["ghidra-mcp"]["command"] == "/absolute/path/to/uv"
+
+
+def test_missing_console_script_is_reported_but_not_alarming(
+    tmp_path, isolated_path, capsys
+):
+    """`uv run` never installs the console script; its absence is not a fault."""
+    from tools.setup import spawn
+
+    _make_launcher(isolated_path, "uv")
+
+    resolutions = spawn.report_spawn_commands(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "bridge-mcp-ghidra -> not on PATH" in out
+    assert "optional" in out
+    # The optional launcher must not drag the whole PATH listing into every run.
+    assert out.count("PATH searched") == 0
+    assert [r.name for r in resolutions] == ["uv", "bridge-mcp-ghidra"]
+
+
+def test_cmd_preflight_maven_reports_spawn_commands(tmp_path, monkeypatch, capsys):
+    """The check is wired into preflight, not merely importable."""
+    from tools.setup import cli
+    from tools.setup.versioning import VersionInfo
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
+    )
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "MCP client spawn commands:" in out
+    assert "does NOT prove" in out
+
+
+def test_cmd_preflight_does_not_fail_when_launchers_are_missing(
+    tmp_path, monkeypatch, capsys
+):
+    """Advisory only — a missing launcher must not red-line preflight by itself."""
+    from tools.setup import cli
+    from tools.setup.versioning import VersionInfo
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
+    )
+    monkeypatch.setenv("PATH", "")
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+    assert "NOT FOUND on this PATH" in capsys.readouterr().out
