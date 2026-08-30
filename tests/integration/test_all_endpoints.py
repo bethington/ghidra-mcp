@@ -12,7 +12,7 @@ from pathlib import Path
 def load_endpoints():
     endpoints_file = Path(__file__).parent.parent / "endpoints.json"
     if endpoints_file.exists():
-        with open(endpoints_file) as f:
+        with open(endpoints_file, encoding="utf-8") as f:
             data = json.load(f)
             return data.get("endpoints", [])
     return []

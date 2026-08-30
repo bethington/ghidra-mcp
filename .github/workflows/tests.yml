@@ -241,6 +241,54 @@ jobs:
       run: |
         uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
+  offline-http-tier:
+    # Issue #112. The integration tier needs a live Ghidra on :8089 with a
+    # binary open, so CI could only ever run the thin offline checks and an
+    # outside contributor could not self-verify anything that touches the wire.
+    # Five fork PRs sat three weeks unreviewable and two contributors shipped
+    # changes while reporting the suite as broken.
+    #
+    # This job closes that. tests/offline/fake_ghidra.py is a strict fake of
+    # the plugin's HTTP surface: it routes from tests/endpoints.json, checks
+    # parameters against the recorded /mcp/schema, and REFUSES anything the
+    # catalog does not describe. No Ghidra download, no JDK, no Maven -- it
+    # runs in well under a minute and in parallel with java-build, which
+    # downloads and unpacks Ghidra and dominates the critical path, so the
+    # wall-clock cost of the workflow is unchanged.
+    #
+    # Read tests/offline/README.md for what this does and does NOT prove.
+    name: Offline HTTP Tier (no Ghidra)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Fake server + bridge end-to-end
+      # --no-cov: the ubuntu python-tests job owns the coverage ratchet and
+      # measures tests/unit/ only. Folding this tier into that measurement
+      # would move the baseline under PR #453's feet; it can be merged in
+      # deliberately later (it would raise the number, not lower it).
+      run: uv run --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
+
+    - name: Replay the read-only integration tier against the fake
+      # The same file that needs a live Ghidra on :8089, run with no Ghidra at
+      # all. The plugin boots the fake on an ephemeral port, points
+      # GHIDRA_MCP_URL at it, skips the documented gaps, and fails the run if
+      # the observed contract violations differ from the committed baseline in
+      # EITHER direction.
+      run: |
+        uv run --python 3.12 --group test pytest \
+          tests/integration/test_readonly_endpoints.py \
+          -p tests.offline.replay_plugin -v --no-cov --tb=short
+
   code-quality:
     # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
     # fallback), so this job surfaces lint/format drift without ever failing CI.
@@ -300,13 +348,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, pester-tests ]
+    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

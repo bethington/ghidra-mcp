@@ -106,6 +106,12 @@ addopts = """
 --junit-xml=tests/junit.xml
 """
 testpaths = ["tests"]
+# Repo root on sys.path before plugins load. `-p tests.offline.replay_plugin`
+# (the no-Ghidra replay of the integration tier, #112) is imported during
+# pre-parse, well before pytest's rootdir insertion, so without this it works
+# under `python -m pytest` -- which puts cwd on the path itself -- and fails
+# under a plain `uv run pytest` with "No module named 'tests'".
+pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

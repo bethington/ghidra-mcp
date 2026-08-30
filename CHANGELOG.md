@@ -129,6 +129,61 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### Offline HTTP tier — the integration suite without Ghidra (#112)
+
+`tests/offline/fake_ghidra.py` is a strict fake of the plugin's HTTP surface.
+It routes from `tests/endpoints.json` (253 endpoints), checks every parameter
+against the recorded `/mcp/schema` (235 tools, each carrying its declared
+`source`), and serves payloads from the 119 committed conformance snapshots.
+Two commands now run on any machine with Python and nothing else:
+
+```bash
+pytest tests/offline/                                        # 37 tests
+pytest tests/integration/test_readonly_endpoints.py \
+       -p tests.offline.replay_plugin                        # 61 pass, 11 skip
+```
+
+The second one is the read-only integration file — the one that previously
+needed a live Ghidra on :8089 with a binary open — running with no Ghidra at
+all. Both are wired into CI as `Offline HTTP Tier (no Ghidra)` and gate
+`build-status`. The job needs no Ghidra download, so it runs in parallel with
+`java-build` and adds nothing to the workflow's critical path.
+
+It is deliberately a *strict* fake, not a response replayer. A replayer can
+only say yes: it hands back the recorded body whatever it is asked, so a caller
+using the wrong method, an invented endpoint, or a query parameter in the JSON
+body still gets 200. This one refuses. `@Param(value = "program")` defaults to
+`ParamSource.QUERY`, and a `program` sent in the body is ignored by the plugin,
+which then writes to whatever program is *current* — so that case is now a 400
+at the wire instead of a silently successful wrong-binary write. Verified by
+injection: dropping the `source` field in `schema._parse_schema` leaves all 560
+unit tests green and fails the offline tier.
+
+Its first run found ten contract breaches in the read-only suite, each a call
+the endpoint catalog does not support and each returning 200 against a live
+server, so the test passed while asserting nothing —
+`/list_functions` sent `limit`/`offset` although `ListingService` documents it
+as "no pagination"; `/search_functions_enhanced` sent `pattern` where the
+declared name is `name_pattern`; `/analyze_function_completeness` and
+`/get_function_labels` sent `address` where the declared selectors are
+`function_address` and `name`; `/get_full_call_graph` sent an undeclared
+`max_depth`; `/search_functions_by_name`, `/get_decompiled_code`,
+`/get_disassembly` and `/list_ghidra_scripts` are not endpoints at all; and
+`/disassemble_bytes` was called with GET where the catalog declares POST. They
+are recorded in `tests/offline/fixtures/expected_contract_violations.json` as a
+ratchet asserted exactly in both directions, rather than fixed here — changing
+what a test asserts is a maintainer call, and two of them want deleting.
+
+Also surfaced: `tests/conformance/snapshots/search_instructions.snap` is a
+recorded *error* response, not a successful one.
+
+**Boundary, stated in the code and in `tests/offline/README.md`:** this proves
+the bridge speaks the protocol and that response shapes match what Ghidra
+really returned when the snapshots were recorded. It proves nothing about
+whether Ghidra does the right thing today, and it never will — the payloads are
+frozen. An endpoint with no recording returns a body stamped
+`"_fake": "synthesized"` so an assertion against one cannot look like evidence.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths

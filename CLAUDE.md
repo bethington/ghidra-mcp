@@ -210,6 +210,15 @@ Three tiers by cost and prerequisites:
 
 1. **Unit** (`pytest tests/unit/`) — pure Python, no Ghidra, no side effects. Covers bridge utils, debugger-proxy gating, setup CLI, catalog/schema consistency. Fast (<5s).
 2. **Offline** — Java scanner/parity + Python regression tests that don't hit Ghidra on 8089. Fast (<10s).
+   Plus **`pytest tests/offline/`** (#112): a strict fake of the plugin's HTTP surface
+   (`tests/offline/fake_ghidra.py`) that routes from `tests/endpoints.json`, validates
+   parameters against the recorded `/mcp/schema`, and serves the conformance snapshots.
+   It runs the real bridge end to end over a real socket, and
+   `pytest tests/integration/test_readonly_endpoints.py -p tests.offline.replay_plugin`
+   runs the read-only integration file with **no Ghidra installed** (61 pass, 11 documented
+   gaps). Read `tests/offline/README.md` before adding to it — the fake proves the bridge
+   speaks the protocol and that shapes match the recordings; it proves nothing about what
+   Ghidra does today, and a test that implies otherwise is worse than no test.
 3. **Integration** (`pytest tests/` + `mvn test`) — requires live Ghidra on port 8089 with a binary open. Slow and stateful.
 
 ### Match change → tests
@@ -219,6 +228,7 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | Change location | Run |
 | --- | --- |
 | `src/main/java/com/xebyte/core/*Service.java` (any service class) | Offline (Java) + Integration (Java) + `tests/integration/test_readonly_endpoints.py` |
+| `tests/offline/*` (the fake, the replay plugin, the baselines) | `pytest tests/offline/ --no-cov` + `pytest tests/integration/test_readonly_endpoints.py -p tests.offline.replay_plugin --no-cov`. Both baselines are asserted EXACTLY: a new contract violation fails, and so does a stale one, so fixing a breach means deleting its line from `fixtures/expected_contract_violations.json`. `fixtures/known_offline_gaps.json` errors on a node id that no longer exists, so the quarantine list cannot outlive its tests. Do NOT teach the fake to compute an answer — it routes, validates and replays, and a fake that derives a response is a test asserting on itself. |
 | `src/main/java/com/xebyte/core/AnalysisService.java` — `/get_function_pcode` / `/get_language_metadata` (#192) | Offline (Java) + `tests/integration/test_readonly_endpoints.py::TestProgramInfo::test_get_language_metadata*` + `::TestFunctionAnalysis::test_get_function_pcode_*`. Requires live Ghidra with the new JAR deployed. |
 | `src/main/java/com/xebyte/core/ServerManager.java` — UDS + TCP port advertising (#175) | Offline (Java) `ServerManagerPortTest` for `boundTcpPort` field; `tests/integration/test_readonly_endpoints.py::test_mcp_instance_info_on_tcp` for the live endpoint. |
 | `src/main/java/com/xebyte/core/ProgramScriptService.java` — `open_program` | Offline (Java) `ProgramOpenFailureMessageTest` + a live round-trip: checkout → `open_program` → `close_program` → `undo_checkout` must return `checkout_undone` **on the first try, with no Ghidra restart**. `getDomainObject(tool, ...)` registers `tool` as a `DomainObject` consumer and `ProgramManager.openProgram` takes its OWN, so ours **must** be released in a `finally` — otherwise the DomainFile is permanently "in use", `undoCheckout` fails forever, and `close_program` reports `success: true, released_cache: false` because neither the ProgramManager nor the provider cache holds the stray reference. Measured 2026-08-10: a read-only verification sweep stranded **140 exclusive checkouts** on the shared project, clearable only by restarting Ghidra. Capture `getName()`/`getFunctionCount()` BEFORE the release — after it, the ProgramManager's consumer is the only thing keeping the Program alive. The release is unconditional on purpose: on a failure path nothing else holds it. `describeOpenFailure` must keep naming the remedy for a language-version refusal — a bare `Minor language change 4.6 -> 4.7` names the symptom, and this endpoint structurally cannot fix it (`okToUpgrade=false` + an upgrade needs an exclusive checkout), so the message points at `tools/upgrade_project_language.py`. Do NOT decorate unrelated failures; a test pins that pass-through. |
