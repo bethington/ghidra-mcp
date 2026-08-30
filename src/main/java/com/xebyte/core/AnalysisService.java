@@ -277,10 +277,25 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String startAddressStr,
-            @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024") int maxScanBytes,
-            @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
-            @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
-            @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true") boolean includeBoundaryDetection,
+            @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024",
+                   description = "How many BYTES forward from `address` to walk while collecting "
+                               + "references and hunting the next named symbol (default 1024). String "
+                               + "detection only ever reads the first 256 bytes of whatever the scan "
+                               + "covered.") int maxScanBytes,
+            @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) adds xref_map: a per-byte map from address to the "
+                               + "sources referencing it, for every byte in the scanned range that has at "
+                               + "least one. False keeps the aggregate counts and drops the map, which is "
+                               + "most of the payload on a heavily referenced region.") boolean includeXrefMap,
+            @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Accepted but currently not read: nothing in this endpoint branches on it "
+                               + "and no assembly-pattern block is produced either way. Setting it changes "
+                               + "nothing today.") boolean includeAssemblyPatterns,
+            @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) stops the forward scan at the first named symbol that "
+                               + "is not a DAT_ autogen, so the region ends where the next documented global "
+                               + "begins. False scans the full max_scan_bytes whatever symbols it "
+                               + "crosses.") boolean includeBoundaryDetection,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -450,9 +465,16 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
-            @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
-            @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
+            @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Accepted but currently not read: the size estimate comes from "
+                               + "cross-references only and no loop-bound analysis runs either "
+                               + "way.") boolean analyzeLoopBounds,
+            @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Accepted but currently not read: no indexing analysis runs either "
+                               + "way.") boolean analyzeIndexing,
+            @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
+                   description = "How many BYTES forward from `address` to scan for references while "
+                               + "estimating the array's extent (default 2048).") int maxScanRange,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -517,8 +539,12 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String structAddressStr,
-            @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
-            @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
+            @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0",
+                   description = "BYTE offset of the field inside the struct at struct_address; context is "
+                               + "gathered at struct_address + this. Must be 0 to 65536.") int fieldOffset,
+            @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5",
+                   description = "How many referencing sites to report: 1 to 50, default 5. A value "
+                               + "outside that range is REJECTED, not clamped.") int numExamples,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
@@ -2175,11 +2201,26 @@ public class AnalysisService {
         @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis")
     public Response analyzeFunctionComplete(
             @Param(value = "name", description = "Function reference (name or address)") String name,
-            @Param(value = "include_xrefs", defaultValue = "true") boolean includeXrefs,
-            @Param(value = "include_callees", defaultValue = "true") boolean includeCallees,
-            @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
-            @Param(value = "include_disasm", defaultValue = "true") boolean includeDisasm,
-            @Param(value = "include_variables", defaultValue = "true") boolean includeVariables,
+            @Param(value = "include_xrefs", defaultValue = "true",
+                   description = "True (the default) adds `xrefs` — the sources referencing the entry "
+                               + "point — capped at the first 100. `xref_count` counts what was listed, so "
+                               + "a value of exactly 100 may mean 'more than 100'; use get_xrefs_to for the "
+                               + "true total.") boolean includeXrefs,
+            @Param(value = "include_callees", defaultValue = "true",
+                   description = "True (the default) adds `callees`, the names of the functions this one "
+                               + "calls, and may add a wrapper_hint when the body is a thin "
+                               + "forwarder.") boolean includeCallees,
+            @Param(value = "include_callers", defaultValue = "true",
+                   description = "True (the default) adds `callers`, the names of the functions that call "
+                               + "this one.") boolean includeCallers,
+            @Param(value = "include_disasm", defaultValue = "true",
+                   description = "True (the default) adds `disassembly`: address plus MNEMONIC only, no "
+                               + "operands, capped at the first 100 instructions of the body. Use "
+                               + "disassemble_function when you need operands or the whole "
+                               + "body.") boolean includeDisasm,
+            @Param(value = "include_variables", defaultValue = "true",
+                   description = "True (the default) adds the function's parameters and locals with their "
+                               + "types and storage.") boolean includeVariables,
             @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2421,8 +2462,13 @@ public class AnalysisService {
             @Param(value = "is_external", description = "Filter by external classification (true=only external, false=exclude external, omit for any)", defaultValue = "") Boolean isExternalFilter,
             @Param(value = "regex", defaultValue = "false", description = "Use regex matching") boolean regex,
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of matches to skip before this page starts; 0 begins at the "
+                               + "first. Applied after every filter and the sort.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum matches returned in this page (default 100). This endpoint "
+                               + "slices directly, so 0 returns an EMPTY page rather than everything — page "
+                               + "with offset against the `total` the response reports.") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -4435,8 +4481,13 @@ public class AnalysisService {
     public Response findCodeGaps(
             @Param(value = "min_size", defaultValue = "1",
                    description = "Minimum gap size in addressable units to report (increase to filter alignment padding)") int minSize,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of gaps to skip before this page starts; 0 begins at the first. "
+                               + "Applied after the min_size filter.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum gaps returned in this page (default 100). This endpoint slices "
+                               + "directly, so 0 returns an EMPTY page rather than everything — page with "
+                               + "offset against the `total` the response reports.") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
