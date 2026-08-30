@@ -91,6 +91,11 @@ dependencies {
 // classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
 test {
     jvmArgs '-Dnet.bytebuddy.experimental=true'
+    // Mirrors the surefire systemPropertyVariables in pom.xml. The offline
+    // source-reading tests resolve the repo through
+    // com.xebyte.offline.ProjectSource, which can find the root by itself but
+    // prefers an explicit answer from the build.
+    systemProperty 'project.basedir', project.projectDir.absolutePath
 }
 
 // ---------------------------------------------------------------------------
