@@ -190,8 +190,10 @@ mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
 Verified: 444 tests via Maven (44 suites) and 445 via Gradle (45 suites), 0
-failures either way. The one-test difference is a suite that self-skips under
-Maven when `GHIDRA_INSTALL_DIR` is unset.
+failures either way. The one-test difference is not a discrepancy: Maven's
+`*Test` filter excludes the `RegenerateEndpointsJson` helper class, while
+Gradle's `com.xebyte.offline.*` matches it. It is inert unless you pass
+`-Dregenerate=true`.
 
 CI additionally runs `com.xebyte.core.*Test` in the same command — those are
 Mockito/ProgramBuilder tests that need no server either. To match CI exactly:
