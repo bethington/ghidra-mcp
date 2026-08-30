@@ -1,0 +1,65 @@
+{
+  "_README": [
+    "Integration tests that CANNOT run against the fake, with the reason.",
+    "",
+    "Every entry here is a claim that the offline tier is structurally unable",
+    "to answer the question the test asks -- not that the test is failing and",
+    "we would rather not look. Two causes appear below and both are honest:",
+    "",
+    "  recording_gap  The fake serves ONE recorded response per endpoint. A",
+    "                 test that varies a parameter and asserts the response",
+    "                 changes needs two recordings; the conformance corpus has",
+    "                 one. Fixable by recording the variant (see",
+    "                 tests/conformance/README.md), not by faking the logic --",
+    "                 a fake that computed the answer would be asserting on",
+    "                 itself.",
+    "",
+    "  bad_fixture    The recorded snapshot is a captured ERROR response, so",
+    "                 there is no valid payload to serve. A defect in the",
+    "                 existing conformance corpus, surfaced here.",
+    "",
+    "  missing_route  The test calls an endpoint that is not in the catalog at",
+    "                 all, and the fake has nothing to serve.",
+    "",
+    "A node id listed here that no longer exists is a hard ERROR (see",
+    "replay_plugin.pytest_collection_modifyitems), so this list cannot rot",
+    "into a permanent excuse."
+  ],
+  "gaps": [
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestProgramInfo::test_get_language_metadata",
+      "cause": "recording_gap",
+      "reason": "asserts 'registers' is ABSENT when include_registers=false; the only recorded /get_language_metadata response was captured with registers present, and the fake serves recordings rather than recomputing the endpoint's filtering."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionAnalysis::test_get_function_pcode_basic",
+      "cause": "recording_gap",
+      "reason": "asserts 'high_pcodes' is ABSENT at default granularity; the only recorded /get_function_pcode response was captured with high_pcodes present."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_by_name",
+      "cause": "missing_route",
+      "reason": "calls /search_functions_by_name, which is not among the 253 endpoints in tests/endpoints.json. The catalogued endpoint is /search_functions (params: name_pattern, offset, limit, program). See expected_contract_violations.json."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_response_shape_for_mnemonic_search",
+      "cause": "bad_fixture",
+      "reason": "tests/conformance/snapshots/search_instructions.snap is a recorded ERROR ('At least one of mnemonic or operand_pattern must be non-empty'), not a successful response. Re-record it with a valid mnemonic to unblock all four TestSearchInstructions cases."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_limit_clamping",
+      "cause": "bad_fixture",
+      "reason": "same recorded-error snapshot as test_response_shape_for_mnemonic_search."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_truncated_flag_when_limit_hit",
+      "cause": "bad_fixture",
+      "reason": "same recorded-error snapshot as test_response_shape_for_mnemonic_search."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_operand_filter_substring_match",
+      "cause": "bad_fixture",
+      "reason": "same recorded-error snapshot as test_response_shape_for_mnemonic_search."
+    }
+  ]
+}

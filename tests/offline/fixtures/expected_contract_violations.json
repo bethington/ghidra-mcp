@@ -1,0 +1,73 @@
+{
+  "_README": [
+    "Contract breaches the read-only integration suite commits when replayed",
+    "against the fake. This is a RATCHET, asserted exactly: a NEW entry fails",
+    "CI, and so does a STALE one, so a fix has to be recorded here as well.",
+    "",
+    "Every entry is a call the suite makes that the endpoint catalog",
+    "(tests/endpoints.json) does not support. Against a live Ghidra each one",
+    "still returns HTTP 200 -- the plugin ignores parameters it does not",
+    "declare -- so the test passes while asserting nothing about the thing its",
+    "name claims. That is why they were invisible until an offline run had a",
+    "catalog to check against.",
+    "",
+    "None of these are fixed here on purpose. Changing what a test asserts is",
+    "a maintainer decision, and two of them arguably want deleting rather than",
+    "repairing. Recording them is what stops them being forgotten again.",
+    "",
+    "Discovered by W12 / issue #112, 2026-08-30, against tests/endpoints.json",
+    "at 253 endpoints."
+  ],
+  "violations": [
+    {
+      "violation": "method_not_allowed GET /disassemble_bytes",
+      "test": "TestMemoryInspection::test_disassemble_bytes",
+      "note": "/disassemble_bytes is a POST endpoint. The test GETs it and accepts [200, 404], so it passes on the 404 a live server returns -- while proving nothing about disassembly."
+    },
+    {
+      "violation": "no_such_endpoint GET /get_decompiled_code",
+      "test": "TestFunctionAnalysis::test_get_decompiled_code",
+      "note": "Not in the catalog. The test already accepts [200, 404] and its own comment says 'may not exist - use decompile_function instead', so it is a permanently-404 no-op."
+    },
+    {
+      "violation": "no_such_endpoint GET /get_disassembly",
+      "test": "TestFunctionAnalysis::test_get_disassembly",
+      "note": "Not in the catalog. Same permanently-404 shape as /get_decompiled_code; /disassemble_function is the real endpoint."
+    },
+    {
+      "violation": "no_such_endpoint GET /list_ghidra_scripts",
+      "test": "TestScripts::test_list_ghidra_scripts",
+      "note": "Not in the catalog. The catalogued endpoint is /list_scripts (param: filter)."
+    },
+    {
+      "violation": "unknown_parameter GET /analyze_function_completeness [address]",
+      "test": "TestFunctionAnalysis::test_analyze_function_completeness",
+      "note": "The declared parameter is `function_address`, not `address`. Sent as `address` it is dropped, so the endpoint scores whatever the server's current function is -- and the test asserts only status 200."
+    },
+    {
+      "violation": "unknown_parameter GET /get_full_call_graph [max_depth]",
+      "test": "TestCallGraph::test_get_full_call_graph",
+      "note": "Declared parameters are format, limit, program. `max_depth` is silently ignored, so the test does not exercise depth limiting at all."
+    },
+    {
+      "violation": "unknown_parameter GET /get_function_labels [address]",
+      "test": "TestFunctionAnalysis::test_get_function_labels",
+      "note": "The declared selector is `name`, not `address`."
+    },
+    {
+      "violation": "unknown_parameter GET /list_functions [limit]",
+      "test": "TestFunctionListing::test_list_functions_with_limit, ::test_list_functions_parseable, and the first_function_address fixture",
+      "note": "/list_functions is documented in ListingService.java as 'List all functions (no pagination)' and declares only `program`. test_list_functions_with_limit therefore tests a capability the endpoint does not have and can never fail."
+    },
+    {
+      "violation": "unknown_parameter GET /list_functions [offset]",
+      "test": "TestFunctionListing::test_list_functions_with_offset",
+      "note": "Same as [limit]. The test is named for pagination the endpoint does not implement."
+    },
+    {
+      "violation": "unknown_parameter GET /search_functions_enhanced [pattern]",
+      "test": "TestFunctionListing::test_search_functions_enhanced",
+      "note": "The declared parameter is `name_pattern`. Sent as `pattern` the filter is dropped entirely, so the call returns an unfiltered listing and the test asserts only status 200."
+    }
+  ]
+}

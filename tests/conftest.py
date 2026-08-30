@@ -94,7 +94,7 @@ def endpoints():
     """Load endpoint specifications from JSON."""
     endpoints_file = Path(__file__).parent / "endpoints.json"
     if endpoints_file.exists():
-        with open(endpoints_file) as f:
+        with open(endpoints_file, encoding="utf-8") as f:
             data = json.load(f)
             return data.get("endpoints", [])
     return []
@@ -259,7 +259,7 @@ def load_endpoints():
     """Load endpoints for parametrization."""
     endpoints_file = Path(__file__).parent / "endpoints.json"
     if endpoints_file.exists():
-        with open(endpoints_file) as f:
+        with open(endpoints_file, encoding="utf-8") as f:
             data = json.load(f)
             return data.get("endpoints", [])
     return []
