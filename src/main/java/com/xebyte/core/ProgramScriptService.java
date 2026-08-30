@@ -3155,7 +3155,12 @@ public class ProgramScriptService {
             @Param(value = "script_name", source = ParamSource.BODY) String scriptName,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
-            @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
+            @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Return the script's console output in the response. Set false for scripts that "
+                               + "emit large volumes of console text you do not need -- the script still runs and "
+                               + "'success' is still reported, but 'console_output' is omitted and 'output_captured' "
+                               + "is false. Output of a FAILED script is always returned regardless, so a failure is "
+                               + "never silent.") boolean captureOutput,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
@@ -3249,13 +3254,23 @@ public class ProgramScriptService {
                 output = err.message();
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "success", succeeded,
-                "script_name", scriptName,
-                "script_path", scriptFile.getAbsolutePath(),
-                "execution_time_seconds", Double.parseDouble(String.format("%.2f", executionTime)),
-                "console_output", output
-            ));
+            // capture_output=false: the script has already run and 'succeeded' is
+            // still authoritative -- we simply do not ship the console text back.
+            // A FAILED script keeps its output either way: suppressing the one
+            // thing that explains the failure would turn this flag into a way of
+            // losing errors, and the volume argument for suppressing output does
+            // not apply to a run that did not finish its work.
+            boolean emitOutput = captureOutput || !succeeded;
+            Map<String, Object> scriptResult = new LinkedHashMap<>();
+            scriptResult.put("success", succeeded);
+            scriptResult.put("script_name", scriptName);
+            scriptResult.put("script_path", scriptFile.getAbsolutePath());
+            scriptResult.put("execution_time_seconds", Double.parseDouble(String.format("%.2f", executionTime)));
+            scriptResult.put("output_captured", emitOutput);
+            if (emitOutput) {
+                scriptResult.put("console_output", output);
+            }
+            return Response.ok(scriptResult);
 
         } catch (Exception e) {
             return Response.err(e.getMessage());

@@ -6,6 +6,54 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Dead parameters: nine advertised switches that did nothing (breaking, schema)
+
+A parameter-documentation sweep found nine parameters the server published in
+`/mcp/schema` and never read. An inert parameter is worse than a missing one: a
+missing parameter is absent from the schema, so a model never reaches for it,
+whereas an inert one looks like a real control — the model sets it, the call
+succeeds, and the model then reasons about a result it believes it configured.
+Each was independently re-verified against the source before being touched.
+
+**Wired up** (the endpoint now does what it always claimed):
+
+| Endpoint | Parameter | Now |
+| --- | --- | --- |
+| `/run_ghidra_script` | `capture_output` | `false` omits `console_output` and reports `output_captured: false`. A **failed** script keeps its output either way, so the flag can never lose an error. |
+| `/rename_variables` | `force_individual` | `true` dispatches straight to the per-variable path instead of running the batch path anyway. `GhidraMCPPlugin.batchApplyDocumentation` had been passing `true` and silently getting batch mode. |
+| `/server/version_control/add` | `keepCheckedOut` | Passed through to `DomainFile.addToVersionControl` instead of a hardcoded `false`, and echoed as `keep_checked_out`. GUI mode only — the headless route is a repository-verification stub that does not add anything. |
+
+**Removed** (nothing implemented them, and implementing them means designing a
+feature, not flipping a flag). These change the published tool surface, so
+clients that generate signatures from `/mcp/schema` will see the parameters
+disappear; passing them is now ignored rather than accepted-and-ignored:
+
+| Endpoint | Parameter | Why removed |
+| --- | --- | --- |
+| `/analyze_data_region` | `include_assembly_patterns` | The endpoint scans data bytes and has no assembly-pattern section to include. `/get_assembly_context` is the tool that does this. |
+| `/detect_array_bounds` | `analyze_loop_bounds`, `analyze_indexing` | The body is one fixed xref scan. Neither name toggles anything that exists; both would be new analyses. |
+| `/get_assembly_context` | `include_patterns` | Patterns are always detected and returned. It was also **required** (no default), so callers had to supply a value for an inert field — the conformance corpus skipped the tool for exactly that reason. |
+| `/server/connect` | `host`, `port` | Vestigial. GUI mode reports the already-open project; headless mode connects with the host/port `GhidraServerManager` reads from `GHIDRA_SERVER_HOST`/`GHIDRA_SERVER_PORT` into `final` fields at construction, and `connect()` takes no arguments. The tool description now says where the values actually come from. |
+
+**Related fix.** Wiring `force_individual` exposed a live bug in the path it
+routes to. `batchRenameVariablesIndividual` decided success by comparing
+`renameVariableInFunction(...).toJson()` to the bare string `"Variable
+renamed"` — a test written against the pre-`Response` raw-text contract that has
+not matched since. Every successful rename was therefore counted as a failure
+and its success payload filed under `errors`, while `success` was hardcoded
+`true`. It now inspects the `Response`, reports `success` based on the actual
+failure count, and propagates the Hungarian-notation warnings it used to drop.
+This path is also the automatic fallback when a batch rename throws, so the
+miscounting was reachable without the new flag.
+
+**Regression cover.** `DeadParameterTest` (offline) fails on any `@McpTool`
+parameter whose identifier is never referenced in the method that declares it.
+It carries a short, reason-annotated allowlist of six parameters that are still
+inert — `/list_data_items_by_xrefs#format` (a documented no-op kept for
+compatibility) plus five that are a genuine backlog — and a companion test that
+fails when an allowlist entry is finally wired up, so the list cannot outlive
+its own justification.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

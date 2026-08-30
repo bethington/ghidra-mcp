@@ -99,7 +99,6 @@ class TestDataRegionAnalysis:
             "address": sample_address,
             "max_scan_bytes": 256,
             "include_xref_map": "true",
-            "include_assembly_patterns": "true",
             "include_boundary_detection": "false"
         })
         assert response.status_code == 200
@@ -183,8 +182,6 @@ class TestArrayBoundsDetection:
         """Test array detection with options."""
         response = http_client.get("/detect_array_bounds", params={
             "address": sample_address,
-            "analyze_loop_bounds": "true",
-            "analyze_indexing": "true",
             "max_scan_range": 1024
         })
         assert response.status_code == 200
@@ -214,8 +211,7 @@ class TestAssemblyContext:
         """Test assembly context with options."""
         response = http_client.get("/get_assembly_context", params={
             "xref_sources": sample_address,
-            "context_instructions": 3,
-            "include_patterns": "MOV,CALL,JMP"
+            "context_instructions": 3
         })
         assert response.status_code == 200
 

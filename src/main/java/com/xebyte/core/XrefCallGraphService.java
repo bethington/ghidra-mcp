@@ -1364,16 +1364,14 @@ public class XrefCallGraphService {
     /**
      * Assembly pattern analysis - get assembly context around xref source addresses
      */
-    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
-                                      Object includePatternsObj) {
-        return getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj, null);
+    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions) {
+        return getAssemblyContext(xrefSourcesObj, contextInstructions, null);
     }
 
     @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref")
     public Response getAssemblyContext(
             @Param(value = "xref_sources", source = ParamSource.BODY) Object xrefSourcesObj,
             @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5") int contextInstructions,
-            @Param(value = "include_patterns", source = ParamSource.BODY) Object includePatternsObj,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
