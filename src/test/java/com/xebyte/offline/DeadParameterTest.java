@@ -347,6 +347,51 @@ public class DeadParameterTest extends TestCase {
     }
 
     /**
+     * The removed parameters must also be gone from {@code tests/endpoints.json}.
+     *
+     * <p>This is a separate check because the catalog cannot heal itself.
+     * {@code RegenerateEndpointsJson} merges scanner params with catalog params
+     * as an ordered-set union, deliberately -- that is how hand-registered
+     * route extras survive. The side effect is that removing a {@code @Param}
+     * never removes it from the catalog: regenerating after this change kept
+     * all six names and merely moved them to the end of their arrays. So the
+     * catalog was edited by hand, and the entries would come back unnoticed if
+     * anyone restored them, since {@code EndpointsJsonParityTest} only checks
+     * that scanned params are a subset of catalog params and says nothing about
+     * catalog-only extras.
+     *
+     * <p>It matters beyond tidiness: the catalog feeds the README API reference
+     * and is the repo's authoritative snapshot of the tool surface, so a stale
+     * entry re-documents a parameter that no longer exists.
+     *
+     * @throws IOException if the catalog cannot be read
+     */
+    public void testRemovedParametersAreGoneFromTheCatalog() throws IOException {
+        Path catalog = Paths.get("tests", "endpoints.json");
+        String json = new String(Files.readAllBytes(catalog), StandardCharsets.UTF_8);
+
+        Map<String, String> banned = new LinkedHashMap<>();
+        banned.put("include_assembly_patterns", "/analyze_data_region");
+        banned.put("analyze_loop_bounds", "/detect_array_bounds");
+        banned.put("analyze_indexing", "/detect_array_bounds");
+        banned.put("include_patterns", "/get_assembly_context");
+
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<String, String> e : banned.entrySet()) {
+            if (json.contains("\"" + e.getKey() + "\"")) {
+                found.add(e.getKey() + " (was on " + e.getValue() + ")");
+            }
+        }
+
+        assertTrue(
+            "tests/endpoints.json still lists parameters that no longer exist in any @McpTool "
+                + "signature. RegenerateEndpointsJson will not drop them for you -- its params merge "
+                + "is a union that preserves catalog-only names on purpose. Remove them by hand and "
+                + "re-run tools.gen_readme_api_reference:\n  " + String.join("\n  ", found),
+            found.isEmpty());
+    }
+
+    /**
      * {@code /server/connect} takes no parameters. It reports the open project
      * in GUI mode, and in headless mode connects using the host and port
      * {@code GhidraServerManager} read from the environment at construction --
