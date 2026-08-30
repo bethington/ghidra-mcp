@@ -345,9 +345,38 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--transport` | `stdio` | `stdio` (AI tools), `streamable-http` (web clients), `sse` (deprecated) |
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
-| `--lazy` | off | Load only the default tool groups on connect. Faster startup, but MCP clients that don't support `tools/list_changed` will see an incomplete tool list. Not recommended for Claude Code. |
-| `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
-| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
+| `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
+| `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
+| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
+
+#### Lazy tool loading is the default (issue #440)
+
+Advertising all ~250 endpoints in a single `tools/list` is over a hard limit for
+at least one major provider. Gemini compiles function declarations into a
+constrained-decoding state machine and rejects the whole request before any tool
+is ever called:
+
+```text
+400 INVALID_ARGUMENT
+The specified schema produces a constraint that has too many states for serving
+```
+
+That is not a degradation, it is an outright break, and no client-side setting
+could work around a server that only ever offered the full set. So the bridge
+now loads `listing,function,program` (57 endpoints plus the 8 static tools) on
+connect and registers the rest on demand.
+
+**If your client ignores `tools/list_changed`** it will not notice tools that
+are registered later, and should turn lazy loading off:
+
+```bash
+uv run bridge-mcp-ghidra --no-lazy          # when you control the command line
+export GHIDRA_MCP_LAZY=0                    # when you don't (Docker, uvx, some client configs)
+```
+
+`GHIDRA_MCP_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
+`--lazy`/`--no-lazy` on the command line wins over it. Startup logs which mode
+is in effect.
 
 #### Strict program routing (multi-program safety)
 
@@ -378,9 +407,9 @@ Off by default: with the variable unset the bridge sends calls unchanged.
 
 #### Reducing tool-context overhead
 
-The bridge exposes a large catalog. To keep the model's tool surface small, run
-with `--lazy` (loads only `listing,function,program` on connect) and let the
-model **discover** the rest on demand instead of registering everything:
+The bridge exposes a large catalog, so it loads only `listing,function,program`
+on connect (see above) and lets the model **discover** the rest on demand
+instead of registering everything:
 
 - `search_tools("rename function")` — keyword-search the **entire** catalog,
   including tools whose group isn't loaded. Each result says whether it's
@@ -391,7 +420,7 @@ model **discover** the rest on demand instead of registering everything:
 - `check_tools("rename_symbol,batch_set_comments")` — confirm specific tools
   are callable right now.
 
-`search_tools` works in both eager and `--lazy` modes, so agents that honor
+`search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.
 
 #### Optional: Connect a standalone debugger server

@@ -47,13 +47,20 @@ class _CliHarness(unittest.TestCase):
             patch.object(cli.uvicorn, "run"),
             patch.object(cli, "_build_http_app"),
         ]
-        if env:
-            import os
+        # os.environ is patched unconditionally (patch.dict restores the whole
+        # mapping on stop) so a test that does not name GHIDRA_MCP_LAZY can
+        # clear it below. That var now feeds the lazy default, so a developer
+        # who happens to export it would otherwise flip the assertions of every
+        # test that says nothing about it.
+        import os
 
-            patches.append(patch.dict(os.environ, env))
+        effective_env = dict(env or {})
+        patches.append(patch.dict(os.environ, effective_env))
         started = []
         for p in patches:
             started.append(p.start())
+        if "GHIDRA_MCP_LAZY" not in effective_env:
+            os.environ.pop("GHIDRA_MCP_LAZY", None)
         try:
             cli.main()
             return {
@@ -90,6 +97,36 @@ class TestCliArguments(_CliHarness):
         # tools/list_changed does not actually exist.
         self.run_main("--no-lazy")
         self.assertFalse(state._lazy_mode)
+
+    def test_env_var_disables_lazy_without_argv(self):
+        # The second half of the #440 escape hatch. A Docker ENTRYPOINT, a uvx
+        # one-liner or a registry-installed server entry may give the user no
+        # way to add a flag, and an escape hatch you cannot reach is not one.
+        self.run_main(env={"GHIDRA_MCP_LAZY": "0"})
+        self.assertFalse(state._lazy_mode)
+
+    def test_env_var_accepts_word_forms(self):
+        for value in ("false", "FALSE", "no", "off"):
+            with self.subTest(value=value):
+                self.run_main(env={"GHIDRA_MCP_LAZY": value})
+                self.assertFalse(state._lazy_mode)
+        for value in ("1", "true", "yes", "on"):
+            with self.subTest(value=value):
+                self.run_main(env={"GHIDRA_MCP_LAZY": value})
+                self.assertTrue(state._lazy_mode)
+
+    def test_explicit_flag_beats_env_var(self):
+        # Both directions: whoever typed the flag meant it.
+        self.run_main("--no-lazy", env={"GHIDRA_MCP_LAZY": "1"})
+        self.assertFalse(state._lazy_mode)
+        self.run_main("--lazy", env={"GHIDRA_MCP_LAZY": "0"})
+        self.assertTrue(state._lazy_mode)
+
+    def test_unparseable_env_var_keeps_the_default(self):
+        # Guessing here silently picks one of the two client families this
+        # setting exists to keep working, so an unknown value is ignored.
+        self.run_main(env={"GHIDRA_MCP_LAZY": "maybe"})
+        self.assertTrue(state._lazy_mode)
 
     def test_default_groups_parsed_and_stripped(self):
         self.run_main("--default-groups", " function , datatype ,")

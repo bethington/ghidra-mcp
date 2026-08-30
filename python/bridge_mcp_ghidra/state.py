@@ -432,6 +432,40 @@ _loaded_groups: set[str] = set()
 # actually works as of a7f5936, and the always-present static tools
 # (search_tools / check_tools) hand the model the exact load_tool_group(...)
 # call it needs, so discovery no longer depends on advertising everything up
-# front. Clients that still want the old behaviour pass --no-lazy.
+# front. Clients that still want the old behaviour pass --no-lazy, or set
+# GHIDRA_MCP_LAZY=0 where the client's config gives no way to pass argv (a
+# container ENTRYPOINT, an `uvx` invocation, a registry-installed server entry).
 _lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)
+
+_TRUTHY_LAZY = {"1", "true", "yes", "on"}
+_FALSEY_LAZY = {"0", "false", "no", "off"}
+
+
+def lazy_mode_from_env(default: bool = True) -> bool:
+    """Resolve lazy mode from GHIDRA_MCP_LAZY, falling back to the default.
+
+    The escape hatch for a client that ignores ``tools/list_changed`` is
+    ``--no-lazy``, but a CLI flag is only reachable when the caller controls
+    argv. Docker ENTRYPOINTs, ``uvx`` one-liners and some MCP client configs
+    do not, and telling those users "pass a flag you cannot pass" is not an
+    escape hatch. GHIDRA_MCP_LAZY=0 is the same switch by another route.
+
+    An unrecognised value is ignored (and warned about) rather than guessed at,
+    because guessing here silently picks one of the two client families this
+    setting exists to keep working.
+    """
+    raw = (os.getenv("GHIDRA_MCP_LAZY") or "").strip().lower()
+    if not raw:
+        return default
+    if raw in _FALSEY_LAZY:
+        return False
+    if raw in _TRUTHY_LAZY:
+        return True
+    logger.warning(
+        "Ignoring GHIDRA_MCP_LAZY=%r: expected one of %s. Leaving lazy tool loading %s.",
+        raw,
+        ",".join(sorted(_TRUTHY_LAZY | _FALSEY_LAZY)),
+        "on" if default else "off",
+    )
+    return default

@@ -120,7 +120,7 @@ def main():
     parser.add_argument(
         "--lazy",
         action="store_true",
-        default=True,
+        default=None,
         help="Only load default tool groups on connect (default). Keeps the "
         "advertised tool set small enough for providers that cap function "
         "declarations; use search_tools/load_tool_group to pull in more.",
@@ -131,7 +131,8 @@ def main():
         action="store_false",
         help="Load all tool groups on connect. Needed only by clients that "
         "ignore tools/list_changed; rejected outright by the Gemini API "
-        "(400 INVALID_ARGUMENT, too many states for serving).",
+        "(400 INVALID_ARGUMENT, too many states for serving). "
+        "GHIDRA_MCP_LAZY=0 does the same where argv is not yours to set.",
     )
     parser.add_argument(
         "--default-groups",
@@ -141,7 +142,12 @@ def main():
     )
     args = parser.parse_args()
 
-    state._lazy_mode = args.lazy
+    # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_LAZY decides, and
+    # only then the built-in default. Argparse leaves args.lazy as None when
+    # neither flag was given, which is what makes the three levels separable —
+    # a store_true default of True would make "not passed" and "passed --lazy"
+    # indistinguishable and swallow the env var.
+    state._lazy_mode = args.lazy if args.lazy is not None else state.lazy_mode_from_env()
     if args.default_groups is not None:
         state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
 
@@ -151,7 +157,7 @@ def main():
         logger.info(
             "Lazy tool loading: only %s on connect. "
             "Call search_tools()/load_tool_group() for the rest, or pass "
-            "--no-lazy to advertise every group up front.",
+            "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front.",
             ",".join(sorted(state._default_groups)),
         )
     if not _auto_connect():

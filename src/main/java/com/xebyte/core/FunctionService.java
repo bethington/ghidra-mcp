@@ -2216,6 +2216,24 @@ public class FunctionService {
                 boolean isParam = targetVar instanceof Parameter;
                 variableKind.set(isParam ? "parameter" : "local");
 
+                // PARSE BEFORE TOUCHING THE FUNCTION'S STORAGE MODE. Enabling
+                // custom storage is a FUNCTION-WIDE change -- it pins every
+                // other parameter at its current location too -- so it must
+                // never survive behind an error response. Parsing after
+                // enabling it meant the most ordinary mistake there is, a
+                // mistyped register name, answered "Unknown register 'R99'"
+                // having already detached the whole parameter list from the
+                // calling convention, with nothing in the response to say so.
+                DataType currentType = targetVar.getDataType();
+                int defaultSize = currentType != null ? currentType.getLength() : targetVar.getLength();
+                VariableStorage newStorage;
+                try {
+                    newStorage = parseStorageSpec(program, storageSpec, defaultSize);
+                } catch (InvalidInputException e) {
+                    errorMessage.set(e.getMessage());
+                    return null;
+                }
+
                 // A parameter's storage is owned by the calling convention until
                 // custom storage is switched on; without this the assignment
                 // below is silently re-derived from the .cspec and the caller
@@ -2235,18 +2253,10 @@ public class FunctionService {
                     if (targetVar == null) {
                         errorMessage.set("Variable '" + variableName + "' disappeared when custom storage was "
                                 + "enabled on " + func.getName() + "; storage was not changed.");
+                        revertCustomStorage(func, enabledCustom);
                         return null;
                     }
-                }
-
-                DataType currentType = targetVar.getDataType();
-                int defaultSize = currentType != null ? currentType.getLength() : targetVar.getLength();
-                VariableStorage newStorage;
-                try {
-                    newStorage = parseStorageSpec(program, storageSpec, defaultSize);
-                } catch (InvalidInputException e) {
-                    errorMessage.set(e.getMessage());
-                    return null;
+                    currentType = targetVar.getDataType();
                 }
 
                 try {
@@ -2258,6 +2268,7 @@ public class FunctionService {
                     // this one catch covers both.
                     errorMessage.set("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
                             + "': " + e.getMessage());
+                    revertCustomStorage(func, enabledCustom);
                     return null;
                 }
 
@@ -2274,6 +2285,7 @@ public class FunctionService {
                 }
                 if (readBack == null) {
                     errorMessage.set("Variable '" + variableName + "' could not be read back after the write");
+                    revertCustomStorage(func, enabledCustom);
                     return null;
                 }
                 VariableStorage actual = readBack.getVariableStorage();
@@ -2282,6 +2294,7 @@ public class FunctionService {
                     errorMessage.set("Storage did not take: requested " + newStorage
                             + " but the variable now reads " + actual
                             + ". This usually means the location overlaps another variable's storage.");
+                    revertCustomStorage(func, enabledCustom);
                     return null;
                 }
 
@@ -2325,6 +2338,30 @@ public class FunctionService {
     // ========================================================================
     // Variable storage (#446)
     // ========================================================================
+
+    /**
+     * Undo a custom-variable-storage mode change THIS call made, so a refused
+     * request never leaves the function's whole parameter list detached from its
+     * calling convention. Only ever called when this call is the one that turned
+     * it on -- a function that already had custom storage is left alone.
+     *
+     * This is load-bearing because the endpoint's error paths set a message and
+     * return NORMALLY, so the surrounding transaction commits. Without it, a
+     * request that was refused would still have permanently changed the
+     * function, which is the mirror image of the bug #446 was filed for.
+     */
+    private static void revertCustomStorage(Function func, AtomicBoolean enabledHere) {
+        if (!enabledHere.get()) {
+            return;
+        }
+        try {
+            func.setCustomVariableStorage(false);
+            enabledHere.set(false);
+        } catch (Exception e) {
+            Msg.warn(FunctionService.class, "Could not restore convention-derived storage on "
+                    + func.getName() + " after a refused set_variable_storage: " + e.getMessage());
+        }
+    }
 
     /**
      * Parse a signed integer that may be written in hex ("-0x10", "0x1c") or
