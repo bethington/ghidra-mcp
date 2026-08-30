@@ -1203,41 +1203,77 @@ def test_the_filesystem_scan_takes_the_last_install_by_name(tmp_path, monkeypatc
     assert upl.resolve_ghidra_dir(None) == (new, "filesystem scan")
 
 
+#: A synthetic WINDOWS install path for the running-install probe.
+#:
+#: `running_ghidra_dir` parses drive-letter paths out of a Windows process
+#: listing (`([A-Za-z]:\\...ghidra_...)\\`), so a real `tmp_path` cannot stand in
+#: for the install: on Linux it is `/tmp/...`, the regex matches nothing, and the
+#: probe returns None having exercised none of the parse-and-select logic. That
+#: is not a platform gate in the function -- the body is fully reachable once
+#: `sys.platform` and `subprocess.run` are stubbed -- so these tests use a
+#: literal `C:\` path and stub the `<candidate>/support` probe instead. Both
+#: platforms then execute the same code, which matters because CI's ratchet runs
+#: on ubuntu and a test skipped there verifies nothing.
+WIN_INSTALL = "C:\\Ghidra\\ghidra_12.1.2_PUBLIC"
+
+
+def _windows_process_listing(monkeypatch, stdout, *, installed=(WIN_INSTALL,)):
+    """Drive `running_ghidra_dir` against a canned Windows process listing.
+
+    `installed` names the paths whose `support/` subdirectory exists; anything
+    else the listing mentions is a candidate the probe must reject.
+    """
+    class Done:
+        stderr = ""
+        returncode = 0
+
+    Done.stdout = stdout
+    supports = {Path(p) / "support" for p in installed}
+
+    monkeypatch.setattr(upl.sys, "platform", "win32")
+    monkeypatch.setattr(upl.subprocess, "run", lambda cmd, **kw: Done())
+    monkeypatch.setattr(upl.Path, "is_dir", lambda self: self in supports)
+
+
 def test_the_running_install_probe_is_windows_only(monkeypatch):
     monkeypatch.setattr(upl.sys, "platform", "linux")
 
     assert upl.running_ghidra_dir() is None
 
 
-def test_the_running_install_comes_from_the_class_loader_line(tmp_path, monkeypatch):
+def test_the_running_install_comes_from_the_class_loader_line(monkeypatch):
     """Keyed on `ghidra.GhidraClassLoader`, never a bare `*ghidra*` glob: this
     repo's own VSCode Java language server carries the workspace path
     `ghidra-mcp` on its command line and would match one."""
-    real = _fake_ghidra(tmp_path / "ghidra_12.1.2_PUBLIC")
-    listing = (
-        f'"C:\\jdk\\java.exe" -cp X;{real}\\support\\lib -Dfoo '
+    _windows_process_listing(monkeypatch, (
+        f'"C:\\jdk\\java.exe" -cp X;{WIN_INSTALL}\\support\\lib -Dfoo '
         'com.example.LanguageServer C:\\src\\ghidra-mcp\n'
-        f'"C:\\jdk\\java.exe" -cp {real}\\Ghidra\\lib;q ghidra.GhidraClassLoader '
-        'ghidra.GhidraRun\n'
+        f'"C:\\jdk\\java.exe" -cp {WIN_INSTALL}\\Ghidra\\lib;q '
+        'ghidra.GhidraClassLoader ghidra.GhidraRun\n'
+    ))
+
+    assert upl.running_ghidra_dir() == Path(WIN_INSTALL)
+
+
+def test_a_java_process_that_is_not_ghidra_is_never_matched(monkeypatch):
+    """The decoy above must be rejected on its own, not merely outranked: with
+    only the language server running, the probe must find nothing rather than
+    return this repo's workspace."""
+    _windows_process_listing(monkeypatch, (
+        f'"C:\\jdk\\java.exe" -cp X;{WIN_INSTALL}\\support\\lib -Dfoo '
+        'com.example.LanguageServer C:\\src\\ghidra-mcp\n'
+    ))
+
+    assert upl.running_ghidra_dir() is None
+
+
+def test_a_class_loader_line_naming_a_dir_without_support_is_rejected(monkeypatch):
+    _windows_process_listing(
+        monkeypatch,
+        '"java.exe" -cp C:\\nope\\ghidra_12.1.2_PUBLIC\\lib;q '
+        'ghidra.GhidraClassLoader ghidra.GhidraRun\n',
+        installed=(),
     )
-
-    class Done:
-        stdout, stderr, returncode = listing, "", 0
-
-    monkeypatch.setattr(upl.sys, "platform", "win32")
-    monkeypatch.setattr(upl.subprocess, "run", lambda cmd, **kw: Done())
-
-    assert upl.running_ghidra_dir() == Path(str(real))
-
-
-def test_a_class_loader_line_naming_a_dir_without_support_is_rejected(tmp_path, monkeypatch):
-    class Done:
-        stdout = ('"java.exe" -cp C:\\nope\\ghidra_12.1.2_PUBLIC\\lib;q '
-                  'ghidra.GhidraClassLoader ghidra.GhidraRun\n')
-        stderr, returncode = "", 0
-
-    monkeypatch.setattr(upl.sys, "platform", "win32")
-    monkeypatch.setattr(upl.subprocess, "run", lambda cmd, **kw: Done())
 
     assert upl.running_ghidra_dir() is None
 
