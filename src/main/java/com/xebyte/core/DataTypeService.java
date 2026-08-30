@@ -103,8 +103,14 @@ public class DataTypeService {
             // the declaration was wrong.
             @Param(value = "category", defaultValue = "",
                    description = "Category filter; omit to list all types") String category,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of entries to skip before this page starts; 0 begins at the "
+                               + "first entry. Page by adding `limit` each call until offset reaches the "
+                               + "`total` the response reports.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
+                               + "negative value for no limit; `total` in the response always reports the "
+                               + "full unpaged count.") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -201,8 +207,14 @@ public class DataTypeService {
     @McpTool(path = "/search_data_types", description = "Search data types by pattern", category = "datatype")
     public Response searchDataTypes(
             @Param(value = "pattern", description = "Search pattern") String pattern,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of entries to skip before this page starts; 0 begins at the "
+                               + "first entry. Page by adding `limit` each call until offset reaches the "
+                               + "`total` the response reports.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
+                               + "negative value for no limit; `total` in the response always reports the "
+                               + "full unpaged count.") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -589,9 +601,18 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_enum", method = "POST", description = "Create an enum data type", category = "datatype")
     public Response createEnum(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "values", source = ParamSource.BODY, fieldsJson = true) String valuesJson,
-            @Param(value = "size", source = ParamSource.BODY, defaultValue = "4") int size,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "New enum type name, e.g. UnitType. Creation FAILS if a type with this "
+                               + "name already exists — delete it first or choose another name.") String name,
+            @Param(value = "values", source = ParamSource.BODY, fieldsJson = true,
+                   description = "JSON object mapping member name to integer value, e.g. "
+                               + "{\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal "
+                               + "strings, or 0x-prefixed hex strings; floats and non-numeric strings are "
+                               + "rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any "
+                               + "complaint comes back as a warning, not a failure.") String valuesJson,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "4",
+                   description = "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). "
+                               + "Anything else is rejected.") int size,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -677,8 +698,17 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_union", method = "POST", description = "Create a union data type", category = "datatype")
     public Response createUnion(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true) String fieldsJson,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "New union type name. An existing same-named type is REPLACED here, "
+                               + "unlike create_enum, which refuses.") String name,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
+                   description = "JSON array of member objects, same shape as create_struct: required "
+                               + "keys name and type; field_name/fieldName and "
+                               + "field_type/fieldType/data_type/dataType are accepted as alternates. Any "
+                               + "offset key is IGNORED — union members all start at 0. A member whose type "
+                               + "cannot be resolved is skipped and reported under fields_skipped instead "
+                               + "of failing the call. Names get the project's Hungarian prefix applied "
+                               + "automatically.") String fieldsJson,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -750,8 +780,12 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_typedef", method = "POST", description = "Create a typedef alias", category = "datatype")
     public Response createTypedef(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "New typedef (alias) name. An existing same-named type is replaced.") String name,
+            @Param(value = "base_type", source = ParamSource.BODY,
+                   description = "Type the alias resolves to. Resolution is recursive, so pointer chains "
+                               + "(int**), array syntax (dword[16]), well-known C types and existing "
+                               + "struct/enum names all work.") String baseType,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -805,8 +839,12 @@ public class DataTypeService {
      */
     @McpTool(path = "/clone_data_type", method = "POST", description = "Clone a data type with new name", category = "datatype")
     public Response cloneDataType(
-            @Param(value = "source_type", source = ParamSource.BODY) String sourceType,
-            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "source_type", source = ParamSource.BODY,
+                   description = "Simple name of the existing type to copy, matched across every "
+                               + "category (no /path prefix needed).") String sourceType,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                   description = "Name for the copy. The clone is independent — later edits to "
+                               + "source_type do not follow it.") String newName,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -858,9 +896,16 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_array_type", method = "POST", description = "Create an array data type", category = "datatype")
     public Response createArrayType(
-            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
-            @Param(value = "length", source = ParamSource.BODY, defaultValue = "1") int length,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
+            @Param(value = "base_type", source = ParamSource.BODY,
+                   description = "Element type. Resolution is recursive, so pointer chains (int**), "
+                               + "nested array syntax and existing struct/enum names all work.") String baseType,
+            @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
+                   description = "Number of ELEMENTS, not bytes — total size is length x "
+                               + "sizeof(base_type). Must be positive; default 1.") int length,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional name for the array type. Omit to let Ghidra name it after the "
+                               + "element type (e.g. dword[16]); the response reports the name actually "
+                               + "used.") String name,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -919,8 +964,14 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_pointer_type", method = "POST", description = "Create a pointer data type", category = "datatype")
     public Response createPointerType(
-            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
+            @Param(value = "base_type", source = ParamSource.BODY,
+                   description = "Type pointed at. `void` is special-cased to Ghidra's void type; "
+                               + "everything else resolves recursively, so int**, dword[16] and existing "
+                               + "struct/enum names all work.") String baseType,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional name for the pointer type. Omit to let Ghidra name it after "
+                               + "the pointee (e.g. UnitAny *); the response reports the name actually "
+                               + "used.") String name,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -985,9 +1036,19 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_function_signature", method = "POST", description = "Create a function signature data type", category = "datatype")
     public Response createFunctionSignature(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "return_type", source = ParamSource.BODY) String returnType,
-            @Param(value = "parameters", source = ParamSource.BODY) String parametersJson,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Name for the function-definition type. This creates a SIGNATURE in the "
+                               + "data type manager; it changes no function in the listing.") String name,
+            @Param(value = "return_type", source = ParamSource.BODY,
+                   description = "Return type, resolved recursively (pointer chains, arrays, struct "
+                               + "names). Required — pass `void` for no return value.") String returnType,
+            @Param(value = "parameters", source = ParamSource.BODY,
+                   description = "JSON array of parameter objects, e.g. "
+                               + "[{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. "
+                               + "Only the TYPES are used: parameter names are discarded and the created "
+                               + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
+                               + "a type containing a comma or a colon does not survive it, and a parameter "
+                               + "whose type cannot be resolved is dropped silently.") String parametersJson,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1089,8 +1150,19 @@ public class DataTypeService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
-            @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true") boolean clearExisting,
+            @Param(value = "type_name", source = ParamSource.BODY,
+                   description = "Type to apply at the address. Any name the resolver understands: a "
+                               + "built-in (uint, char *), an existing struct/enum/typedef name, a pointer "
+                               + "chain (int**), or array syntax basetype[count] such as dword[10]. Create "
+                               + "the type first with create_struct / create_enum / create_array_type if it "
+                               + "does not exist yet.") String typeName,
+            @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) clears whatever code or data occupies the FULL target "
+                               + "range first, which is what lets you retype an address sitting inside a "
+                               + "wider existing unit. False leaves existing units alone, and the write "
+                               + "then fails with a conflict if anything overlaps. Clearing is also what "
+                               + "arms the guard that refuses a write which would destroy named "
+                               + "neighbours.") boolean clearExisting,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
@@ -1263,7 +1335,10 @@ public class DataTypeService {
             description = "Delete a data type by name. Fails if the type is referenced; use resolve_duplicate_type first to remove unused /Demangler 1-byte stubs when a full type exists.",
             category = "datatype")
     public Response deleteDataType(
-            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "type_name", source = ParamSource.BODY,
+                   description = "Simple name of the type to delete, matched across every category (no "
+                               + "/path prefix needed). Deletion fails while anything still references "
+                               + "the type.") String typeName,
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
@@ -1335,11 +1410,19 @@ public class DataTypeService {
      */
     @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype")
     public Response modifyStructField(
-            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "struct_name", source = ParamSource.BODY,
+                   description = "Simple name of the existing structure to edit, matched across every "
+                               + "category (no /path prefix needed).") String structName,
             @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
                    description = "Field name to modify. For unnamed fields, use 'offset:N' (e.g., 'offset:16') to identify by byte offset.") String fieldName,
-            @Param(value = "new_type", source = ParamSource.BODY, defaultValue = "") String newType,
-            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "") String newName,
+            @Param(value = "new_type", source = ParamSource.BODY, defaultValue = "",
+                   description = "Replacement type for the field, resolved recursively (pointer chains, "
+                               + "array syntax, struct names). Leave empty to keep the current type and "
+                               + "only rename.") String newType,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Replacement field name. Leave empty to keep the current name and only "
+                               + "retype. The project's Hungarian prefix is applied automatically from the "
+                               + "field's type, so the stored name can differ from what you send.") String newName,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1453,10 +1536,15 @@ public class DataTypeService {
             description = "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only.",
             category = "datatype")
     public Response modifyStructFieldType(
-            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "struct_name", source = ParamSource.BODY,
+                   description = "Simple name of the existing structure to edit, matched across every "
+                               + "category (no /path prefix needed).") String structName,
             @Param(value = "field_name", source = ParamSource.BODY,
                    description = "Field name or offset:N (e.g. offset:0x88).") String fieldName,
-            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "new_type", source = ParamSource.BODY,
+                   description = "Replacement type for the field, resolved recursively (pointer chains, "
+                               + "array syntax, struct names). Required here — use modify_struct_field if "
+                               + "you also want to rename.") String newType,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -1470,7 +1558,9 @@ public class DataTypeService {
             description = "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally.",
             category = "datatype")
     public Response embedStructField(
-            @Param(value = "parent_struct", source = ParamSource.BODY) String parentStruct,
+            @Param(value = "parent_struct", source = ParamSource.BODY,
+                   description = "Simple name of the structure that CONTAINS the field being replaced — "
+                               + "the outer type, not the one being embedded.") String parentStruct,
             @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
                    description = "Field name or offset:N.") String fieldName,
             @Param(value = "embedded_struct", source = ParamSource.BODY,
@@ -1491,8 +1581,13 @@ public class DataTypeService {
             description = "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md.",
             category = "datatype")
     public Response resizeStruct(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "new_size", source = ParamSource.BODY) int newSize,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Simple name of the existing structure to resize, matched across every "
+                               + "category (no /path prefix needed).") String name,
+            @Param(value = "new_size", source = ParamSource.BODY,
+                   description = "New TOTAL size of the struct in bytes, not a field count. Must be "
+                               + "positive. Growing pads with undefined filler; shrinking past a defined "
+                               + "field is refused unless force=true.") int newSize,
             @Param(value = "preserve_fields", source = ParamSource.BODY, defaultValue = "true",
                    description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
@@ -1573,8 +1668,15 @@ public class DataTypeService {
             description = "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced.",
             category = "datatype")
     public Response recreateStruct(
-            @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true) String fieldsJson,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Name of the structure to (re)create. An existing same-named type is "
+                               + "deleted first, but only when replace_placeholder or force allows it.") String name,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
+                   description = "JSON array of field objects, exactly the shape create_struct takes: "
+                               + "required keys name and type, optional offset as a decimal BYTE offset. "
+                               + "field_name/fieldName, field_type/fieldType/data_type/dataType and "
+                               + "field_offset/fieldOffset/off are accepted as alternates. Field names get "
+                               + "the project's Hungarian prefix applied automatically.") String fieldsJson,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Optional minimum total size in bytes after create; grows with undefined padding when larger than implied field layout.") int size,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "true",
@@ -1695,7 +1797,9 @@ public class DataTypeService {
             description = "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders.",
             category = "datatype")
     public Response resolveDuplicateType(
-            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "type_name", source = ParamSource.BODY,
+                   description = "Simple name to look for duplicates of (no /path prefix) — every "
+                               + "category is searched for that name.") String typeName,
             @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
                    description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
             @Param(value = "program", defaultValue = "",
@@ -1911,10 +2015,22 @@ public class DataTypeService {
      */
     @McpTool(path = "/add_struct_field", method = "POST", description = "Add a field to a structure", category = "datatype")
     public Response addStructField(
-            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
-            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
-            @Param(value = "field_type", source = ParamSource.BODY) String fieldType,
-            @Param(value = "offset", source = ParamSource.BODY, defaultValue = "-1") int offset,
+            @Param(value = "struct_name", source = ParamSource.BODY,
+                   description = "Simple name of the existing structure to add to, matched across every "
+                               + "category (no /path prefix needed).") String structName,
+            @Param(value = "field_name", source = ParamSource.BODY,
+                   description = "Name for the new field. The project's Hungarian prefix is applied "
+                               + "automatically from field_type, so the stored name can differ from what "
+                               + "you send — the response reports the name actually used, and "
+                               + "remove_struct_field accepts either form.") String fieldName,
+            @Param(value = "field_type", source = ParamSource.BODY,
+                   description = "Type of the new field, resolved recursively (pointer chains, array "
+                               + "syntax such as dword[8], existing struct/enum names).") String fieldType,
+            @Param(value = "offset", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "BYTE offset to place the field at. -1 (the default) appends to the end. "
+                               + "A non-negative offset OVERWRITES whatever occupies that range rather than "
+                               + "shifting later fields, and grows the struct when it lies at or past the "
+                               + "current end.") int offset,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2027,8 +2143,12 @@ public class DataTypeService {
 
     @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure (by the name you created it with, even after Hungarian auto-prefixing).", category = "datatype")
     public Response removeStructField(
-            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
-            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
+            @Param(value = "struct_name", source = ParamSource.BODY,
+                   description = "Simple name of the existing structure to edit, matched across every "
+                               + "category (no /path prefix needed).") String structName,
+            @Param(value = "field_name", source = ParamSource.BODY,
+                   description = "Field to remove. Matched exactly first, then by Hungarian stem, so the "
+                               + "name you originally sent still works after auto-prefixing changed it.") String fieldName,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2095,8 +2215,12 @@ public class DataTypeService {
      */
     @McpTool(path = "/move_data_type_to_category", method = "POST", description = "Move data type to category", category = "datatype")
     public Response moveDataTypeToCategory(
-            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
-            @Param(value = "category_path", source = ParamSource.BODY) String categoryPath,
+            @Param(value = "type_name", source = ParamSource.BODY,
+                   description = "Simple name of the type to move, matched across every category (no "
+                               + "/path prefix needed).") String typeName,
+            @Param(value = "category_path", source = ParamSource.BODY,
+                   description = "Destination category as a /-separated path, e.g. /D2Structs/Units. It "
+                               + "is created, with any missing parents, if it does not exist.") String categoryPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2444,8 +2568,13 @@ public class DataTypeService {
      */
     @McpTool(path = "/import_data_types", method = "POST", description = "Parse C source (structs/unions/enums/typedefs) into the program's data type manager via Ghidra's CParser. Returns how many types were added and any parser messages. Used to load a project's canonical type vocabulary from a generated header.", category = "datatype")
     public Response importDataTypes(
-            @Param(value = "source", source = ParamSource.BODY) String source,
-            @Param(value = "format", source = ParamSource.BODY, defaultValue = "c") String format,
+            @Param(value = "source", source = ParamSource.BODY,
+                   description = "C declarations — structs, unions, enums, typedefs — as one string of "
+                               + "source TEXT, not a file path. Passed straight to Ghidra's CParser.") String source,
+            @Param(value = "format", source = ParamSource.BODY, defaultValue = "c",
+                   description = "Accepted but ignored: parsing is always C through Ghidra's CParser "
+                               + "whatever you pass. Kept so existing callers that send it keep "
+                               + "working.") String format,
             @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2499,7 +2628,9 @@ public class DataTypeService {
      */
     @McpTool(path = "/create_data_type_category", method = "POST", description = "Create a new data type category", category = "datatype")
     public Response createDataTypeCategory(
-            @Param(value = "category_path", source = ParamSource.BODY) String categoryPath,
+            @Param(value = "category_path", source = ParamSource.BODY,
+                   description = "New category as a /-separated path, e.g. /D2Structs/Units. Missing "
+                               + "parent categories are created too.") String categoryPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2532,8 +2663,14 @@ public class DataTypeService {
      */
     @McpTool(path = "/list_data_type_categories", description = "List all data type categories", category = "datatype")
     public Response listDataTypeCategories(
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of entries to skip before this page starts; 0 begins at the "
+                               + "first entry. Page by adding `limit` each call until offset reaches the "
+                               + "`total` the response reports.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
+                               + "negative value for no limit; `total` in the response always reports the "
+                               + "full unpaged count.") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2593,8 +2730,13 @@ public class DataTypeService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
-            @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10") int maxFunctionsToAnalyze,
+            @Param(value = "struct_name", source = ParamSource.BODY,
+                   description = "Optional label for the structure being analysed. It does NOT select the "
+                               + "type — that comes from the data already applied at `address` — and is only "
+                               + "echoed back; omit it to use the applied type's own name.") String structName,
+            @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10",
+                   description = "How many referencing functions to decompile: 1 to 100, default 10. A "
+                               + "value outside that range is REJECTED, not clamped.") int maxFunctionsToAnalyze,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
@@ -2834,7 +2976,9 @@ public class DataTypeService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String structAddressStr,
-            @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0") int structSize,
+            @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Size of the structure in BYTES, or 0 (the default) to take the size "
+                               + "from the data already applied at struct_address. Must be 0 to 65536.") int structSize,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
@@ -2966,10 +3110,24 @@ public class DataTypeService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "classification", source = ParamSource.BODY) String classification,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "type_definition", source = ParamSource.BODY) Object typeDefinitionObj,
+            @Param(value = "classification", source = ParamSource.BODY,
+                   description = "Which shape to build, matched case-sensitively against exactly "
+                               + "PRIMITIVE, STRUCTURE, ARRAY or STRING. Any other value applies NO type at "
+                               + "all and the call falls through to the rename and comment steps.") String classification,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional label to place at the address. Applied only when a data type "
+                               + "actually ended up defined there, so it is skipped whenever the "
+                               + "classification applied nothing.") String name,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional PRE comment for the address. Unlike the plate-comment tools, "
+                               + "this one DOES turn the two-character escapes for newline, tab and return "
+                               + "into real whitespace, so an escaped string arrives as multiple lines.") String comment,
+            @Param(value = "type_definition", source = ParamSource.BODY,
+                   description = "JSON object whose required keys depend on `classification`: PRIMITIVE "
+                               + "needs {\"type\": \"dword\"}; STRUCTURE needs a name plus a fields array of "
+                               + "{name, type} objects; ARRAY needs count plus either element_type or "
+                               + "element_struct; STRING takes an optional type. It must be an OBJECT — a "
+                               + "JSON string is rejected.") Object typeDefinitionObj,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
