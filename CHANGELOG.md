@@ -150,6 +150,38 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### Contributor-facing process documentation
+
+`CONTRIBUTING.md` rewritten from the repository rather than from open-source
+boilerplate: both build backends, the tier-by-tier testing table stating which
+tiers need a live Ghidra on port 8089 and which need nothing, the CI job list
+with which jobs gate and which are advisory, the change-to-test map, and the
+gotchas that have measurably cost someone time. Every command in it was run
+before it was written down. It replaces a guide that documented an `examples/`
+directory, a `CONTRIBUTORS.md`, a `TOOL_REFERENCE.md` and a
+`DOCUMENTATION_INDEX.md` that do not exist, told contributors to register HTTP
+routes by hand with `httpServer.createContext` (routes have been annotation-
+discovered for several major versions), and said PRs merge to `main` when the
+default branch is `dev`.
+
+The single most important addition is not a command: **a first-time
+contributor's workflow runs need maintainer approval before any CI runs at
+all**, so a PR showing no checks is waiting on the maintainer. Five outside pull
+requests sat three weeks with zero CI results for exactly this reason, and
+nothing told either side what the wait was. Also recorded: a PR can be red for a
+reason unrelated to its content, which happened when the coverage floor sat one
+point above measured coverage and failed a two-file Markdown change.
+
+`ROADMAP.md` rebuilt from open issues, open PRs and `CHANGELOG.md` into six
+themes, each with what is done, what is in flight, and what is not started —
+plus an explicit **Not planned** section, which is the part that lets someone
+stop waiting. It carries no dates, deliberately.
+
+Issue forms (`.github/ISSUE_TEMPLATE/`) and a pull request template now ask up
+front for the four things that otherwise cost a round trip on every report:
+Ghidra version, plugin/bridge version, MCP client and transport, and the exact
+command with its exact output.
+
 ### Documentation correctness: `doc_lint` + Function ID
 
 `analyze_function_completeness` measures whether documentation is *present*. It

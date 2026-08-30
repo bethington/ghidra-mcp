@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/bethington/ghidra-mcp/discussions
+    about: Usage questions, "is this supposed to work like this", and early ideas.
+  - name: Security vulnerability
+    url: https://github.com/bethington/ghidra-mcp/security/advisories/new
+    about: Report privately. Do not open a public issue with technical details.
+  - name: Project direction
+    url: https://github.com/bethington/ghidra-mcp/blob/dev/ROADMAP.md
+    about: What is done, in flight, and explicitly not planned.

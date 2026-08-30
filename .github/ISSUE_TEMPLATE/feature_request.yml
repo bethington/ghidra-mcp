@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a new tool or capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [ROADMAP.md](https://github.com/bethington/ghidra-mcp/blob/dev/ROADMAP.md) first. It has a **Not
+        planned** section — if your idea is there, it has been decided rather
+        than overlooked, and the reasoning is written down.
+
+        Describe the problem, not only the solution. A described problem can be
+        solved a better way than the one you had in mind; a described solution
+        cannot.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you today?
+      placeholder: |
+        I need to find functions that do not follow their declared calling
+        convention. Today that means decompiling each one and reading it, which
+        does not scale past a few hundred functions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead today
+      description: >
+        The workaround, even if it is ugly, and why it is not good enough. This
+        is often the most useful field in the whole form.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: >
+        If you have one: the tool name, its parameters, and what it would
+        return. A rough sketch is fine.
+      render: text
+      placeholder: |
+        analyze_register_usage(function, program)
+        -> {"register_changes": {...}, "violations": [...]}
+    validations:
+      required: false
+
+  - type: dropdown
+    id: existing
+    attributes:
+      label: Did you check the existing tool catalog?
+      description: >
+        253 tools are listed in tests/endpoints.json and in the README's API
+        Reference. `search_tools` searches the live catalog by keyword.
+      options:
+        - "Yes, nothing covers this"
+        - "Yes, something is close but does not fit — explained above"
+        - "No"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to open a PR?
+      description: >
+        Not a requirement, and a no does not deprioritize anything. Feature
+        requests that arrive with a PR simply move fastest.
+      options:
+        - "Yes"
+        - "Maybe, with pointers on where to start"
+        - "No"
+    validations:
+      required: false
