@@ -42,8 +42,13 @@ public class SymbolLabelService {
     public Response getFunctionLabels(
             @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
                    description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "20") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of labels to skip before this page starts; 0 begins at the "
+                               + "first.") int offset,
+            @Param(value = "limit", defaultValue = "20",
+                   description = "Maximum labels returned in this page (default 20). Pass 0 or a negative "
+                               + "value for no limit; `total` in the response always reports the full "
+                               + "count for the function.") int limit,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -95,7 +100,14 @@ public class SymbolLabelService {
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
                    aliases = {"address", "function_address", "old_name"},
                    description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.") String target,
-            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                   description = "The name to apply. A data global should be g_ + Hungarian + descriptor "
+                               + "(g_dwPlayerCount); a code label should be snake_case. Convention misses "
+                               + "come back as warnings on an otherwise successful write. IMPORTANT: at a "
+                               + "CODE address with no defined data, this ADDS a label rather than renaming "
+                               + "one — the existing symbol survives and may stay primary, so the listing "
+                               + "can still show the old name after a success. Call delete_label on the old "
+                               + "name first when you meant to replace it.") String newName,
             @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
                    description = "auto | data | global | label | external") String kind,
             @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
