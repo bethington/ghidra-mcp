@@ -1457,7 +1457,9 @@ public class DataTypeService {
             @Param(value = "field_name", source = ParamSource.BODY,
                    description = "Field name or offset:N (e.g. offset:0x88).") String fieldName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         return modifyStructField(structName, fieldName, newType, "", programName);
     }
 
@@ -1473,7 +1475,9 @@ public class DataTypeService {
                    description = "Field name or offset:N.") String fieldName,
             @Param(value = "embedded_struct", source = ParamSource.BODY,
                    description = "Existing structure type to embed by value.") String embeddedStruct,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         if (embeddedStruct == null || embeddedStruct.isEmpty()) {
             return Response.err("embedded_struct is required");
         }
@@ -1493,7 +1497,9 @@ public class DataTypeService {
                    description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Allow shrink even when defined fields extend past new_size (clips trailing layout).") boolean force,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1575,7 +1581,9 @@ public class DataTypeService {
                    description = "Delete a 1-byte placeholder/Demangler stub before recreate (default true).") boolean replacePlaceholder,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Delete an existing full-sized struct before recreate (fails if referenced).") boolean force,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1690,7 +1698,9 @@ public class DataTypeService {
             @Param(value = "type_name", source = ParamSource.BODY) String typeName,
             @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
                    description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
 
         if (typeName == null || typeName.isEmpty()) {
             return Response.err("type_name is required");

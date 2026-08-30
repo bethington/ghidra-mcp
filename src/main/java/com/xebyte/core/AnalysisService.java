@@ -226,7 +226,9 @@ public class AnalysisService {
      */
     @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis")
     public Response runAnalysis(
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

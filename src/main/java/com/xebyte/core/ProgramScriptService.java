@@ -466,7 +466,9 @@ public class ProgramScriptService {
             @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
                    description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -552,7 +554,9 @@ public class ProgramScriptService {
     public Response removeProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -639,7 +643,9 @@ public class ProgramScriptService {
             @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
                    description = "Value type: int, long, string, or void.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -685,7 +691,9 @@ public class ProgramScriptService {
              category = "program")
     public Response deletePropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -730,7 +738,9 @@ public class ProgramScriptService {
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -808,7 +818,9 @@ public class ProgramScriptService {
     public Response getProperty(
             @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
             @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -849,7 +861,9 @@ public class ProgramScriptService {
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -897,7 +911,9 @@ public class ProgramScriptService {
             @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
             @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3269,7 +3285,9 @@ public class ProgramScriptService {
     @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

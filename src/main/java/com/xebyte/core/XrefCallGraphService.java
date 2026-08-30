@@ -91,7 +91,9 @@ public class XrefCallGraphService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -160,7 +162,9 @@ public class XrefCallGraphService {
                                + "re-analysis), ANALYSIS, IMPORTED, DEFAULT.") String sourceTypeStr,
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -229,7 +233,9 @@ public class XrefCallGraphService {
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index to match. -1 (default) = remove references on any operand; "
                                + ">= 0 = remove only the reference on that operand.") int operandIndex,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -315,7 +321,9 @@ public class XrefCallGraphService {
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -369,7 +377,9 @@ public class XrefCallGraphService {
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -453,7 +463,9 @@ public class XrefCallGraphService {
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -518,7 +530,9 @@ public class XrefCallGraphService {
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -573,7 +587,9 @@ public class XrefCallGraphService {
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -736,7 +752,9 @@ public class XrefCallGraphService {
     public Response getFullCallGraph(
             @Param(value = "format", defaultValue = "edges", description = "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)") String format,
             @Param(value = "limit", defaultValue = "1000", description = "Max edges to return. 0 = unlimited.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -897,7 +915,9 @@ public class XrefCallGraphService {
             @Param(value = "start_function", description = "Start function name") String startFunction,
             @Param(value = "end_function", description = "End function name") String endFunction,
             @Param(value = "analysis_type", defaultValue = "summary", description = "Analysis type (summary/paths/cycles)") String analysisType,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1301,7 +1321,9 @@ public class XrefCallGraphService {
     @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
     public Response getBulkXrefs(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1374,7 +1396,9 @@ public class XrefCallGraphService {
             @Param(value = "xref_sources", source = ParamSource.BODY) Object xrefSourcesObj,
             @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5") int contextInstructions,
             @Param(value = "include_patterns", source = ParamSource.BODY) Object includePatternsObj,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

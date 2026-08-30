@@ -327,7 +327,9 @@ public class FunctionService {
     // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 7.0.0.
     public Response batchDecompileFunctions(
             @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -394,7 +396,9 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -503,7 +507,9 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -608,7 +614,9 @@ public class FunctionService {
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
             @Param(value = "old_variable_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldVarName,
             @Param(value = "new_variable_name", source = ParamSource.BODY, aliases = {"newName"}) String newVarName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -753,7 +761,9 @@ public class FunctionService {
                                + "<space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact "
                                + "function name.") String functionAddrStr,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' (reject "
                                + "low-quality names), 'warn' (write goes through with warnings), or 'off' "
@@ -1356,7 +1366,9 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"variableName"}) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1705,7 +1717,9 @@ public class FunctionService {
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY) String functionAddress,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"}) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         if ("this".equals(variableName)) {
             return setFunctionThisType(functionAddress, newType, programName);
         }
@@ -1976,7 +1990,9 @@ public class FunctionService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "no_return", source = ParamSource.BODY, aliases = {"noReturn"}) boolean noReturn,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2065,7 +2081,9 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String instructionAddrStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2147,7 +2165,9 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
             @Param(value = "storage", source = ParamSource.BODY) String storageSpec,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2244,7 +2264,9 @@ public class FunctionService {
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName,
             @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") int limit,
             @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2480,7 +2502,9 @@ public class FunctionService {
             @Param(value = "parameter_renames", source = ParamSource.BODY) Map<String, String> parameterRenames,
             @Param(value = "local_renames", source = ParamSource.BODY) Map<String, String> localRenames,
             @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "") String returnType,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2586,7 +2610,9 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2655,7 +2681,9 @@ public class FunctionService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
             @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true") boolean disassembleFirst,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2789,7 +2817,9 @@ public class FunctionService {
                    description = "Return the disassembled instruction list (mnemonic, operands, raw bytes, address) in the response. Disable for byte ranges where you only need the success/byte-count summary.") boolean includeInstructions,
             @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
                    description = "Cap on number of instructions returned when include_instructions is true. Protects against runaway payload for large ranges; if the actual count exceeds this, the response sets truncated=true and instructions_total reports the real count.") int maxInstructions,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3030,7 +3060,9 @@ public class FunctionService {
                    description = "Exclusive seed end (consistent with disassemble_bytes). Must be in the same "
                                + "address space as start_address and strictly greater. Omitted: one-address seed; "
                                + "the command still follows flow from there like clicking one address in the GUI.") String endAddress,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
 
         if (startAddress == null || startAddress.isEmpty()) {
             return Response.err("start_address parameter required");
@@ -3315,7 +3347,9 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "variable_renames", source = ParamSource.BODY) Map<String, String> variableRenames,
             @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false") boolean forceIndividual,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3542,7 +3576,9 @@ public class FunctionService {
                    description = "JSON object mapping old variable names to {name, type} objects. "
                                + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
                                + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
-            @Param(value = "program") String programName) {
+            @Param(value = "program",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4033,7 +4069,9 @@ public class FunctionService {
     public Response getFunctionTags(
             @Param(value = "function", paramType = "address",
                    description = "Function address (0x<hex> or <space>:<hex>) or function name") String functionRef,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4065,7 +4103,9 @@ public class FunctionService {
                    description = "Comma-separated tag names to attach (single mode).") String tagsCsv,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4116,7 +4156,9 @@ public class FunctionService {
                    description = "Comma-separated tag names to detach (single mode).") String tagsCsv,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4168,7 +4210,9 @@ public class FunctionService {
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "500",
                    description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4200,7 +4244,9 @@ public class FunctionService {
                    description = "Tag name (case-sensitive; Ghidra treats whitespace-trimmed names as unique)") String name,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional description for the tag") String comment,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4240,7 +4286,9 @@ public class FunctionService {
     public Response deleteFunctionTag(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name to delete program-wide") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4275,7 +4323,9 @@ public class FunctionService {
                    description = "Tag name") String name,
             @Param(value = "comment", source = ParamSource.BODY,
                    description = "New comment text (pass an empty string to clear)") String comment,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4308,7 +4358,9 @@ public class FunctionService {
             @Param(value = "tag", description = "Tag name to search for") String tagName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "1000") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4349,7 +4401,9 @@ public class FunctionService {
     public Response batchAddFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4418,7 +4472,9 @@ public class FunctionService {
     public Response batchRemoveFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
