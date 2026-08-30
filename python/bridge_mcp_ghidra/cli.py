@@ -15,16 +15,18 @@ from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
 
 
-def _wildcard_allowed_hosts() -> list[str]:
-    """Build the allowed-Host list for a 0.0.0.0/:: bind.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
-    Returns the loopback names plus this machine's hostname, FQDN, and
-    every local interface IP, each with a ``:*`` port suffix. This lets
-    legitimate remote clients (which use the real hostname/IP in the
-    Host header) through while DNS-rebinding attacks (which use an
-    attacker-controlled hostname) are rejected.
+
+def _local_machine_hosts() -> set[str]:
+    """Every name this machine legitimately answers to.
+
+    Hostname, FQDN, and every address the hostname resolves to (covers
+    multi-NIC). Used for a 0.0.0.0/:: bind, where legitimate remote
+    clients put the real hostname/IP in the Host header while a
+    DNS-rebinding attacker puts a name he controls.
     """
-    hosts: set[str] = {"localhost", "127.0.0.1", "::1"}
+    hosts: set[str] = set()
     try:
         hn = socket.gethostname()
         if hn:
@@ -34,7 +36,6 @@ def _wildcard_allowed_hosts() -> list[str]:
             except OSError:
                 pass
             try:
-                # All addresses the hostname resolves to (covers multi-NIC).
                 for info in socket.getaddrinfo(hn, None):
                     addr = info[4][0]
                     if addr:
@@ -43,37 +44,113 @@ def _wildcard_allowed_hosts() -> list[str]:
                 pass
     except OSError:
         pass
-    out: list[str] = []
-    for h in sorted(hosts):
-        out.append(f"{h}:*")
-        # RFC 3986: IPv6 literals are bracketed in Host headers
-        # (e.g. "[::1]:8089"); add the bracketed form so they match too.
+    return hosts
+
+
+def _policy_hosts(bind_host: str) -> set[str]:
+    """The ONE host set every request gate is derived from.
+
+    Two independent gates read the Origin header of every non-preflight
+    request -- ``CORSMiddleware`` (browser-facing, answers the preflight)
+    and the SDK's ``TransportSecurityMiddleware`` (DNS-rebinding, runs
+    inside the transport app). They are separate mechanisms with separate
+    syntaxes, so when their allowlists are hand-maintained side by side
+    they drift, and a request the preflight approved is then refused by
+    the inner gate -- a 200 preflight followed by a 421/403 on the real
+    POST, which reads to the operator as a network fault rather than a
+    policy one. Deriving both from this function is what stops that.
+
+    Bare names only here: no scheme, no port, no brackets. The two
+    encodings are added by ``_host_header_forms`` / ``_origin_forms``.
+    """
+    hosts = set(_LOOPBACK_HOSTS)
+    if bind_host in {"0.0.0.0", "::"}:
+        hosts |= _local_machine_hosts()
+    elif bind_host not in _LOOPBACK_HOSTS:
+        hosts.add(bind_host)
+    # The escape hatch operators reach for when a legitimate client is
+    # refused. It must extend BOTH gates, or it fixes one and not the other.
+    extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
+    hosts.update(h.strip() for h in extra.split(",") if h.strip())
+    return hosts
+
+
+def _bracketed(hosts) -> set[str]:
+    """Add RFC 3986 bracketed forms for bare IPv6 literals.
+
+    IPv6 appears bracketed in both Host headers and origins
+    (``[::1]:8089``, ``http://[::1]:6274``), so the bare form alone never
+    matches a real request.
+    """
+    out = set(hosts)
+    for h in hosts:
         if ":" in h and not h.startswith("["):
-            out.append(f"[{h}]:*")
+            out.add(f"[{h}]")
     return out
+
+
+def _host_header_forms(hosts) -> list[str]:
+    """Host-header allowlist entries: portless AND ``:*`` for every host.
+
+    BOTH forms are required. The SDK matches ``host:*`` only when the Host
+    header actually carries a port, and a reverse proxy terminating on a
+    default port (443 for https, 80 for http) forwards a PORTLESS Host --
+    so a ``host:*``-only allowlist rejects every proxied request with 421
+    Misdirected Request.
+    """
+    out: list[str] = []
+    for h in sorted(_bracketed(hosts)):
+        out.append(h)
+        out.append(f"{h}:*")
+    return out
+
+
+def _origin_forms(hosts) -> list[str]:
+    """Origin allowlist entries: {http,https} x {portless, ``:*``}.
+
+    Mirrors ``_cors_origin_regex``'s ``^https?://host(:\\d+)?$`` exactly.
+    Dropping https here is the same 421-class trap as dropping the
+    portless host: anything behind TLS termination sends an https Origin,
+    the preflight approves it, and the SDK gate then answers 403.
+    """
+    out: list[str] = []
+    for h in sorted(_bracketed(hosts)):
+        for scheme in ("http", "https"):
+            out.append(f"{scheme}://{h}")
+            out.append(f"{scheme}://{h}:*")
+    return out
+
+
+def _wildcard_allowed_hosts() -> list[str]:
+    """Allowed-Host list for a 0.0.0.0/:: bind."""
+    return _host_header_forms(set(_LOOPBACK_HOSTS) | _local_machine_hosts())
+
+
+def _transport_security(bind_host: str) -> TransportSecuritySettings:
+    """DNS-rebinding settings for a non-loopback bind.
+
+    Built from ``_policy_hosts`` -- the same set ``_cors_origin_regex``
+    uses -- so the browser-facing gate and this one cannot disagree.
+    """
+    hosts = _policy_hosts(bind_host)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_host_header_forms(hosts),
+        allowed_origins=_origin_forms(hosts),
+    )
 
 
 def _cors_origin_regex(bind_host: str) -> str:
     """Build the allowed-Origin regex for the HTTP transports.
 
-    CORS only gates browsers — native MCP clients never send a preflight —
-    so this mirrors the Host-header policy: loopback origins on any port
-    are always allowed (browser tools like MCP Inspector serve their UI
-    from ``http://localhost:<port>``), a non-loopback bind additionally
+    CORS only gates browsers -- native MCP clients never send a preflight
+    -- so this mirrors the Host-header policy: loopback origins on any
+    port are always allowed (browser tools like MCP Inspector serve their
+    UI from ``http://localhost:<port>``), a non-loopback bind additionally
     allows the bind host itself, a wildcard bind allows the machine's own
     hostnames/IPs, and ``GHIDRA_MCP_ALLOWED_HOSTS`` extends the list.
     """
-    hosts: set[str] = {"localhost", "127.0.0.1", "[::1]"}
-    if bind_host in {"0.0.0.0", "::"}:
-        # _wildcard_allowed_hosts entries are "host:*"; strip the suffix.
-        hosts.update(entry[:-2] for entry in _wildcard_allowed_hosts())
-    elif bind_host not in {"localhost", "127.0.0.1", "::1"}:
-        hosts.add(bind_host)
-        if ":" in bind_host and not bind_host.startswith("["):
-            hosts.add(f"[{bind_host}]")
-    extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
-    hosts.update(h.strip() for h in extra.split(",") if h.strip())
-    alternatives = "|".join(sorted(re.escape(h) for h in hosts))
+    alternatives = "|".join(sorted(re.escape(h) for h in _bracketed(_policy_hosts(bind_host))))
     return rf"^https?://({alternatives})(:\d+)?$"
 
 
@@ -156,51 +233,37 @@ def main():
         mcp.settings.port = args.mcp_port
 
     _host = args.mcp_host
-    if _host not in {"127.0.0.1", "localhost", "::1"}:
-        if _host in {"0.0.0.0", "::"}:
-            # Wildcard bind is the MOST exposed configuration — keep
-            # DNS-rebinding protection ON and allow only the machine's
-            # actual hostnames/IPs. Previously this branch disabled
-            # protection entirely, which is inverted: a malicious page
-            # could DNS-rebind to this host and drive every Ghidra tool
-            # from the victim's browser.
-            #
-            # Legitimate remote clients use the real hostname/IP, so
-            # they pass the Host-header check. Operators with custom
-            # DNS can extend the list via GHIDRA_MCP_ALLOWED_HOSTS
-            # (comma-separated), or explicitly opt back into the old
-            # unprotected behavior with GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1.
-            if os.environ.get("GHIDRA_MCP_DISABLE_REBIND_PROTECTION") == "1":
-                logger.warning(
-                    "DNS-rebinding protection DISABLED for wildcard bind via "
-                    "GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 — any page in the "
-                    "user's browser can drive this server."
-                )
-                mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
-            else:
-                allowed = _wildcard_allowed_hosts()
-                extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
-                for h in (x.strip() for x in extra.split(",") if x.strip()):
-                    allowed.append(f"{h}:*")
-                logger.info(
-                    "Wildcard bind %s with DNS-rebinding protection ON; "
-                    "allowed Host headers: %s. Extend with "
-                    "GHIDRA_MCP_ALLOWED_HOSTS=host1,host2 if a remote client "
-                    "is rejected.",
-                    _host,
-                    allowed,
-                )
-                mcp.settings.transport_security = TransportSecuritySettings(
-                    enable_dns_rebinding_protection=True,
-                    allowed_hosts=allowed,
-                    allowed_origins=[f"http://{h}" for h in allowed],
-                )
-        else:
-            mcp.settings.transport_security = TransportSecuritySettings(
-                enable_dns_rebinding_protection=True,
-                allowed_hosts=[f"{_host}:*", "localhost:*", "127.0.0.1:*"],
-                allowed_origins=[f"http://{_host}:*", "http://localhost:*", "http://127.0.0.1:*"],
+    if _host not in _LOOPBACK_HOSTS:
+        # Wildcard bind is the MOST exposed configuration — keep
+        # DNS-rebinding protection ON and allow only the machine's actual
+        # hostnames/IPs. Previously this branch disabled protection
+        # entirely, which is inverted: a malicious page could DNS-rebind
+        # to this host and drive every Ghidra tool from the victim's
+        # browser.
+        #
+        # Legitimate remote clients use the real hostname/IP, so they
+        # pass the Host-header check. Operators with custom DNS can
+        # extend the list via GHIDRA_MCP_ALLOWED_HOSTS (comma-separated),
+        # or explicitly opt back into the old unprotected behavior with
+        # GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 (wildcard bind only).
+        if _host in {"0.0.0.0", "::"} and os.environ.get("GHIDRA_MCP_DISABLE_REBIND_PROTECTION") == "1":
+            logger.warning(
+                "DNS-rebinding protection DISABLED for wildcard bind via "
+                "GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 — any page in the "
+                "user's browser can drive this server."
             )
+            mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+        else:
+            security = _transport_security(_host)
+            logger.info(
+                "Bind %s with DNS-rebinding protection ON; allowed Host "
+                "headers: %s. Extend with GHIDRA_MCP_ALLOWED_HOSTS=host1,host2 "
+                "if a legitimate client is rejected — it widens the CORS "
+                "origin policy and this one together.",
+                _host,
+                security.allowed_hosts,
+            )
+            mcp.settings.transport_security = security
     logger.info(f"Starting MCP bridge ({args.transport})")
     try:
         if args.transport in ("sse", "streamable-http"):
