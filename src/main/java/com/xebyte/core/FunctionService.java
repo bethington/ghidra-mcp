@@ -760,7 +760,15 @@ public class FunctionService {
                    description = "Function name or address to rename. Address accepts 0x<hex> or "
                                + "<space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact "
                                + "function name.") String functionAddrStr,
-            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                   description = "New function name in PascalCase, verb first: GetPlayerHealth, not "
+                               + "get_player_health and not PlayerHealth. An UPPERCASE module prefix is "
+                               + "allowed and validated separately (D2COMMON_GetUnitStat). The quality "
+                               + "gate rejects a vague verb carrying fewer than two specifier tokens "
+                               + "(ProcessData), a single-token name (Get), a weak-noun-only name "
+                               + "(GetInfo), and a name whose tokens are a strict subset of an existing "
+                               + "function's within the same module prefix. strict_mode downgrades those "
+                               + "rejections to warnings.") String newName,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName,
@@ -1074,8 +1082,18 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "prototype", source = ParamSource.BODY) String prototype,
-            @Param(value = "calling_convention", source = ParamSource.BODY, defaultValue = "") String callingConvention,
+            @Param(value = "prototype", source = ParamSource.BODY,
+                   description = "Full C signature as one string, e.g. "
+                               + "int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed "
+                               + "and then discarded — it does NOT rename the function, call rename_function "
+                               + "for that. A calling convention written here is only recognised before the "
+                               + "first '(', so one inside a callback parameter type survives "
+                               + "untouched.") String prototype,
+            @Param(value = "calling_convention", source = ParamSource.BODY, defaultValue = "",
+                   description = "Convention to apply — __cdecl, __stdcall, __fastcall, __thiscall and "
+                               + "whatever else list_calling_conventions reports for this program's "
+                               + "language. When set it OVERRIDES the convention written into the "
+                               + "prototype string; omit to use whatever the prototype says.") String callingConvention,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
         if (result.isSuccess()) {
@@ -1714,9 +1732,21 @@ public class FunctionService {
             description = "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type.",
             category = "function")
     public Response setDecompilerVariableType(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY) String functionAddress,
-            @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"}) String variableName,
-            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Entry address of the function that owns the variable. Accepts 0x<hex> "
+                               + "(default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use "
+                               + "get_address_spaces first on targets that are not "
+                               + "address-space-agnostic.") String functionAddress,
+            @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"},
+                   description = "Local or parameter to retype, named exactly as the decompiler shows it "
+                               + "(get_function_variables lists them). The literal value 'this' is "
+                               + "special-cased and routes to set_function_this_type.") String variableName,
+            @Param(value = "new_type", source = ParamSource.BODY,
+                   description = "New data type, resolved recursively (pointer chains, array syntax such "
+                               + "as dword[8], existing struct/enum names). A type starting with `undefined` "
+                               + "is REJECTED whatever the current type is — swapping one undefined width "
+                               + "for another is a no-op, not documentation. For 'this', a bare struct name "
+                               + "is auto-suffixed with ' *'.") String newType,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -1746,8 +1776,13 @@ public class FunctionService {
     public Response listClassMembers(
             @Param(value = "class_name",
                    description = "Class / struct name, e.g. 'UnitAny'.") String className,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "200") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of members to skip before this page starts; 0 begins at the "
+                               + "first. Negative values are clamped to 0.") int offset,
+            @Param(value = "limit", defaultValue = "200",
+                   description = "Maximum members returned in this page (default 200). It is clamped to a "
+                               + "MINIMUM of 1, so 0 returns one member rather than everything — page with "
+                               + "offset against total_members instead.") int limit,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (className == null || className.trim().isEmpty()) {
             return Response.err("class_name is required");
@@ -1989,7 +2024,11 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "no_return", source = ParamSource.BODY, aliases = {"noReturn"}) boolean noReturn,
+            @Param(value = "no_return", source = ParamSource.BODY, aliases = {"noReturn"},
+                   description = "True marks the function non-returning: its call sites become "
+                               + "CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing "
+                               + "execution continuing past the call. False clears that back to an ordinary "
+                               + "returning function. Required — there is no default.") boolean noReturn,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -2163,8 +2202,13 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
-            @Param(value = "storage", source = ParamSource.BODY) String storageSpec,
+            @Param(value = "variable_name", source = ParamSource.BODY,
+                   description = "Local or parameter to address, matched by exact name against the "
+                               + "function's variables.") String variableName,
+            @Param(value = "storage", source = ParamSource.BODY,
+                   description = "Storage specification: a location followed by a size in bytes, e.g. "
+                               + "Stack[-0x10]:4, EBP:4, EAX:4. The response echoes it as "
+                               + "requested_storage next to the variable's current_storage.") String storageSpec,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -2498,10 +2542,26 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "function_name", source = ParamSource.BODY, defaultValue = "") String functionName,
-            @Param(value = "parameter_renames", source = ParamSource.BODY) Map<String, String> parameterRenames,
-            @Param(value = "local_renames", source = ParamSource.BODY) Map<String, String> localRenames,
-            @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "") String returnType,
+            @Param(value = "function_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional new name for the function; leave empty to keep the current "
+                               + "one. Unlike rename_function this writes the name directly and does NOT "
+                               + "run the naming-quality gate.") String functionName,
+            @Param(value = "parameter_renames", source = ParamSource.BODY,
+                   description = "JSON object mapping each parameter's CURRENT name to its new name. Keys "
+                               + "must match exactly; an entry naming a parameter that does not exist is "
+                               + "ignored silently, and parameters_renamed in the response reports how many "
+                               + "actually landed.") Map<String, String> parameterRenames,
+            @Param(value = "local_renames", source = ParamSource.BODY,
+                   description = "JSON object mapping each local variable's CURRENT name to its new name, "
+                               + "same rules as parameter_renames; locals_renamed reports how many "
+                               + "landed.") Map<String, String> localRenames,
+            @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional new return type. It is looked up by exact data-type-manager "
+                               + "PATH (/uint), not through the recursive resolver the other tools use, so "
+                               + "a bare name or a pointer chain does not resolve — and a failed lookup is "
+                               + "IGNORED SILENTLY, leaving the return type unchanged while the call still "
+                               + "reports success. Prefer set_function_prototype when the return type "
+                               + "matters.") String returnType,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -2679,8 +2739,15 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
-            @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true") boolean disassembleFirst,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional name for the new function; leave empty to keep Ghidra's "
+                               + "generated FUN_<address>. Written directly, so the naming-quality gate "
+                               + "does not run here — use rename_function if you want it to.") String name,
+            @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) disassembles the entry address first when no "
+                               + "instruction exists there, which is what lets you create a function over "
+                               + "raw undefined bytes. False requires the address to be disassembled "
+                               + "already; function creation fails otherwise.") boolean disassembleFirst,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -2811,8 +2878,16 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String endAddress,
-            @Param(value = "length", source = ParamSource.BODY, defaultValue = "0") Integer length,
-            @Param(value = "restrict_to_execute_memory", source = ParamSource.BODY, defaultValue = "true") boolean restrictToExecuteMemory,
+            @Param(value = "length", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Number of BYTES to disassemble from start_address, as an alternative to "
+                               + "end_address; end_address wins when both are given. 0 (the default) with "
+                               + "no end_address auto-detects the run of undefined bytes and stops at a "
+                               + "100-byte safety cap.") Integer length,
+            @Param(value = "restrict_to_execute_memory", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) refuses to disassemble outside memory blocks marked "
+                               + "executable, which stops a stray address turning data into instructions. "
+                               + "Set false only for code that genuinely lives in a non-execute "
+                               + "block.") boolean restrictToExecuteMemory,
             @Param(value = "include_instructions", source = ParamSource.BODY, defaultValue = "true",
                    description = "Return the disassembled instruction list (mnemonic, operands, raw bytes, address) in the response. Disable for byte ranges where you only need the success/byte-count summary.") boolean includeInstructions,
             @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
@@ -3345,8 +3420,15 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "variable_renames", source = ParamSource.BODY) Map<String, String> variableRenames,
-            @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false") boolean forceIndividual,
+            @Param(value = "variable_renames", source = ParamSource.BODY,
+                   description = "JSON object mapping each variable's CURRENT decompiler name to its new "
+                               + "name. Matching happens against the decompiler's high-level symbols, so "
+                               + "use the names get_function_variables and decompile_function report, not "
+                               + "the raw listing's.") Map<String, String> variableRenames,
+            @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Accepted but currently not read: the batched decompiler commit always "
+                               + "runs first and per-variable renames happen only as a fallback when it "
+                               + "throws. Setting it true changes nothing today.") boolean forceIndividual,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -4207,7 +4289,9 @@ public class FunctionService {
              description = "List all program-wide function tag definitions with their use counts.",
              category = "function")
     public Response listFunctionTags(
-            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of tag definitions to skip before this page starts; 0 begins at "
+                               + "the first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "500",
                    description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
             @Param(value = "program", defaultValue = "",
@@ -4356,8 +4440,13 @@ public class FunctionService {
              category = "function")
     public Response searchFunctionsByTag(
             @Param(value = "tag", description = "Tag name to search for") String tagName,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "1000") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of matching functions to skip before this page starts; 0 begins "
+                               + "at the first. Negative values are clamped to 0.") int offset,
+            @Param(value = "limit", defaultValue = "1000",
+                   description = "Maximum functions returned in this page (default 1000). 0 returns an "
+                               + "EMPTY page rather than everything — page with offset against the `total` "
+                               + "the response reports.") int limit,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
