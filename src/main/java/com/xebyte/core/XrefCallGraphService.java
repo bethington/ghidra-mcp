@@ -1428,28 +1428,25 @@ public class XrefCallGraphService {
     /**
      * Assembly pattern analysis - get assembly context around xref source addresses
      */
-    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
-                                      Object includePatternsObj) {
-        return getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj, null);
+    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions) {
+        return getAssemblyContext(xrefSourcesObj, contextInstructions, null);
     }
 
     @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref")
     public Response getAssemblyContext(
-            @Param(value = "xref_sources", source = ParamSource.BODY,
+@Param(value = "xref_sources", source = ParamSource.BODY,
                    description = "Instruction addresses to pull context around. Accepts a JSON array of "
                                + "address strings or one comma-separated string, each in the usual 0x<hex> "
                                + "or <space>:<hex> form. The result is keyed by the exact string you sent, "
                                + "and an address with no instruction at it gets its own error entry rather "
                                + "than failing the batch.") Object xrefSourcesObj,
-            @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5",
+            
+@Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5",
                    description = "How many instructions to include on EACH side of every source address "
                                + "(default 5), so the window is up to 2n+1 instructions. The walk stops "
                                + "early at the start or end of the listing.") int contextInstructions,
-            @Param(value = "include_patterns", source = ParamSource.BODY,
-                   description = "Accepted but currently not read. Mnemonic pattern detection always runs "
-                               + "and patterns_detected is always present; there is no way to switch it off "
-                               + "today.") Object includePatternsObj,
-            @Param(value = "program", defaultValue = "",
+            
+@Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
