@@ -117,6 +117,59 @@ One shape bug this exposed and fixed: parameters can now declare that an empty
 string is *meaningful*, rather than treating empty as absent. Clearing a comment
 did not work end to end before that.
 
+### `create_memory_block` accepts byte contents (#404)
+
+The tool could only ever produce an *empty* block, so laying down a known region
+— a patch stub, a decrypted overlay, an MMIO map with a real signature in it —
+took a `create_memory_block` call followed by a byte-writing tool that does not
+exist in this server. Reported by @antoniovazquezblanco.
+
+Five new body parameters:
+
+| Param | Meaning |
+| --- | --- |
+| `bytes_hex` | contents as hex (`"deadbeef"`, `"de ad be ef"`, `"0xdeadbeef"`) |
+| `bytes_base64` | contents as standard base64, for large or fully binary payloads |
+| `initialized` | create an initialized block with no supplied contents |
+| `fill_byte` | value (0-255) for every byte past the supplied contents |
+| `overlay` | create the block in a new overlay address space |
+
+Both encodings are offered because `EmulationService`'s memory-region contract
+already accepts both for the same job; they are mutually exclusive and named
+`bytes_*` rather than the bare `hex`/`data` that collide with `read_memory`'s
+differently-shaped response fields.
+
+The behavior that matters:
+
+- **Supplying contents forces `initialized=true`** — an uninitialized block has
+  nowhere to put bytes. The default is still an uninitialized block, so every
+  pre-existing call behaves exactly as before.
+- **Contents longer than `size` is an error, never a truncation.** Silently
+  dropping bytes the caller sent would produce a block that reports success and
+  contains the wrong program. Contents *shorter* than `size` pad with
+  `fill_byte` and report `padded_bytes` — "a 4 KB region whose first 16 bytes
+  are this header" is the common real request, and making the caller hand-build
+  kilobytes of zero digits to express it would be hostile. Omitting `size`
+  entirely sizes the block to the contents.
+- **Nothing is written on a bad request.** Decoding and size reconciliation both
+  run before the transaction opens, so a malformed payload cannot leave a
+  half-created block behind. The creation itself is a single Ghidra call that
+  creates *and* fills, so there is no window where an empty block exists; any
+  failure still leaves `endTransaction(tx, false)` to roll the whole thing back.
+- **Caps, not OOMs.** Contents are limited to 16 MB (matching `read_memory`, and
+  fitting inside the 64 MB request-body cap in either encoding) and the limit is
+  checked against the *encoded* length, before any array is allocated. An
+  initialized block is capped at 256 MB because those bytes are real database
+  storage written on the Swing thread; uninitialized blocks stay uncapped, which
+  is the pre-existing behavior and the reason a multi-gigabyte MMIO aperture
+  still works.
+- **`overlay=true` skips the overlap check**, because shadowing existing memory
+  is the entire point of an overlay; the response reports the generated space in
+  `address_space`.
+
+The response gained `initialized`, `overlay`, `address_space`, `bytes_written`,
+`padded_bytes` and `fill_byte`.
+
 ### MCP-protocol conformance suite
 
 `tests/conformance/` drives the server through a real MCP client rather than raw
