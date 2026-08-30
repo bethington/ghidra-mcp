@@ -1224,6 +1224,9 @@ load-bearing: removing it turns 7 passing tests into 7 errors.
   Container user creation reclaims UID and GID 1000 from the base image and
   assigns them explicitly to `ghidra`, retaining the numeric ownership expected
   by persisted volumes.
+- **`ensure-prereqs` no longer requires `pip` inside a uv-managed environment.**
+  The optional Ghidra `ghidratrace` wheel is installed with `uv pip --python`,
+  so the debugger dependency sync works after `uv sync` removes unmanaged pip.
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
   now stay responsive.
 - **`debugger_launch`** failed for reasons that had been misattributed to the
