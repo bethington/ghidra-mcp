@@ -1,18 +1,25 @@
 package com.xebyte.core;
 
+import com.xebyte.offline.ProjectSource;
 import junit.framework.TestCase;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Offline checks for {@code this} routing and pointer normalization helpers.
+ *
+ * <p>The source-text assertions below read through {@link ProjectSource} so
+ * they neither depend on the working directory nor on how the checkout
+ * materialised line endings — the failure mode that made two other tests look
+ * broken to outside contributors (#447, #448).
  */
 public class FunctionServiceThisTypeTest extends TestCase {
+
+    private static String readFunctionServiceSource() throws IOException {
+        return ProjectSource.readMainSource("core", "FunctionService.java");
+    }
 
     public void testResolveThisPointerTypeReturnsNullWithoutDataTypeManager() {
         assertNull(FunctionService.resolveThisPointerType(null, "MyStruct"));
@@ -21,9 +28,7 @@ public class FunctionServiceThisTypeTest extends TestCase {
     }
 
     public void testSetParameterTypeRoutesThisToSetFunctionThisType() throws IOException {
-        String src = Files.readString(
-                Paths.get("src/main/java/com/xebyte/core/FunctionService.java"),
-                StandardCharsets.UTF_8);
+        String src = readFunctionServiceSource();
         Pattern block = Pattern.compile(
                 "public Response setParameterTypeEndpoint\\([\\s\\S]*?\\n    \\}",
                 Pattern.MULTILINE);
@@ -35,9 +40,7 @@ public class FunctionServiceThisTypeTest extends TestCase {
     }
 
     public void testSetDecompilerVariableTypeRoutesThis() throws IOException {
-        String src = Files.readString(
-                Paths.get("src/main/java/com/xebyte/core/FunctionService.java"),
-                StandardCharsets.UTF_8);
+        String src = readFunctionServiceSource();
         Pattern block = Pattern.compile(
                 "public Response setDecompilerVariableType\\([\\s\\S]*?\\n    \\}",
                 Pattern.MULTILINE);
@@ -49,9 +52,7 @@ public class FunctionServiceThisTypeTest extends TestCase {
     }
 
     public void testSetFunctionThisTypeUsesClassNamespaceAssociation() throws IOException {
-        String src = Files.readString(
-                Paths.get("src/main/java/com/xebyte/core/FunctionService.java"),
-                StandardCharsets.UTF_8);
+        String src = readFunctionServiceSource();
         Pattern block = Pattern.compile(
                 "public Response setFunctionThisType\\([\\s\\S]*?\\n    \\}",
                 Pattern.MULTILINE);
