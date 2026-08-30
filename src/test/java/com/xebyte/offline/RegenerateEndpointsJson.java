@@ -33,9 +33,11 @@ import java.util.TreeMap;
  * <p>Merge rules:
  * <ul>
  *   <li>For every {@code @McpTool}-scanned endpoint: write/overwrite the entry
- *       with scanner data (path, method). Description and category are
+ *       with scanner data (path, method, category). The description is
  *       preserved from the existing catalog if non-empty; otherwise taken from
- *       the scanner. Params are an ordered-set union: scanner names in
+ *       the scanner. The category is NOT preserved — it names the tool group the
+ *       bridge lazy-loads by, and only the annotation scan can say what that is.
+ *       Params are an ordered-set union: scanner names in
  *       declaration order, then catalog-only names in their existing order,
  *       each emitted once (case-sensitive comparison). Catalog-only names may
  *       be hand-registered route extras (e.g. {@code /open_project}'s
@@ -74,14 +76,15 @@ public class RegenerateEndpointsJson extends TestCase {
         next.addProperty("path", tool.path());
         next.addProperty("method", tool.method());
 
-        String category;
-        if (existing != null && existing.has("category")
-                && !existing.get("category").getAsString().isEmpty()) {
-            category = existing.get("category").getAsString();
-        } else {
-            category = tool.category() != null ? tool.category() : "";
-        }
-        next.addProperty("category", category);
+        // Category comes from the scanner, ALWAYS — never preserved from the catalog.
+        // The category is not editorial metadata like the description: it is the tool
+        // GROUP the bridge lazy-loads by, and the bridge reads it from /mcp/schema,
+        // which the annotation scan produces. Preserving the catalog's value here is
+        // what let 63 of 219 entries drift into a dead pre-tool-group vocabulary
+        // (getter/rename/decompile/search/script) that no `load_tool_group` call can
+        // ever name. To change a tool's group, change its @McpTool/@McpToolGroup
+        // annotation; the catalog follows.
+        next.addProperty("category", tool.category() != null ? tool.category() : "");
 
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (AnnotationScanner.ParamDescriptor p : tool.params()) {

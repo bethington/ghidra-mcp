@@ -125,4 +125,14 @@ public final class ManualToolDescriptors {
     public static java.util.Set<String> knownPaths() {
         return java.util.Collections.unmodifiableSet(ALL.keySet());
     }
+
+    /**
+     * Every descriptor, keyed by path (for parity tests). These categories are
+     * published in {@code /mcp/schema} exactly like the annotation-scanned ones,
+     * so they are the runtime tool group for these routes and
+     * {@code tests/endpoints.json} must agree with them.
+     */
+    public static Map<String, AnnotationScanner.ToolDescriptor> descriptors() {
+        return java.util.Collections.unmodifiableMap(ALL);
+    }
 }
