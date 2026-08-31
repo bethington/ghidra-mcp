@@ -446,7 +446,11 @@ public class AnnotationScanner {
                 NO_DEFAULT.equals(binding.param.defaultValue()) ? null : binding.param.defaultValue(),
                 binding.param.description(),
                 binding.param.paramType(),
-                binding.param.allowEmpty()
+                binding.param.allowEmpty(),
+                // Declared alternative spellings. resolveQueryParam / resolveBodyParam
+                // already accept these; publishing them is what lets a schema-driven
+                // client know that, instead of calling a valid spelling unknown.
+                binding.aliases == null ? List.of() : List.of(binding.aliases)
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
@@ -497,10 +501,31 @@ public class AnnotationScanner {
         }
     }
 
-    /** Describes a tool parameter for schema generation. */
+    /**
+     * Describes a tool parameter for schema generation.
+     *
+     * <p>{@code aliases} are the alternative spellings the runtime resolver accepts
+     * for this parameter (see {@link Param#aliases()}). They are part of the public
+     * contract -- the server genuinely serves them -- so they belong in /mcp/schema.
+     * Before 7.0.0 they were honoured at dispatch but never published, so the schema
+     * understated what the server accepts and any schema-driven client or checker
+     * treated a valid spelling as an unknown parameter.
+     */
     public record ParamDescriptor(String name, String type, String source,
             boolean optional, String defaultValue, String description, String paramType,
-            boolean allowEmpty) {
+            boolean allowEmpty, List<String> aliases) {
+
+        /** Normalize {@code aliases} so no caller has to hand in a non-null list. */
+        public ParamDescriptor {
+            aliases = (aliases == null) ? List.of() : List.copyOf(aliases);
+        }
+
+        /** Back-compat overload for callers predating the {@code aliases} component. */
+        public ParamDescriptor(String name, String type, String source, boolean optional,
+                String defaultValue, String description, String paramType, boolean allowEmpty) {
+            this(name, type, source, optional, defaultValue, description, paramType,
+                 allowEmpty, List.of());
+        }
 
         /** Serialize to JSON. */
         public String toJson() {
@@ -517,6 +542,16 @@ public class AnnotationScanner {
             }
             if (paramType != null && !paramType.isEmpty()) {
                 sb.append(", \"param_type\": ").append(jsonStr(paramType));
+            }
+            // Only emitted when the parameter actually declares alternatives, so the
+            // 200-odd tools that declare none keep byte-identical schema output.
+            if (aliases != null && !aliases.isEmpty()) {
+                sb.append(", \"aliases\": [");
+                for (int i = 0; i < aliases.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(jsonStr(aliases.get(i)));
+                }
+                sb.append("]");
             }
             // Only emitted when true: the bridge drops "" arguments unless a
             // parameter declares that empty carries meaning.
