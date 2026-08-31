@@ -53,7 +53,7 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
     "script": ("Scripting", ""),
     "server": ("Ghidra Server & Version Control", ""),
     "debugger": (
-        "Debugger (Ghidra TraceRmi — GUI only)",
+        "Debugger (Ghidra TraceRmi)",
         "On Windows hosts where the bridge's WinDbg debugger proxy is active"
         " (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix"
         " (e.g. `debugger_status_2`).",
@@ -87,6 +87,19 @@ def _first_sentence(description: str) -> str:
     return sentence.rstrip(".")
 
 
+#: Suffix marking a tool that only one of the two HTTP servers registers.
+#: Keyed by the catalog's `servers` array; `["gui", "headless"]` gets nothing,
+#: because 212 of 253 tools are on both and marking those would be noise.
+SERVER_MARKERS = {
+    ("gui",): " **(GUI only)**",
+    ("headless",): " **(headless only)**",
+}
+
+
+def _server_marker(endpoint: dict) -> str:
+    return SERVER_MARKERS.get(tuple(endpoint.get("servers", ())), "")
+
+
 def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
     """Render the generated portion of the README API Reference section."""
     catalog = json.loads(endpoints_json.read_text(encoding="utf-8"))
@@ -99,6 +112,11 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
 
     ordered = [cat for cat in CATEGORY_SECTIONS if cat in by_category]
     ordered += sorted(set(by_category) - set(CATEGORY_SECTIONS))
+
+    scopes = [tuple(e.get("servers", ())) for e in endpoints]
+    both = sum(1 for s in scopes if s == ("gui", "headless"))
+    gui_only = sum(1 for s in scopes if s == ("gui",))
+    headless_only = sum(1 for s in scopes if s == ("headless",))
 
     try:
         sys.path.insert(0, str(PROJECT_ROOT / "python"))
@@ -115,6 +133,12 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
         "`python -m tools.gen_readme_api_reference --write`; the live schema at "
         "`/mcp/schema` is authoritative at runtime. Usage patterns: "
         "[docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).",
+        "",
+        f"{both} of these are served by both the GUI plugin and the standalone "
+        f"headless server. The rest are marked **(GUI only)** ({gui_only}) or "
+        f"**(headless only)** ({headless_only}) — calling one against the other "
+        "server returns a 404, not an error message. See "
+        "`python -m tools.audit_server_scope` for how the split is derived.",
     ]
 
     for category in ordered:
@@ -126,7 +150,8 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
             lines += [blurb, ""]
         for endpoint in sorted(by_category[category], key=lambda e: _tool_name(e["path"])):
             lines.append(
-                f"- `{_tool_name(endpoint['path'])}` - {_first_sentence(endpoint['description'])}"
+                f"- `{_tool_name(endpoint['path'])}` - "
+                f"{_first_sentence(endpoint['description'])}{_server_marker(endpoint)}"
             )
 
     lines += [

@@ -128,4 +128,68 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
         RegenerateEndpointsJson.mergeEntry(tool("path"), existing);
         assertEquals(before, existing.toString());
     }
+
+    // ------------------------------------------------------------------
+    // `servers` — which of the two HTTP servers registers the route.
+    // Derived by tools/audit_server_scope.py, not by this scanner: the
+    // scanner here reflects over the UNION of both servers' services and
+    // cannot attribute a tool back to a server. So the only correct
+    // behaviour is to carry the field through untouched. Dropping it would
+    // silently unstamp all 253 entries on every regeneration.
+    // ------------------------------------------------------------------
+
+    private static JsonObject withServers(JsonObject obj, String... servers) {
+        JsonArray arr = new JsonArray();
+        for (String s : servers) {
+            arr.add(s);
+        }
+        obj.add("servers", arr);
+        return obj;
+    }
+
+    private static List<String> serversOf(JsonObject entry) {
+        List<String> out = new ArrayList<>();
+        if (!entry.has("servers")) {
+            return out;
+        }
+        for (JsonElement el : entry.getAsJsonArray("servers")) {
+            out.add(el.getAsString());
+        }
+        return out;
+    }
+
+    public void testServersPreservedFromCatalog() {
+        JsonObject existing = withServers(entry("d", "headless", "path"), "gui", "headless");
+        RegenerateEndpointsJson.MergeResult result =
+                RegenerateEndpointsJson.mergeEntry(tool("path"), existing);
+        assertEquals(List.of("gui", "headless"), serversOf(result.entry));
+    }
+
+    public void testSingleServerScopePreserved() {
+        JsonObject existing = withServers(entry("d", "headless", "path"), "headless");
+        RegenerateEndpointsJson.MergeResult result =
+                RegenerateEndpointsJson.mergeEntry(tool("path"), existing);
+        assertEquals(List.of("headless"), serversOf(result.entry));
+    }
+
+    public void testNoServersFieldWhenCatalogHasNone() {
+        // A brand-new endpoint has no catalog entry to preserve from. It must
+        // NOT be invented here -- it is left absent so
+        // tests/unit/test_audit_server_scope.py's "unstamped" assertion fires
+        // and the operator re-runs the audit script.
+        RegenerateEndpointsJson.MergeResult result =
+                RegenerateEndpointsJson.mergeEntry(tool("path"), null);
+        assertFalse(result.entry.has("servers"));
+    }
+
+    public void testServersSitsBetweenParamsAndDescription() {
+        // Field order is load-bearing only for diff stability, but an unstable
+        // order would churn all 253 entries every time the two writers alternate.
+        JsonObject existing = withServers(entry("d", "headless", "path"), "gui");
+        RegenerateEndpointsJson.MergeResult result =
+                RegenerateEndpointsJson.mergeEntry(tool("path"), existing);
+        assertEquals(
+                List.of("path", "method", "category", "params", "servers", "description"),
+                new ArrayList<>(result.entry.keySet()));
+    }
 }

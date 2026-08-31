@@ -631,6 +631,8 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 253 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
+212 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (27) or **(headless only)** (14) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
+
 ### Program & Session Management
 
 - `analysis_status` - Get auto-analysis status for open programs
@@ -664,27 +666,27 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 - `create_folder` - Create a folder in the project
 - `delete_file` - Delete a file from the project
-- `delete_project` - Delete a Ghidra project
-- `list_projects` - List available Ghidra projects
+- `delete_project` - Delete a Ghidra project **(headless only)**
+- `list_projects` - List available Ghidra projects **(headless only)**
 - `move_file` - Move a program file to a different folder in the project, preserving analysis and documentation
 - `move_folder` - Move a project folder and everything under it into another folder
-- `project_info` - Get detailed project info including running tools and open programs
+- `project_info` - Get detailed project info including running tools and open programs **(GUI only)**
 
 ### Headless Project & Program Lifecycle
 
 Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
-- `archive_project` - Archive the currently open project to a Ghidra-native .gar file
-- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version
-- `close_project` - Close the currently open project
-- `create_project` - Create a new Ghidra project
-- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf)
-- `get_project_info` - Get info about the currently open project
-- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/')
-- `load_program` - Load a binary file into the headless server for analysis
-- `load_program_from_project` - Load program from Ghidra project (headless)
+- `archive_project` - Archive the currently open project to a Ghidra-native .gar file **(headless only)**
+- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version **(headless only)**
+- `close_project` - Close the currently open project **(headless only)**
+- `create_project` - Create a new Ghidra project **(headless only)**
+- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf) **(headless only)**
+- `get_project_info` - Get info about the currently open project **(headless only)**
+- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/') **(headless only)**
+- `load_program` - Load a binary file into the headless server for analysis **(headless only)**
+- `load_program_from_project` - Load program from Ghidra project (headless) **(headless only)**
 - `open_project` - Open an existing Ghidra project (.gpr file or directory)
-- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`
+- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name` **(headless only)**
 - `server_status` - Check headless server connection status
 
 ### Listing & Enumeration
@@ -711,7 +713,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 - `get_current_address` - Get cursor address (GUI only)
 - `get_current_function` - Get function at cursor (GUI only)
-- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only)
+- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only) **(GUI only)**
 - `get_entry_points` - Get program entry points
 - `get_enum_values` - Get enumeration values
 - `get_external_location` - Get external location details
@@ -835,10 +837,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_function_completeness` - Analyze documentation completeness
 - `analyze_struct_field_usage` - Analyze struct field usage
 - `apply_data_classification` - Apply data classification
-- `batch_apply_documentation` - Apply all documentation to a function in one call
+- `batch_apply_documentation` - Apply all documentation to a function in one call **(GUI only)**
 - `can_rename_at_address` - Check if address can be renamed
 - `clear_instruction_flow_override` - Clear flow override
-- `configure_analyzer` - Configure an analysis plugin
+- `configure_analyzer` - Configure an analysis plugin **(headless only)**
 - `create_function` - Create function at address
 - `create_memory_block` - Create memory block
 - `delete_function` - Delete function at address
@@ -883,12 +885,12 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `get_function_signature` - Get function feature signature
 - `get_metadata` - Get program metadata
 - `get_version` - Get plugin version
-- `health` - Health check endpoint for headless server
-- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count
+- `health` - Health check endpoint for headless server **(headless only)**
+- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count **(GUI only)**
 - `mcp_schema` - Machine-readable API schema with endpoint metadata
-- `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address
-- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed
-- `tool_running_tools` - List all running Ghidra tool windows
+- `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address **(GUI only)**
+- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed **(GUI only)**
+- `tool_running_tools` - List all running Ghidra tool windows **(GUI only)**
 
 ### Emulation
 
@@ -906,7 +908,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_admin_terminate_all_checkouts` - Terminate all checkouts in a folder recursively
 - `server_admin_terminate_checkout` - Terminate all checkouts on a single file
 - `server_admin_users` - List all users on the server
-- `server_authenticate` - Register server credentials for programmatic authentication
+- `server_authenticate` - Register server credentials for programmatic authentication **(GUI only)**
 - `server_checkouts` - List all checked-out files in a folder, including server-side checkouts
 - `server_connect` - Connect to a Ghidra server
 - `server_disconnect` - Disconnect from the Ghidra server
@@ -920,32 +922,32 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_version_control_undo_checkout` - Undo a file checkout
 - `server_version_history` - Get version history for a file
 
-### Debugger (Ghidra TraceRmi — GUI only)
+### Debugger (Ghidra TraceRmi)
 
 On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix (e.g. `debugger_status_2`).
 
-- `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address
-- `debugger_interrupt` - Interrupt (break into) the running target
-- `debugger_launch` - Launch an executable through Ghidra's Trace RMI debugger launcher
-- `debugger_launch_offers` - List available debugger launch/attach options for the current program
-- `debugger_list_breakpoints` - List all breakpoints in the current trace
-- `debugger_modules` - List modules (DLLs/EXEs) loaded in the debugged process
-- `debugger_read_memory` - Read memory from the debugged process
-- `debugger_registers` - Read CPU registers from the current debug trace snapshot
-- `debugger_remove_breakpoint` - Remove a breakpoint at an address
-- `debugger_resume` - Resume execution of the debugged process
-- `debugger_set_breakpoint` - Set a software execution breakpoint at an address in the trace
-- `debugger_stack_trace` - Get the call stack backtrace for the current thread
-- `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace
-- `debugger_status` - Get debugger status: active trace, thread, execution state, module count
-- `debugger_step_into` - Single-step into the next instruction (follows calls)
-- `debugger_step_out` - Step out of the current function (run to return)
-- `debugger_step_over` - Step over the next instruction (does not follow calls)
-- `debugger_traces` - List all open debug traces
+- `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
+- `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**
+- `debugger_launch` - Launch an executable through Ghidra's Trace RMI debugger launcher **(GUI only)**
+- `debugger_launch_offers` - List available debugger launch/attach options for the current program **(GUI only)**
+- `debugger_list_breakpoints` - List all breakpoints in the current trace **(GUI only)**
+- `debugger_modules` - List modules (DLLs/EXEs) loaded in the debugged process **(GUI only)**
+- `debugger_read_memory` - Read memory from the debugged process **(GUI only)**
+- `debugger_registers` - Read CPU registers from the current debug trace snapshot **(GUI only)**
+- `debugger_remove_breakpoint` - Remove a breakpoint at an address **(GUI only)**
+- `debugger_resume` - Resume execution of the debugged process **(GUI only)**
+- `debugger_set_breakpoint` - Set a software execution breakpoint at an address in the trace **(GUI only)**
+- `debugger_stack_trace` - Get the call stack backtrace for the current thread **(GUI only)**
+- `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace **(GUI only)**
+- `debugger_status` - Get debugger status: active trace, thread, execution state, module count **(GUI only)**
+- `debugger_step_into` - Single-step into the next instruction (follows calls) **(GUI only)**
+- `debugger_step_out` - Step out of the current function (run to return) **(GUI only)**
+- `debugger_step_over` - Step over the next instruction (does not follow calls) **(GUI only)**
+- `debugger_traces` - List all open debug traces **(GUI only)**
 
 ### System
 
-- `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling
+- `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling **(GUI only)**
 
 ### Symbol (uncategorized)
 
@@ -1245,9 +1247,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 | Metric | Value |
 |--------|-------|
 | **Version** | 7.0.0 |
-| **MCP Tools** | 249 fully implemented |
-| **GUI Endpoints** | 196 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
+| **MCP Tools** | 253 fully implemented |
+| **GUI Endpoints** | 239 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 226 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |
