@@ -1,0 +1,314 @@
+# Tool-output regression baseline for the generated Benchmark.dll fixture.
+#
+# Schema:  tests/fixtures/benchmark/regression/__schema__.md
+# Runner:  tools.setup.ghidra.run_benchmark_yaml_regression
+# Subject: tests/fixtures/benchmark/Benchmark.dll (see build_manifest.json)
+#
+# ADDRESSES HERE ARE GENERATOR OUTPUTS, NOT BUILD OBSERVATIONS.
+# The predecessor of this file carried the opposite warning, because its subject
+# was compiled: a 2026-08-08 toolchain switch moved every function in the binary
+# while the C sources were untouched, and the baseline silently described the
+# previous build. The fixture is now emitted by
+# tests/fixtures/benchmark/make_fixture.py, whose layout is deterministic, and
+# tests/unit/test_benchmark_fixture.py fails offline -- in CI, with no Ghidra --
+# if any address below stops matching build_manifest.json. A rebuild can still
+# move an address; it can no longer move one quietly.
+#
+# Every value below was measured, not estimated: `analyzeHeadless` imported this
+# exact binary into a throwaway project and a script read the numbers back out.
+# `basic_block_count` is pinned exactly because BinaryComparisonService counts
+# blocks with the same BasicBlockModel.getCodeBlocksContaining call the
+# measurement used. `cyclomatic_complexity` is deliberately absent: it derives
+# from an edge count that was not measured, and a guessed assertion in a release
+# gate is worse than no assertion.
+
+program:
+  name: "Benchmark.dll"
+  path: "/testing/benchmark/Benchmark.dll"
+  architecture: "x86"
+  language: "x86:LE:32:default"
+  compiler: "windows"
+  # 12 authored functions plus the import thunks; measured 18 post-analysis.
+  function_count_min: 12
+  # 66 strings are emitted by the generator; Ghidra's ASCII analyzer defines 88
+  # (it also picks up the export and import name tables). /list_strings caps at
+  # 100 by default, so this stays well inside one page of results.
+  string_count_min: 50
+  segments:
+    - name: "Headers"
+    - name: ".text"
+    - name: ".rdata"
+    - name: ".data"
+  must_contain_strings:
+    - "GhidraMCP benchmark fixture"
+    - "crc16: CCITT polynomial 0x1021, seed 0xFFFF"
+
+functions:
+  # The anchor. tools.setup.ghidra looks this name up by default
+  # (DEFAULT_BENCHMARK_FUNCTION), and the write tier renames and re-types it.
+  # Its locals live in stack slots on purpose, so the decompiler recovers named,
+  # non-phantom variables for `require_variable=True` to find.
+  - address: "0x10001000"
+    name: "calc_crc16"
+    param_count: 2
+    basic_block_count: 10
+    instruction_count_min: 30
+    xref_count_to_min: 2
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    decompile_contains: ["0x1021", "0xffff"]
+    immediate_values_contains: [4129, 65535]   # 0x1021, 0xFFFF
+
+  - address: "0x10001092"
+    name: "compute_gcd"
+    param_count: 2
+    basic_block_count: 4
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    decompile_contains: ["%"]                  # Euclidean remainder
+
+  - address: "0x100010b6"
+    name: "compute_str_len"
+    param_count: 1
+    basic_block_count: 4
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  # The structurally densest function in the fixture: a five-state ladder,
+  # 20 basic blocks. It exists so a change in how the plugin walks a CFG has
+  # somewhere to show up.
+  - address: "0x100010d5"
+    name: "advance_parser_state"
+    param_count: 2
+    basic_block_count: 20
+    instruction_count_min: 40
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x100011c5"
+    name: "stat_list_add"
+    param_count: 4                             # the widest signature here
+    basic_block_count: 4
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x10001203"
+    name: "get_stat_list_flags"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x10001227"
+    name: "get_stat_list_layer"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x1000124e"
+    name: "get_stat_list_owner_guid"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x1000126c"
+    name: "get_stat_list_prev_link"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  # The only non-leaf. Without it every function would be reachable only from
+  # the export table and both the xref and callee assertions would be vacuous.
+  - address: "0x1000128a"
+    name: "benchmark_self_test"
+    param_count: 0
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    callee_names_contains: ["calc_crc16", "compute_gcd", "compute_str_len"]
+
+  - address: "0x100012f5"
+    name: "benchmark_describe"
+    param_count: 0
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  # DllMain. Ghidra names the image entry point "entry" regardless of what the
+  # source called it, so that -- not "DllMain" -- is what this asserts.
+  - address: "0x10001303"
+    name: "entry"
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+endpoint_smoke:
+  # listing
+  - endpoint: "/get_function_count"
+    assert:
+      type: "json"
+      contains_keys: ["function_count", "program"]
+
+  - endpoint: "/list_segments"
+    assert:
+      type: "lines"
+      min_lines: 4
+      contains: [".text", ".rdata", ".data"]
+
+  - endpoint: "/list_strings"
+    assert:
+      type: "lines"
+      min_lines: 50
+
+  - endpoint: "/list_imports"
+    assert:
+      type: "lines"
+      contains: ["GetTickCount", "Sleep"]
+
+  - endpoint: "/list_exports"
+    assert:
+      type: "lines"
+      contains: ["calc_crc16", "compute_gcd", "benchmark_self_test"]
+
+  - endpoint: "/list_namespaces"
+    assert:
+      type: "lines"
+      min_lines: 1
+
+  - endpoint: "/list_data_items"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_data_types"
+    assert:
+      type: "lines"
+      min_lines: 10
+
+  - endpoint: "/list_data_type_categories"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_calling_conventions"
+    assert:
+      type: "lines"
+      min_lines: 4
+      contains: ["__cdecl", "__stdcall", "__fastcall"]
+
+  - endpoint: "/list_external_locations"
+    assert:
+      type: "nonempty"
+
+  # getter
+  - endpoint: "/get_metadata"
+    assert:
+      type: "text"
+      contains: ["\"architecture\": \"x86\"", "function_count", "\"compiler\": \"windows\""]
+
+  - endpoint: "/get_address_spaces"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/get_entry_points"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/get_current_program_info"
+    assert:
+      type: "json"
+      contains_keys: ["name"]
+
+  # decompile -- the bulk form, which absorbed batch_decompile in 7.0.0
+  - endpoint: "/decompile_function"
+    params: { functions: "0x10001000,0x10001092" }
+    assert:
+      type: "nonempty"
+
+  # search
+  - endpoint: "/search_functions"
+    params: { name_pattern: "compute" }
+    assert:
+      type: "lines"
+      contains: ["compute_gcd", "compute_str_len"]
+
+  - endpoint: "/search_strings"
+    params: { search_term: "benchmark" }
+    assert:
+      type: "nonempty"
+
+  # The parameter is `pattern`, not `query`. Passing the wrong name used to
+  # produce a plain-text "Search pattern is required", which satisfied
+  # `nonempty` -- so the case passed while testing nothing. Keep the name right.
+  - endpoint: "/search_data_types"
+    params: { pattern: "int" }
+    assert:
+      type: "nonempty"
+
+  # xref
+  - endpoint: "/get_xrefs_to"
+    params: { address: "0x10001000" }
+    assert:
+      type: "lines"
+      min_lines: 1
+
+  - endpoint: "/get_xrefs_from"
+    params: { address: "0x1000128a" }
+    assert:
+      type: "nonempty"
+
+  # analysis
+  - endpoint: "/list_analyzers"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/analysis_status"
+    assert:
+      type: "json"
+      contains_keys: ["analyzed", "analyzing"]
+
+  # function -- benchmark_self_test, the one function here with real callees
+  - endpoint: "/get_function_callees"
+    params: { address: "0x1000128a" }
+    assert:
+      type: "nonempty"
+
+  # script
+  - endpoint: "/list_scripts"
+    assert:
+      type: "nonempty"
+
+  # system / utility
+  - endpoint: "/check_connection"
+    assert:
+      type: "text"
+      contains: ["GhidraMCP plugin running"]
+
+  - endpoint: "/list_open_programs"
+    assert:
+      type: "json"
+      contains_keys: ["programs"]
+
+skipped:
+  - endpoint: "/list_classes"
+    reason: "The fixture has no C++ classes; an empty envelope satisfies every assertion type this runner has, so the case would pass while testing nothing"
+  - endpoint: "/list_methods"
+    reason: "Same as /list_classes -- no class methods to enumerate"
+  - endpoint: "/find_dead_code"
+    reason: "Per-function endpoint; no clean per-binary smoke variant"
+  - endpoint: "/check_tools"
+    reason: "Bridge-side static tool, not an HTTP endpoint"
+  - endpoint: "/bsim_query_function_match"
+    reason: "BSim DB empty in dev environment"
+  - endpoint: "/import_data_types"
+    reason: "Mutating endpoint; would corrupt baseline state for subsequent assertions"
+  - endpoint: "/import_file"
+    reason: "Already exercised by reset_benchmark_fixture"
+  - endpoint: "/run_ghidra_script"
+    reason: "Requires GHIDRA_MCP_ALLOW_SCRIPTS=1 and a script file; out of scope for a read-only baseline"
+  - endpoint: "/run_script_inline"
+    reason: "Requires GHIDRA_MCP_ALLOW_SCRIPTS=1 and inline script; out of scope for a read-only baseline"
+  - endpoint: "/emulate_function"
+    reason: "Emulation needs careful seed state; covered by dedicated emulation tests"
+  - endpoint: "/emulate_hash_batch"
+    reason: "Emulation needs careful seed state; covered by dedicated emulation tests"
+  - endpoint: "/save_program"
+    reason: "Persists changes; would dirty the baseline for subsequent runs"
+  - endpoint: "/exit_ghidra"
+    reason: "Terminates Ghidra; obviously cannot run during a regression"
+  - endpoint: "/reanalyze"
+    reason: "Mutating; covered by reset_benchmark_fixture's auto_analyze=true"
