@@ -150,6 +150,39 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### Release workflows: stale references left by the `fun-doc` move-out
+
+Auditing every workflow that runs on a tag or a release event, ahead of cutting
+v7.0.0, found references to files that left the repository weeks earlier.
+
+- **`release-regression.yml` built a fixture from a directory that no longer
+  exists.** The `Build Benchmark.dll` step ran
+  `uv run python fun-doc\benchmark\build.py`; `fun-doc/` moved to the
+  `d2-game-exe` repository on 2026-08-10 (commit `10960f76`). The step is
+  removed, with a comment recording what it did.
+- **Removing that step is not the whole fix, and pretending otherwise would
+  have been worse.** The fixture itself moved, not just its build script, so
+  every deploy tier that calls `reset_benchmark_fixture()` — `release`,
+  `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live`,
+  `negative-contract` — cannot run here at all. `release` is the workflow's
+  own default tier and the gate the release checklist named. A guard now fails
+  in seconds with that explanation instead of after a full build, Ghidra
+  restart and deploy. Only `endpoint-catalog` and `selected-contract` still
+  run from this repository; choosing the replacement release gate is an open
+  maintainer decision, deliberately not guessed at here.
+- **`RELEASE_CHECKLIST.md` and `docs/TESTING.md` documented the unrunnable
+  path as routine.** Both now say so at the point of use, and the checklist
+  no longer asks the maintainer to enable `run_live_regression`, which
+  dispatches the same dead tier.
+- **The release checklist's offline Java step omitted its prerequisite.** On a
+  clean machine `mvn test -Dtest='com.xebyte.offline.*Test'` fails to resolve
+  dependencies before running anything; `install-ghidra-deps` is now listed
+  ahead of it, along with the `endpoints.json` regeneration pair.
+- **`.github/workflows/README.md` documented `build.yml`**, deleted on
+  2026-06-08 when build was consolidated into `tests.yml`. Replaced with the
+  workflows that actually exist.
+- **`pre-release.yml` reported installing 15 Ghidra JARs while installing 18.**
+
 ### Documentation correctness: `doc_lint` + Function ID
 
 `analyze_function_completeness` measures whether documentation is *present*. It

@@ -92,6 +92,14 @@ file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 ## Benchmark Fixture
 
+> **Not available in this repository.** `fun-doc/` moved to `d2-game-exe` on
+> 2026-08-10 (commit `10960f76`), so nothing below can be built or reset from
+> here. Every deploy tier that touches this fixture — `release`,
+> `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live`,
+> `negative-contract` — raises in `reset_benchmark_fixture()`. Only
+> `endpoint-catalog` and `selected-contract` still run. The rest of this
+> section documents how the fixture behaves where it now lives.
+
 The benchmark binary is built from `fun-doc/benchmark` and imported into the
 active Ghidra project at:
 
