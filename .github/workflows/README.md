@@ -36,14 +36,26 @@ This is not enabled for every PR by default because public GitHub-hosted runners
 do not have the required active Ghidra project, and external PRs should not hang
 waiting for a private self-hosted runner.
 
-> **The `release` tier cannot run from this repository.** `fun-doc/` moved to
-> the `d2-game-exe` repository on 2026-08-10 and took the `Benchmark.dll`
-> fixture with it. Every tier that resets that fixture — `release`,
-> `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live` and
-> `negative-contract` — now fails in `reset_benchmark_fixture()`. Only
-> `endpoint-catalog` and `selected-contract` still run here. The workflow
-> fails fast with this explanation rather than discovering it after a deploy.
-> Choosing the replacement release gate is an open maintainer decision.
+All eight tiers run from this repository. Six of them reset the benchmark
+fixture first (`release`, `benchmark-read`, `benchmark-write`, `multi-program`,
+`debugger-live`, `negative-contract`); that fixture is committed under
+`tests/fixtures/benchmark/` and is generated, not compiled, so the runner needs
+no toolchain. The workflow verifies the committed binaries still match their
+generator before it builds anything.
+
+> **History.** From 2026-08-10 to 2026-08-31 those six tiers all raised in
+> `reset_benchmark_fixture()`: `fun-doc/` moved to the `d2-game-exe` repository
+> and took the fixture with it, leaving only `endpoint-catalog` and
+> `selected-contract` working — neither of which touches a program. `release`
+> is this workflow's default tier, so its default configuration was dead for
+> three weeks.
+
+> **`debugger-live` is a partial restoration.** Its debuggee fixture is back and
+> runnable, but the tier also needs a Ghidra GUI, a working dbgeng backend and
+> `ghidratrace` in the launcher's interpreter. Where those are missing it raises
+> `DebuggerLiveTestSkipped`, and inside `release` that is caught and reported.
+> The `release` tier's pass line names the outcome so a skip cannot read as a
+> pass.
 
 ## Release Gates
 

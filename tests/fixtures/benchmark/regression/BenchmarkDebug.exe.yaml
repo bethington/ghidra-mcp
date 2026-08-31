@@ -1,0 +1,84 @@
+# Tool-output regression baseline for the generated BenchmarkDebug.exe fixture.
+#
+# Schema:  tests/fixtures/benchmark/regression/__schema__.md
+# Runner:  tools.setup.ghidra.run_benchmark_yaml_regression
+# Subject: tests/fixtures/benchmark/BenchmarkDebug.exe (see build_manifest.json)
+#
+# The debuggee carries the same function bodies as Benchmark.dll at the same
+# section offsets, so its addresses differ from the DLL's only by image base
+# (0x00400000 against 0x10000000). That is a deliberate property of the
+# generator, not a coincidence, and it makes the two baselines easy to compare.
+#
+# This file stays deliberately thinner than the DLL's. The DLL is the read,
+# write, negative-contract and multi-program subject; this image exists so the
+# debugger tier has something to launch, and so a PE that is an EXE rather than
+# a DLL goes through the import path at least once per release run.
+#
+# Values measured with analyzeHeadless against this exact binary.
+
+program:
+  name: "BenchmarkDebug.exe"
+  path: "/testing/benchmark/BenchmarkDebug.exe"
+  architecture: "x86"
+  language: "x86:LE:32:default"
+  compiler: "windows"
+  function_count_min: 12
+  string_count_min: 50
+  segments:
+    - name: "Headers"
+    - name: ".text"
+    - name: ".rdata"
+    - name: ".data"
+  must_contain_strings:
+    - "debuggee: sleeping so a debugger can attach"
+
+functions:
+  - address: "0x00401000"
+    name: "calc_crc16"
+    param_count: 2
+    basic_block_count: 10
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    immediate_values_contains: [4129, 65535]
+
+  - address: "0x004010d5"
+    name: "advance_parser_state"
+    param_count: 2
+    basic_block_count: 20
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  # The console entry point. Unlike the DLL's, this one is the whole program:
+  # no CRT, so it scans its own command line and never returns.
+  - address: "0x00401303"
+    name: "entry"
+    basic_block_count: 21
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+endpoint_smoke:
+  - endpoint: "/get_metadata"
+    assert:
+      type: "text"
+      contains: ["\"architecture\": \"x86\""]
+
+  - endpoint: "/get_entry_points"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_imports"
+    assert:
+      type: "lines"
+      contains: ["ExitProcess", "GetCommandLineA"]
+
+  - endpoint: "/list_segments"
+    assert:
+      type: "lines"
+      min_lines: 4
+      contains: [".text", ".rdata", ".data"]
+
+skipped:
+  - endpoint: "/list_exports"
+    reason: "The EXE does export the same eleven functions, but /list_exports is already asserted against Benchmark.dll; duplicating it here would only re-test the same export directory writer"
+  - endpoint: "/debugger/launch"
+    reason: "Exercised by run_debugger_live_test, which needs a Ghidra GUI, dbgeng and ghidratrace -- not something a YAML assertion can stand in for"
