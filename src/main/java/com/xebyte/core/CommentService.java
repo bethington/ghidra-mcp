@@ -269,8 +269,19 @@ public class CommentService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> decompilerComments,
-            @Param(value = "disassembly_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> disassemblyComments,
+            @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "JSON array of {address, comment} objects setting PRE comments — the "
+                               + "lines the decompiler shows above a statement. Every entry carries its "
+                               + "OWN address (0x<hex> or <space>:<hex>); the top-level `address` is the "
+                               + "function entry and is not used for these. An entry missing either key, "
+                               + "or whose address does not parse, is skipped silently — compare "
+                               + "decompiler_comments_set against what you sent. An empty comment string "
+                               + "clears that address's PRE comment.") List<Map<String, String>> decompilerComments,
+            @Param(value = "disassembly_comments", source = ParamSource.BODY, defaultValue = "[]",
+                   description = "JSON array of {address, comment} objects setting EOL comments — the "
+                               + "trailing comment on a listing line. Same per-entry address rules and the "
+                               + "same silent skip as decompiler_comments; an empty comment string clears "
+                               + "that address's EOL comment.") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
@@ -467,9 +478,15 @@ public class CommentService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
-            @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
-            @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
+            @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) removes the function's plate comment — the block "
+                               + "above its entry. False leaves it alone.") boolean clearPlate,
+            @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) removes every PRE (decompiler) comment inside the "
+                               + "function body. False leaves them alone.") boolean clearPre,
+            @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true",
+                   description = "True (the default) removes every EOL (disassembly) comment inside the "
+                               + "function body. False leaves them alone.") boolean clearEol,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();

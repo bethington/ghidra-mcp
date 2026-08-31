@@ -120,8 +120,13 @@ public class HeadlessManagementService {
 
     @McpTool(path = "/create_project", method = "POST", description = "Create a new Ghidra project", category = "headless")
     public Response createProject(
-            @Param(value = "parentDir", source = ParamSource.BODY) String parentDir,
-            @Param(value = "name", source = ParamSource.BODY) String name) {
+            @Param(value = "parentDir", source = ParamSource.BODY,
+                   description = "Existing filesystem directory that will CONTAIN the new project, e.g. "
+                               + "C:/ghidra_projects. It must resolve inside the server's configured file "
+                               + "root or the call is denied.") String parentDir,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Project name. The project is created at parentDir/name and the response "
+                               + "echoes that path.") String name) {
         if (parentDir == null || parentDir.isEmpty()) return Response.err("parentDir required");
         if (name == null || name.isEmpty()) return Response.err("name required");
         File parent = resolveWithinRootOrLog(parentDir, "/create_project");
@@ -143,7 +148,9 @@ public class HeadlessManagementService {
 
     @McpTool(path = "/open_project", method = "POST", description = "Open an existing Ghidra project (.gpr file or directory)", category = "headless")
     public Response openProject(
-            @Param(value = "path", source = ParamSource.BODY) String projectPath) {
+            @Param(value = "path", source = ParamSource.BODY,
+                   description = "Path to an existing project: either its .gpr file or the project "
+                               + "directory holding it.") String projectPath) {
         if (projectPath == null || projectPath.isEmpty()) {
             return Response.err("Project path required");
         }

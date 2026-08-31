@@ -466,7 +466,9 @@ public class ProgramScriptService {
             @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
                    description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -552,7 +554,9 @@ public class ProgramScriptService {
     public Response removeProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -639,7 +643,9 @@ public class ProgramScriptService {
             @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
                    description = "Value type: int, long, string, or void.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -685,7 +691,9 @@ public class ProgramScriptService {
              category = "program")
     public Response deletePropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -730,7 +738,9 @@ public class ProgramScriptService {
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -808,7 +818,9 @@ public class ProgramScriptService {
     public Response getProperty(
             @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
             @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -849,7 +861,9 @@ public class ProgramScriptService {
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -897,7 +911,9 @@ public class ProgramScriptService {
             @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
             @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2595,8 +2611,17 @@ public class ProgramScriptService {
 
     @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
     public Response runScriptInline(
-            @Param(value = "code", source = ParamSource.BODY) String code,
-            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args,
+            @Param(value = "code", source = ParamSource.BODY,
+                   description = "Complete Java source for a GhidraScript, as one string — not a bare "
+                               + "statement. If it declares `public class X` that name is used for the "
+                               + "file; otherwise a unique McpInline_<hex> class name is generated. The "
+                               + "source is written into ~/ghidra_scripts and compiled by Ghidra, so a "
+                               + "compile error surfaces as script output rather than as a request "
+                               + "error.") String code,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "",
+                   description = "Arguments handed to the script, split on WHITESPACE into a String[]. "
+                               + "There is no quoting, so an argument containing a space arrives as two "
+                               + "arguments.") String args,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
@@ -2829,19 +2854,37 @@ public class ProgramScriptService {
 
     @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response createMemoryBlock(
-            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Name for the new block as it appears in the memory map, e.g. MMIO or "
+                               + "PERIPH. Required.") String name,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0") long size,
-            @Param(value = "read", source = ParamSource.BODY, defaultValue = "true") boolean read,
-            @Param(value = "write", source = ParamSource.BODY, defaultValue = "true") boolean write,
-            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
-            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Block length in BYTES, not elements or pages. Must be positive — the "
+                               + "declared default of 0 is rejected, so this is effectively required. The "
+                               + "range address..address+size-1 must not overlap an existing "
+                               + "block.") long size,
+            @Param(value = "read", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Read permission on the new block (default true); the r in the "
+                               + "response's `permissions` string.") boolean read,
+            @Param(value = "write", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Write permission on the new block (default true); the w in the "
+                               + "response's `permissions` string.") boolean write,
+            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Execute permission, default FALSE. Set true only for a code region — "
+                               + "leaving it false is what keeps disassembly out of a data or MMIO "
+                               + "block.") boolean execute,
+            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Marks the block volatile (default false): its contents can change "
+                               + "outside program flow, so the decompiler stops folding repeated reads "
+                               + "away. Set this for MMIO and peripheral register regions.") boolean isVolatile,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional comment stored on the memory block itself. Empty (the default) "
+                               + "leaves it unset.") String comment,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2946,8 +2989,14 @@ public class ProgramScriptService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
+            @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
+                   description = "Bookmark category, free text; empty or omitted becomes the literal "
+                               + "`Note`. An existing bookmark at this address in the SAME category is "
+                               + "replaced, while a different category adds a second bookmark. Everything "
+                               + "here is created under Ghidra's Note bookmark type.") String category,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
+                   description = "Bookmark text. Empty is allowed and stores an empty "
+                               + "comment.") String comment,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -3093,7 +3142,10 @@ public class ProgramScriptService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
+            @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
+                   description = "Delete only bookmarks in this category. Empty (the default) deletes "
+                               + "EVERY bookmark at the address whatever its category; `deleted` in the "
+                               + "response counts how many went.") String category,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -3152,10 +3204,20 @@ public class ProgramScriptService {
 
     @McpTool(path = "/run_ghidra_script", method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
     public Response runGhidraScriptWithCapture(
-            @Param(value = "script_name", source = ParamSource.BODY) String scriptName,
-            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
-            @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
+            @Param(value = "script_name", source = ParamSource.BODY,
+                   description = "Script to run. Searched in ~/ghidra_scripts, <cwd>/ghidra_scripts and "
+                               + "./ghidra_scripts, then tried as an absolute path. A name with no dot in "
+                               + "it is tried with .java, then .py, then bare.") String scriptName,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "",
+                   description = "Arguments handed to the script, split on WHITESPACE into a String[]. "
+                               + "There is no quoting, so an argument containing a space arrives as two "
+                               + "arguments.") String scriptArgs,
+            @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300",
+                   description = "Wall-clock limit for the run in SECONDS: 1 to 1800, default 300. A value "
+                               + "outside that range is REJECTED, not clamped.") int timeoutSeconds,
+            @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Accepted but currently not read: the script's console output is captured "
+                               + "either way. Passing false does not suppress it today.") boolean captureOutput,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
@@ -3269,7 +3331,9 @@ public class ProgramScriptService {
     @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
