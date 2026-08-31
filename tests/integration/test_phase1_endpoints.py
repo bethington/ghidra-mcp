@@ -9,12 +9,11 @@ Tests for the 9 Phase 1 endpoints:
 - set_variable_type
 - create_struct
 - apply_data_type
-- batch_rename_variables
+- rename_variables (was batch_rename_variables before 5.0)
 - set_comment
 """
 
 import pytest
-import requests
 import uuid
 
 
@@ -122,18 +121,17 @@ class TestFunctionPrototype:
         response = http_client.post(
             "/set_function_prototype",
             data={
-                "address": sample_address,
+                # The declared selector is `function_address`; the `address`
+                # this also sent was undeclared and therefore ignored.
                 "function_address": sample_address,
                 "prototype": "int testFunc(int param1)",
             },
         )
         assert response.status_code == 200
-        # Live servers vary on parameter names and validation wording; any
-        # success/failure response is acceptable as long as the endpoint handled it.
-        assert any(
-            word in response.text.lower()
-            for word in ("success", "error", "failed", "required", "invalid")
-        )
+        # The old assertion accepted any of success/error/failed/required/
+        # invalid, which every possible body satisfies. A prototype this
+        # simple, on a real function, must be applied.
+        assert response.json().get("status") == "success", response.text
 
     @pytest.mark.requires_program
     @pytest.mark.write
@@ -144,13 +142,18 @@ class TestFunctionPrototype:
         response = http_client.post(
             "/set_function_prototype",
             data={
-                "address": sample_address,
+                # `address` is not a parameter of this endpoint.
                 "function_address": sample_address,
                 "prototype": "void testFunc2()",
                 "calling_convention": "__cdecl",
             },
         )
         assert response.status_code == 200
+        body = response.json()
+        assert body.get("status") == "success", response.text
+        # The convention has to come back, or nothing proves it was applied
+        # rather than dropped the way `address` was.
+        assert body.get("calling_convention") == "__cdecl", response.text
 
     @pytest.mark.requires_program
     def test_set_function_prototype_invalid_address(self, http_client):
@@ -323,32 +326,19 @@ class TestBatchRename:
         assert response.status_code == 200
         assert "error" in response.text.lower()
 
-    @pytest.mark.requires_program
-    @pytest.mark.write
-    def test_batch_rename_variables_legacy_alias(self, http_client, sample_address):
-        """Test legacy alias remains available for compatibility."""
-        try:
-            response = http_client.post(
-                "/batch_rename_variables",
-                json_data={
-                    "function_address": sample_address,
-                    "variable_renames": {"local_8": "testVarLegacy"},
-                },
-            )
-        except requests.RequestException:
-            pytest.skip(
-                "Legacy alias probe aborted the connection on this deployed plugin build"
-            )
-        # Newer builds keep the alias for compatibility; older deployed builds may
-        # not have it yet. Both outcomes are acceptable in live compatibility runs.
-        assert response.status_code in [200, 404]
-        if response.status_code == 200:
-            text = response.text
-            assert (
-                "renamed" in text.lower()
-                or "failed" in text.lower()
-                or "error" in text.lower()
-            )
+    # test_batch_rename_variables_legacy_alias was DELETED on 2026-08-31.
+    #
+    # It POSTed /batch_rename_variables, asserting `status_code in [200, 404]`.
+    # That route was renamed to /rename_variables before 5.0 and no
+    # back-compat alias was ever added, so the call 404-ed on every build the
+    # test has ever run against and the assertion accepted the 404. It could
+    # not fail, and it could not have detected the alias disappearing either.
+    #
+    # The capability its author expected -- the pre-rename spelling still
+    # answering -- does not exist on this server. Reinstating it is a server
+    # change (an @McpTool alias, or a route registered in GhidraMCPPlugin),
+    # not something a test can assert into being. /rename_variables is
+    # covered by TestVariableRenaming above.
 
 
 class TestPlateComment:

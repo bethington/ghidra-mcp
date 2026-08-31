@@ -347,8 +347,9 @@ def test_audit_globals_in_function_returns_summary(http_client, http_session, se
     + summary histogram. The function might or might not have global
     xrefs; either is fine, we just check the response shape."""
     import json
-    # Find a function to audit.
-    response = http_session.get(f"{server_url}/list_functions", params={"limit": 1}, timeout=10)
+    # Find a function to audit. /list_functions declares only `program` --
+    # "List all functions (no pagination)" -- so a `limit` here was dropped.
+    response = http_session.get(f"{server_url}/list_functions", timeout=10)
     if response.status_code != 200 or not response.text.strip():
         pytest.skip("No functions available")
     # Try to parse function address.
