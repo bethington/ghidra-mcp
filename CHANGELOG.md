@@ -145,10 +145,54 @@ testing nothing.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
+- **`disassemble_function` returned one instruction for a whole function** when
+  Ghidra's stored body was degenerate, and said nothing about it. See below.
 
 A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
+
+### `disassemble_function`: a degenerate body is not a one-instruction function
+
+Ghidra's boundary analysis records `body_end == body_start` on a measured
+fraction of real binaries. `disassemble_function` bounded its listing by that
+stored body, so it emitted exactly **one** instruction and returned the ordinary
+`{instructions, count}` envelope. Measured 2026-08-11 against Game.exe: 8 of 24
+launcher functions, 7 of them answering with a single instruction —
+`IsFieldSeparator` is 44 bytes and came back as `MOV EAX,[0x0040cf30]`,
+`count: 1`.
+
+The damage is not the missing instructions, it is that **a truncated listing is
+shaped exactly like a complete one**. A caller cannot distinguish "the function
+ends here" from "I stopped looking", so it reasons about a fragment as though it
+were the whole function. The same defect is already known to have corrupted
+reconstruction manifests, where a degenerate extent of 1 scored a vacuous
+one-byte "match".
+
+The listing is now re-bounded by the **tighter** of the next function's entry
+point and the end of the memory block that contains the entry point, trailing
+`NOP`/`INT3` alignment fill is trimmed, and the response gains three fields so
+the caller knows why this disagrees with the function's stored extent:
+
+| Field | Meaning |
+| --- | --- |
+| `body_degenerate` | `true` — the stored body cannot be the whole function |
+| `bounded_by` | `next_function` \| `memory_block` \| `function_body` |
+| `warning` | why the stored extent, including any byte-for-byte comparison built on it, is unreliable here |
+
+**The healthy path is untouched**: a function with a sound body returns exactly
+the `{instructions, count}` envelope it always did, with no added fields, and a
+test pins that. Bodies of a single address are only flagged when they fail to
+reach the end of their *own first instruction* — a genuine one-byte function
+(an empty `__cdecl` compiles to a bare `RET`) is correct and is left alone. The
+memory-block clamp is what stops the last function in a block being bounded by
+a "next function" that lives in a different block, or in a different address
+space entirely, where `Address.compareTo` orders by space id and the bound would
+be meaningless.
+
+An empty stored body also used to reach the listing loop as a null `end` and
+fail the call with `Error disassembling function: null`; it now takes the same
+re-bounded path.
 
 ### Documentation correctness: `doc_lint` + Function ID
 
