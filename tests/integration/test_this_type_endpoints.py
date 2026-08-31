@@ -36,8 +36,12 @@ def require_server_and_program(server_available, program_loaded):
 
 
 def _first_function_address(http_client):
-    """Return the address of the first listed function, or skip."""
-    response = http_client.get("/list_functions", params={"limit": 1})
+    """Return the address of the first listed function, or skip.
+
+    /list_functions takes no `limit`; the first match in the full listing is
+    what the regex below finds.
+    """
+    response = http_client.get("/list_functions")
     if response.status_code != 200:
         pytest.skip("Cannot list functions")
     match = re.search(r"at\s+(?:0x)?([0-9a-fA-F]+)", response.text)

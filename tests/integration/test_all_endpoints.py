@@ -91,13 +91,21 @@ class TestListingEndpoints:
         # Response may be empty if no program loaded, but should not error
 
     @pytest.mark.requires_server
-    def test_list_functions_pagination(self, http_client, server_available):
-        """list_functions should support pagination."""
+    def test_list_functions_enhanced_pagination(self, http_client, server_available):
+        """Pagination lives on /list_functions_enhanced, not /list_functions.
+
+        ListingService documents /list_functions as "List all functions (no
+        pagination)" and declares only `program`, so the `offset`/`limit` this
+        test used to send were dropped and the assertion below was vacuous.
+        """
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/list_functions", params={"offset": 0, "limit": 10})
+        response = http_client.get(
+            "/list_functions_enhanced", params={"offset": 0, "limit": 10}
+        )
         assert response.status_code == 200
+        assert len(response.json()["functions"]) <= 10
 
     @pytest.mark.requires_program
     def test_list_segments(self, http_client, program_loaded):
@@ -244,24 +252,38 @@ class TestSearchEndpoints:
 
     @pytest.mark.requires_program
     def test_search_functions(self, http_client, program_loaded):
-        """search_functions should find matching functions."""
+        """search_functions should find matching functions.
+
+        The declared selector is `name_pattern`; `query` is not a parameter of
+        this endpoint, so it was dropped and the search ran unfiltered.
+        """
         if not program_loaded:
             pytest.skip("No program loaded")
 
         response = http_client.get(
-            "/search_functions", params={"query": "main", "limit": 10}
+            "/search_functions", params={"name_pattern": "a", "limit": 10}
         )
         assert response.status_code == 200
+        payload = response.json()
+        assert len(payload["functions"]) <= 10
+        # Entries are "<name> @ <address>"; the pattern must match the NAME,
+        # not the address, or a hex digit would satisfy this vacuously.
+        names = [entry.split(" @ ")[0] for entry in payload["functions"]]
+        assert all("a" in name.lower() for name in names), names
 
     @pytest.mark.requires_server
-    def test_search_functions_empty_query(self, http_client, server_available):
-        """search_functions should handle empty query gracefully."""
+    def test_search_functions_empty_pattern(self, http_client, server_available):
+        """An empty `name_pattern` is refused, not crashed on.
+
+        ListingService returns `Response.err("Search term is required")`, which
+        the HTTP layer still serves as 200 -- so the status alone said nothing.
+        """
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/search_functions", params={"query": ""})
+        response = http_client.get("/search_functions", params={"name_pattern": ""})
         assert response.status_code == 200
-        # Should return error or empty result, not crash
+        assert "required" in response.json()["error"].lower()
 
 
 # =============================================================================

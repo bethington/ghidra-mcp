@@ -30,8 +30,12 @@ def require_server_and_program(server_available, program_loaded):
 
 @pytest.fixture
 def first_function_address(http_client):
-    """Get the address of the first function in the current program."""
-    response = http_client.get("/list_functions", params={"limit": 1})
+    """Get the address of the first function in the current program.
+
+    /list_functions declares only `program` -- "List all functions (no
+    pagination)" -- so the `limit=1` this used to send was silently dropped.
+    """
+    response = http_client.get("/list_functions")
     if response.status_code != 200 or not response.text.strip():
         pytest.skip("Cannot list functions")
 
@@ -163,9 +167,16 @@ class TestLiveServerSmoke:
         assert "architecture" in payload and "language" in payload
 
     def test_list_functions_returns_live_data(self, http_client):
-        response = http_client.get("/list_functions", params={"limit": 3})
+        """/list_functions takes no `limit`; it lists the whole program.
+
+        The dropped `limit=3` made `len(text) > 0` the only claim, which the
+        `{}` of an errored response also satisfies. Assert the envelope.
+        """
+        response = http_client.get("/list_functions")
         assert response.status_code == 200
-        assert len(response.text.strip()) > 0
+        payload = response.json()
+        assert payload["count"] == len(payload["functions"])
+        assert payload["count"] > 0, "a program is loaded, so there are functions"
 
     def test_current_selection_optional(self, http_client):
         response = http_client.get("/get_current_selection")
@@ -209,16 +220,30 @@ class TestSafeRoundTripSmoke:
         set_response = http_client.post(
             "/set_function_prototype",
             data={
-                "address": first_function_address,
+                # `address` is not declared on this endpoint -- the selector is
+                # `function_address` -- so it was ignored. Sending both meant
+                # the test could not tell which one the server used.
                 "function_address": first_function_address,
                 "prototype": signature,
             },
         )
-        assert set_response.status_code in [200, 400, 404, 500]
+        assert set_response.status_code == 200, set_response.text
+        # Round-tripping a function's own signature must be accepted. The
+        # response contract is {"status": "success", ...} or {"error": ...};
+        # the HTTP status is 200 either way, so it proved nothing on its own.
+        assert set_response.json().get("status") == "success", set_response.text
 
-    def test_rename_variables_endpoints_reachable(
+    def test_rename_variables_endpoint_reachable(
         self, http_client, first_function_address
     ):
+        """The second half of this test used to POST /batch_rename_variables.
+
+        That route was renamed to /rename_variables before 5.0 and no
+        back-compat alias was kept, so the call 404-ed permanently -- and the
+        assertion accepted 404, so it could not fail. Nothing is lost by
+        dropping it: /rename_variables below is the same capability, and if a
+        legacy alias is ever wanted it is a server change, not a test.
+        """
         canonical = http_client.post(
             "/rename_variables",
             json_data={
@@ -226,16 +251,14 @@ class TestSafeRoundTripSmoke:
                 "variable_renames": {},
             },
         )
-        assert canonical.status_code == 200
-
-        legacy = http_client.post(
-            "/batch_rename_variables",
-            json_data={
-                "function_address": first_function_address,
-                "variable_renames": {},
-            },
-        )
-        assert legacy.status_code in [200, 404]
+        assert canonical.status_code == 200, canonical.text
+        body = canonical.json()
+        assert "error" not in body, canonical.text
+        # An empty rename map is a legitimate no-op, and the receipt has to
+        # say so: `"error" not in body` alone is satisfied by any body at all.
+        assert body["success"] is True, canonical.text
+        assert body["variables_renamed"] == 0, canonical.text
+        assert body["variables_failed"] == 0, canonical.text
 
     def test_no_return_round_trip(self, http_client, first_function_address):
         get_response = http_client.get(
