@@ -104,7 +104,7 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/PDB/lib/PDB.jar"                    -DgroupId=ghidra -DartifactId=PDB                -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/FunctionID/lib/FunctionID.jar"      -DgroupId=ghidra -DartifactId=FunctionID         -Dversion=${GV} -Dpackaging=jar
 
-        echo "Installed 15 Ghidra JARs to Maven local repository"
+        echo "Installed 18 Ghidra JARs to Maven local repository"
 
     - name: Install uv (Python build + test gate)
       uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
