@@ -1,0 +1,126 @@
+name: Bug report
+description: Something is broken. Report it with enough detail to reproduce.
+title: "[Bug]: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Four things make a report actionable immediately: the Ghidra version,
+        the bridge version, the MCP client and transport, and the exact command
+        with its exact output. Without them the first reply is always a request
+        for them, which costs a round trip before anything can start.
+
+        Do not report security vulnerabilities here — see
+        [SECURITY.md](https://github.com/bethington/ghidra-mcp/blob/dev/SECURITY.md) for the private route.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happens
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        Calling decompile_function on a 12 MB binary returns a timeout instead
+        of either the decompilation or a clear error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command and exact output
+      description: >
+        The command you ran, copied verbatim, and everything it printed. Paste
+        the real error text rather than describing it. If the failure is inside
+        an MCP client, include the tool call and the client's error.
+      render: text
+      placeholder: |
+        $ uv run bridge-mcp-ghidra --transport streamable-http --mcp-port 8081
+        ...
+        Error: ...
+    validations:
+      required: true
+
+  - type: input
+    id: ghidra-version
+    attributes:
+      label: Ghidra version
+      description: From Help > About Ghidra, e.g. 12.1.2 PUBLIC.
+      placeholder: "12.1.2 PUBLIC"
+    validations:
+      required: true
+
+  - type: input
+    id: bridge-version
+    attributes:
+      label: Plugin and bridge version
+      description: >
+        The version of the GhidraMCP extension and of the bridge. If they differ,
+        say both — a mismatch is itself a common cause.
+      placeholder: "plugin 7.0.0, bridge ghidra-mcp-bridge 7.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      description: Which client, and which model or provider if that is relevant.
+      placeholder: "Cline (VS Code), provider Google Gemini"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - streamable-http
+        - sse (deprecated)
+        - not using an MCP client (direct HTTP)
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 / Ubuntu 24.04 / macOS 15"
+    validations:
+      required: true
+
+  - type: textarea
+    id: server-health
+    attributes:
+      label: Server health check
+      description: >
+        Output of a direct call to the server, which separates "the server is
+        down" from "the client cannot reach it". Skip only if the server will
+        not start at all — in which case say so.
+      render: text
+      placeholder: |
+        curl http://127.0.0.1:8089/mcp/instance_info
+        curl -s http://127.0.0.1:8089/mcp/schema | jq '.tools | length'
+    validations:
+      required: false
+
+  - type: textarea
+    id: binary
+    attributes:
+      label: Binary and program state
+      description: >
+        Architecture, rough size, and whether auto-analysis had finished. Only
+        if the bug involves a specific program. Do not upload anything you are
+        not allowed to share.
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Workarounds you found, when it last worked, related issues.
+    validations:
+      required: false
