@@ -27,9 +27,11 @@ README = PROJECT_ROOT / "README.md"
 BEGIN_MARKER = "<!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->"
 END_MARKER = "<!-- END GENERATED API REFERENCE -->"
 
-# Catalog category -> (README heading, blurb). Order here is presentation order;
-# categories missing from this map are appended alphabetically with a generic
-# heading so new catalog categories can never be silently dropped.
+# Tool group -> (README heading, blurb). The catalog's `category` IS the tool group
+# the bridge lazy-loads by (see load_tool_group), so these headings name real,
+# loadable groups. Order here is presentation order; groups missing from this map
+# are appended alphabetically with a generic heading so a new group can never be
+# silently dropped.
 CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
     "program": ("Program & Session Management", ""),
     "project": ("Project Organization", ""),
@@ -38,19 +40,17 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
         "Available on the standalone headless server (`GhidraMCPHeadlessServer`).",
     ),
     "listing": ("Listing & Enumeration", ""),
-    "getter": ("Context & Lookups", ""),
-    "search": ("Search", ""),
-    "decompile": ("Decompilation & Disassembly", ""),
-    "function": ("Function Tags, Variables & Attributes", ""),
-    "xref": ("Cross-References", ""),
+    "getter": ("Current GUI Context", ""),
+    "function": ("Functions: Decompile, Rename, Prototypes & Variables", ""),
+    "symbol": ("Symbols, Labels & Globals", ""),
+    "xref": ("Cross-References & Call Graphs", ""),
     "datatype": ("Data Types & Structures", ""),
-    "rename": ("Renaming & Labels", ""),
-    "comment": ("Comments & Bookmarks", ""),
+    "comment": ("Comments", ""),
     "analysis": ("Analysis", ""),
+    "malware": ("Malware & Anti-Analysis", ""),
     "documentation": ("Cross-Binary Documentation & Archive", ""),
-    "utility": ("Utility & Documentation Transfer", ""),
+    "utility": ("Health, Schema & Tool Control", ""),
     "emulation": ("Emulation", ""),
-    "script": ("Scripting", ""),
     "server": ("Ghidra Server & Version Control", ""),
     "debugger": (
         "Debugger (Ghidra TraceRmi — GUI only)",

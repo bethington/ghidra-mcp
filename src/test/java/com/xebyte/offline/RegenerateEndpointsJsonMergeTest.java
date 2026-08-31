@@ -92,11 +92,29 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
         assertTrue(result.retainedCatalogParams.isEmpty());
     }
 
-    public void testNonEmptyDescriptionAndCategoryPreserved() {
+    public void testNonEmptyDescriptionPreserved() {
         RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
                 tool("path"), entry("hand-authored", "project", "path"));
         assertEquals("hand-authored", result.entry.get("description").getAsString());
-        assertEquals("project", result.entry.get("category").getAsString());
+    }
+
+    /**
+     * The category is the tool GROUP the bridge lazy-loads by, and only the
+     * annotation scan can say what it is. A catalog value that disagrees is drift,
+     * not a hand-authored correction, so the scanner overwrites it — unlike the
+     * description, which stays editorial.
+     */
+    public void testCatalogCategoryNeverOverridesScanner() {
+        RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
+                tool("path"), entry("hand-authored", "project", "path"));
+        assertEquals("headless", result.entry.get("category").getAsString());
+    }
+
+    /** The dead pre-tool-group vocabulary must not survive a regeneration. */
+    public void testStaleVerbCategoryIsReplaced() {
+        RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
+                tool("path"), entry("hand-authored", "getter", "path"));
+        assertEquals("headless", result.entry.get("category").getAsString());
     }
 
     public void testEmptyDescriptionAndCategoryFallBackToScanner() {

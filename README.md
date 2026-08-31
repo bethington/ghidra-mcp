@@ -635,26 +635,35 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 - `analysis_status` - Get auto-analysis status for open programs
 - `close_program` - Close an open program by project path or name
+- `create_memory_block` - Create memory block
 - `create_property_map` - Create a user property map to store typed values keyed by address
+- `delete_bookmark` - Delete bookmark
 - `delete_property_map` - Delete a user property map and all values it holds
 - `exit_ghidra` - Save and exit Ghidra
 - `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
 - `get_current_program_info` - Get current program info
 - `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
+- `get_metadata` - Get program metadata
 - `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
 - `get_property` - Read the value stored at an address in a property map
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
+- `list_bookmarks` - List bookmarks
 - `list_open_programs` - List open programs
 - `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
 - `list_properties` - List (address, value) entries stored in a property map, with pagination
 - `list_property_maps` - List user-defined property maps â€” typed per-address keyâ†’value stores
+- `list_scripts` - List available Ghidra scripts
 - `open_program` - Open program from project
+- `read_memory` - Read raw memory
 - `reanalyze` - Trigger full auto-analysis on a program
 - `remove_program_option` - Remove an option from a program option group
 - `remove_property` - Remove the value stored at a single address in a property map
+- `run_ghidra_script` - Run script with output capture
+- `run_script_inline` - Run inline script code
 - `save_all_programs` - Save all open programs
 - `save_program` - Save current program
+- `set_bookmark` - Set bookmark
 - `set_image_base` - Set the base address of the program (rebases all addresses)
 - `set_program_option` - Set a typed program option
 - `set_property` - Set a value at an address in a property map
@@ -689,7 +698,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Listing & Enumeration
 
-- `list_bookmarks` - List bookmarks
+- `convert_number` - Convert number between bases
+- `get_entry_points` - Get program entry points
+- `get_external_location` - Get external location details
+- `get_function_count` - Return the number of functions in the loaded program
 - `list_calling_conventions` - List available calling conventions
 - `list_classes` - List namespace/class names
 - `list_data_items` - List defined data
@@ -702,68 +714,68 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `list_imports` - List imported symbols
 - `list_methods` - List all function names with pagination
 - `list_namespaces` - List all namespaces
-- `list_scripts` - List available Ghidra scripts
 - `list_segments` - List memory segments
 - `list_shadowed_globals` - List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them
 - `list_strings` - List defined strings
+- `search_functions` - Search functions by name
+- `search_strings` - Search defined strings by a regex/substring pattern
 
-### Context & Lookups
+### Current GUI Context
 
 - `get_current_address` - Get cursor address (GUI only)
 - `get_current_function` - Get function at cursor (GUI only)
 - `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only)
-- `get_entry_points` - Get program entry points
-- `get_enum_values` - Get enumeration values
-- `get_external_location` - Get external location details
-- `get_full_call_graph` - Get full call graph
-- `get_function_by_address` - Get function at address
-- `get_function_call_graph` - Get call graph
-- `get_function_callees` - Get functions called
-- `get_function_callers` - Get calling functions
-- `get_function_count` - Return the number of functions in the loaded program
-- `get_function_jump_targets` - Get jump targets
-- `get_function_labels` - Get labels in function
-- `get_function_variables` - List all variables in a function
-- `get_struct_layout` - Get structure layout
-- `get_valid_data_types` - Get valid data type names
 
-### Search
+### Functions: Decompile, Rename, Prototypes & Variables
 
-- `find_similar_functions` - Find similar functions
-- `search_byte_patterns` - Search for byte patterns
-- `search_data_types` - Search data types
-- `search_functions` - Search functions by name
-- `search_functions_enhanced` - Advanced function search
-- `search_strings` - Search defined strings by a regex/substring pattern
-
-### Decompilation & Disassembly
-
+- `add_function_tag` - Attach one or more tags to a function
+- `batch_rename_function_components` - Batch rename function components
+- `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
+- `clear_instruction_flow_override` - Clear flow override
+- `create_function` - Create function at address
+- `create_function_tag` - Create a program-wide function tag definition with an optional comment
 - `decompile_function` - Decompile function
+- `delete_function` - Delete function at address
+- `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
 - `force_decompile` - Force fresh decompilation
-
-### Function Tags, Variables & Attributes
-
-- `add_function_tag` - Attach one or more tags to a function
-- `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
-- `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `delete_function_tag` - Delete a program-wide function tag definition
+- `get_function_by_address` - Get function at address
 - `get_function_tags` - List all tags assigned to a specific function
+- `get_function_variables` - List all variables in a function
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
+- `rename_function` - Rename function by name
+- `rename_variables` - Batch rename variables
 - `search_functions_by_tag` - List all functions that have a specified tag attached
 - `set_function_no_return` - Set no-return attribute
+- `set_function_prototype` - Set function prototype (return type, param types, calling convention)
 - `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
 - `set_function_this_type` - Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall)
+- `set_variable_storage` - Set variable storage
 - `set_variable_type` - Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer
 - `set_variables` - Set types and names for multiple variables atomically
 
-### Cross-References
+### Symbols, Labels & Globals
+
+- `can_rename_at_address` - Check if address can be renamed
+- `create_label` - Create label
+- `delete_label` - Delete label at address
+- `get_function_labels` - Get labels in function
+- `rename_symbol` - Rename a symbol of any kind
+
+### Cross-References & Call Graphs
 
 - `add_memory_reference` - Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables)
+- `analyze_call_graph` - Analyze function call graph patterns
+- `get_assembly_context` - Get assembly context
 - `get_bulk_xrefs` - Get xrefs for multiple addresses
+- `get_full_call_graph` - Get full call graph
+- `get_function_call_graph` - Get call graph
+- `get_function_callees` - Get functions called
+- `get_function_callers` - Get calling functions
+- `get_function_jump_targets` - Get jump targets
 - `get_function_xrefs` - Get function cross-references
 - `get_xrefs_from` - Get references from address
 - `get_xrefs_to` - Get references to address
@@ -773,6 +785,8 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 - `add_struct_field` - Add struct field
 - `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness
+- `analyze_struct_field_usage` - Analyze struct field usage
+- `apply_data_classification` - Apply data classification
 - `apply_data_type` - Apply data type
 - `audit_global` - Audit a global variable's documentation state
 - `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
@@ -787,7 +801,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `create_union` - Create union
 - `delete_data_type` - Delete data type
 - `embed_struct_field` - Replace a structure field with an embedded struct type by value (e.g
+- `get_enum_values` - Get enumeration values
+- `get_struct_layout` - Get structure layout
 - `get_type_size` - Get data type size and info
+- `get_valid_data_types` - Get valid data type names
 - `import_data_types` - Import data types from GDT
 - `list_data_type_categories` - List data type categories
 - `list_data_types` - List data types
@@ -799,89 +816,72 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `rename_data_type` - Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it
 - `resize_struct` - Grow or shrink an existing structure by total byte size
 - `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
-- `set_function_prototype` - Set function prototype (return type, param types, calling convention)
+- `search_data_types` - Search data types
 - `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
-- `set_variable_storage` - Set variable storage
+- `suggest_field_names` - Suggest field names
 - `validate_data_type` - Validate data type syntax
 - `validate_function_prototype` - Validate function prototype
 
-### Renaming & Labels
-
-- `batch_rename_function_components` - Batch rename function components
-- `create_label` - Create label
-- `delete_label` - Delete label at address
-- `rename_function` - Rename function by name
-- `rename_variables` - Batch rename variables
-
-### Comments & Bookmarks
+### Comments
 
 - `batch_get_comments` - Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
-- `delete_bookmark` - Delete bookmark
 - `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike)
-- `set_bookmark` - Set bookmark
 - `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
 
 ### Analysis
 
-- `analyze_api_call_chains` - Analyze API call chains
-- `analyze_call_graph` - Analyze function call graph patterns
 - `analyze_control_flow` - Analyze control flow
 - `analyze_data_region` - Analyze data region
 - `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
 - `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
-- `analyze_struct_field_usage` - Analyze struct field usage
-- `apply_data_classification` - Apply data classification
 - `batch_apply_documentation` - Apply all documentation to a function in one call
-- `can_rename_at_address` - Check if address can be renamed
-- `clear_instruction_flow_override` - Clear flow override
 - `configure_analyzer` - Configure an analysis plugin
-- `create_function` - Create function at address
-- `create_memory_block` - Create memory block
-- `delete_function` - Delete function at address
 - `detect_array_bounds` - Detect array bounds
-- `detect_crypto_constants` - Detect crypto constants
-- `detect_malware_behaviors` - Detect malware behaviors
-- `extract_iocs_with_context` - Extract IOCs with context
-- `find_anti_analysis_techniques` - Find anti-analysis techniques
 - `find_code_gaps` - Find gaps of undefined bytes between functions in executable memory
 - `find_dead_code` - Find dead code
 - `find_next_undefined_function` - Find next undefined function
-- `get_assembly_context` - Get assembly context
+- `find_similar_functions` - Find similar functions
 - `get_field_access_context` - Get field access context
 - `get_function_pcode` - Dump raw P-code for a function (issue #192)
 - `inspect_memory_content` - Inspect memory bytes
 - `list_analyzers` - List available analysis plugins
-- `read_memory` - Read raw memory
 - `run_analysis` - Run auto-analysis on the current program
+- `search_byte_patterns` - Search for byte patterns
+- `search_functions_enhanced` - Advanced function search
 - `search_instructions` - Search for instructions by mnemonic and/or operand substring
-- `suggest_field_names` - Suggest field names
+
+### Malware & Anti-Analysis
+
+- `analyze_api_call_chains` - Analyze API call chains
+- `detect_crypto_constants` - Detect crypto constants
+- `detect_malware_behaviors` - Detect malware behaviors
+- `extract_iocs_with_context` - Extract IOCs with context
+- `find_anti_analysis_techniques` - Find anti-analysis techniques
 
 ### Cross-Binary Documentation & Archive
 
+- `apply_function_documentation` - Apply function documentation
 - `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres)
 - `archive_ingest_program` - Bulk-ingest every function in a program into the cross-version documentation archive
 - `batch_string_anchor_report` - Report of source file strings and their FUN_* functions
 - `bulk_fuzzy_match` - Bulk cross-binary function matching
-- `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
-- `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
-
-### Utility & Documentation Transfer
-
-- `apply_function_documentation` - Apply function documentation
-- `check_connection` - Health check endpoint
 - `compare_programs_documentation` - Compare documentation across programs
-- `convert_number` - Convert number between bases
 - `diff_functions` - Diff two functions
+- `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
 - `find_undocumented_by_string` - Find undocumented functions referencing string
 - `get_bulk_function_hashes` - Get bulk function hashes
 - `get_function_documentation` - Export function documentation
 - `get_function_hash` - Get function hash
 - `get_function_signature` - Get function feature signature
-- `get_metadata` - Get program metadata
+- `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
+
+### Health, Schema & Tool Control
+
+- `check_connection` - Health check endpoint
 - `get_version` - Get plugin version
 - `health` - Health check endpoint for headless server
 - `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count
@@ -894,11 +894,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 - `emulate_function` - Emulate a single function with controlled register/memory inputs
 - `emulate_hash_batch` - Brute-force API hash resolution
-
-### Scripting
-
-- `run_ghidra_script` - Run script with output capture
-- `run_script_inline` - Run inline script code
 
 ### Ghidra Server & Version Control
 
@@ -946,10 +941,6 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 ### System
 
 - `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling
-
-### Symbol (uncategorized)
-
-- `rename_symbol` - Rename a symbol of any kind
 
 ### Bridge Static Tools
 
