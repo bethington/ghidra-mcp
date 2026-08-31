@@ -150,6 +150,42 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### `uv.lock` refreshed — the stale `fun-doc` group is gone
+
+`uv.lock` still carried a `[package.dev-dependencies] fun-doc` group that
+`pyproject.toml` stopped declaring when fun-doc moved to the `d2-game-exe`
+repository on 2026-08-11. A lock that disagrees with its manifest is not a
+tidiness problem: **`uv run` re-locks before it runs**, so every plain
+`uv run …` in this repo silently rewrote `uv.lock` with a 653-line deletion.
+Four separate maintainer sessions hit that, each noticing and reverting it by
+hand; CI hits it too (`tests.yml` runs `uv run`, not `uv run --frozen`), which
+means the committed lock was never the thing CI installed. The failure mode
+being avoided is a 653-line unexplained lock diff riding along inside an
+unrelated PR.
+
+The refresh is `uv lock` against the current `pyproject.toml` and is a pure
+subtraction: **103 → 80 locked packages, 23 removed, 0 added, and not one
+resolved version changed.** The 23 are exactly the closure of the dead
+`fun-doc` group and nothing else — the 6 it declared (`claude-agent-sdk`,
+`flask`, `flask-socketio`, `openai`, `psycopg`, `sqlalchemy`) plus the 17
+reachable only through them: `bidict`, `blinker`, `distro`, `greenlet`,
+`itsdangerous`, `jinja2`, `jiter`, `markupsafe`, `psycopg-binary`,
+`python-engineio`, `python-socketio`, `simple-websocket`, `sniffio`, `tqdm`,
+`tzdata`, `werkzeug`, `wsproto`. `sniffio` looks like it should have survived
+on `anyio`'s account, but anyio 4.14 no longer depends on it.
+
+`python-dotenv` was **kept** despite being declared by `fun-doc`: it is also a
+transitive dependency of `pydantic-settings`, which `mcp` requires. Dropping a
+package because one of its two parents died is the mistake this refresh was
+most at risk of making.
+
+The only non-deletion in the diff is a marker tightening: `pybag`'s
+dependencies (`capstone`, `pywin32`, `win32more`) now carry
+`sys_platform == 'win32'`, inherited from `pybag`'s own marker in the
+`debugger` group. Nothing in `mcp`, `pytest`, `coverage` or the `test` group
+moved, so the coverage gate and the 3.10–3.13 matrix resolve exactly as before
+— verified by locking on each of the four interpreters.
+
 ### Documentation correctness: `doc_lint` + Function ID
 
 `analyze_function_completeness` measures whether documentation is *present*. It
