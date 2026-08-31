@@ -150,6 +150,70 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### The release gate works again: a benchmark fixture that lives here
+
+The deploy-regression gate was non-functional for three weeks. When `fun-doc/`
+moved to the `d2-game-exe` repository on 2026-08-10 it took `Benchmark.dll` with
+it, and six of the eight `--test` tiers — `release`, `benchmark-read`,
+`benchmark-write`, `multi-program`, `debugger-live`, `negative-contract` — raised
+in `reset_benchmark_fixture()` before running a single assertion. `release` is
+the release-regression workflow's default tier, the gate the release checklist
+names, and the fourth command in CLAUDE.md's release floor. The two tiers that
+still worked, `endpoint-catalog` and `selected-contract`, never touch a program:
+they check that endpoints are *registered*.
+
+**The fixture is now generated rather than compiled.**
+`tests/fixtures/benchmark/make_fixture.py` emits both PE32 images directly, with
+a small x86 assembler and a small PE writer, and no toolchain at all. The old
+one was built by a pinned, licensed MSVC 6 / VS2003 tree that lived outside git
+with gitignored outputs — so it could not survive a directory move, could not be
+rebuilt by anyone without the media, and had already moved every function
+address once when the toolchain changed under it while the C sources stood
+still. Its own baseline recorded that: both toolchains linked at the same base
+and reported the same linker version, so the PE headers could not tell them
+apart and `build_manifest.json` was the only witness.
+
+Generating closes that trap rather than documenting it. The images are
+byte-identical on any machine with a Python interpreter, the addresses in
+`regression/*.yaml` are chosen by code under review instead of observed from a
+build, and `tests/unit/test_benchmark_fixture.py` fails **offline, in CI, in
+seconds** if the baseline and the binary ever disagree about one — where before
+the only symptom was a red deploy on release day.
+
+**The fixture proves itself without Ghidra.** `BenchmarkDebug.exe` is a real
+CRT-less 32-bit console program. Run bare it exits with the CRC-16/CCITT of its
+banner; run with `@` it `LoadLibraryA`s `Benchmark.dll`, resolves `calc_crc16`
+through the generated export directory and exits with the result. Both return
+`0x5db7`, which is what that CRC is in Python. A pass means the Windows loader
+accepted both images, bound the `KERNEL32` imports, ran `DllMain` and executed
+the generated machine code correctly. The regression numbers are measured too,
+by `analyzeHeadless` in a throwaway project;`cyclomatic_complexity` is
+deliberately absent from the baseline because it was not measured, and a guessed
+assertion inside a release gate is worse than no assertion.
+
+Three defects surfaced while wiring it back up:
+
+- **`negative-contract` was missing from `BENCHMARK_DEPLOY_TEST_MODES`** although
+  `run_deploy_tests` resets the fixture for it like every other entry. That set
+  is what enables the prompt policy before the imports and cleans up restored
+  CodeBrowser tools afterwards, so `--test negative-contract` imported two
+  binaries with neither.
+- **`run_benchmark_yaml_regression` printed "skipping" and returned success**
+  when it found no baselines. Its assertions are the only part of the release
+  tier that checks an *answer* rather than checking that an endpoint answered;
+  everything else the tier does is liveness. A silent skip there is precisely
+  the failure the gate exists to prevent, so it now raises.
+- **The regression schema documented two fields the runner has never read** — a
+  `data:` block and `program.symbol_count_min` — and the shipped baseline used
+  `symbol_count_min: 700`. An assertion the runner cannot see is worse than a
+  missing one, because the file reads as covering something it does not.
+
+`debugger-live` is restored **in part, and labelled as such**: its debuggee is
+back and runnable, but the tier still needs a Ghidra GUI, a dbgeng backend and
+`ghidratrace`, and none of that was verified here. The `release` tier's pass
+line now names the debugger outcome (`ran` / `SKIPPED (<reason>)`) instead of
+printing an unqualified "passed" over a step that quietly did not run.
+
 ### Release workflows: stale references left by the `fun-doc` move-out
 
 Auditing every workflow that runs on a tag or a release event, ahead of cutting
