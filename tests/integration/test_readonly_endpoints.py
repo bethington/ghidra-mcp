@@ -189,27 +189,51 @@ class TestFunctionListing:
         # Should return some text (may be empty list or error if no program)
         assert len(response.text) > 0
 
-    def test_list_functions_with_limit(self, http_client):
-        """List functions with limit parameter."""
-        response = http_client.get("/list_functions", params={"limit": 10})
-        assert response.status_code == 200
+    def test_list_functions_enhanced_with_limit(self, http_client):
+        """Pagination lives on /list_functions_enhanced, not /list_functions.
 
-    def test_list_functions_with_offset(self, http_client):
-        """List functions with pagination."""
-        response = http_client.get("/list_functions", params={"offset": 0, "limit": 5})
+        /list_functions declares only `program` -- ListingService documents it
+        as "List all functions (no pagination)". This test used to send
+        `limit` there, which the plugin silently drops, so it asserted nothing.
+        """
+        response = http_client.get("/list_functions_enhanced", params={"limit": 5})
         assert response.status_code == 200
+        functions = response.json()["functions"]
+        assert len(functions) <= 5
 
-    def test_search_functions_by_name(self, http_client):
-        """Search functions by name pattern."""
-        response = http_client.get("/search_functions_by_name", params={"name": "main"})
-        assert response.status_code == 200
-
-    def test_search_functions_enhanced(self, http_client):
-        """Enhanced function search."""
+    def test_list_functions_enhanced_with_offset(self, http_client):
+        """`offset` is declared on /list_functions_enhanced and must be honored."""
         response = http_client.get(
-            "/search_functions_enhanced", params={"pattern": "FUN_", "limit": 10}
+            "/list_functions_enhanced", params={"offset": 0, "limit": 5}
         )
         assert response.status_code == 200
+        payload = response.json()
+        assert "functions" in payload
+        assert len(payload["functions"]) <= 5
+
+    def test_search_functions_by_name(self, http_client):
+        """Search functions by name pattern.
+
+        /search_functions_by_name is not an endpoint; /search_functions is,
+        and its declared selector is `name_pattern`.
+        """
+        response = http_client.get("/search_functions", params={"name_pattern": "a"})
+        assert response.status_code == 200
+        assert "functions" in response.json()
+
+    def test_search_functions_enhanced(self, http_client):
+        """Enhanced function search.
+
+        The declared selector is `name_pattern`; sent as `pattern` the filter
+        was dropped entirely and this returned an unfiltered listing.
+        """
+        response = http_client.get(
+            "/search_functions_enhanced", params={"name_pattern": "FUN_", "limit": 10}
+        )
+        assert response.status_code == 200
+        results = response.json()["results"]
+        assert len(results) <= 10
+        assert all("FUN_" in r["name"] for r in results)
 
 
 class TestDataTypes:
@@ -348,21 +372,32 @@ class TestScripts:
         response = http_client.get("/list_scripts")
         assert response.status_code == 200
 
-    def test_list_ghidra_scripts(self, http_client):
-        """List Ghidra scripts."""
-        response = http_client.get("/list_ghidra_scripts")
-        # May be 404 if scripts endpoint not available
-        assert response.status_code in [200, 404]
+    def test_list_scripts_with_filter(self, http_client):
+        """`filter` is the endpoint's only declared parameter.
+
+        Replaces test_list_ghidra_scripts, which called /list_ghidra_scripts --
+        not an endpoint. It accepted [200, 404] and so was a permanent 404
+        no-op; /list_scripts is the real route and test_list_scripts already
+        covers the unfiltered call, so this covers the parameter instead.
+        """
+        response = http_client.get("/list_scripts", params={"filter": "Backfill"})
+        assert response.status_code == 200
 
 
 class TestCallGraph:
     """Test call graph endpoints (read-only) - requires valid function address."""
 
     def test_get_full_call_graph(self, http_client):
-        """Get full call graph (may fail if no functions)."""
-        response = http_client.get("/get_full_call_graph", params={"max_depth": 2})
-        # May return error if no program, that's OK
+        """Get full call graph, bounded by the declared `limit`.
+
+        This used to send `max_depth`, which the endpoint does not declare --
+        silently dropped, so no bound was ever exercised. Declared parameters
+        are format, limit and program.
+        """
+        response = http_client.get("/get_full_call_graph", params={"limit": 5})
         assert response.status_code == 200
+        edges = response.json()["edges"]
+        assert len(edges) <= 5
 
 
 class TestDocumentation:
@@ -379,8 +414,12 @@ class TestFunctionAnalysis:
 
     @pytest.fixture
     def first_function_address(self, http_client):
-        """Get address of first function in program."""
-        response = http_client.get("/list_functions", params={"limit": 1})
+        """Get address of first function in program.
+
+        /list_functions takes no `limit` -- it lists all functions -- so the
+        first match in the full listing is what the regex below finds.
+        """
+        response = http_client.get("/list_functions")
         if response.status_code != 200:
             pytest.skip("Cannot list functions")
         text = response.text
@@ -410,13 +449,10 @@ class TestFunctionAnalysis:
         )
         assert response.status_code == 200
 
-    def test_get_decompiled_code(self, http_client, first_function_address):
-        """Get decompiled code for a function (alias endpoint)."""
-        response = http_client.get(
-            "/get_decompiled_code", params={"function_address": first_function_address}
-        )
-        # This endpoint may not exist - use decompile_function instead
-        assert response.status_code in [200, 404]
+    # test_get_decompiled_code removed: /get_decompiled_code is not an
+    # endpoint. It accepted [200, 404] and so passed on the permanent 404,
+    # asserting nothing. The real route is /decompile_function, already
+    # covered by test_decompile_function directly above.
 
     def test_disassemble_function(self, http_client, first_function_address):
         """Disassemble a function."""
@@ -425,13 +461,9 @@ class TestFunctionAnalysis:
         )
         assert response.status_code == 200
 
-    def test_get_disassembly(self, http_client, first_function_address):
-        """Get disassembly for a function (alias endpoint)."""
-        response = http_client.get(
-            "/get_disassembly", params={"function_address": first_function_address}
-        )
-        # This endpoint may not exist - use disassemble_function instead
-        assert response.status_code in [200, 404]
+    # test_get_disassembly removed: /get_disassembly is not an endpoint, and
+    # the test accepted [200, 404]. /disassemble_function is the real route,
+    # covered by test_disassemble_function directly above.
 
     def test_get_function_variables(self, http_client, first_function_address):
         """Get function variables."""
@@ -441,9 +473,15 @@ class TestFunctionAnalysis:
         assert response.status_code in [200, 404]
 
     def test_get_function_labels(self, http_client, first_function_address):
-        """Get function labels."""
+        """Get function labels.
+
+        The declared selector is `name` (which accepts a function name OR an
+        address). `address` is a back-compat alias the resolver still honors,
+        but /mcp/schema advertises only the canonical spelling, so that is
+        what a test should exercise.
+        """
         response = http_client.get(
-            "/get_function_labels", params={"address": first_function_address}
+            "/get_function_labels", params={"name": first_function_address}
         )
         # May not exist in all versions
         assert response.status_code in [200, 404]
@@ -495,11 +533,18 @@ class TestFunctionAnalysis:
         assert response.status_code == 200
 
     def test_analyze_function_completeness(self, http_client, first_function_address):
-        """Analyze function completeness score."""
+        """Analyze function completeness score.
+
+        The declared selector is `function_address`, with no alias for
+        `address`. Sent as `address` it was dropped, so this scored whatever
+        function happened to be current.
+        """
         response = http_client.get(
-            "/analyze_function_completeness", params={"address": first_function_address}
+            "/analyze_function_completeness",
+            params={"function_address": first_function_address},
         )
         assert response.status_code == 200
+        assert "completeness_score" in response.json()
 
     def test_get_function_pcode_basic(self, http_client, first_function_address):
         """Issue #192: dump P-code for a function (basic-block iter only).
@@ -565,8 +610,11 @@ class TestXRefEndpoints:
 
     @pytest.fixture
     def sample_address(self, http_client):
-        """Get a sample address from the program."""
-        response = http_client.get("/list_functions", params={"limit": 1})
+        """Get a sample address from the program.
+
+        /list_functions declares only `program`; `limit` was silently dropped.
+        """
+        response = http_client.get("/list_functions")
         if response.status_code != 200:
             pytest.skip("Cannot get sample address")
         import re
@@ -620,14 +668,20 @@ class TestMemoryInspection:
         # May be 404 if not available
         assert response.status_code in [200, 404]
 
-    def test_disassemble_bytes(self, http_client, sample_address):
-        """Disassemble bytes at address."""
-        response = http_client.get(
-            "/disassemble_bytes",
-            params={"address": sample_address, "length": 16},
-        )
-        # May be 404 if not available
-        assert response.status_code in [200, 404]
+    # test_disassemble_bytes removed from the READ-ONLY suite.
+    #
+    # It GET-ed /disassemble_bytes with `address`, and accepted [200, 404].
+    # /disassemble_bytes is declared `method = "POST"` with `start_address` in
+    # the JSON body, so a live server answered 404 every time and the test
+    # could not tell that from a pass.
+    #
+    # Calling it correctly is NOT a read: FunctionService.disassembleBytes
+    # creates instructions over undefined bytes, inside a transaction. That
+    # belongs in the write tier (tests/integration/test_safe_write_endpoints.py
+    # or a mutating file), not here -- rewriting it in place would have turned
+    # a no-op into a listing mutation in the suite whose contract is that it
+    # never writes. Read-only memory inspection is covered by
+    # test_inspect_memory_content above.
 
 
 class TestSearchInstructions:
@@ -788,8 +842,11 @@ class TestResponseFormats:
             assert len(response.text) > 0
 
     def test_list_functions_parseable(self, http_client):
-        """Function list should be parseable."""
-        response = http_client.get("/list_functions", params={"limit": 5})
+        """Function list should be parseable.
+
+        Sent without `limit`: the endpoint does not declare one.
+        """
+        response = http_client.get("/list_functions")
         assert response.status_code == 200
         # Should be non-empty
         assert len(response.text) > 0

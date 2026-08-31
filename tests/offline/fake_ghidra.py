@@ -74,6 +74,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from tests.offline.param_aliases import aliases_for
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_ROOT = REPO_ROOT / "tests"
 CATALOG_PATH = TESTS_ROOT / "endpoints.json"
@@ -135,6 +137,10 @@ class EndpointSpec:
     # snapshot (the 18 headless-only project-management endpoints). Routing
     # still works; parameter contract checking is skipped and said so.
     params: dict[str, ParamSpec] | None
+    # {alias: canonical} back-compat spellings the runtime resolver accepts.
+    # /mcp/schema does not advertise these (see tests/offline/param_aliases),
+    # so without them a valid alias would be recorded as a contract breach.
+    aliases: dict[str, str] = field(default_factory=dict)
 
 
 def _load_json(path: Path) -> Any:
@@ -165,6 +171,7 @@ def load_contract() -> dict[tuple[str, str], EndpointSpec]:
             method=route[1],
             category=entry.get("category", "unknown"),
             params=params_by_route.get(route),
+            aliases=aliases_for(entry["path"], route[1]),
         )
     return contract
 
@@ -481,14 +488,26 @@ class FakeGhidraServer:
         body_keys = set(body or {})
         query_keys = set(query) - BRIDGE_SYNTHETIC_QUERY_PARAMS
 
+        # An alias resolves to its canonical parameter before every other
+        # check, exactly as AnnotationScanner does at runtime. Without this a
+        # documented back-compat spelling -- /get_function_labels accepts
+        # `address` for `name` -- would be reported as a breach it is not.
+        def canonical(name: str) -> str:
+            return spec.aliases.get(name, name)
+
         for name in sorted(query_keys | body_keys):
-            if name not in spec.params:
+            if canonical(name) not in spec.params:
                 found.append(
                     Violation(
                         "unknown_parameter", spec.method, spec.path, parameter=name,
                         detail=(
                             f"{spec.method} {spec.path} does not declare a parameter "
                             f"named '{name}'. Declared: {sorted(spec.params)}"
+                            + (
+                                f"; aliases: {sorted(spec.aliases)}"
+                                if spec.aliases
+                                else ""
+                            )
                         ),
                     )
                 )
@@ -499,8 +518,8 @@ class FakeGhidraServer:
         # ignored by the real plugin, which then silently operates on whatever
         # program happens to be current -- a wrong-binary write that reports
         # success.
-        for name in sorted(body_keys & set(spec.params)):
-            if spec.params[name].source == "query":
+        for name in sorted(n for n in body_keys if canonical(n) in spec.params):
+            if spec.params[canonical(name)].source == "query":
                 found.append(
                     Violation(
                         "param_in_wrong_place", spec.method, spec.path, parameter=name,
@@ -512,8 +531,8 @@ class FakeGhidraServer:
                         ),
                     )
                 )
-        for name in sorted(query_keys & set(spec.params)):
-            if spec.params[name].source == "body" and spec.method == "POST":
+        for name in sorted(n for n in query_keys if canonical(n) in spec.params):
+            if spec.params[canonical(name)].source == "body" and spec.method == "POST":
                 found.append(
                     Violation(
                         "param_in_wrong_place", spec.method, spec.path, parameter=name,
@@ -525,7 +544,7 @@ class FakeGhidraServer:
                 )
 
         if self.strict_required:
-            supplied = query_keys | body_keys
+            supplied = {canonical(n) for n in query_keys | body_keys}
             missing = sorted(
                 n for n, p in spec.params.items() if p.required and n not in supplied
             )

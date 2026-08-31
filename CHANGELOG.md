@@ -171,11 +171,56 @@ declared name is `name_pattern`; `/analyze_function_completeness` and
 `/get_disassembly` and `/list_ghidra_scripts` are not endpoints at all; and
 `/disassemble_bytes` was called with GET where the catalog declares POST. They
 are recorded in `tests/offline/fixtures/expected_contract_violations.json` as a
-ratchet asserted exactly in both directions, rather than fixed here — changing
-what a test asserts is a maintainer call, and two of them want deleting.
+ratchet asserted exactly in both directions.
 
 Also surfaced: `tests/conformance/snapshots/search_instructions.snap` is a
 recorded *error* response, not a successful one.
+
+### Read-only suite contract breaches — all ten fixed, and made unrepeatable
+
+The ten breaches above are fixed and the violation baseline is now **empty**.
+Nine were broken tests; one was never a breach at all.
+
+Parameter names corrected to the declared spelling
+(`search_functions_enhanced` → `name_pattern`,
+`analyze_function_completeness` → `function_address`), and the corrected tests
+gained the assertion the wrong name had made impossible — that the filter
+actually filters and the limit actually bounds. Pagination moved to the
+endpoint that has it: `/list_functions` declares only `program`, so the two
+"pagination" tests now exercise `/list_functions_enhanced`, and four other
+calls simply stopped sending a `limit` the server drops.
+`/search_functions_by_name` → `/search_functions`;
+`/list_ghidra_scripts` → `/list_scripts`, rewritten to cover its `filter`
+parameter, since the unfiltered call was already covered.
+`/get_decompiled_code` and `/get_disassembly` were deleted: they are aliases
+for `/decompile_function` and `/disassemble_function`, which the tests
+immediately above them already cover, so the tests were duplicates that could
+only ever 404.
+
+**`/disassemble_bytes` left the read-only tier rather than being corrected in
+place.** Calling it properly is a POST that creates instructions inside a
+transaction, so "fixing" the call would have turned a permanent no-op into a
+listing mutation in the suite whose whole contract is that it never writes.
+
+**`/get_function_labels` sending `address` was NOT a breach.** `@Param(value =
+"name")` there declares `aliases = {"function", "address", "function_address"}`
+and `AnnotationScanner` honours every one at dispatch — but
+`ParamDescriptor.toJson` never emits them, so `/mcp/schema` advertises only the
+canonical name and any consumer reasoning from the schema calls a valid alias
+unknown. `tests/offline/param_aliases.py` reads the annotations directly to
+close that gap for the offline tier; the test still moved to the canonical
+`name`, which is what the annotation itself says new callers should prefer.
+
+**The guard.** `tests/unit/test_integration_call_contract.py` AST-scans every
+file in `tests/integration/` and checks each HTTP call's path, method and
+parameter names against `tests/endpoints.json` and the recorded `/mcp/schema`.
+It needs no server, no fixtures and no Ghidra, so it runs in the unit tier CI
+always executes — across all 15 integration files, not just the one the
+offline tier replays. Verified to go red on each breach shape: a nonexistent
+endpoint, a wrong parameter name, and a GET on a POST route.
+`tests/unit/fixtures/known_integration_call_breaches.json` records the 29
+breaches that already existed in the *other* integration files, ratcheted in
+both directions, and the read-only suite is asserted to hold zero.
 
 **Boundary, stated in the code and in `tests/offline/README.md`:** this proves
 the bridge speaks the protocol and that response shapes match what Ghidra
