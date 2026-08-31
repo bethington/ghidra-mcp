@@ -145,6 +145,29 @@ testing nothing.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
+- **A non-loopback HTTP bridge approved a browser's preflight and then refused
+  the request it had just authorized (#399, #307).** Adding `CORSMiddleware`
+  stopped the bare `OPTIONS /mcp` → `405 Method Not Allowed` that made the
+  bridge unusable from Open WebUI and MCP Inspector, but the Origin header is
+  read by **two** gates, not one: `CORSMiddleware` answers the preflight, and
+  the SDK's `TransportSecurityMiddleware` re-checks Host and Origin on the
+  actual request inside the transport app. Their allowlists were maintained
+  side by side in different syntaxes and had drifted — the CORS regex was
+  `^https?://host(:\d+)?$` (either scheme, port optional) while the rebinding
+  list held only `http://host:*` (http only, port required). So a bridge behind
+  a TLS-terminating proxy answered the preflight `200` with a full
+  `Access-Control-Allow-*` grant and then answered the POST `421 Misdirected
+  Request` (proxy on :443 forwards a **portless** Host) or `403 Forbidden`
+  (**https** Origin). That reads as a network fault rather than a policy one,
+  and it is invisible to any test that asserts on the preflight alone. Both
+  gates are now derived from one `_policy_hosts()` set, so they cannot disagree;
+  `GHIDRA_MCP_ALLOWED_HOSTS` widens both together, and it is now honored for an
+  explicit remote bind instead of only a wildcard one. Loopback behaviour is
+  unchanged (rebinding protection stays off there, native clients send no
+  Origin), strangers are still refused by both gates, and `mcp-session-id` stays
+  in `expose_headers` *and* is accompanied by `Access-Control-Allow-Origin` on
+  the real response — without that header a browser discards the session id even
+  though it was exposed.
 
 A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
