@@ -129,6 +129,51 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### CI: the Python coverage ratchet, paid off instead of lowered
+
+The unit-test coverage gate had been red-lining pull requests that touch no
+Python at all — #442 is two `.md` files and reported Build Status=FAILURE, and 6
+of 8 open dependabot PRs were red for the same reason. The whole contributor
+queue looked stalled on review when it was blocked on a number.
+
+Nothing had got less tested. Commit `6f7e7e8` dissolved `scripts/` into
+`tools/`, and `tools/` is a coverage source while `scripts/` was not, so 533
+uncovered statements entered the DENOMINATOR in a single commit —
+`upgrade_project_language.py` (530 stmts / 343 missed),
+`build_reference_index.py` (147/147) and `ghidra_server_health_check.py`
+(43/43). The measured total fell to 57%, the floor was 58, and the gate sat on a
+knife-edge. Dropping it to 55 unblocked the queue but left the debt.
+
+The debt is now paid rather than hidden: those three operator scripts are
+**covered, not scoped out**. No module was added to `[tool.coverage.run] omit`.
+
+| Module | Before | After |
+| --- | --- | --- |
+| `tools/upgrade_project_language.py` | 35% (343 missed) | **99%** (1 missed) |
+| `tools/build_reference_index.py` | 0% (147 missed) | **99%** (1 missed) |
+| `tools/ghidra_server_health_check.py` | 0% (43 missed) | **98%** (1 missed) |
+| **total** | **57.24%** | **69.22%** |
+
+The one missed line in each is the `sys.exit(main())` under
+`if __name__ == "__main__"`, which cannot execute under import.
+
+Three new suites, ~150 tests, pinning behaviour rather than touching lines —
+`tests/unit/test_ghidra_server_health_check.py`,
+`tests/unit/test_build_reference_index.py` and
+`tests/unit/test_upgrade_project_language_main.py`. They cover the traps these
+scripts were built around: the 24h refusal on a repeat whole-project `--apply`
+(the tool is not idempotent and must not be used as its own verification), the
+MSYS `--folder` mangling that turns a run into a silent no-op, the reconciliation
+that catches a planned program which was never attempted, the checkout-leak
+bookkeeping, "saved" being distinct from "committed" on a shared project, the
+`bsim` password reaching each child on stdin and never argv, and `add_binary`
+verifying its ARTIFACT because `analyzeHeadless` exits 0 when a script throws.
+
+`--cov-fail-under` goes **55 → 67** against a measured 69.22% — a ~2 point
+margin, deliberately not the ~0.5 point knife-edge that caused the outage. The
+comment block in `.github/workflows/tests.yml` now records the whole history so
+the number is not re-derived from scratch next time.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
