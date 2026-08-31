@@ -63,7 +63,7 @@ mvn clean package -P docker -DskipTests
 ### Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `GHIDRA_MCP_PORT` | `8089` | HTTP server port |
 | `JAVA_OPTS` | `-Xmx4g -XX:+UseG1GC` | JVM options |
 | `PROGRAM_FILE` | - | Path to binary file to load on startup |
@@ -72,7 +72,7 @@ mvn clean package -P docker -DskipTests
 ### Volumes
 
 | Volume | Container Path | Description |
-|--------|---------------|-------------|
+| -------- | --------------- | ------------- |
 | `ghidra-data` | `/data` | Persistent data storage |
 | `ghidra-projects` | `/projects` | Ghidra project files |
 
@@ -81,11 +81,13 @@ mvn clean package -P docker -DskipTests
 The headless server exposes the same REST API as the GUI plugin. Currently implemented:
 
 ### Health & Metadata
+
 - `GET /check_connection` - Health check
 - `GET /get_version` - Server version
 - `GET /get_metadata` - Program metadata
 
 ### Listing
+
 - `GET /list_methods` - List function names
 - `GET /list_functions` - List functions with addresses
 - `GET /list_classes` - List namespaces
@@ -97,6 +99,7 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 - `GET /list_data_types` - List data types
 
 ### Analysis
+
 - `GET /decompile_function` - Decompile function
 - `GET /disassemble_function` - Disassemble function
 - `GET /get_function_by_address` - Get function info
@@ -105,6 +108,7 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 - `GET /search_functions` - Search functions by name
 
 ### Modification (POST)
+
 - `POST /rename_function` - Rename function by name
 - `POST /rename_function` - Rename function by address
 - `POST /rename_symbol` - Rename data label
@@ -113,6 +117,7 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 - `POST /set_comment(type='eol')` - Set EOL_COMMENT
 
 ### Program Management
+
 - `GET /list_open_programs` - List loaded programs
 - `GET /get_current_program_info` - Current program info
 - `POST /switch_program` - Switch active program
@@ -143,7 +148,7 @@ pytest tests/integration/test_all_endpoints.py -v
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     Docker Container                         │
 │  ┌────────────────────────────────────────────────────────┐ │

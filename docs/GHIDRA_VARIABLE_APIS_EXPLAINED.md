@@ -84,6 +84,7 @@ while (symbols.hasNext()) {
 ### Example Names
 
 SSA variables use **Hungarian notation** with type prefix:
+
 - `dVar12`, `dVar13` - Double precision floats
 - `iVar6` - Signed integers
 - `uVar2`, `uVar3` - Unsigned integers
@@ -120,7 +121,7 @@ HighFunctionDBUtil.updateDBVariable(
 
 ### Storage Variables
 
-```
+```text
 Stack[-0xc]:8  ←→  local_c (undefined8)
 ```
 
@@ -128,7 +129,7 @@ This says: "There's an 8-byte value at stack offset -0xc that we'll call `local_
 
 ### SSA Variables (Generated from Storage)
 
-```
+```text
 local_c  →  Decompiler Analysis  →  dVar12, dVar13, dVar14 (multiple SSA vars)
 ```
 
@@ -228,6 +229,7 @@ These represent SIMD registers whose exact type isn't known.
 ### Why Can't They Be Renamed?
 
 They're **implicit/synthetic** - not actual function variables. They represent:
+
 - Calling convention details (implicit register parameters)
 - Return values from function calls (extraout_*)
 - Compiler-generated temporaries (undefined arrays)
@@ -235,7 +237,7 @@ They're **implicit/synthetic** - not actual function variables. They represent:
 ## Summary Table
 
 | Aspect | Storage Variables | SSA Variables |
-|--------|------------------|---------------|
+| -------- | ------------------ | --------------- |
 | **Access API** | `func.getLocalVariables()` | `LocalSymbolMap.getSymbols()` |
 | **Example Names** | `local_c`, `param_1` | `dVar12`, `uVar3`, `bVar1` |
 | **Rename API** | `variable.setName()` | `HighFunctionDBUtil.updateDBVariable()` |

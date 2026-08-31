@@ -7,7 +7,8 @@
 ## 🎯 Key Principles
 
 ### 1. Use kebab-case (lowercase-with-hyphens)
-```
+
+```text
 ✅ getting-started.md
 ✅ api-reference.md
 ✅ project-structure.md
@@ -17,7 +18,8 @@
 ```
 
 ### 2. Reserve UPPERCASE for Standards Only
-```
+
+```text
 ✅ README.md          (GitHub standard)
 ✅ CHANGELOG.md       (industry standard)
 ✅ CONTRIBUTING.md    (GitHub standard)
@@ -27,7 +29,8 @@
 ```
 
 ### 3. Be Descriptive
-```
+
+```text
 ✅ structure-discovery-guide.md
 ✅ binary-analysis-report.md
 ❌ guide.md
@@ -36,7 +39,8 @@
 ```
 
 ### 4. Keep It Concise (< 40 characters)
-```
+
+```text
 ✅ api-reference.md (16 chars)
 ✅ getting-started.md (18 chars)
 ⚠️ comprehensive-structure-discovery-master-guide.md (51 chars - too long)
@@ -47,6 +51,7 @@
 ## 📋 Current Files Assessment
 
 ### ✅ Already Following Best Practices
+
 - `README.md` - Standard
 - `CHANGELOG.md` - Standard
 - `CONTRIBUTING.md` - Standard
@@ -54,7 +59,7 @@
 ### 🔄 Recommended Changes
 
 | Current | Recommended | Reason |
-|---------|-------------|--------|
+| --------- | ------------- | -------- |
 | `START_HERE.md` | `getting-started.md` | Descriptive kebab-case |
 | `DOCUMENTATION_INDEX.md` | `docs-index.md` | Shorter, kebab-case |
 | `CLAUDE.md` | `ai-assistant-guide.md` | Descriptive, not tool-specific |
@@ -65,6 +70,7 @@
 ### 📁 Move to Subdirectories
 
 **Reports** → `docs/reports/`:
+
 - `ORGANIZATION_SUMMARY.md` → `docs/reports/organization-summary.md`
 - `PROJECT_CLEANUP_SUMMARY.md` → `docs/reports/cleanup-summary.md`
 - `QUICKWIN_COMPLETION_REPORT.md` → `docs/reports/quickwin-report.md`
@@ -78,7 +84,8 @@
 ## 📐 Naming Patterns by Type
 
 ### Documentation
-```
+
+```text
 <topic>-guide.md        → installation-guide.md
 <topic>-reference.md    → api-reference.md
 <topic>-tutorial.md     → quickstart-tutorial.md
@@ -86,20 +93,23 @@
 ```
 
 ### Analysis
-```
+
+```text
 <binary>-analysis.md    → game-exe-analysis.md
 <dll>-analysis.md       → d2client-analysis.md
 ```
 
 ### Reports
-```
+
+```text
 <topic>-report.md       → performance-report.md
 <topic>-summary.md      → cleanup-summary.md
 <topic>-YYYY-MM.md      → milestone-2025-11.md
 ```
 
 ### Configuration
-```
+
+```text
 <topic>-conventions.md  → naming-conventions.md
 <tool>-guide.md         → maven-guide.md
 <topic>-setup.md        → environment-setup.md
@@ -125,6 +135,7 @@ Before creating a markdown file:
 ## 🚀 Implementation
 
 See [MARKDOWN_NAMING_GUIDE.md](.github/MARKDOWN_NAMING_GUIDE.md) for:
+
 - Complete renaming recommendations
 - Migration strategy
 - Impact analysis

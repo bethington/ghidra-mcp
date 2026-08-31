@@ -11,7 +11,7 @@
 ### Current Version Status
 
 | Location | Version | Status |
-|----------|---------|--------|
+| ---------- | --------- | -------- |
 | `pom.xml` | **1.9.2** | ✅ Correct (source of truth) |
 | `CHANGELOG.md` | 1.8.4 | ⚠️ Needs update to 1.9.2 |
 | `DOCUMENTATION_INDEX.md` | 1.8.1 | ⚠️ Needs update to 1.9.2 |
@@ -123,6 +123,7 @@
 #### 🎯 Major Improvements
 
 **Documentation Organization**:
+
 - Created comprehensive PROJECT_STRUCTURE.md documenting entire project layout
 - Consolidated DOCUMENTATION_INDEX.md merging duplicate indexes
 - Enhanced scripts/README.md with categorization and workflows
@@ -130,6 +131,7 @@
 - Organized 40+ root-level files into clear categories
 
 **Project Structure**:
+
 - Categorized all files by purpose (core, build, data, docs, scripts, tools)
 - Created visual directory trees with emoji icons for clarity
 - Defined clear guidelines for adding new files
@@ -137,6 +139,7 @@
 - Prepared 3-phase reorganization plan for future improvements
 
 **Standards & Conventions**:
+
 - Established markdown file naming best practices (kebab-case)
 - Defined special file naming rules (README.md, CHANGELOG.md, etc.)
 - Created quick reference guides and checklists
@@ -144,6 +147,7 @@
 - Set up migration strategy for existing files
 
 **Release Preparation**:
+
 - Created comprehensive release checklist
 - Verified version consistency across project
 - Updated all documentation references
@@ -298,8 +302,8 @@
 ### Release Team
 
 - **Project Lead**: bethington
-- **Repository**: https://github.com/bethington/ghidra-mcp
-- **Issues**: https://github.com/bethington/ghidra-mcp/issues
+- **Repository**: <https://github.com/bethington/ghidra-mcp>
+- **Issues**: <https://github.com/bethington/ghidra-mcp/issues>
 - **Documentation**: See DOCUMENTATION_INDEX.md
 
 ### Support Channels

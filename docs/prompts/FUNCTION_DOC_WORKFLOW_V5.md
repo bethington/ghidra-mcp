@@ -15,7 +15,7 @@ You are documenting reverse-engineered functions in Ghidra using MCP tools. Appl
 
 ## Hungarian Notation Reference
 
-```
+```text
 b:byte  c:char  f:bool  n:int/short  dw:uint/DWORD  w:ushort  l:long
 fl:float  d:double  ll:longlong  qw:ulonglong  ld:float10  h:HANDLE
 p:void*/ptr  pb:byte*  pw:ushort*  pdw:uint*  pn:int*  pp:void**
@@ -53,6 +53,7 @@ Call `rename_function` and `set_function_prototype` in **parallel**.
 **Skip condition**: `get_function_variables` shows all variables have custom names AND resolved storage types (no `undefined` in type field) -> skip to Step 4.
 
 **Type audit checklist** — walk EVERY parameter and local variable:
+
 1. Call `get_function_variables` to get the full variable list with storage types
 2. For each variable where type contains `undefined`: call `set_variable_type` with the correct type based on usage context. Skip phantoms (`extraout_*`, `in_*`) on first failure.
 3. For each parameter where the name has a pointer prefix (`p`, `pp`, `lpsz`) but type is `int` or `uint`: fix the type to a pointer (`void *`, or a specific struct pointer if identifiable)
@@ -62,6 +63,7 @@ Call `rename_function` and `set_function_prototype` in **parallel**.
 7. Call `get_function_variables` once more to confirm no `undefined` storage types remain
 
 **Struct access patterns** — for raw pointer+offset access (`*(ptr + 0x10)`, `ptr[4]`, `param_1[0x2C]`):
+
 - If a matching struct type exists (use `search_data_types`): apply it with `set_variable_type`
 - Otherwise: add EOL comment at each struct access instruction documenting the offset (e.g., `/* +0x10: flags */`). This satisfies the scorer without requiring struct creation.
 
@@ -76,7 +78,8 @@ First, rename any DAT_*/s_* globals visible in the decompiled code: `apply_data_
 Then use `batch_set_comments` with `plate_comment` parameter to set everything in ONE call:
 
 **Plate comment** (plain text only):
-```
+
+```text
 One-line function summary.
 
 Algorithm:
@@ -104,6 +107,7 @@ Structure Layout: (if accessing structs)
 ## Step 5: Verify (1 turn)
 
 Call `analyze_function_completeness` once. Acceptable unfixable deductions — do not attempt further fixes:
+
 - Phantom variables (extraout_*, undefined3) — documented in plate comment
 - API-mandated void* parameters (e.g., DllMain pvReserved)
 - Standard API parameter names using lp/h prefixes vs strict Hungarian
@@ -123,7 +127,7 @@ Skip for non-leaf functions, anything with heap/syscall side effects, or anythin
 
 ## Output
 
-```
+```text
 DONE: FunctionName
 Changes: [brief summary]
 Score: N% [note any unfixable deductions]

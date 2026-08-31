@@ -75,7 +75,7 @@ stopped this repo being the answer by default — the rehoming is what finished 
 
 ## Architecture
 
-```
+```text
 AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> Ghidra Plugin (GhidraMCPPlugin.jar)
 ```
 
@@ -99,6 +99,7 @@ AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> Ghidra Plugin (GhidraMCP
 - **Annotation Scanner**: `AnnotationScanner.java` discovers `@McpTool` methods, generates `/mcp/schema`
 
 Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
+
 - FrontEnd mode: `FrontEndProgramProvider` + `DirectThreadingStrategy`
 - Headless mode: `HeadlessProgramProvider` + `DirectThreadingStrategy`
 

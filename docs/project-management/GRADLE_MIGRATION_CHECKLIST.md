@@ -27,7 +27,7 @@ The desired end state is:
 Current `tools.setup` command to proposed Gradle task mapping:
 
 | Current command | Current backend | Target Gradle task(s) | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `install-python-deps` | Python + pip | `installPythonDeps` wrapper or stay Python-native | Keep the real dependency logic in Python; Gradle may wrap it but should not own the Python environment model. |
 | `verify-version` | Python + `pom.xml` | `verifyVersion` | Read Gradle project version and compare against the selected Ghidra install version. |
 | `preflight` | Python + Maven + filesystem checks | `preflight` | Split internally into version, Java, Ghidra layout, write-access, and optional network checks. |
