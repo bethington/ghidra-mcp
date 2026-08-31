@@ -254,20 +254,41 @@ def _capture_request_connection_snapshot() -> ConnectionSnapshot:
         return get_connection_snapshot()
 
 
-def remember_tools_changed_context(ctx) -> None:
-    """Remember one MCP session that can receive tools/list_changed."""
-    if ctx is None or getattr(ctx, "_request_context", None) is None:
+def remember_tools_changed_session(session) -> None:
+    """Remember one MCP session that can receive tools/list_changed.
+
+    Must be called from the session's own event loop — the loop is captured
+    here so a worker thread can later dispatch the notification back onto it.
+
+    Registration used to happen ONLY inside connect_instance/load_tool_group/
+    unload_tool_group/import_file, which are tools the client has to call
+    first. That made the whole notification path dead in the one situation it
+    exists for: a bridge started BEFORE Ghidra registers 35 static tools, the
+    background retry succeeds seconds later and calls
+    notify_tools_changed_from_worker() — into an EMPTY target list, because no
+    static tool had been invoked yet. The client is never told, so the session
+    runs to its end showing 35 of 273 tools while Ghidra is healthy. Capturing
+    at tools/list (see server.py) fixes that: every client lists tools right
+    after initialize, so a target always exists before the retry can win.
+    """
+    if session is None:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    session = ctx.request_context.session
     with _tools_changed_session_lock:
         for existing_loop, existing_session in _tools_changed_targets:
             if existing_loop is loop and existing_session is session:
                 return
         _tools_changed_targets.append((loop, session))
+
+
+def remember_tools_changed_context(ctx) -> None:
+    """Remember the MCP session behind a FastMCP Context, if it has one."""
+    if ctx is None or getattr(ctx, "_request_context", None) is None:
+        return
+    remember_tools_changed_session(ctx.request_context.session)
 
 
 def notify_tools_changed_from_worker() -> None:

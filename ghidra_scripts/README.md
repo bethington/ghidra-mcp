@@ -7,6 +7,14 @@ This directory contains scripts that run **directly inside Ghidra** (not via MCP
 ### Java Scripts
 - **ClearCallReturnOverrides.java** - Clears incorrect CALL_RETURN flow overrides that prevent proper control flow analysis
 - **DocumentFunctionWithClaude.java** - Documents the current function by calling Claude AI with comprehensive plate comment prompt (Keybinding: Ctrl+Shift+D)
+- **ImportMSDLPDB.java** - Downloads the matching PDB for the current program from
+  Microsoft's symbol server and applies it via Ghidra's PDB Universal Analyzer.
+  One-time Ghidra setup: `Edit > Symbol Server Config` → point at
+  `https://msdl.microsoft.com/download/symbols` with a local cache dir.
+  Skips gracefully (empty JSON result) when the binary has no `PdbInformation`
+  header — no `/DEBUG` link flag, common for third-party DLLs. PDB covers the
+  symbols Microsoft published (CRT / MSVCRT / MFC); a heuristic library-code
+  detector catches the rest.
 
 ## How to Use These Scripts
 

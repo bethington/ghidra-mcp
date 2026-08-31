@@ -57,14 +57,14 @@ small, and clear the leftovers with a Ghidra restart followed by
 USAGE
 -----
     # dry run (default) -- inventory + plan, writes nothing, needs no password
-    python scripts/upgrade_project_language.py
+    python tools/upgrade_project_language.py
 
     # validate credentials and enumeration against the server, still writes nothing
-    python scripts/upgrade_project_language.py --preflight
+    python tools/upgrade_project_language.py --preflight
 
     # do it
-    python scripts/upgrade_project_language.py --apply
-    python scripts/upgrade_project_language.py --apply --folder /Vanilla/1.01
+    python tools/upgrade_project_language.py --apply
+    python tools/upgrade_project_language.py --apply --folder /Vanilla/1.01
 
 Password comes from the environment (never argv, which is world-readable):
 ``GHIDRA_SERVER_PASSWORD`` then ``GHIDRA_PASS``. On Windows the user-scope
@@ -902,7 +902,7 @@ def main() -> int:
                 f"\n  WARNING: {len(leaked)} exclusive checkout(s) could NOT be released.\n"
                 f"  Recorded in {leak_path}. They block a future headless pass on those\n"
                 "  files. To clear: restart Ghidra (which drops the leaked consumers),\n"
-                "  then run:  python scripts/upgrade_project_language.py --release-checkouts"
+                "  then run:  python tools/upgrade_project_language.py --release-checkouts"
             )
         # "unknown" is not "passed": an unreadable probe must never be reported
         # as a clean result, or the verification quietly certifies nothing.

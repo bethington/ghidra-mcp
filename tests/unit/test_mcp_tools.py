@@ -306,6 +306,113 @@ class TestToolsChangedFanout(unittest.TestCase):
         session2.send_tool_list_changed.assert_awaited_once()
 
 
+class TestToolsListCapturesSession(unittest.TestCase):
+    """tools/list must register the notification target.
+
+    Registration used to happen only inside connect_instance/load_tool_group/
+    unload_tool_group/import_file. That made the background auto-connect retry
+    (which exists for a bridge started BEFORE Ghidra) notify an EMPTY target
+    list: the client is never told the other ~238 tools arrived, so the whole
+    session shows 35 of 273 tools while Ghidra is healthy. Every MCP client
+    lists tools right after initialize, so capturing there is what guarantees a
+    target exists before the retry can win.
+    """
+
+    @staticmethod
+    def _run_list_tools(session):
+        import bridge_mcp_ghidra as bridge
+        from mcp.server.lowlevel import server as lowlevel
+
+        async def scenario():
+            token = lowlevel.request_ctx.set(SimpleNamespace(session=session))
+            try:
+                return await bridge.mcp.list_tools()
+            finally:
+                lowlevel.request_ctx.reset(token)
+
+        return asyncio.run(scenario())
+
+    def test_tools_list_registers_notification_target(self):
+        import bridge_mcp_ghidra as bridge
+
+        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        old_targets = list(bridge.state._tools_changed_targets)
+        try:
+            bridge.state._tools_changed_targets.clear()
+            tools = self._run_list_tools(session)
+            self.assertTrue(tools, "tools/list must still return the tool list")
+            self.assertEqual(len(bridge.state._tools_changed_targets), 1)
+            self.assertIs(bridge.state._tools_changed_targets[0][1], session)
+        finally:
+            bridge.state._tools_changed_targets[:] = old_targets
+
+    def test_late_registration_notifies_a_client_that_only_listed_tools(self):
+        """The end-to-end shape of the bug: list tools, then register late."""
+        import bridge_mcp_ghidra as bridge
+        from mcp.server.lowlevel import server as lowlevel
+
+        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+
+        async def scenario():
+            token = lowlevel.request_ctx.set(SimpleNamespace(session=session))
+            try:
+                await bridge.mcp.list_tools()
+            finally:
+                lowlevel.request_ctx.reset(token)
+            # Ghidra arrives later; the retry thread notifies from a worker.
+            await asyncio.get_running_loop().run_in_executor(
+                None, bridge.state.notify_tools_changed_from_worker
+            )
+            await asyncio.sleep(0)
+
+        old_targets = list(bridge.state._tools_changed_targets)
+        try:
+            bridge.state._tools_changed_targets.clear()
+            asyncio.run(scenario())
+        finally:
+            bridge.state._tools_changed_targets[:] = old_targets
+
+        session.send_tool_list_changed.assert_awaited_once()
+
+    def test_tools_list_without_request_context_still_works(self):
+        """A direct call (no active request) must not raise."""
+        import bridge_mcp_ghidra as bridge
+
+        old_targets = list(bridge.state._tools_changed_targets)
+        try:
+            bridge.state._tools_changed_targets.clear()
+            tools = asyncio.run(bridge.mcp.list_tools())
+            self.assertTrue(tools)
+            self.assertEqual(bridge.state._tools_changed_targets, [])
+        finally:
+            bridge.state._tools_changed_targets[:] = old_targets
+
+    def test_lowlevel_handler_uses_the_capturing_wrapper(self):
+        """Patching only FastMCP.list_tools would miss the real request path."""
+        import bridge_mcp_ghidra as bridge
+        import mcp.types as types
+        from mcp.server.lowlevel import server as lowlevel
+
+        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        handler = bridge.mcp._mcp_server.request_handlers[types.ListToolsRequest]
+
+        async def scenario():
+            token = lowlevel.request_ctx.set(SimpleNamespace(session=session))
+            try:
+                return await handler(types.ListToolsRequest(method="tools/list"))
+            finally:
+                lowlevel.request_ctx.reset(token)
+
+        old_targets = list(bridge.state._tools_changed_targets)
+        try:
+            bridge.state._tools_changed_targets.clear()
+            result = asyncio.run(scenario())
+            self.assertTrue(result.root.tools)
+            self.assertEqual(len(bridge.state._tools_changed_targets), 1)
+        finally:
+            bridge.state._tools_changed_targets[:] = old_targets
+
+
 class TestEndpointTimeouts(unittest.TestCase):
     """Test endpoint timeout configuration."""
 

@@ -1940,7 +1940,7 @@ public class ProgramScriptService {
                 + " -- " + path + " was built against an older SLEIGH language revision than this"
                 + " Ghidra ships, so it can only be opened read-only until it is upgraded."
                 + " An upgrade requires an exclusive checkout and cannot be done from here."
-                + " Run: python scripts/upgrade_project_language.py --apply --folder "
+                + " Run: python tools/upgrade_project_language.py --apply --folder "
                 + parentFolderOf(path);
         }
         return message;

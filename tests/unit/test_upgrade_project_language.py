@@ -1,4 +1,4 @@
-"""Unit tests for scripts/upgrade_project_language.py.
+"""Unit tests for tools/upgrade_project_language.py.
 
 Pure Python -- no Ghidra, no server, no subprocess. Every behaviour pinned here
 is one that produced a silent wrong answer during development:
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = REPO_ROOT / "scripts" / "upgrade_project_language.py"
+MODULE_PATH = REPO_ROOT / "tools" / "upgrade_project_language.py"
 
 
 def _load():
