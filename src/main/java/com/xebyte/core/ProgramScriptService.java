@@ -2818,6 +2818,246 @@ public class ProgramScriptService {
         }
     }
 
+    // ========================================================================
+    // Memory Block Creation
+    // ========================================================================
+
+    /**
+     * Upper bound on decoded byte content accepted by {@code /create_memory_block}.
+     *
+     * <p>Matches {@code /read_memory}'s 16 MB ceiling on purpose: a block you can
+     * create with explicit contents is a block you can read back in a single call.
+     * The wire form is larger than the payload (hex doubles it, base64 adds a third),
+     * and {@link SecurityConfig#MAX_REQUEST_BODY_BYTES} is 64 MB, so 16 MB of content
+     * fits in either encoding with room for the surrounding JSON.
+     */
+    public static final int MAX_BLOCK_CONTENT_BYTES = 16 * 1024 * 1024;
+
+    /**
+     * Upper bound on the length of an <em>initialized</em> block.
+     *
+     * <p>Initialized bytes are real database storage written on the Swing thread,
+     * so an unbounded {@code size} with {@code initialized=true} is an EDT freeze
+     * (and a project bloat) waiting to happen. Uninitialized blocks cost nothing
+     * per byte and are deliberately left uncapped here — that is the pre-existing
+     * behavior, and mapping a multi-gigabyte MMIO aperture is a legitimate use.
+     */
+    public static final long MAX_INITIALIZED_BLOCK_BYTES = 256L * 1024 * 1024;
+
+    /**
+     * Reconciled plan for a memory block's contents: what to write, how long the
+     * block ends up, and how much of it is fill rather than caller-supplied bytes.
+     *
+     * @param content caller-supplied bytes; never null, may be empty
+     * @param size final block length in bytes
+     * @param fillByte value used for every byte past {@code content}
+     * @param initialized whether the block must be created initialized
+     */
+    public record BlockContentPlan(byte[] content, long size, int fillByte, boolean initialized) {
+        /** Bytes of the block that are fill rather than caller-supplied content. */
+        public long paddedBytes() {
+            return size - content.length;
+        }
+    }
+
+    /**
+     * Decode a byte payload supplied in exactly one of the two accepted encodings.
+     *
+     * <p>Hex is the primary form (readable in a shell, diffable in a log); base64
+     * is offered for large or genuinely binary payloads. This mirrors
+     * {@code EmulationService}'s memory-region contract, which already accepts a
+     * {@code hex} string and a base64 {@code data} string for the same job.
+     *
+     * <p>Hex input tolerates whitespace, commas and a single leading {@code 0x};
+     * base64 input tolerates whitespace. Anything else is rejected by position so
+     * the caller learns which character was wrong rather than getting a bare
+     * {@code NumberFormatException}.
+     *
+     * @param bytesHex hex-encoded content, or null/empty when not supplied
+     * @param bytesBase64 base64-encoded content, or null/empty when not supplied
+     * @return the decoded bytes; empty when neither parameter was supplied
+     * @throws IllegalArgumentException with a caller-facing message on any problem
+     */
+    public static byte[] decodeBlockContent(String bytesHex, String bytesBase64) {
+        boolean haveHex = bytesHex != null && !bytesHex.trim().isEmpty();
+        boolean haveB64 = bytesBase64 != null && !bytesBase64.trim().isEmpty();
+
+        if (haveHex && haveB64) {
+            throw new IllegalArgumentException(
+                "Specify only one of bytes_hex or bytes_base64, not both");
+        }
+        if (!haveHex && !haveB64) {
+            return new byte[0];
+        }
+
+        if (haveHex) {
+            String cleaned = stripHexNoise(bytesHex);
+            if (cleaned.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "bytes_hex contained no hex digits");
+            }
+            if (cleaned.length() % 2 != 0) {
+                throw new IllegalArgumentException(
+                    "bytes_hex must have an even number of hex digits (got "
+                        + cleaned.length() + ") — each byte is two digits");
+            }
+            // Reject on the encoded length before allocating anything.
+            long decodedLength = cleaned.length() / 2L;
+            if (decodedLength > MAX_BLOCK_CONTENT_BYTES) {
+                throw new IllegalArgumentException(
+                    "bytes_hex decodes to " + decodedLength + " bytes, over the "
+                        + MAX_BLOCK_CONTENT_BYTES + "-byte limit for block content");
+            }
+            byte[] out = new byte[(int) decodedLength];
+            for (int i = 0; i < out.length; i++) {
+                int hi = Character.digit(cleaned.charAt(i * 2), 16);
+                int lo = Character.digit(cleaned.charAt(i * 2 + 1), 16);
+                if (hi < 0 || lo < 0) {
+                    int bad = hi < 0 ? i * 2 : i * 2 + 1;
+                    throw new IllegalArgumentException(
+                        "bytes_hex has a non-hex character '" + cleaned.charAt(bad)
+                            + "' at position " + bad + " (after removing whitespace,"
+                            + " commas and any leading 0x)");
+                }
+                out[i] = (byte) ((hi << 4) | lo);
+            }
+            return out;
+        }
+
+        String cleaned = bytesBase64.replaceAll("\\s+", "");
+        // 4 base64 chars carry at most 3 bytes; check before decoding so an
+        // oversized payload never materializes as a byte[].
+        long estimated = (cleaned.length() / 4L) * 3L;
+        if (estimated > MAX_BLOCK_CONTENT_BYTES) {
+            throw new IllegalArgumentException(
+                "bytes_base64 decodes to about " + estimated + " bytes, over the "
+                    + MAX_BLOCK_CONTENT_BYTES + "-byte limit for block content");
+        }
+        try {
+            byte[] out = Base64.getDecoder().decode(cleaned);
+            if (out.length > MAX_BLOCK_CONTENT_BYTES) {
+                throw new IllegalArgumentException(
+                    "bytes_base64 decodes to " + out.length + " bytes, over the "
+                        + MAX_BLOCK_CONTENT_BYTES + "-byte limit for block content");
+            }
+            return out;
+        } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().contains("over the")) {
+                throw e;
+            }
+            throw new IllegalArgumentException(
+                "bytes_base64 is not valid base64: " + e.getMessage());
+        }
+    }
+
+    /** Remove whitespace, commas and a single leading 0x/0X from a hex string. */
+    private static String stripHexNoise(String hex) {
+        String cleaned = hex.replaceAll("[\\s,_]+", "");
+        if (cleaned.length() >= 2
+                && cleaned.charAt(0) == '0'
+                && (cleaned.charAt(1) == 'x' || cleaned.charAt(1) == 'X')) {
+            cleaned = cleaned.substring(2);
+        }
+        return cleaned;
+    }
+
+    /**
+     * Reconcile caller-supplied content against the requested block length.
+     *
+     * <p>The rules, all of which produce an explicit outcome rather than a silent one:
+     * <ul>
+     * <li>Content longer than {@code size} is an error. Bytes are never truncated —
+     *     discarding data the caller sent is not a recoverable mistake.</li>
+     * <li>Content shorter than {@code size} pads the remainder with {@code fillByte}
+     *     and reports {@code padded_bytes} in the response. "A 4 KB region whose
+     *     first 16 bytes are this header" is the common real request; forcing the
+     *     caller to hand-build kilobytes of zero digits would be hostile.</li>
+     * <li>{@code size} omitted (or zero) with content supplied sizes the block to
+     *     the content exactly.</li>
+     * <li>Content supplied implies an initialized block — an uninitialized block
+     *     has nowhere to put bytes.</li>
+     * </ul>
+     *
+     * @param content decoded content from {@link #decodeBlockContent}; never null
+     * @param initializedRequested the caller's explicit {@code initialized} flag
+     * @param requestedSize the caller's {@code size}; {@code <= 0} means "infer"
+     * @param fillByte value for bytes past the content, 0-255
+     * @return the reconciled plan
+     * @throws IllegalArgumentException with a caller-facing message on any conflict
+     */
+    public static BlockContentPlan planBlockContent(byte[] content,
+                                                    boolean initializedRequested,
+                                                    long requestedSize,
+                                                    int fillByte) {
+        if (fillByte < 0 || fillByte > 255) {
+            throw new IllegalArgumentException(
+                "fill_byte must be between 0 and 255 (got " + fillByte + ")");
+        }
+        boolean hasContent = content != null && content.length > 0;
+        byte[] safeContent = content == null ? new byte[0] : content;
+        boolean initialized = initializedRequested || hasContent;
+
+        long size;
+        if (hasContent && requestedSize <= 0) {
+            size = safeContent.length;
+        } else {
+            if (requestedSize <= 0) {
+                throw new IllegalArgumentException("size must be positive");
+            }
+            size = requestedSize;
+        }
+
+        if (safeContent.length > size) {
+            throw new IllegalArgumentException(
+                "byte content is " + safeContent.length + " bytes but size is " + size
+                    + " — raise size or shorten the content; content is never truncated");
+        }
+        if (initialized && size > MAX_INITIALIZED_BLOCK_BYTES) {
+            throw new IllegalArgumentException(
+                "size " + size + " exceeds the " + MAX_INITIALIZED_BLOCK_BYTES
+                    + "-byte limit for an initialized block; create it with"
+                    + " initialized=false (and no byte content) for a larger region");
+        }
+        return new BlockContentPlan(safeContent, size, fillByte, initialized);
+    }
+
+    /**
+     * Build the stream Ghidra reads the block's bytes from, or null for a plain
+     * zero fill (which Ghidra stores far more compactly).
+     *
+     * <p>The padding tail is deliberately infinite, mirroring
+     * {@code MemoryMapDB.createInitializedBlock}'s own fill stream: Ghidra reads
+     * exactly {@code size} bytes and stops, so nothing is materialized for the
+     * padded region.
+     */
+    private static InputStream blockContentStream(BlockContentPlan plan) {
+        byte[] content = plan.content();
+        int fill = plan.fillByte() & 0xFF;
+        if (content.length == 0 && fill == 0) {
+            return null;  // Ghidra's compact zero-initialization path
+        }
+        InputStream head = new ByteArrayInputStream(content);
+        if (content.length >= plan.size()) {
+            return head;
+        }
+        InputStream tail = new InputStream() {
+            @Override
+            public int read() {
+                return fill;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) {
+                if (len == 0) {
+                    return 0;
+                }
+                Arrays.fill(b, off, off + len, (byte) fill);
+                return len;
+            }
+        };
+        return new SequenceInputStream(head, tail);
+    }
+
     /**
      * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
      */
@@ -2827,22 +3067,73 @@ public class ProgramScriptService {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
-    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    /**
+     * Backward-compatible entry point predating byte contents: creates an
+     * uninitialized, non-overlay block.
+     */
+    public Response createMemoryBlock(String name, String addressStr, long size,
+                                     boolean read, boolean write, boolean execute,
+                                     boolean isVolatile, String comment, String programName) {
+        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile,
+                comment, "", "", false, 0, false, programName);
+    }
+
+    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response createMemoryBlock(
-            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Name for the new memory block (e.g. mmio, patch, .bss). "
+                               + "Must satisfy Ghidra's block-naming rules.") String name,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0") long size,
-            @Param(value = "read", source = ParamSource.BODY, defaultValue = "true") boolean read,
-            @Param(value = "write", source = ParamSource.BODY, defaultValue = "true") boolean write,
-            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
-            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Block length in bytes. Omit (or 0) when byte content is supplied to "
+                               + "size the block to the content exactly. If larger than the content, "
+                               + "the remainder is filled with fill_byte. Must be positive when no "
+                               + "content is supplied.") long size,
+            @Param(value = "read", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Whether the block is readable") boolean read,
+            @Param(value = "write", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Whether the block is writable") boolean write,
+            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Whether the block is executable") boolean execute,
+            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Mark the block volatile — reads may have side effects, so the "
+                               + "decompiler will not constant-fold them (use for MMIO/peripheral "
+                               + "registers)") boolean isVolatile,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional comment describing the block") String comment,
+            @Param(value = "bytes_hex", source = ParamSource.BODY, defaultValue = "",
+                   description = "Block contents as a hex string, e.g. \"deadbeef\" or "
+                               + "\"de ad be ef\". Whitespace, commas and a leading 0x are ignored. "
+                               + "Supplying content forces initialized=true. Max "
+                               + MAX_BLOCK_CONTENT_BYTES
+                               + " decoded bytes. Mutually exclusive with bytes_base64.") String bytesHex,
+            @Param(value = "bytes_base64", source = ParamSource.BODY, defaultValue = "",
+                   description = "Block contents as a standard base64 string — preferred over "
+                               + "bytes_hex for large or fully binary payloads. Supplying content "
+                               + "forces initialized=true. Max " + MAX_BLOCK_CONTENT_BYTES
+                               + " decoded bytes. Mutually exclusive with bytes_hex.") String bytesBase64,
+            @Param(value = "initialized", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Create an initialized block (real bytes backed by the program "
+                               + "database) rather than an uninitialized one. Implied true when "
+                               + "byte content is supplied. An initialized block is capped at "
+                               + MAX_INITIALIZED_BLOCK_BYTES
+                               + " bytes; leave it false for larger MMIO apertures.") boolean initialized,
+            @Param(value = "fill_byte", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Byte value (0-255) for every byte of an initialized block not "
+                               + "covered by the supplied content. Defaults to 0, which Ghidra "
+                               + "stores most compactly.") int fillByte,
+            @Param(value = "overlay", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Create the block in a new overlay address space instead of the "
+                               + "program's physical memory. Use this to map a region that "
+                               + "deliberately overlaps existing blocks (bank switching, ROM "
+                               + "shadowing); the overlap check is skipped and the response "
+                               + "reports the generated overlay space in address_space.") boolean overlay,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2853,8 +3144,15 @@ public class ProgramScriptService {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address parameter required");
         }
-        if (size <= 0) {
-            return Response.err("size must be positive");
+
+        // Decode and reconcile the payload BEFORE opening a transaction, so a
+        // malformed request never touches the program database at all.
+        final BlockContentPlan plan;
+        try {
+            byte[] content = decodeBlockContent(bytesHex, bytesBase64);
+            plan = planBlockContent(content, initialized, size, fillByte);
+        } catch (IllegalArgumentException e) {
+            return Response.err(e.getMessage());
         }
 
         // Resolve address before entering EDT lambda
@@ -2871,19 +3169,34 @@ public class ProgramScriptService {
                 int tx = program.startTransaction("Create memory block");
                 boolean txSuccess = false;
                 try {
-                    // Check for overlap with existing blocks
-                    Address end = addr.add(size - 1);
-                    for (MemoryBlock existing : program.getMemory().getBlocks()) {
-                        if (existing.contains(addr) || existing.contains(end) ||
-                            (addr.compareTo(existing.getStart()) <= 0 && end.compareTo(existing.getEnd()) >= 0)) {
-                            errorMsg.set("Address range overlaps with existing block '" + existing.getName() +
-                                         "' (" + existing.getStart() + " - " + existing.getEnd() + ")");
-                            return;
+                    // Overlay blocks land in a freshly created overlay address space,
+                    // so overlapping the existing physical blocks is the point rather
+                    // than an error. Only guard the non-overlay case.
+                    if (!overlay) {
+                        Address end = addr.add(plan.size() - 1);
+                        for (MemoryBlock existing : program.getMemory().getBlocks()) {
+                            if (existing.contains(addr) || existing.contains(end) ||
+                                (addr.compareTo(existing.getStart()) <= 0 && end.compareTo(existing.getEnd()) >= 0)) {
+                                errorMsg.set("Address range overlaps with existing block '" + existing.getName() +
+                                             "' (" + existing.getStart() + " - " + existing.getEnd() + ")");
+                                return;
+                            }
                         }
                     }
 
-                    MemoryBlock block = program.getMemory().createUninitializedBlock(
-                        name, addr, size, false);
+                    // One Ghidra call both creates the block and fills it, so there
+                    // is no window in which a created-but-unfilled block can exist.
+                    // Any failure leaves txSuccess false and endTransaction(tx, false)
+                    // rolls the whole thing back.
+                    MemoryBlock block;
+                    if (plan.initialized()) {
+                        block = program.getMemory().createInitializedBlock(
+                            name, addr, blockContentStream(plan), plan.size(),
+                            ghidra.util.task.TaskMonitor.DUMMY, overlay);
+                    } else {
+                        block = program.getMemory().createUninitializedBlock(
+                            name, addr, plan.size(), overlay);
+                    }
 
                     block.setRead(read);
                     block.setWrite(write);
@@ -2896,7 +3209,7 @@ public class ProgramScriptService {
                     txSuccess = true;
 
                     String permissions = (read ? "r" : "-") + (write ? "w" : "-") + (execute ? "x" : "-");
-                    resultData.set(JsonHelper.mapOf(
+                    Map<String, Object> out = JsonHelper.mapOf(
                         "success", true,
                         "name", name,
                         "start", block.getStart().toString(),
@@ -2904,8 +3217,15 @@ public class ProgramScriptService {
                         "size", block.getSize(),
                         "permissions", permissions,
                         "volatile", isVolatile,
-                        "message", "Memory block '" + name + "' created at " + addr
-                    ));
+                        "initialized", block.isInitialized(),
+                        "overlay", block.isOverlay(),
+                        "address_space", block.getStart().getAddressSpace().getName(),
+                        "bytes_written", plan.content().length,
+                        "padded_bytes", plan.paddedBytes(),
+                        "fill_byte", plan.fillByte(),
+                        "message", "Memory block '" + name + "' created at " + block.getStart()
+                    );
+                    resultData.set(out);
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                     errorMsg.set(msg);

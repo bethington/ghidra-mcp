@@ -585,9 +585,14 @@
         "execute",
         "volatile",
         "comment",
+        "bytes_hex",
+        "bytes_base64",
+        "initialized",
+        "fill_byte",
+        "overlay",
         "program"
       ],
-      "description": "Create memory block"
+      "description": "Create memory block, optionally initialized with byte contents (hex or base64)"
     },
     {
       "path": "/create_pointer_type",
