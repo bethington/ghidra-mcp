@@ -271,17 +271,22 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```
    In the main project window: **Tools > GhidraMCP > Start MCP Server**
 
-6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`):
+6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`) — use the **absolute
+   path** to `uv` (`which uv`), not the bare name; GUI-launched clients do not
+   inherit your shell's PATH ([#441](https://github.com/bethington/ghidra-mcp/issues/441)):
    ```json
    {
      "mcpServers": {
        "ghidra": {
-         "command": "uv",
+         "command": "/opt/homebrew/bin/uv",
          "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra"]
        }
      }
    }
    ```
+
+   macOS is the sharpest case: apps launched from Finder/Dock get `launchd`'s
+   PATH, which never contains `~/.local/bin` or `/opt/homebrew/bin`.
 
 ### Installation (Arch Linux — AUR)
 
@@ -303,10 +308,42 @@ yay -S ghidra-mcp        # or ghidra-mcp-git
 uv run bridge-mcp-ghidra          # or: python -m bridge_mcp_ghidra
 ```
 
+MCP client config (`.mcp.json`, `~/.cursor/mcp.json`, Claude Desktop config, …).
+**Use the absolute path to `uv`** — see the note below for why:
+
+```json
+{
+  "mcpServers": {
+    "ghidra-mcp": {
+      "command": "/home/<you>/.local/bin/uv",
+      "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra", "--transport", "stdio"],
+      "env": { "GHIDRA_MCP_URL": "http://127.0.0.1:8089" }
+    }
+  }
+}
+```
+
+On Windows the same config points at `uv.exe`, e.g.
+`"command": "C:\\Users\\<you>\\.local\\bin\\uv.exe"`. Find your own path with
+`which uv` (POSIX) or `where.exe uv` (Windows), or just run
+`python -m tools.setup preflight`, which prints the resolved absolute path and a
+ready-to-paste snippet.
+
+> **Why absolute? `"command": "uv"` fails under service and GUI launchers.**
+> The MCP client resolves `command` with **its own** PATH, not your shell's. A
+> client started from a **systemd user service**, a `.desktop` entry, or any
+> other GUI session inherits that launcher's environment, which routinely lacks
+> `~/.local/bin` and `~/.cargo/bin` — the very directories `uv` installs into.
+> The failure lands at process-spawn time as `spawn uv ENOENT`, before any
+> bridge code runs, so there is nothing in any log to read. An absolute path
+> makes the client's PATH irrelevant and works on the first try. The same
+> applies to `python`, `python3`, and the `bridge-mcp-ghidra` console script.
+> ([#441](https://github.com/bethington/ghidra-mcp/issues/441))
+
 To add the bridge to [Autohand Code](https://github.com/autohandai/code-cli/) from a cloned checkout:
 
 ```bash
-autohand mcp add ghidra uv run --directory /path/to/ghidra-mcp bridge-mcp-ghidra
+autohand mcp add ghidra /home/<you>/.local/bin/uv run --directory /path/to/ghidra-mcp bridge-mcp-ghidra
 ```
 
 Add `--scope project` before `ghidra` to save the server in the current project's `.autohand` configuration instead of your user configuration.
@@ -393,6 +430,66 @@ model **discover** the rest on demand instead of registering everything:
 
 `search_tools` works in both eager and `--lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.
+
+#### Minimal read-only allowlist
+
+Some MCP clients gate tools through an explicit allowlist. Cut it too far and
+the agent loses **discovery** — it cannot find entry points or enumerate
+functions through MCP, so it works around the allowlist by `curl`-ing the HTTP
+API on `127.0.0.1:8089` directly, which defeats the point of having one. The
+allowlist has to be small *and* self-sufficient.
+
+**Minimum viable read-only set (4 tools):**
+
+| Tool | Group | What it buys you |
+| --- | --- | --- |
+| `get_metadata` | `program` | Which binary is loaded — name, architecture, image base, function count. Orientation, and it confirms the bridge reached Ghidra at all. |
+| `list_methods` | `listing` | Paginated function-name enumeration (`offset`, `limit`). **This is the discovery tool** — without it the agent cannot answer "what is in this binary". |
+| `get_entry_points` | `listing` | Where execution starts, so analysis has a root to work down from. |
+| `decompile_function` | `function` | The payload. Takes `address` **or** `functions=` (comma-separated names *or* addresses), so one call can pull several bodies. |
+
+That set is genuinely closed: `get_entry_points` and `list_methods` supply the
+addresses and names that `decompile_function` consumes, and a decompiled body
+names its callees, which feed straight back into `decompile_function`.
+
+The three tools suggested in [#441](https://github.com/bethington/ghidra-mcp/issues/441)
+— `get_metadata`, `get_entry_points`, `decompile_function` — all exist under
+exactly those names and are a workable floor. `list_methods` is the one addition
+worth making: without it the agent can only reach code that is reachable by name
+from something it already decompiled, so anything not referenced from an entry
+point is invisible.
+
+**Useful next additions, in order:**
+
+| Tool | Group | Why |
+| --- | --- | --- |
+| `get_function_callers` / `get_function_callees` | `xref` | Walk the call graph without decompiling every body to find edges. |
+| `get_xrefs_to` | `xref` | Who touches this address — the standard question about a global. |
+| `list_strings` | `listing` | Strings are the cheapest orientation signal in an unknown binary. |
+| `search_functions` | `listing` | Name search, once the agent knows what it is hunting for. |
+| `list_imports` / `list_exports` | `listing` | The binary's external surface. |
+
+Every tool above is a `GET`; none of them writes to the Ghidra database.
+
+**Two things to check when your allowlist is narrow:**
+
+- **Groups, not just names.** The bridge registers tools by *group*, and the
+  group is the `category` on the Java `@McpTool` annotation (which the running
+  server publishes at `/mcp/schema`) — not the `category` field in
+  `tests/endpoints.json`, which is a separate hand-maintained column and does
+  not always agree. All four tools in the minimum set fall inside the default
+  `listing,function,program` groups, so they are registered even under `--lazy`.
+  Of the additions above, only the `xref` ones fall outside: under `--lazy` you
+  must either allow `load_tool_group` as well, or start the bridge with
+  `--default-groups listing,function,program,xref`.
+- **A narrow allowlist plus `--lazy` needs the group tools.** If you allowlist
+  only leaf tools and run lazily, the agent has no way to load anything else.
+  Either run eagerly (`--no-lazy`, the default) or add `search_tools`,
+  `list_tool_groups`, `load_tool_group`, and `check_tools` to the allowlist.
+
+Verify any allowlist against the running server rather than against this table:
+`curl http://127.0.0.1:8089/mcp/schema` lists every tool with the `category`
+the bridge groups it by.
 
 #### Optional: Connect a standalone debugger server
 
@@ -500,6 +597,49 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
 - **Localhost-only deployments need no changes.** Auth, bind refusal, and path-root checks are all opt-in.
 
 ## ❓ Troubleshooting
+
+### `spawn uv ENOENT` / `spawn python ENOENT` when the client starts the server
+
+**Cause:** the MCP client could not find the `command` on **its own** PATH. This
+happens before any bridge code runs, so there is nothing in the Ghidra log or
+the bridge log to look at — the process was never created.
+
+It shows up when the client is launched by something other than a login shell:
+
+- a **systemd user service** (`systemctl --user`), whose PATH is
+  `/usr/local/bin:/usr/bin:/bin` unless you extend it;
+- a desktop `.desktop` entry, dock icon, or app launcher;
+- macOS apps started from Finder, which inherit `launchd`'s PATH.
+
+None of those contain `~/.local/bin` (uv's default install location) or
+`~/.cargo/bin`, so `"command": "uv"` cannot resolve even though `uv` works
+perfectly in your terminal.
+
+**Solution:** use an absolute path in the client config.
+
+```jsonc
+// before — resolves against the client's PATH, fails under a service/GUI launcher
+"command": "uv"
+// after — no PATH lookup at all
+"command": "/home/<you>/.local/bin/uv"
+```
+
+Find yours with `which uv` (POSIX) or `where.exe uv` (Windows). Or run:
+
+```bash
+python -m tools.setup preflight
+```
+
+which prints the resolved absolute path, the PATH entries it searched when a
+launcher is missing, and a ready-to-paste config snippet. Note what that check
+can and cannot tell you: it resolves against **your shell's** PATH, not the
+client's, so a pass there is evidence, not proof — the absolute path is what
+actually removes the failure mode. ([#441](https://github.com/bethington/ghidra-mcp/issues/441))
+
+If you must keep a bare command name, give the service manager the PATH instead
+— e.g. `Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"` in the
+unit file, or `systemctl --user import-environment PATH` — but the absolute
+path is the smaller and more portable fix.
 
 ### "GhidraMCP" menu not appearing in Tools
 

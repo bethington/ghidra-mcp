@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ghidra-mcp": {
-      "command": "uv",
+      "command": "c:/Users/benam/.local/bin/uv.exe",
       "args": [
         "run",
         "--no-sync",

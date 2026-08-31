@@ -23,6 +23,7 @@ from .requirements import (
     make_install_plan,
     uv_sync_command,
 )
+from .spawn import report_spawn_commands
 from .version_bump import apply_version_bump
 from .versioning import (
     infer_ghidra_version_from_path,
@@ -375,6 +376,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             return 1
         print(f"Python: {python_executable}")
         print("uv: available")
+        report_spawn_commands(repo_root)
         ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
         return run_gradle(repo_root, ["preflight"], ghidra_path=ghidra_path)
 
@@ -393,6 +395,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     print("uv: available")
+    report_spawn_commands(repo_root)
     if shutil.which("java") is None:
         print("Java not found on PATH.", file=sys.stderr)
         return 1
