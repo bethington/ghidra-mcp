@@ -106,34 +106,39 @@ python -m tools.gen_readme_api_reference --write
 Live regression is required before merging risky deploy, GUI plugin, debugger,
 benchmark, or endpoint behavior changes.
 
-> **BLOCKED — the `release` tier cannot run from this repository.**
-> `fun-doc/` moved to the `d2-game-exe` repository on 2026-08-10 (commit
-> `10960f76`) and took the `Benchmark.dll` fixture with it. Every tier that
-> resets that fixture — `release`, `benchmark-read`, `benchmark-write`,
-> `multi-program`, `debugger-live`, `negative-contract` — now raises in
-> `reset_benchmark_fixture()` (`tools/setup/ghidra.py`) before a single
-> assertion runs. The two tiers that still work here are `endpoint-catalog`
-> and `selected-contract`.
->
-> Until a maintainer decides what the release gate should be, do not treat
-> this section as satisfiable. The options are: run the benchmark tiers from
-> `d2-game-exe`, re-home a fixture here, or downgrade the gate to the tiers
-> that still run. Recording "passed" for a tier that cannot execute is worse
-> than recording that it is blocked.
-
-- [ ] Confirm the current Ghidra UI has no blocking modal dialogs.
-- [ ] Run the deploy regression at a tier that can execute:
+The `release` tier imports the benchmark fixture from
+`tests/fixtures/benchmark/` into the active Ghidra project at
+`/testing/benchmark/`. The fixture is committed and generated rather than
+compiled, so no toolchain is needed — but confirm it is intact before spending a
+build and a Ghidra restart on discovering otherwise:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test selected-contract
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test endpoint-catalog
+python tests/fixtures/benchmark/make_fixture.py --check
 ```
 
-- [ ] Record which tiers were run and whether they passed. Note explicitly that
-  the benchmark-backed tiers were skipped as unrunnable, not as passing.
+- [ ] Confirm the current Ghidra UI has no blocking modal dialogs.
+- [ ] Run the release-grade deploy regression:
+
+```text
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test release
+```
+
+- [ ] Record whether the release regression passed, **and read its last line**.
+  It ends `Debugger live test: ran` or `Debugger live test: SKIPPED (<reason>)`.
+  A skip is tolerated by design — the tier needs a dbgeng backend and
+  `ghidratrace` in the launcher's Python — but it is a hole in the run, not a
+  pass, and it should be recorded as one.
 - [ ] If the run required manual dialog intervention, document the popup and
   decide whether the deploy/prompt-policy automation needs another fix before
   release.
+
+> **This gate was dead from 2026-08-10 to 2026-08-31.** `fun-doc/` moved to
+> `d2-game-exe` and took the `Benchmark.dll` fixture with it, so `release` and
+> five other tiers raised in `reset_benchmark_fixture()` before running a single
+> assertion. If this section ever stops being satisfiable again, say so in the
+> release notes rather than substituting a tier that does not test the same
+> thing: `endpoint-catalog` and `selected-contract` check that endpoints are
+> *registered*, and never touch a program.
 
 ## 5. Commit and Pull Request
 
@@ -176,10 +181,9 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-- [ ] Leave `run_live_regression` **off** in the release workflow until the
-  benchmark-tier question above is resolved. It calls `release-regression.yml`
-  with `test_tier: release`, which now fails fast by design (see section 4).
-  Enabling it today guarantees a red release run.
+- [ ] Enable `run_live_regression` in the release workflow when the self-hosted
+  Windows runner is available. It calls `release-regression.yml` with
+  `test_tier: release`, which works again as of 2026-08-31.
 - [ ] Verify release assets include `GhidraMCP-X.Y.Z.zip`.
 - [ ] Download the release ZIP and sanity-check that it installs or at least
   contains the expected extension payload.
