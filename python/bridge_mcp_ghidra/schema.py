@@ -75,6 +75,13 @@ def _parse_schema(raw: dict) -> list[dict]:
                 pdef["source"] = p["source"]
             if p.get("param_type"):
                 pdef["param_type"] = p["param_type"]
+            # Alternative spellings the server accepts for this parameter
+            # (@Param(aliases = {...})). AnnotationScanner resolves the canonical
+            # name first and then each alias, so both reach the same argument.
+            # Carried through so registry.handler can fold an alias onto its
+            # canonical name instead of the bridge dropping it on the floor.
+            if p.get("aliases"):
+                pdef["aliases"] = [str(a) for a in p["aliases"]]
             # Carried through so the dispatch handler knows not to drop an
             # empty-string argument for this parameter (e.g. clearing a
             # comment). See registry.handler's filtering.

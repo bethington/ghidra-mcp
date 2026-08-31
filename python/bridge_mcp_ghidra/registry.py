@@ -24,6 +24,41 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
     properties = params_schema.get("properties", {})
     required = set(params_schema.get("required", []))
+    # Back-compat parameter spellings. `@Param(aliases = {...})` names spellings
+    # the server genuinely serves -- AnnotationScanner tries the canonical name
+    # and then each alias -- and /mcp/schema publishes them as of 7.0.0.
+    #
+    # The bridge has to declare them too. FastMCP validates arguments against
+    # this signature with a pydantic model whose `extra` policy is `ignore`, so
+    # an alias the signature does not name was SILENTLY DROPPED here and the
+    # request went out without the value; and when the canonical name was
+    # required, the call was rejected client-side for a spelling the server
+    # accepts. Declaring each alias as an optional parameter and folding it onto
+    # the canonical name is what makes the published contract reachable.
+    alias_to_canonical: dict[str, str] = {}
+    for _canonical, _pdef in properties.items():
+        for _alias in _pdef.get("aliases") or ():
+            # Never shadow a real parameter, and never let a second declaration
+            # steal an alias already claimed: first declaration wins, which is
+            # the order the Java resolver walks.
+            if _alias in properties or _alias in alias_to_canonical:
+                continue
+            alias_to_canonical[_alias] = _canonical
+    # A required parameter that has aliases cannot stay required in the
+    # signature -- the alias IS the value. The check moves into the handler,
+    # after folding, so it still fails loudly but on the real condition.
+    aliased_required = {c for c in required if c in set(alias_to_canonical.values())}
+    signature_required = required - aliased_required
+    # Parameters where "" is itself the intent (see the filtering note in
+    # handler). Hoisted out of the handler so alias folding shares one answer.
+    allow_empty = {name for name, pdef in properties.items() if pdef.get("allow_empty")}
+
+    def is_absent(value, name: str) -> bool:
+        """True when `value` would not survive the empty-argument filter below."""
+        if value is None:
+            return True
+        return isinstance(value, str) and value == "" and name not in allow_empty
+
     # Program selectors: params that pick which open program a call operates on.
     # Most tools use plain `program=`; the cross-program tools (diff_functions,
     # bulk_fuzzy_match, find_similar_functions_fuzzy) use `source_program`/
@@ -46,6 +81,27 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         return bool(value)
 
     def handler(**kwargs):
+        # Fold back-compat spellings onto their canonical parameter before
+        # anything else reads kwargs. Resolution order matches the Java side:
+        # the canonical name wins when the caller supplied one, otherwise the
+        # first alias that carries a value, in declaration order.
+        for alias, canonical in alias_to_canonical.items():
+            value = kwargs.pop(alias, None)
+            if value is None:
+                continue
+            if is_absent(kwargs.get(canonical), canonical):
+                kwargs[canonical] = value
+        # Required-but-aliased params are optional in the signature (an alias may
+        # be carrying the value), so enforce them here instead.
+        unfilled = sorted(c for c in aliased_required if is_absent(kwargs.get(c), c))
+        if unfilled:
+            spellings = {c: [c] + [a for a, target in alias_to_canonical.items() if target == c] for c in unfilled}
+            return json.dumps(
+                {
+                    "error": "Missing required parameter(s): "
+                    + "; ".join(f"`{c}` (or {', '.join(f'`{s}`' for s in alts[1:])})" for c, alts in spellings.items())
+                }
+            )
         # Sanitize address parameters before dispatch
         for pname, pdef in properties.items():
             if pdef.get("param_type") == "address" and pname in kwargs and kwargs[pname] is not None:
@@ -69,9 +125,6 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # empty is meaningful is a property of the parameter, so the parameter
         # declares it (@Param(allowEmpty = true)) rather than the bridge
         # guessing.
-        allow_empty = {
-            name for name, pdef in properties.items() if pdef.get("allow_empty")
-        }
         filtered = {
             k: v
             for k, v in kwargs.items()
@@ -124,7 +177,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         json_type = pdef.get("type", "string")
         py_type = _TYPE_MAP.get(json_type, str)
         default = pdef.get("default", inspect.Parameter.empty)
-        if pname not in required and default is inspect.Parameter.empty:
+        if pname not in signature_required and default is inspect.Parameter.empty:
             default = None
             py_type = py_type | None if py_type != str else str | None
 
@@ -133,6 +186,19 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             required_params.append(param)
         else:
             optional_params.append(param)
+
+    # Declared back-compat spellings, always optional. Without these the pydantic
+    # arg model drops them before `handler` ever sees them.
+    for alias, canonical in alias_to_canonical.items():
+        py_type = _TYPE_MAP.get(properties[canonical].get("type", "string"), str)
+        optional_params.append(
+            inspect.Parameter(
+                alias,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=py_type | None,
+            )
+        )
 
     sig_params = required_params + optional_params
     # Add dry_run parameter for POST (write) endpoints
