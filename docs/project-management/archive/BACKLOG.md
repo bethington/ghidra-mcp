@@ -6,6 +6,7 @@ Each item has a corresponding GitHub issue for tracking.
 ## Priority: Do Now
 
 ### Streamable HTTP Transport Documentation
+
 **Status:** Already implemented — SDK supports it, argparse accepts it.
 **Remaining:** Update docs, mcp-config.json examples, README client setup.
 **Effort:** 15 minutes
@@ -14,6 +15,7 @@ Each item has a corresponding GitHub issue for tracking.
 ## Priority: Do Next
 
 ### Composable Batch Query Endpoint
+
 **Status:** Planning
 **Effort:** Medium (2-3 days)
 **Inspiration:** GhidraMCPd's `/api/collect.json` and starsong's `analyze_function_complete`
@@ -23,12 +25,14 @@ A single endpoint that accepts a list of "fields" and returns everything in one
 call instead of requiring 4+ sequential tool calls.
 
 **Problem it solves:**
+
 - fun_doc's `fetch_function_data()` makes 4 sequential HTTP calls per function
 - MiniMax/Codex agent loops waste tokens on repeated round-trips
 - Every AI consumer independently re-discovers the same multi-call pattern
 
 **Proposed design:**
-```
+
+```text
 POST /analyze_function_bundle
 {
   "address": "0x10042a30",
@@ -41,6 +45,7 @@ Returns a single JSON object with all requested data keyed by field name.
 Server-side, dispatches to existing service methods — no new business logic.
 
 **Implementation notes:**
+
 - New method in `AnalysisService.java` with `@McpTool`
 - Fields map to existing service calls: decompile→FunctionService, variables→FunctionService, etc.
 - `analyze_for_documentation` is a partial version of this but hardcoded
@@ -48,6 +53,7 @@ Server-side, dispatches to existing service methods — no new business logic.
 - fun_doc's `fetch_function_data()` can switch to a single call
 
 ### Write Safety / Dry-Run Mode
+
 **Status:** Implemented (v5.1.0)
 **Effort:** Low (1 day)
 **Inspiration:** GhidraMCPd's `ENABLE_WRITES` and `dry_run` flags
@@ -63,6 +69,7 @@ wraps the call in a nested transaction that always rolls back. Bridge auto-adds
 ## Priority: Plan For
 
 ### Data Flow Analysis Tool
+
 **Status:** Research
 **Effort:** High (3-5 days)
 **Inspiration:** starsong's `analysis_get_dataflow`
@@ -72,6 +79,7 @@ Track how data flows through a function — forward (where does this value go?)
 and backward (where did this value come from?).
 
 **Implementation notes:**
+
 - Ghidra has Varnode/PcodeOp graph via `DecompInterface`
 - New method in `AnalysisService.java`
 - Parameters: address, direction (forward/backward), max_steps
@@ -79,6 +87,7 @@ and backward (where did this value come from?).
 - Self-contained — no existing code changes needed, ~200-300 lines Java
 
 ### Offline Test Fixtures
+
 **Status:** Research
 **Effort:** Medium (2-3 days)
 **Inspiration:** GhidraMCPd's reference firmware + stub server
@@ -87,6 +96,7 @@ and backward (where did this value come from?).
 CI tests that don't require a running Ghidra instance.
 
 **Implementation notes:**
+
 - Create a `FixtureProgramProvider` implementing `ProgramProvider`
 - Returns canned data for a reference binary
 - Services already accept `ProgramProvider` via constructor injection
@@ -96,6 +106,7 @@ CI tests that don't require a running Ghidra instance.
 ## Priority: Architect
 
 ### Native MCP Server (Eliminate Python Bridge)
+
 **Status:** Researched, scoped
 **Effort:** Medium-High (Phase 1: 2-3 days, Phase 2: 1 day, Phase 3: TBD)
 **GitHub Issue:** #114
@@ -104,21 +115,25 @@ Replace the Python bridge with the official Java MCP SDK (`io.modelcontextprotoc
 in headless mode. The bridge converts MCP↔HTTP — exactly the glue code MCP was designed to eliminate.
 
 **Target architecture:**
-```
+
+```text
 AI Tool → MCP (stdio) → Ghidra Headless Server (Java, native MCP)
 ```
 
 **Phase 1 — Headless stdio:**
+
 - Add `mcp-core` + `mcp-json-jackson2` Maven deps
 - `McpToolAdapter`: converts `AnnotationScanner` output → `SyncToolSpecification[]`
 - New entry point using `StdioServerTransportProvider`
 - Keep HTTP mode as fallback
 
 **Phase 2 — Streamable HTTP:**
+
 - Embedded servlet container (Jetty/Undertow) for `HttpServletStreamableServerTransportProvider`
 - Replaces Python bridge for remote use cases
 
 **Phase 3 — GUI plugin (future):**
+
 - Plugin can't own stdio; needs embedded servlet or IPC
 
 **Key decision:** Use Jackson 2 (`mcp-json-jackson2`) alongside existing Gson. No conflict —
@@ -130,11 +145,13 @@ supports stdio + streamable-http + SSE transports natively.
 ## Evaluated and Skipped
 
 ### HATEOAS / Self-Describing API (starsong)
+
 **Why skipped:** Over-engineered for MCP use case. AI clients don't follow
 hypermedia links — they call tools by name from the schema. Adds JSON bloat
 that contradicts token-efficiency goals.
 
 ### Standalone CLI Tool (starsong)
+
 **Why skipped:** Web dashboard + curl-able HTTP endpoints cover the use cases.
 fun_doc handles batch automation. Low ROI given maintenance surface.
 

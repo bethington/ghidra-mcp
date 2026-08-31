@@ -86,7 +86,7 @@ workflows.
 ## Quick Navigation
 
 | Task | Location |
-|------|----------|
+| ------ | ---------- |
 | Install and deploy | `python -m tools.setup ...` in the repo root |
 | Run the MCP bridge | `uv run bridge-mcp-ghidra` (or `python -m bridge_mcp_ghidra`) |
 | Read release notes | `docs/releases/` |

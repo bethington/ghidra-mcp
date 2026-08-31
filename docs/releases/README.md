@@ -413,8 +413,7 @@ internal fun-doc improvement (library-code auto-classification). 241 → 243 too
   default on all platforms; TCP port-range fallback scans
   `8089..8104` when the configured port is taken; actual bound port
   surfaced via `/mcp/instance_info → tcp_port`.
-- **P-code endpoints** (#192, PR #197) — `/get_function_pcode` (basic
-  + high granularity, full HighFunction graph with SSA flags),
+- **P-code endpoints** (#192, PR #197) — `/get_function_pcode` (basic + high granularity, full HighFunction graph with SSA flags),
   `/get_language_metadata` (SLEIGH facts, register relations,
   default symbols).
 - **Library-code auto-classification (fun-doc)** (PR #198) — heuristic
@@ -434,6 +433,7 @@ Major release: fun-doc's per-function workflow state moves out of `state.json` (
 - **Tier-2 doc-quality regression** (`fun-doc/benchmark/bh/`) — grades BH.dll documentation against the upstream Project-Diablo-2/BH source as ground truth. Baseline corpus score 0.442 captured.
 
 Migration path for existing users:
+
 ```bash
 pip install -r fun-doc/requirements.txt
 python fun-doc/scripts/migrate_state_to_sql.py [--state ... --runs ... --inventory ... --global-inventory ...]
@@ -589,7 +589,7 @@ Function-name quality enforcement:
 Summarized below; detailed per-release docs are in [archive/](archive/).
 
 | Version | Type | Highlights |
-|---------|------|-----------|
+| --------- | ------ | ----------- |
 | v3.2.0 | fixes | Trailing slash, fuzzy match JSON, completeness checker overhaul |
 | v3.1.0 | feature | Server control menu, deployment automation, TCD auto-activation |
 | v3.0.0 | major | Headless server parity, 8 new tool categories, 179 tools |

@@ -21,12 +21,12 @@ Funding does not buy private control of the project. It helps move public, revie
 - Help refine acceptance criteria before implementation starts.
 - For organization-backed work, reach out about sponsored development or invoice-based support.
 
-Sponsor link: https://github.com/sponsors/bethington
+Sponsor link: <https://github.com/sponsors/bethington>
 
 ## Current RFC Milestones
 
 | Milestone | RFC | Primary Value | First Phase | Status |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Native MCP Runtime | `NATIVE_MCP_RUNTIME_RFC.md` | Java speaks MCP directly in headless and GUI modes, reducing bridge/process complexity | Headless native MCP over stdio | Draft RFC |
 | Function Documentation at Scale | `FUNCTION_DOCUMENTATION_SCALE_RFC.md` | Reliable AI documentation across many functions with queueing, scoring, reports, and dashboard review | Reliable function-level jobs | Draft RFC |
 | Dynamic Knowledge Validation | `DYNAMIC_KNOWLEDGE_VALIDATION_RFC.md` | Use live debugger evidence to validate and expand the Ghidra knowledge corpus | Runtime Prototype Validation | Draft RFC |
@@ -125,7 +125,7 @@ Best for sponsors who care about:
 These may become RFCs later, but need more clarification or may be absorbed into the milestones above:
 
 | Candidate | Source | Likely Direction |
-|---|---|---|
+| --- | --- | --- |
 | Offline/disposable CI test fixtures | GitHub issue `#112`, `docs/TESTING.md` | Could become a CI Reliability RFC or fold into Headless Parity |
 | Cross-client discovery/connectivity hardening | GitHub issue `#170` | Could become a Client Compatibility RFC or fold into Recovery/Native MCP |
 | Gradle migration completion | `GRADLE_MIGRATION_CHECKLIST.md` | Could become Build and Release Modernization milestone |
@@ -161,4 +161,3 @@ Sponsor link: https://github.com/sponsors/bethington
 - Keep small bugs and straightforward enhancements in normal issues.
 - Add an RFC before implementation when a milestone affects architecture, user workflows, or long-term maintenance.
 - Update statuses when an RFC moves from draft to accepted, in progress, shipped, or deferred.
-

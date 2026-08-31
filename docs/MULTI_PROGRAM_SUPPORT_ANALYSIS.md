@@ -17,7 +17,7 @@ Generated: December 10, 2025
 These endpoints already support multi-program operations via the `program` query parameter:
 
 | Endpoint | Handler Method | Line | Notes |
-|----------|----------------|------|-------|
+| ---------- | ---------------- | ------ | ------- |
 | `/list_functions` | `listFunctions(String programName)` | 259 | ✅ Complete |
 | `/list_functions_enhanced` | `listFunctionsEnhanced(int, int, String programName)` | 266 | ✅ Complete |
 | `/search_functions` | `searchFunctionsByName(String, int, int, String programName)` | 303 | ✅ Complete |
@@ -35,7 +35,7 @@ These endpoints already support multi-program operations via the `program` query
 These are meta/UI endpoints that operate on Ghidra's current state, not a specific program:
 
 | Endpoint | Handler Method | Line | Reason |
-|----------|----------------|------|--------|
+| ---------- | ---------------- | ------ | -------- |
 | `/get_current_address` | `getCurrentAddress()` | 322 | Returns UI cursor position |
 | `/get_current_function` | `getCurrentFunction()` | 326 | Returns UI selection |
 | `/get_current_program_info` | `getCurrentProgramInfo()` | 1399 | Returns active program info |
@@ -55,7 +55,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Function Analysis Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/get_function_by_address` | `getFunctionByAddress(String)` | 316 | ❌ Uses `getCurrentProgram()` |
 | `/get_function_callees` | `getFunctionCallees(String, int, int)` | 619 | ❌ Uses `getCurrentProgram()` (line 5788) |
 | `/get_function_callers` | `getFunctionCallers(String, int, int)` | 627 | ❌ Uses `getCurrentProgram()` (line 5869) |
@@ -74,7 +74,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Data & Symbol Listing Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/list_methods` | `getAllFunctionNames(int, int)` | 202 | ❌ Uses `getCurrentProgram()` (line 1482) |
 | `/list_classes` | `getAllClassNames(int, int)` | 209 | ❌ Uses `getCurrentProgram()` (line 1493) |
 | `/list_segments` | `listSegments(int, int)` | 216 | ❌ Uses `getCurrentProgram()` (line 1510) |
@@ -92,7 +92,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Data Type Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/list_data_types` | `listDataTypes(String, int, int)` | 654 | ❌ Uses `getCurrentProgram()` |
 | `/get_type_size` | `getTypeSize(String)` | 776 | ❌ Uses `getCurrentProgram()` |
 | `/get_struct_layout` | `getStructLayout(String)` | 782 | ❌ Uses `getCurrentProgram()` |
@@ -106,7 +106,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Memory & Xref Analysis Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/read_memory` | `readMemory(String, int)` | 905 | ❌ Uses `getCurrentProgram()` |
 | `/get_bulk_xrefs` | `getBulkXrefs(Object)` | 918 | ❌ Uses `getCurrentProgram()` |
 | `/analyze_data_region` | `analyzeDataRegion(...)` | 926 | ❌ Uses `getCurrentProgram()` |
@@ -121,7 +121,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Metadata & Analysis Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/get_metadata` | `getMetadata()` | 724 | ❌ Uses `getCurrentProgram()` |
 | `/list_calling_conventions` | `listCallingConventions()` | 394 | ❌ Uses `getCurrentProgram()` |
 | `/can_rename_at_address` | `canRenameAtAddress(String)` | 1293 | ❌ Uses `getCurrentProgram()` |
@@ -130,7 +130,7 @@ Critical for cross-binary analysis and documentation propagation:
 ### Malware/Security Analysis Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/detect_crypto_constants` | `detectCryptoConstants()` | 1023 | ❌ Uses `getCurrentProgram()` |
 | `/find_similar_functions` | `findSimilarFunctions(...)` | 1039 | ❌ Uses `getCurrentProgram()` |
 | `/analyze_control_flow` | `analyzeControlFlow(String)` | 1049 | ❌ Uses `getCurrentProgram()` |
@@ -151,7 +151,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Rename Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/rename_function` | `renameFunction(String, String)` | 278 | ❌ Uses `getCurrentProgram()` (line 1767) |
 | `/rename_function_by_address` | `renameFunctionByAddress(String, String)` | 364 | ❌ Uses `getCurrentProgram()` |
 | `/rename_data` | `renameDataAtAddress(String, String)` | 284 | ❌ Uses `getCurrentProgram()` |
@@ -166,7 +166,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Comment Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/set_decompiler_comment` | `setDecompilerComment(String, String)` | 348 | ❌ Uses `getCurrentProgram()` |
 | `/set_disassembly_comment` | `setDisassemblyComment(String, String)` | 356 | ❌ Uses `getCurrentProgram()` |
 | `/set_plate_comment` | `setPlateComment(String, String)` | 1122 | ❌ Uses `getCurrentProgram()` |
@@ -175,7 +175,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Function Prototype Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/set_function_prototype` | `setFunctionPrototype(...)` | 372 | ❌ Uses `getCurrentProgram()` |
 | `/set_local_variable_type` | `setLocalVariableType(...)` | 399 | ❌ Uses `getCurrentProgram()` |
 | `/set_function_no_return` | `setFunctionNoReturn(String, boolean)` | 418 | ❌ Uses `getCurrentProgram()` |
@@ -185,7 +185,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Data Type Modification Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/create_struct` | `createStruct(String, String)` | 662 | ❌ Uses `getCurrentProgram()` |
 | `/create_enum` | `createEnum(String, String, int)` | 678 | ❌ Uses `getCurrentProgram()` |
 | `/create_union` | `createUnion(String, String)` | 756 | ❌ Uses `getCurrentProgram()` |
@@ -206,14 +206,14 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Label & Symbol Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/create_label` | `createLabel(String, String)` | 591 | ❌ Uses `getCurrentProgram()` |
 | `/batch_create_labels` | `batchCreateLabels(List)` | 600 | ❌ Uses `getCurrentProgram()` |
 
 ### Bookmark Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/set_bookmark` | `setBookmark(...)` | 1360 | ❌ Uses `getCurrentProgram()` |
 | `/list_bookmarks` | `listBookmarks(...)` | 1371 | ❌ Uses `getCurrentProgram()` |
 | `/delete_bookmark` | `deleteBookmark(...)` | 1381 | ❌ Uses `getCurrentProgram()` |
@@ -221,7 +221,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Other Write Endpoints
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/apply_data_classification` | `applyDataClassification(...)` | 963 | ❌ Uses `getCurrentProgram()` |
 | `/force_decompile` | `forceDecompile(String)` | 500 | ❌ Uses `getCurrentProgram()` (line 3411) |
 | `/clear_instruction_flow_override` | `clearInstructionFlowOverride(String)` | 438 | ❌ Uses `getCurrentProgram()` |
@@ -231,7 +231,7 @@ These modify program state - less critical but still useful for cross-binary wor
 ### Script Endpoints (Program Context Dependent)
 
 | Endpoint | Handler Method | Line | Current Status |
-|----------|----------------|------|----------------|
+| ---------- | ---------------- | ------ | ---------------- |
 | `/run_script` | `runGhidraScript(...)` | 476 | Scripts run on current program |
 | `/list_scripts` | `listGhidraScripts(String)` | 491 | No program context needed |
 | `/run_ghidra_script` | `runGhidraScriptWithCapture(...)` | 1348 | Scripts run on current program |
@@ -243,7 +243,7 @@ These modify program state - less critical but still useful for cross-binary wor
 These don't need programName as they're program-independent:
 
 | Endpoint | Handler Method | Line | Notes |
-|----------|----------------|------|-------|
+| ---------- | ---------------- | ------ | ------- |
 | `/convert_number` | `convertNumber(String, int)` | 728 | Pure utility |
 | `/list_scripts` | `listGhidraScripts(String)` | 491 | Lists available scripts |
 
@@ -268,6 +268,7 @@ private String someMethod(String param, String programName) {
 ```
 
 The `getProgramOrError(String programName)` method at line 4347 handles:
+
 1. If programName is null/empty → returns `getCurrentProgram()`
 2. Otherwise → finds the named program from open programs
 3. Returns `Object[]{Program, ErrorString}` where one is null
@@ -277,6 +278,7 @@ The `getProgramOrError(String programName)` method at line 4347 handles:
 ## Recommended Implementation Order
 
 ### Phase 1: Core Read Operations (Critical for cross-binary analysis)
+
 1. `get_function_by_address`
 2. `get_function_callees`
 3. `get_function_callers`
@@ -289,6 +291,7 @@ The `getProgramOrError(String programName)` method at line 4347 handles:
 10. `analyze_function_completeness`
 
 ### Phase 2: Listing Operations
+
 1. `list_methods`
 2. `list_classes`
 3. `list_segments`
@@ -301,12 +304,14 @@ The `getProgramOrError(String programName)` method at line 4347 handles:
 10. `list_data_types`
 
 ### Phase 3: Data Analysis
+
 1. `read_memory`
 2. `get_bulk_xrefs`
 3. `analyze_data_region`
 4. `get_metadata`
 
 ### Phase 4: Write Operations (As needed)
+
 - Rename operations
 - Comment operations
 - Data type modifications

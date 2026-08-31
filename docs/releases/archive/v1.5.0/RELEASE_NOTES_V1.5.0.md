@@ -13,9 +13,11 @@ Version 1.5.0 introduces **9 new workflow optimization tools** designed to drama
 ### Batch Operations
 
 #### 1. `batch_set_comments` - Unified Comment Management
+
 **Reduces**: 4+ API calls → 1 API call (75% reduction)
 
 Set all comment types in a single atomic operation:
+
 - Plate comments (function header)
 - Decompiler comments (PRE_COMMENT)
 - Disassembly comments (EOL_COMMENT)
@@ -36,6 +38,7 @@ batch_set_comments(
 ```
 
 #### 2. `batch_rename_function_components` - Atomic Rename Operations
+
 **Reduces**: 3-5 API calls → 1 API call (67-80% reduction)
 
 Rename function, parameters, and local variables atomically:
@@ -50,6 +53,7 @@ batch_rename_function_components(
 ```
 
 #### 3. `batch_apply_data_types` - Multiple Type Applications
+
 **Reduces**: 5+ API calls → 1 API call (80% reduction)
 
 Apply multiple data types in a single operation:
@@ -65,6 +69,7 @@ batch_apply_data_types([
 ### Function Inspection
 
 #### 4. `get_function_variables` - Variable Enumeration
+
 **Enables**: Programmatic variable discovery (previously required manual parsing)
 
 List all variables in a function:
@@ -83,6 +88,7 @@ List all variables in a function:
 ```
 
 #### 5. `analyze_function_completeness` - Quality Verification
+
 **Enables**: Automated quality assurance (previously manual inspection)
 
 Check function documentation completeness:
@@ -103,6 +109,7 @@ Check function documentation completeness:
 ### Documentation Tools
 
 #### 6. `set_plate_comment` - Function Header Comments
+
 **Enables**: Previously impossible operation
 
 Set function-level documentation:
@@ -117,6 +124,7 @@ set_plate_comment(
 ### Type System
 
 #### 7. `get_valid_data_types` - Type Discovery
+
 **Enables**: Self-documenting type system (resolves "Unknown type" errors)
 
 List all valid type strings:
@@ -131,6 +139,7 @@ List all valid type strings:
 ```
 
 #### 8. `validate_data_type` - Type Validation
+
 **Enables**: Pre-flight type checking (prevents failed operations)
 
 Validate data type before applying:
@@ -147,6 +156,7 @@ Validate data type before applying:
 ```
 
 #### 9. `suggest_data_type` - Type Inference
+
 **Enables**: AI-assisted type detection
 
 Get type suggestions based on memory content:
@@ -163,7 +173,7 @@ Get type suggestions based on memory content:
 ## Performance Improvements
 
 | Metric | Before v1.5.0 | After v1.5.0 | Improvement |
-|--------|---------------|--------------|-------------|
+| -------- | --------------- | -------------- | ------------- |
 | **API calls per function** | 15-20 calls | 5-9 calls | **40-55% reduction** |
 | **Comment operations** | 4 calls | 1 call | **75% reduction** |
 | **Rename operations** | 3-5 calls | 1 call | **67-80% reduction** |
@@ -172,7 +182,8 @@ Get type suggestions based on memory content:
 ### Real-World Example: InvokeVirtualMethod Function
 
 **Before v1.5.0**: 18 API calls required
-```
+
+```text
 1. decompile_function
 2. get_function_xrefs
 3. get_function_callees
@@ -185,7 +196,8 @@ Get type suggestions based on memory content:
 ```
 
 **After v1.5.0**: 6 API calls required
-```
+
+```text
 1. decompile_function
 2. get_function_xrefs
 3. get_function_callees
@@ -200,6 +212,7 @@ Get type suggestions based on memory content:
 ## Technical Implementation
 
 ### Java Plugin Changes
+
 - **File**: `src/main/java/com/xebyte/GhidraMCPPlugin.java`
 - **Lines Added**: ~770 lines
 - **New Endpoints**: 9 REST endpoints
@@ -207,6 +220,7 @@ Get type suggestions based on memory content:
 - **Atomicity**: Batch operations wrapped in single Ghidra transaction
 
 ### Python MCP Bridge Changes
+
 - **File**: `bridge_mcp_ghidra.py`
 - **Lines Added**: ~220 lines
 - **New Tools**: 9 MCP tools with `@mcp.tool()` decorators
@@ -214,6 +228,7 @@ Get type suggestions based on memory content:
 - **Error Handling**: Comprehensive error messages for debugging
 
 ### Build System
+
 - **Maven Version**: Updated to 1.5.0 in `pom.xml`
 - **Build Command**: `mvn clean package assembly:single`
 - **Artifacts**:
@@ -223,6 +238,7 @@ Get type suggestions based on memory content:
 ## Installation
 
 ### From ZIP File (Recommended)
+
 1. Download `GhidraMCP-1.5.0.zip` from releases
 2. In Ghidra: **File → Install Extensions**
 3. Click **Add Extension** → Select ZIP file
@@ -230,6 +246,7 @@ Get type suggestions based on memory content:
 5. Verify plugin loaded: **Tools → Ghidra MCP** should appear
 
 ### From Source
+
 ```bash
 # Build the extension
 mvn clean package assembly:single
@@ -240,6 +257,7 @@ cp target/GhidraMCP-1.5.0.zip "<ghidra_install>/Extensions/"
 ```
 
 ### Python Bridge Setup
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -261,7 +279,9 @@ python bridge_mcp_ghidra.py --ghidra-server http://127.0.0.1:8089/
 ## Known Issues
 
 ### Deprecation Warnings
+
 The following Ghidra APIs used in this release are deprecated but still functional:
+
 - `CodeUnit.PRE_COMMENT`
 - `CodeUnit.EOL_COMMENT`
 - `Function.setComment(String)`
@@ -271,6 +291,7 @@ These will be migrated to new Ghidra APIs in a future release but do not affect 
 ## Documentation
 
 New documentation files created:
+
 - `GHIDRA_ANALYSIS_PROMPT.md` - Original analysis workflow template
 - `MCP_ENHANCEMENT_RECOMMENDATIONS.md` - Gap analysis and tool proposals
 - `OPTIMIZED_ANALYSIS_PROMPT.md` - Improved workflow with verification steps
@@ -282,12 +303,14 @@ New documentation files created:
 ### Upgrading from v1.4.0
 
 **1. Uninstall Old Version**
+
 ```bash
 # In Ghidra: File → Manage Extensions → Uninstall GhidraMCP v1.4.0
 # Restart Ghidra
 ```
 
 **2. Install New Version**
+
 ```bash
 # Follow installation instructions above
 ```
@@ -295,6 +318,7 @@ New documentation files created:
 **3. Update Workflows**
 
 **Old workflow (v1.4.0)**:
+
 ```python
 # Set comments separately (4 calls)
 set_decompiler_comment(addr1, comment1)
@@ -304,6 +328,7 @@ set_disassembly_comment(addr4, comment4)
 ```
 
 **New workflow (v1.5.0)**:
+
 ```python
 # Set all comments in one call
 batch_set_comments(
@@ -321,6 +346,7 @@ batch_set_comments(
 ```
 
 **Old workflow (v1.4.0)**:
+
 ```python
 # Rename components separately (4 calls)
 rename_function("FUN_6fae7e70", "InvokeVirtualMethod")
@@ -330,6 +356,7 @@ set_function_prototype("0x6fae7e70", "void InvokeVirtualMethod(void* objectInsta
 ```
 
 **New workflow (v1.5.0)**:
+
 ```python
 # Rename all components atomically (1 call)
 batch_rename_function_components(
@@ -345,17 +372,20 @@ set_function_prototype("0x6fae7e70", "void InvokeVirtualMethod(void* objectInsta
 ## Testing
 
 ### Unit Tests
+
 ```bash
 pytest tests/unit/ -v
 ```
 
 ### Integration Tests (requires Ghidra running)
+
 ```bash
 # Start Ghidra with plugin and load a binary
 pytest tests/integration/ -v
 ```
 
 ### Functional Tests (requires Ghidra + binary)
+
 ```bash
 pytest tests/functional/ -v
 ```
@@ -363,6 +393,7 @@ pytest tests/functional/ -v
 ## Future Roadmap
 
 Potential v1.6.0 features (not committed):
+
 - Control flow graph generation
 - Automated vtable reconstruction
 - Binary diffing tools
@@ -381,13 +412,14 @@ Apache License 2.0 - See LICENSE file for details
 
 ## Support
 
-- **Issues**: https://github.com/bethington/ghidra-mcp/issues
-- **Documentation**: https://github.com/bethington/ghidra-mcp/wiki
+- **Issues**: <https://github.com/bethington/ghidra-mcp/issues>
+- **Documentation**: <https://github.com/bethington/ghidra-mcp/wiki>
 - **API Reference**: docs/API_REFERENCE.md
 
 ---
 
 **Build Info**:
+
 - Build Date: 2025-10-10
 - Build Status: ✅ SUCCESS
 - JAR Size: 94KB

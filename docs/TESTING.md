@@ -64,7 +64,7 @@ unless the user opts in with `--test ...` or `GHIDRA_MCP_DEPLOY_TESTS`.
 Pass one or more `--test` values to `python -m tools.setup deploy`.
 
 | Tier | Project Mutation | Purpose |
-|------|------------------|---------|
+| ------ | ------------------ | --------- |
 | `selected-contract` | No benchmark import | Checks selected release-critical tools against live schema and `tests/endpoints.json`. |
 | `endpoint-catalog` | No benchmark import | Confirms all catalog endpoints are present in the live schema. |
 | `benchmark-read` | Imports/resets benchmark | Runs broader read-only endpoint checks against `/testing/benchmark/Benchmark.dll`. |

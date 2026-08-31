@@ -17,6 +17,7 @@ Version 1.7.3 fixes a critical transaction management bug in the `disassemble_by
 **Symptom**: Users reported that calling `disassemble_bytes` returned `{"success": true}` but the bytes were not actually disassembled in Ghidra's database. The changes were visible during the request but disappeared after the transaction ended.
 
 **Root Cause**:
+
 ```java
 // BEFORE (v1.7.2) - BUG:
 if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
@@ -31,6 +32,7 @@ program.endTransaction(tx, success);
 ```
 
 **Fix** (v1.7.3):
+
 ```java
 // AFTER - FIXED:
 if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
@@ -45,6 +47,7 @@ program.endTransaction(tx, success);
 ```
 
 **Impact**:
+
 - ✅ **HIGH** - Critical functionality was broken
 - ✅ All `disassemble_bytes` calls now properly persist changes
 - ✅ Ghidra scripts using this endpoint will function correctly
@@ -55,6 +58,7 @@ program.endTransaction(tx, success);
 ### src/main/java/com/xebyte/GhidraMCPPlugin.java
 
 **Line 9716** - Added missing success flag assignment:
+
 ```diff
   if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
       // Success - build result
@@ -82,6 +86,7 @@ program.endTransaction(tx, success);
 ### Test Case: Address 0x6fb4ca14 (21 bytes)
 
 **Test Script**: `test_disassemble.py`
+
 ```python
 POST http://127.0.0.1:8089/disassemble_bytes
 {
@@ -91,11 +96,13 @@ POST http://127.0.0.1:8089/disassemble_bytes
 ```
 
 **v1.7.2 Result**:
+
 - ❌ API returned success but changes not persisted
 - ❌ Bytes remained undefined after transaction
 - ❌ Subsequent reads showed no instructions
 
 **v1.7.3 Result**:
+
 - ✅ API returns: `{"success": true, "bytes_disassembled": 21}`
 - ✅ Transaction commits successfully
 - ✅ Disassembled instructions visible in function listing
@@ -104,6 +111,7 @@ POST http://127.0.0.1:8089/disassemble_bytes
 ### Verification Script
 
 **File**: `verify_disassembly.py`
+
 ```python
 # Comprehensive verification:
 # 1. Test disassemble_bytes API call
@@ -119,6 +127,7 @@ POST http://127.0.0.1:8089/disassemble_bytes
 ### For Users
 
 1. **Stop the MCP bridge** (if running):
+
    ```bash
    # Press Ctrl+C in terminal running bridge_mcp_ghidra.py
    ```
@@ -128,12 +137,14 @@ POST http://127.0.0.1:8089/disassemble_bytes
    - Exit Ghidra completely
 
 3. **Build the new version**:
+
    ```bash
    cd ghidra-mcp
    mvn clean package assembly:single -DskipTests
    ```
 
 4. **Install the updated plugin**:
+
    ```bash
    # Recommended:
    python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
@@ -148,11 +159,13 @@ POST http://127.0.0.1:8089/disassemble_bytes
    - Verify GhidraMCP plugin loaded (Tools → GhidraMCP)
 
 6. **Restart the MCP bridge**:
+
    ```bash
    python bridge_mcp_ghidra.py
    ```
 
 7. **Verify the fix**:
+
    ```bash
    python verify_disassembly.py
    ```
@@ -196,6 +209,7 @@ This fix is **highly recommended** for all users of v1.7.0 through v1.7.2 who us
 ## Next Steps
 
 After upgrading, users can:
+
 1. Re-run any failed `disassemble_bytes` operations
 2. Use the endpoint reliably in automated analysis scripts
 3. Integrate with noreturn function fix workflows (see `NORETURN_FIX_GUIDE.md`)
@@ -203,4 +217,4 @@ After upgrading, users can:
 ---
 
 For questions or issues, please file a bug report at:
-https://github.com/bethington/ghidra-mcp/issues
+<https://github.com/bethington/ghidra-mcp/issues>

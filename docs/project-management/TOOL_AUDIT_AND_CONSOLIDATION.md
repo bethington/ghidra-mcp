@@ -53,12 +53,14 @@ and `scratchpad/harness_mut.py` (mutating round-trips). These will be ported int
 integration suite (see §4).
 
 ### 2a. Read-only sweep — 132 GET tools
+
 **116/132 clean.** All 16 "flags" were false positives: heuristic substring matches
 (`"exception"`/`"invalid "` appearing inside legitimate output) or intentionally-wrong
 inputs where the tool **correctly** returned "not found" (good input validation). **Zero
 read-only defects.**
 
 ### 2b. Mutating round-trips — confirmed behaviors & merge evidence
+
 | Test | Result |
 | --- | --- |
 | `set_comment(type=plate/pre/eol/post)` vs `set_plate/decompiler/disassembly_comment` | ✅ identical effect; `get_comment` returns all kinds in one JSON `{plate,pre,eol,post}` |
@@ -73,6 +75,7 @@ read-only defects.**
 | `check_connection` vs `mcp_health` | ✅ both healthy (text vs rich JSON) |
 
 ### 2c. BUGS & footguns found
+
 - **BUG-1 — `validate_data_type_exists` is broken for bare names.** It calls
   `DataTypeManager.getDataType(name)` ([`DataTypeService.java:432`](../../src/main/java/com/xebyte/core/DataTypeService.java#L432)),
   which needs a full path. `int`→`{"exists":false}`, `/int`→`{"exists":true}`. Every natural
@@ -108,6 +111,7 @@ Cross-referenced all 291 tool names against `tests/` and `src/test/`.
 | others | 11 | mixed |
 
 ### Proposed test-extension plan (prioritized)
+
 - **P0 — port the §2b harness into `tests/integration/`** as durable round-trip tests:
   comment family, bookmark lifecycle, struct lifecycle, tag family, label family, type-size,
   validators, rename-by-name-vs-address. Closes the most embarrassing gaps (core mutators) and
@@ -133,6 +137,7 @@ removed — every capability remains reachable. Net surface reduction ≈ **15�
 > context size.
 
 ### Group 1 — Comments (evidence: §2b, proven)
+
 | Remove | Into | Notes |
 | --- | --- | --- |
 | `set_plate_comment` | `set_comment(type="plate")` | proven identical |
@@ -144,6 +149,7 @@ removed — every capability remains reachable. Net surface reduction ≈ **15�
 variadic `set_comment`; different payload shape, so listed as opt-in, not baseline.)
 
 ### Group 2 — Single/batch → one variadic tool ("one or many")
+
 | Merge pair | New tool |
 | --- | --- |
 | `add_function_tag` + `batch_add_function_tags` | `add_function_tags` (accepts `function`+`tags` **or** `assignments[]`) |
@@ -158,6 +164,7 @@ variadic `set_comment`; different payload shape, so listed as opt-in, not baseli
 **−8 tools.**
 
 ### Group 3 — True duplicates
+
 | Remove | Into | Notes |
 | --- | --- | --- |
 | `get_data_type_size` | `get_type_size` | superset (proven) |
@@ -168,6 +175,7 @@ variadic `set_comment`; different payload shape, so listed as opt-in, not baseli
 **−4 tools.**
 
 ### Deliberately NOT merged (kept granular on purpose)
+
 - `set_local_variable_type` / `set_parameter_type` / `set_decompiler_variable_type` — real merge
   candidates but Tier-3 (semantic mode-tool); flagged as **opt-in** below, not baseline.
 - `rename_data` / `rename_global_variable` / `rename_label` / `rename_or_label` /
@@ -176,10 +184,12 @@ variadic `set_comment`; different payload shape, so listed as opt-in, not baseli
 - Analysis/malware tools — distinct outputs; merging would hurt tool selection.
 
 ### Tier-3 opt-in (only if you want them)
+
 - `set_variable_type` unifying local/param/decompiler var-type setters (**−2**).
 - `rename_symbol(kind=)` unifying the 5-way rename family (**−4**), higher misuse risk.
 
 ### Independent fixes (recommend regardless of consolidation)
+
 - Fix **BUG-1** (validate_data_type_exists bare-name resolution).
 - Fix **BUG-2** (struct-field mutators accept original field stem / create_struct returns final names).
 - **NIT**: `get_function_labels` accept address; better missing-param message.
@@ -223,6 +233,7 @@ later**.
 ## 6. Execution status
 
 ### Done
+
 - [x] **Merges implemented** — all of Groups 1–3 plus both Tier-3 unifications.
       Advertised surface **272 → 251**. Java `@McpTool` methods extended/removed,
       `ManualToolDescriptors` + headless manual-route lists pruned of the deleted
@@ -244,6 +255,7 @@ later**.
       Python (`tests/performance/` minus the four live-Ghidra files).
 
 ### Remaining
+
 - [ ] **Live verification** — deploy the JAR, confirm `/mcp/schema` reports 251,
       then run the integration tiers (`pytest tests/ -m readonly`, `-m safe_write`,
       the Java `EndpointRegistrationTest`) and the four live-Ghidra performance

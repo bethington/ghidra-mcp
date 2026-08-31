@@ -9,6 +9,7 @@ Legend: **SURVIVOR** = kept (possibly extended). **REMOVE** = deleted. Transform
 call site is rewritten.
 
 ## Group 1 — Comments (CommentService.java)
+
 | REMOVE | SURVIVOR | Transform |
 | --- | --- | --- |
 | `set_plate_comment(address, comment)` | `set_comment` | `set_comment(address, comment, type="plate")` |
@@ -19,6 +20,7 @@ call site is rewritten.
 `batch_set_comments` is **kept** (distinct per-function multi-kind shape; not in baseline).
 
 ## Group 2 — single/batch → one variadic survivor
+
 | REMOVE | SURVIVOR (extended to accept one-or-many) | Transform |
 | --- | --- | --- |
 | `batch_add_function_tags(assignments)` | `add_function_tag` (+ optional `assignments[]`) | `add_function_tag(assignments=[...])` |
@@ -31,6 +33,7 @@ call site is rewritten.
 | `batch_set_variable_types(function_address, variable_types)` | `set_variables` | `set_variables(function_address, variables=[{name,type}])` |
 
 ## Group 3 — true duplicates
+
 | REMOVE | SURVIVOR | Transform / notes |
 | --- | --- | --- |
 | `get_data_type_size(type_name)` | `get_type_size(type_name)` | superset; drop-in |
@@ -39,15 +42,20 @@ call site is rewritten.
 | `rename_function_by_address(function_address, new_name)` | `rename_function(old_name, new_name)` | `old_name` now accepts a **name OR address**; transform: `rename_function(old_name=<addr>, new_name)` |
 
 ## Tier-3 — semantic unifications
+
 ### set_variable_type (FunctionService.java)
+
 Unifies `set_local_variable_type`, `set_parameter_type`, `set_decompiler_variable_type`.
+
 - SURVIVOR: **`set_variable_type(function_address, variable_name, new_type)`** (new name).
 - Transform: all three → `set_variable_type(...)` (`parameter_name`→`variable_name`).
 - **Verify** local(DB) vs decompiler(high) equivalence during impl; survivor must apply at
   the level that satisfies both prior tools (decompiler high-var path covers params+locals).
 
 ### rename_symbol (SymbolLabelService.java)
+
 Unifies `rename_data`, `rename_global_variable`, `rename_label`, `rename_or_label`, `rename_external_location`.
+
 - SURVIVOR: **`rename_symbol(target, new_name, kind="auto")`** (new name). `target` = address or name.
   `kind ∈ {auto,data,global,label,external}`; `auto` detects the symbol kind at the address.
   Preserves `rename_or_label`'s create-if-missing behavior when `kind=label`/auto and none exists.
@@ -59,6 +67,7 @@ Unifies `rename_data`, `rename_global_variable`, `rename_label`, `rename_or_labe
   - `rename_external_location(address,new_name)` → `rename_symbol(address, new_name, kind="external")`
 
 ## Bug fixes (independent, applied with the merges)
+
 - **BUG-1** — folded into `validate_data_type` (resolver fix, above).
 - **BUG-2** — `create_struct`/`remove_struct_field`/`modify_struct_field`: resolve a field by its
   **original (pre-Hungarian) stem** as a fallback, and have `create_struct` return the final field
@@ -66,6 +75,7 @@ Unifies `rename_data`, `rename_global_variable`, `rename_label`, `rename_or_labe
 - **NIT** — `get_function_labels`: accept an **address** as well as a name; clearer missing-param error.
 
 ## Manual routes deleted
+
 `batch_set_variable_types` and `get_data_type_size` were manual routes, not `@McpTool`.
 Their registrations are gone from `GhidraMCPHeadlessServer`'s manual-route list and their
 descriptors from `ManualToolDescriptors.buildAll()` — `ManualToolDescriptorsParityTest`
@@ -73,6 +83,7 @@ fails on a descriptor with no registered route, which is what caught the leftove
 `mcp_health` is **kept** (see the Group 3 row).
 
 ## Migration mechanics — DONE
+
 1. **Java:** survivors extended, removed methods demoted to plain (non-`@McpTool`) helpers
    or deleted, manual routes + descriptors pruned. Also migrated: the user-facing guidance
    strings in `AnalysisService`'s `recommendations` / `actions` output, whose
@@ -90,6 +101,7 @@ fails on a descriptor with no registered route, which is what caught the leftove
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
 
 ## Call-shape changes worth knowing
+
 - **`analyze_function_completeness` bulk mode is a GET** with `addresses` as a
   comma-separated string (the removed `batch_analyze_completeness` was a POST with a JSON
   array). This also moves bulk scoring onto the concurrent read path. Callers must join

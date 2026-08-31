@@ -7,7 +7,7 @@
 
 When attempting to enable the GhidraMCP plugin in Ghidra v11.4.2, users encountered:
 
-```
+```text
 Error constructing plugin: class com.xebyte.GhidraMCPPlugin
 ghidra.framework.plugintool.util.PluginException: Error constructing plugin
 
@@ -45,6 +45,7 @@ try {
 ```
 
 **Changes**:
+
 - Added explicit `BindException` handling
 - Provides clear error message to user
 - Suggests remediation steps
@@ -74,6 +75,7 @@ public void dispose() {
 ```
 
 **Changes**:
+
 - Added 100ms delay after server.stop() to ensure port release
 - Proper interrupt handling
 - Ensures clean shutdown sequence
@@ -102,6 +104,7 @@ catch (IOException e) {
 ```
 
 **Changes**:
+
 - Added user-facing error dialog with troubleshooting steps
 - Improved console logging
 - Provides actionable guidance
@@ -109,14 +112,16 @@ catch (IOException e) {
 ## Testing
 
 ### Before Fix
-```
+
+```text
 ❌ Plugin fails to load with IllegalArgumentException
 ❌ No clear error message to user
 ❌ Port remains locked after failed initialization
 ```
 
 ### After Fix
-```
+
+```text
 ✅ Plugin loads cleanly
 ✅ Clear error messages if port is in use
 ✅ Proper cleanup on dispose
@@ -126,6 +131,7 @@ catch (IOException e) {
 ## Deployment
 
 ### Build
+
 ```bash
 mvn clean package assembly:single -DskipTests
 ```
@@ -133,13 +139,15 @@ mvn clean package assembly:single -DskipTests
 **Result**: ✅ SUCCESS
 
 ### Artifacts
-```
+
+```text
 target/GhidraMCP.jar (94 KB) - Deployed to user Extensions
 target/GhidraMCP-1.5.0.zip (94 KB) - Deployed to Ghidra Extensions
 ```
 
 ### Installation Locations
-```
+
+```text
 JAR:  C:\Users\benam\AppData\Roaming\ghidra\ghidra_11.4.2_PUBLIC\Extensions\GhidraMCP\lib\GhidraMCP.jar
 ZIP:  F:\ghidra_11.4.2\Extensions\Ghidra\GhidraMCP-1.5.0.zip
 ```
@@ -157,9 +165,11 @@ ZIP:  F:\ghidra_11.4.2\Extensions\Ghidra\GhidraMCP-1.5.0.zip
 
 1. Check for other running Ghidra instances
 2. Check if another application is using port 8089:
+
    ```bash
    netstat -ano | findstr :8089
    ```
+
 3. Change the port in Ghidra:
    - Edit > Tool Options > GhidraMCP
    - Change "Server Port" to another port (e.g., 8090)
@@ -169,16 +179,18 @@ ZIP:  F:\ghidra_11.4.2\Extensions\Ghidra\GhidraMCP-1.5.0.zip
 
 After enabling the plugin, you should see in the Ghidra console:
 
-```
+```text
 GhidraMCPPlugin loaded successfully with HTTP server on port 8089
 ```
 
 Test connectivity:
+
 ```bash
 curl http://127.0.0.1:8089/check_connection
 ```
 
 Expected response:
+
 ```json
 {"status": "connected", "version": "1.5.0"}
 ```
@@ -186,7 +198,7 @@ Expected response:
 ## Changes Summary
 
 | File | Change | Impact |
-|------|--------|--------|
+| ------ | -------- | -------- |
 | GhidraMCPPlugin.java | Enhanced error handling | Better user experience |
 | GhidraMCPPlugin.java | Improved cleanup | Prevents port locking |
 | GhidraMCPPlugin.java | Added delay on dispose | Ensures clean shutdown |
