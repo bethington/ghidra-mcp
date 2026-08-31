@@ -11,6 +11,16 @@
 # recommended cadence. Push triggers run too so a security-relevant
 # config change (CODEOWNERS, branch protection, workflow hardening)
 # reflects in the badge within minutes instead of waiting a week.
+#
+# The push branch MUST be this repo's DEFAULT branch, currently `dev`.
+# scorecard-action validates this itself and hard-fails with
+# "validating options: only default branch is supported" on anything
+# else -- it is not a warning and not skippable. The default moved from
+# `main` to `dev` between 2026-08-03 and 2026-08-10, and this trigger
+# was left on `main`, so from that moment every push to main started a
+# run that could only fail: 3 consecutive failures, while the scheduled
+# runs (which follow the default branch automatically) kept passing.
+# If the default branch ever moves again, this line moves with it.
 name: Scorecard supply-chain security
 
 on:
@@ -18,7 +28,7 @@ on:
   schedule:
     - cron: '17 8 * * 1'   # Mondays 08:17 UTC
   push:
-    branches: [main]
+    branches: [dev]
   # Manual trigger so the score can be refreshed without forcing a
   # dummy commit (useful after enabling repo Settings toggles like
   # Dependabot security alerts or branch protection rulesets, which
@@ -66,6 +76,6 @@ jobs:
       # Upload to GitHub's code-scanning so findings show up in the
       # repository's Security tab alongside Dependabot / CodeQL.
       - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v3
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3  # v4.37.6
         with:
           sarif_file: results.sarif

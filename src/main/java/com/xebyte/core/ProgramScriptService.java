@@ -131,7 +131,11 @@ public class ProgramScriptService {
                     mgr.reAnalyzeAll(null);
                 }
                 mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+                // Through the guarded helper, never mgr.waitForAnalysis
+                // directly -- see awaitAnyPendingAnalysis. An unguarded call
+                // here is one of the two paths that wedged all three HTTP
+                // threads for 7.8 CPU-hours on 2026-08-11.
+                awaitAnyPendingAnalysis(program);
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
@@ -219,7 +223,51 @@ public class ProgramScriptService {
         }
     }
 
+    /**
+     * Re-entrancy guard for {@link AutoAnalysisManager#waitForAnalysis}.
+     *
+     * <p>{@code waitForAnalysis(null, monitor)} can re-enter ITSELF. Measured
+     * from a live thread dump on 2026-08-11, after Ghidra had been
+     * unresponsive for hours:</p>
+     *
+     * <pre>
+     *   AutoAnalysisManager.scheduleWorker(1350)
+     *     -&gt; waitForAnalysis(518)
+     *       -&gt; analysisWorkerCallback(523)
+     *         -&gt; AnalysisWorkerCommand.applyTo(1694)
+     *           -&gt; applyToWithTransaction
+     *             -&gt; scheduleWorker(1350)   ... and round again
+     * </pre>
+     *
+     * <p>All THREE GhidraMCP-HTTP threads -- the entire pool -- were stuck in
+     * that loop, 317 frames deep, having burned ~9,400 CPU-seconds EACH
+     * (7.8 CPU-hours between them). They never return, so the pool is
+     * permanently consumed and every one of the 253 endpoints times out. The
+     * symptom presents as "Ghidra is slow", not as an error, and the only
+     * recovery is a restart.</p>
+     *
+     * <p>A thread that is already inside a wait does not need to start
+     * another one: the outer call is still going to wait for the same
+     * analysis to finish. So a nested call on the same thread returns
+     * immediately and the recursion cannot form. This is deliberately the
+     * smallest fix that provably terminates -- it changes no semantics for
+     * the outer wait, and if it is wrong the failure mode is a save racing
+     * analysis, which {@code saveWithRetry} already handles and which is
+     * vastly preferable to a wedged server.</p>
+     */
+    // Package-visible on purpose: FrontEndProgramProvider shares this ONE
+    // guard. Two separate ThreadLocals would not guard each other, and the
+    // recursion can cross both classes on a single thread.
+    static final ThreadLocal<Boolean> IN_ANALYSIS_WAIT =
+            ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     private void awaitAnyPendingAnalysis(Program program) {
+        if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
+            // Already waiting further up this same thread's stack. Starting
+            // another wait here is what forms the infinite recursion above.
+            return;
+        }
+        IN_ANALYSIS_WAIT.set(Boolean.TRUE);
         try {
             AutoAnalysisManager.getAnalysisManager(program)
                     .waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
@@ -227,6 +275,8 @@ public class ProgramScriptService {
             // Best-effort: let the save call itself surface any real failure
             // rather than mask it with a wait-side error here.
             Msg.warn(this, "awaitAnyPendingAnalysis failed, proceeding to save anyway: " + e.getMessage());
+        } finally {
+            IN_ANALYSIS_WAIT.set(Boolean.FALSE);
         }
     }
 
@@ -1818,37 +1868,90 @@ public class ProgramScriptService {
                 return Response.err("Failed to open program: " + path);
             }
 
-            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+            // getDomainObject registered US (tool) as a consumer. ProgramManager
+            // takes its OWN consumer in openProgram below, so ours must be handed
+            // back -- otherwise the DomainObject keeps a consumer forever and the
+            // DomainFile stays permanently "in use": undoCheckout then fails with
+            // "<name> is in use" and keeps failing until Ghidra restarts, while
+            // close_program reports success with released_cache=false because
+            // neither the ProgramManager nor the provider cache holds the stray
+            // reference. Measured 2026-08-10: 140 exclusive checkouts stranded on
+            // a shared project by a read-only verification sweep, clearable only
+            // by restarting Ghidra.
+            try {
+                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
 
-            boolean analyzed = false;
-            if (autoAnalyze) {
-                analyzed = runAutoAnalysisAndPersistFlags(program, true);
-            } else {
-                try {
-                    suppressAnalysisPrompt(program);
-                } catch (Exception e) {
-                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                boolean analyzed = false;
+                if (autoAnalyze) {
+                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
+                } else {
+                    try {
+                        suppressAnalysisPrompt(program);
+                    } catch (Exception e) {
+                        Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                    }
                 }
+
+                // Capture before releasing: after the release our only guarantee
+                // that the Program is still alive is the ProgramManager's consumer.
+                String programName = program.getName();
+                int functionCount = program.getFunctionManager().getFunctionCount();
+
+                // Open after the analysis flags are persisted so CodeBrowser does not prompt.
+                Program finalProgram = program;
+                SwingUtilities.invokeAndWait(() -> {
+                    pm.openProgram(finalProgram);
+                    pm.setCurrentProgram(finalProgram);
+                });
+
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "message", "Program opened successfully",
+                    "name", programName,
+                    "path", path,
+                    "auto_analyzed", analyzed,
+                    "function_count", functionCount
+                ));
+            } finally {
+                // Unconditional: on the failure paths nothing else holds the
+                // program, so releasing is both correct and the only way the
+                // checkout can ever be undone.
+                program.release(tool);
             }
-
-            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
-            Program finalProgram = program;
-            SwingUtilities.invokeAndWait(() -> {
-                pm.openProgram(finalProgram);
-                pm.setCurrentProgram(finalProgram);
-            });
-
-            return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "message", "Program opened successfully",
-                "name", program.getName(),
-                "path", path,
-                "auto_analyzed", analyzed,
-                "function_count", program.getFunctionManager().getFunctionCount()
-            ));
         } catch (Exception e) {
-            return Response.err("Failed to open program: " + e.getMessage());
+            return Response.err("Failed to open program: " + describeOpenFailure(e, path));
         }
+    }
+
+    /**
+     * Turn an open failure into something the caller can act on.
+     *
+     * <p>A program built against an older SLEIGH language revision opens read-ONLY
+     * but refuses a read-write open, surfacing here as a bare
+     * {@code "Minor language change 4.6 -> 4.7"}. That names the symptom and not
+     * the cure, and this code path cannot perform the cure itself: every
+     * FrontEnd-side open passes {@code okToUpgrade=false}, and an upgrade also
+     * needs an exclusive checkout. Point at the tool that does both.
+     */
+    public static String describeOpenFailure(Exception e, String path) {
+        String message = e.getMessage() != null ? e.getMessage() : e.toString();
+        if (message.contains("language change") || message.contains("older version of Ghidra")) {
+            return message
+                + " -- " + path + " was built against an older SLEIGH language revision than this"
+                + " Ghidra ships, so it can only be opened read-only until it is upgraded."
+                + " An upgrade requires an exclusive checkout and cannot be done from here."
+                + " Run: python tools/upgrade_project_language.py --apply --folder "
+                + parentFolderOf(path);
+        }
+        return message;
+    }
+
+    private static String parentFolderOf(String path) {
+        if (path == null) {
+            return "/";
+        }
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash > 0 ? path.substring(0, lastSlash) : "/";
     }
 
     // ========================================================================

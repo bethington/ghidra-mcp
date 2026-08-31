@@ -70,7 +70,7 @@ jobs:
         shell: powershell
         run: |
           uv python install 3.13
-          uv sync --python 3.13 --group test --group fun-doc
+          uv sync --python 3.13 --group test
 
       - name: Build Benchmark.dll
         shell: powershell

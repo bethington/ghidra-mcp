@@ -1,5 +1,6 @@
 """Discovery of running Ghidra instances over UDS and TCP."""
 
+import concurrent.futures
 import http.client
 import json
 
@@ -7,6 +8,11 @@ from . import state
 from . import transport
 from . import validation
 from .config import DEFAULT_TCP_PORT, TCP_PORT_SCAN_RANGE, logger
+
+# Upper bound on threads used to probe the TCP scan range. The scan is pure
+# wait (a dropped connection costs the full timeout), so the cap only exists
+# to keep thread churn bounded on a wide range_size.
+_TCP_SCAN_MAX_WORKERS = 16
 
 
 def _unwrap_response_data(text: str) -> dict:
@@ -83,6 +89,49 @@ def discover_instances() -> list[dict]:
     return instances
 
 
+def _probe_tcp_port(port: int, timeout: float, cancel_handle) -> tuple[str, dict] | None:
+    """Probe one port for a Ghidra plugin; return (url, instance_info) or None.
+
+    `cancel_handle` is passed in rather than read from `state` because this
+    runs on a worker thread: the handle lives in a ContextVar, and ContextVars
+    are not inherited by ThreadPoolExecutor workers, so an in-thread lookup
+    would silently always return None and defeat request cancellation.
+    """
+    url = f"http://127.0.0.1:{port}"
+    conn = None
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        if cancel_handle is not None and not cancel_handle.register_connection(conn):
+            return None
+        try:
+            conn.connect()
+            if cancel_handle is not None and cancel_handle.aborted:
+                return None
+            if cancel_handle is not None:
+                with cancel_handle.hold_send_window(conn) as can_send:
+                    if not can_send:
+                        return None
+                    conn.request("GET", "/mcp/instance_info")
+            else:
+                conn.request("GET", "/mcp/instance_info")
+            resp = conn.getresponse()
+            if resp.status != 200:
+                return None
+            body = resp.read().decode("utf-8", errors="replace")
+        finally:
+            if cancel_handle is not None and conn is not None:
+                cancel_handle.unregister_connection(conn)
+            conn.close()
+        info = _unwrap_response_data(body)
+        if isinstance(info, dict):
+            return url, info
+    except Exception:
+        # Connection refused / timeout / non-JSON response — not an instance.
+        if cancel_handle is not None and conn is not None:
+            cancel_handle.unregister_connection(conn)
+    return None
+
+
 def _iter_tcp_instances(
     start_port: int = DEFAULT_TCP_PORT, range_size: int = TCP_PORT_SCAN_RANGE, timeout: float = 1.0
 ):
@@ -92,44 +141,41 @@ def _iter_tcp_instances(
     `GET /mcp/instance_info` with a short timeout; unreachable ports and
     non-JSON responders are skipped silently.
 
+    Ports are probed CONCURRENTLY, but results are yielded in ascending port
+    order so callers keep their deterministic "lowest matching port wins"
+    semantics (`_scan_tcp_for_project`'s exact match, `_tcp_instances_by_pid`'s
+    first-pid-wins). Concurrency is not a micro-optimization: a port that is
+    *dropped* rather than *refused* costs the full timeout, and on a Windows
+    host whose firewall drops, a serial scan of the default 16-port range
+    measured 15.2s of the bridge's 16.8s startup — close enough to an MCP
+    client's start timeout to fail the connection outright, which presents as
+    "the Ghidra tools are missing" with nothing in the logs.
+
     Uses http.client (stdlib) rather than `requests` to keep the bridge's
     dependency footprint minimal -- see test_project_consistency.
     """
-    for port in range(start_port, start_port + range_size):
-        url = f"http://127.0.0.1:{port}"
-        cancel_handle = state.get_request_cancel_handle()
-        conn = None
-        try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
-            if cancel_handle is not None and not cancel_handle.register_connection(conn):
-                return
+    ports = list(range(start_port, start_port + range_size))
+    if not ports:
+        return
+
+    cancel_handle = state.get_request_cancel_handle()
+    found: dict[int, tuple[str, dict]] = {}
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(ports), _TCP_SCAN_MAX_WORKERS),
+        thread_name_prefix="GhidraMCP-PortScan",
+    ) as pool:
+        futures = {pool.submit(_probe_tcp_port, port, timeout, cancel_handle): port for port in ports}
+        for future in concurrent.futures.as_completed(futures):
             try:
-                conn.connect()
-                if cancel_handle is not None and cancel_handle.aborted:
-                    return
-                if cancel_handle is not None:
-                    with cancel_handle.hold_send_window(conn) as can_send:
-                        if not can_send:
-                            return
-                        conn.request("GET", "/mcp/instance_info")
-                else:
-                    conn.request("GET", "/mcp/instance_info")
-                resp = conn.getresponse()
-                if resp.status != 200:
-                    continue
-                body = resp.read().decode("utf-8", errors="replace")
-            finally:
-                if cancel_handle is not None and conn is not None:
-                    cancel_handle.unregister_connection(conn)
-                conn.close()
-            info = _unwrap_response_data(body)
-            if isinstance(info, dict):
-                yield url, info
-        except Exception:
-            # Connection refused / timeout / non-JSON response — try next port.
-            if cancel_handle is not None and conn is not None:
-                cancel_handle.unregister_connection(conn)
-            continue
+                result = future.result()
+            except Exception:
+                result = None
+            if result is not None:
+                found[futures[future]] = result
+
+    for port in ports:
+        if port in found:
+            yield found[port]
 
 
 def _tcp_instances_by_pid(

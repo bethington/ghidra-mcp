@@ -22,13 +22,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **252 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **253 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **252 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **253 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -58,7 +58,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **252 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
+- **253 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -394,14 +394,19 @@ model **discover** the rest on demand instead of registering everything:
 `search_tools` works in both eager and `--lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.
 
-#### Optional: Start the standalone debugger server
+#### Optional: Connect a standalone debugger server
+
+The debugger server itself moved to the `d2-game-exe` repository on 2026-08-11
+(its D2 calling-convention layer made it game-specific). Start it there, then
+point this bridge at it:
+
 ```bash
-uv sync --group debugger
-uv run python -m debugger
+export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
-The debugger server listens on `http://127.0.0.1:8099/` by default and is
-required for the `debugger_*` proxy tools exposed by the MCP bridge.
+The bridge's 22 `debugger_*` proxy tools register only when that variable is
+set, so leaving it unset costs nothing — the tools simply do not appear rather
+than appearing and failing.
 
 Debugger server flags:
 
@@ -545,19 +550,22 @@ pip install -e .
 bridge-mcp-ghidra
 ```
 
-### `python -m debugger` fails with `ModuleNotFoundError` for `pybag` or `comtypes`
+### The `debugger_*` tools do not appear
 
-**Cause:** The standalone debugger server uses optional Windows-only Python
-dependencies that are not installed by default.
+**Cause:** They are registered only when `GHIDRA_DEBUGGER_URL` is set, and only
+on Windows. The debugger server they proxy to lives in the `d2-game-exe`
+repository since 2026-08-11 — this repo ships the proxies, not the server.
 
-**Solution:**
+**Solution:** start the debugger server from that repo, then set the URL before
+launching the bridge:
+
 ```text
-uv sync --group debugger
-uv run python -m debugger
+export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
-If you have both a global Python and a project venv, make sure you install
-into and run from the same interpreter.
+A `ModuleNotFoundError` for `pybag` or `comtypes` while starting that server is
+a missing optional dependency on its side; install its Windows-only extras from
+that repo, and make sure you install into and run from the same interpreter.
 
 ### 500 Internal Server Errors
 
@@ -621,7 +629,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-252 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+253 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
 ### Program & Session Management
 
@@ -807,6 +815,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Comments & Bookmarks
 
+- `batch_get_comments` - Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
 - `delete_bookmark` - Delete bookmark
@@ -1059,7 +1068,6 @@ ghidra-mcp/
 │       ├── GhidraMCPPlugin.java         # GUI plugin (196 endpoints)
 │       ├── headless/                    # Headless server (183 endpoints)
 │       └── core/                        # Shared service layer (12 services)
-├── debugger/                # Optional standalone debugger server (port 8099)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
@@ -1149,8 +1157,8 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 - [Function Documentation V5](docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md) — Primary workflow: 7-step process with Hungarian notation, type auditing, and verification scoring
 - [Batch Documentation V5](docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md) — Parallel subagent dispatch for multi-function processing
 - [Orphaned Code Discovery](docs/prompts/ORPHANED_CODE_DISCOVERY_WORKFLOW.md) — Automated scanner for undiscovered functions
-- [Data Type Investigation](docs/prompts/DATA_TYPE_INVESTIGATION_WORKFLOW.md) — Systematic structure discovery
-- [Cross-Version Matching](docs/prompts/CROSS_VERSION_MATCHING_COMPREHENSIVE.md) — Hash-based function matching
+- [Data Type Investigation](docs/prompts/DATA_TYPE_INVESTIGATION_QUICK.md) — Structure discovery and field analysis
+- [Global Data Analysis](docs/prompts/GLOBAL_DATA_ANALYSIS_WORKFLOW.md) — Global naming and analysis
 - [Quick Start Prompt](docs/prompts/QUICK_START_PROMPT.md) — Simplified beginner workflow
 - [All Prompts](docs/prompts/README.md) — Complete prompt index
 

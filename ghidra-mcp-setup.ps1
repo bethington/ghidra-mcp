@@ -1207,7 +1207,8 @@ Write-LogInfo "Usage:"
 Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
 Write-Host "   Python: uv run bridge-mcp-ghidra (from the project root), or 'python -m bridge_mcp_ghidra'"
 if ($InstallDebuggerDeps) {
-    Write-Host "   Debugger: python -m debugger (from project root)"
+    Write-Host "   Debugger: server lives in the d2-game-exe repo; start it there,"
+    Write-Host "             then set GHIDRA_DEBUGGER_URL to register the proxy tools"
 }
 Write-Host ""
 Write-LogInfo "Default Server: http://127.0.0.1:8089/"

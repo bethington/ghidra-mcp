@@ -92,6 +92,16 @@ public class EmulationService {
                     description = "Maximum P-code steps before timeout") int maxSteps,
             @Param(value = "return_registers", source = ParamSource.BODY, defaultValue = "",
                     description = "Comma-separated register names to return (empty = all general-purpose)") String returnRegisters,
+            @Param(value = "read_memory_after", source = ParamSource.BODY, fieldsJson = true,
+                    defaultValue = "",
+                    description = "Memory regions to read back AFTER emulation, as a JSON array: " +
+                            "[{\"address\": \"0x408300\", \"length\": 16}, ...]. Needed to observe " +
+                            "in-place mutations (e.g. a function that lowercases a string via a " +
+                            "pointer argument) -- the emulator's memory is an ISOLATED overlay and " +
+                            "never touches the real program, so a plain read_memory call after " +
+                            "emulation sees only the ORIGINAL unmodified bytes, not the emulated " +
+                            "result. This reads from the emulator's own state instead.")
+                    String readMemoryAfterJson,
             @Param(value = "program", defaultValue = "") String programName) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -241,6 +251,51 @@ public class EmulationService {
                     }
                 }
                 result.put("registers", regValues);
+
+                // Read back caller-specified memory regions from the EMULATOR's
+                // state (not the program's), so a mutation made only inside the
+                // sandboxed run -- e.g. a string lowercased in place via a
+                // pointer argument -- is observable. Read even on a fault or
+                // step-limit exit: a partial mutation up to the point of failure
+                // is still useful evidence for a caller diagnosing why two
+                // implementations disagree.
+                if (readMemoryAfterJson != null && !readMemoryAfterJson.isEmpty()) {
+                    List<Map<String, String>> regions = ServiceUtils.convertToMapList(
+                            JsonHelper.parseJson(readMemoryAfterJson).get("regions"));
+                    if (regions == null) {
+                        regions = ServiceUtils.convertToMapList(readMemoryAfterJson);
+                    }
+                    if (regions != null) {
+                        List<Map<String, Object>> memResults = new ArrayList<>();
+                        for (Map<String, String> region : regions) {
+                            String addrStr = String.valueOf(region.get("address"));
+                            Map<String, Object> entry = new LinkedHashMap<>();
+                            entry.put("address", addrStr);
+                            Address memAddr = ServiceUtils.parseAddress(program, addrStr);
+                            // Gson parses JSON numbers as Double, so a naive
+                            // Integer.decode(String.valueOf(...)) sees "16.0"
+                            // and throws -- JsonHelper.getInt already exists
+                            // to handle Double/Integer/Long/String uniformly.
+                            int length = JsonHelper.getInt(region.get("length"), 0);
+                            if (memAddr == null || length <= 0) {
+                                entry.put("error", "invalid address or length");
+                            } else {
+                                try {
+                                    byte[] readBack = emu.readMemory(memAddr, length);
+                                    StringBuilder hex = new StringBuilder(readBack.length * 2);
+                                    for (byte b : readBack) {
+                                        hex.append(String.format("%02x", b));
+                                    }
+                                    entry.put("hex", hex.toString());
+                                } catch (Exception e) {
+                                    entry.put("error", e.getMessage());
+                                }
+                            }
+                            memResults.add(entry);
+                        }
+                        result.put("memory", memResults);
+                    }
+                }
 
                 String lastError = emu.getLastError();
                 if (lastError != null && !lastError.isEmpty()) {

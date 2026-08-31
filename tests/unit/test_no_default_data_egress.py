@@ -11,13 +11,14 @@ def _read(relative_path: str) -> str:
 
 
 def test_archive_exchange_is_disabled_by_default():
+    # fun-doc moved out of this repo (it is a curation subsystem, not part of
+    # the Ghidra MCP server). Its own opt-in-default archive check travels with
+    # it; here we assert only the Java side, which is what this repo ships.
     java_source = _read(
         "src/main/java/com/xebyte/core/DocumentationHashService.java"
     )
-    fun_doc_source = _read("fun-doc/fun_doc.py")
 
     assert 'env == null ? "" : env.trim()' in java_source
-    assert 'os.environ.get("RE_KB_ARCHIVE_URL", "")' in fun_doc_source
     assert "DEFAULT_ARCHIVE_URL" not in java_source
 
 
@@ -87,7 +88,17 @@ def _tracked_files() -> list[Path] | None:
 
 def test_removed_private_destination_does_not_reappear():
     removed_destination = ".".join(("10", "0", "10", "30"))
-    checked_roots = ("src", "fun-doc", "ghidra_scripts", "docker", "scripts", "tests")
+    # No "fun-doc" -- it left this repo. Roots are matched against *tracked*
+    # files, so a root that no longer exists silently contributes nothing;
+    # keeping a dead one here would make this guard quietly narrower than it
+    # reads. Add a root back only when this repo tracks files under it.
+    #
+    # "scripts" -> "tools" on 2026-08-12: scripts/ was dissolved into
+    # ghidra_scripts/ and tools/. Dropping the dead root WITHOUT adding tools/
+    # would have shrunk this guard silently, because scripts/bsim/
+    # build_reference_index.py -- BSim tooling, i.e. exactly the code that can
+    # carry a private destination -- landed in tools/, which was never checked.
+    checked_roots = ("src", "ghidra_scripts", "docker", "tools", "tests")
 
     tracked = _tracked_files()
     if tracked is None:

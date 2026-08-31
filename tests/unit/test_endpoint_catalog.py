@@ -162,22 +162,29 @@ class TestBridgeIsDynamic(unittest.TestCase):
         """Bridge static tool decorators should match the full static tool allowlist.
 
         Management tools use @mcp.tool(); the WinDbg debugger proxy tools use
-        @_debugger_tool() (registered conditionally — see _debugger_enabled).
-        Every name in _ALL_STATIC_TOOL_NAMES must have exactly one decorator,
-        independent of whether the debugger is active on this host.
+        @_debugger_tool() (registered conditionally — see _debugger_enabled); the
+        D2Debugger in-process oracle proxy tools use @_oracle_tool() (likewise —
+        see _oracle_enabled). Every name in _ALL_STATIC_TOOL_NAMES must have
+        exactly one decorator, independent of which backends are active here.
         """
         import bridge_mcp_ghidra as bridge
 
         content = _bridge_source_text()
         mgmt_count = len(re.findall(r"@mcp\.tool\([^\n]*\)", content))
         debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
-        tool_count = mgmt_count + debugger_count
+        oracle_count = len(re.findall(r"@_oracle_tool\(\)", content))
+        tool_count = mgmt_count + debugger_count + oracle_count
         self.assertEqual(
             tool_count,
             len(bridge._ALL_STATIC_TOOL_NAMES),
             f"Bridge has {mgmt_count} @mcp.tool(...) + {debugger_count} "
-            f"@_debugger_tool() decorators ({tool_count}) but "
-            f"{len(bridge._ALL_STATIC_TOOL_NAMES)} static tool names",
+            f"@_debugger_tool() + {oracle_count} @_oracle_tool() decorators "
+            f"({tool_count}) but {len(bridge._ALL_STATIC_TOOL_NAMES)} static tool names",
+        )
+        self.assertEqual(
+            oracle_count,
+            len(bridge.ORACLE_TOOL_NAMES),
+            "oracle @_oracle_tool() decorators should match ORACLE_TOOL_NAMES",
         )
         self.assertEqual(
             mgmt_count,
