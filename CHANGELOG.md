@@ -131,6 +131,9 @@ testing nothing.
 
 ### Fixed
 
+- **`ensure-prereqs` no longer requires `pip` inside a uv-managed environment.**
+  The optional Ghidra `ghidratrace` wheel is installed with `uv pip --python`,
+  so the debugger dependency sync works after `uv sync` removes unmanaged pip.
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
   now stay responsive.
 - **`debugger_launch`** failed for reasons that had been misattributed to the
