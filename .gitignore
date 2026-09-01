@@ -592,6 +592,12 @@ audit-*.json
 # test-matrix rows. The blanket audit_*.py rule above was silently keeping them
 # out of version control -- a machine failure would have taken them with it.
 !fun-doc/scripts/audit_*.py
+# Same trap, second location: tools/ is an importable package invoked as
+# `python -m tools.<name>` and referenced from CLAUDE.md's test matrix -- it is
+# first-class tooling, never a one-off drop zone. audit_endpoint_categories.py
+# (the reproducer for the endpoints.json category drift) was silently unstageable
+# until this line existed.
+!tools/audit_*.py
 
 fun-doc/state.json
 fun-doc/state.json.bak

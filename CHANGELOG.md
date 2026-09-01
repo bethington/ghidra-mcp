@@ -129,6 +129,66 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### The GUI and headless servers do not serve the same routes, and now the catalog says so
+
+`tests/endpoints.json` records a `servers` array per endpoint — `["gui"]`,
+`["headless"]`, or both. **212 of 253 endpoints are on both servers; 27 are
+GUI-only and 14 are headless-only.** Calling one against the wrong server
+returns a 404, not a message, which is the first thing a headless user hits.
+
+The split is **derived, never declared**. Each server builds its own
+`AnnotationScanner` from a different service list and hand-registers a different
+set of legacy routes, so the scope of a tool is a property of the wiring, not of
+the tool. `tools/audit_server_scope.py` reads both servers' sources — the
+`new AnnotationScanner(...)` argument list and the
+`ManualToolDescriptors.addAll(...)` path list — resolves each argument to its
+declared type, and stamps the catalog. Adding a service to one server moves every
+one of its endpoints with no per-tool edit. This follows the rule the category
+fix established: the scanner always wins, because a hand-maintained flag drifts.
+`tests/unit/test_audit_server_scope.py` fails when the catalog and the sources
+disagree, and when a new endpoint is left unstamped.
+
+What the split turns out to be:
+
+- **GUI-only (27):** the 18 `/debugger/*` tools (Ghidra TraceRmi needs a live
+  `PluginTool`), `/prompt_policy`, and 8 hand-registered routes — `/tool/*`,
+  `/project/info`, `/mcp/health`, `/server/authenticate`,
+  `/get_current_selection`, `/batch_apply_documentation`.
+- **Headless-only (14):** `HeadlessManagementService`'s program/project
+  lifecycle (`/load_program`, `/create_project`, `/import_program`,
+  `/export_program`, `/archive_project`, `/restore_project`, …) plus `/health`,
+  `/list_projects`, `/delete_project`, `/configure_analyzer`.
+- The 11 shared services take a `ThreadingStrategy` precisely so one `@McpTool`
+  serves both modes, which is why nothing here needed a per-tool annotation.
+
+Consequences worth knowing if you run headless:
+
+- **`/mcp/health` and `/mcp/instance_info` are GUI-only.** The headless
+  equivalent of the first is `/health`; the second has no headless equivalent at
+  all. `/check_connection` is the only liveness probe both servers answer.
+- **The bridge's instance discovery is therefore GUI-only.**
+  `python/bridge_mcp_ghidra/discovery.py` probes `/mcp/instance_info` over both
+  UDS and TCP, so `list_instances` cannot see a headless server by design, not by
+  accident. Point the bridge at a headless server explicitly.
+
+The README's API Reference now marks each **(GUI only)** / **(headless only)**
+tool, and its Production Status table carried 249 / 196 / 195 against a real
+253 / 239 / 226 — three numbers the existing consistency test could not see,
+because its regex wants `<N> MCP tools` and that table writes the count after the
+label. Now pinned.
+
+### Release notes stop publishing "Headless Endpoints: 1"
+
+`.github/workflows/release.yml` derived its GUI and headless counts by grepping
+`src/main/java/com/xebyte/core/EndpointRegistry.java` — a file deleted on
+2026-07-25. A `|| echo "0"` fallback turned the missing file into a plausible
+zero, so v6.0.0 shipped **GUI Endpoints: 35** (a `createContext` line count, two
+of which were comment lines) and **Headless Endpoints: 1** (the `safeContext`
+helper's single call site), next to a tool count that was correct. Both now come
+from the catalog via `python -m tools.audit_server_scope --release-counts`, which
+raises rather than defaulting if the catalog is unreadable or unstamped — the
+fallback default is what made two releases publish a wrong number quietly.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
