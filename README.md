@@ -1261,6 +1261,12 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 This project was originally derived from [LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP) in August 2025 and has since been substantially rewritten and extended. We acknowledge LaurieWired's original work as the starting point. See [NOTICE](NOTICE) for license attribution.
 
+### Powered by
+
+[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
+
+Tooling provided by JetBrains through their [Open Source Support Program](https://jb.gg/OpenSource).
+
 ## 👥 Contributors
 
 This project has benefited from the work of dedicated contributors:
