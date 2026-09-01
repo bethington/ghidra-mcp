@@ -6,6 +6,110 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — `set_variable_storage` reported storage instead of setting it ([#446](https://github.com/bethington/ghidra-mcp/issues/446))
+
+`/set_variable_storage` was a no-op. It looked the variable up, read its
+*current* storage, logged the request, and returned HTTP 200 with
+`"status": "unsupported"`. Nothing was ever written. The stated reason was
+wrong: `Variable.setDataType(type, storage, force, source)` together with
+`Function.setCustomVariableStorage(boolean)` has been public Ghidra API for many
+versions.
+
+Returning success for a write that never happened is worse than refusing it,
+because the caller cannot tell the difference — and this is the one case where
+the caller has no alternative. An argument layout that assigns registers in a
+fixed ordered run (`R0`+`R2`, a lone `R28` — a NEC V60 target in the report)
+cannot be expressed by **any** calling convention, so adding one to the `.cspec`
+does not help. Custom storage is the only route.
+
+The endpoint now:
+
+- parses the shapes Ghidra itself prints, so storage read back from
+  `get_function_variables` can be handed straight in: `EAX`, `EAX:4`,
+  `R0:4,R2:4` (one value split across registers) and `Stack[-0x10]:4`. Size
+  defaults to the variable's data-type length.
+- switches the function to custom variable storage when the target is a
+  **parameter**, whose storage is otherwise re-derived from the `.cspec`, and
+  reports that as `custom_storage_enabled` because it pins every other
+  parameter too.
+- **reads the storage back off the variable** and compares it to what was asked
+  for, instead of echoing the request. Echoing is what let the stub look like it
+  worked.
+- returns genuine errors — unknown register (naming the language), a size larger
+  than the register, an unparseable offset, an overlap that did not take.
+- leaves nothing behind when it refuses: the spec is parsed *before* the
+  function-wide storage mode is touched, and any failure after that point puts
+  the mode back. A mistyped register name previously answered
+  `Unknown register 'R99'` having already detached the function's whole
+  parameter list from its calling convention.
+
+Reported by drojaazu. Covered by `VariableStorageWriteTest`.
+
+### Fixed — lazy tool loading is now the default, unbreaking the Gemini API ([#440](https://github.com/bethington/ghidra-mcp/issues/440))
+
+Eager loading put every endpoint into a single `tools/list`. For Gemini that is
+not merely expensive, it is over a hard limit: the API compiles function
+declarations into a constrained-decoding state machine and rejects the whole
+request before any tool is ever called.
+
+```text
+400 INVALID_ARGUMENT
+The specified schema produces a constraint that has too many states for serving
+```
+
+So the old default did not degrade those clients, it broke them outright, and no
+client-side configuration could work around a server that only ever offered the
+full set. The bridge now loads `listing,function,program` (57 endpoints plus the
+8 static tools) on connect and registers the rest on demand. This is also the
+concrete half of the "too many tools for agents" complaint in
+[#307](https://github.com/bethington/ghidra-mcp/issues/307) /
+[#245](https://github.com/bethington/ghidra-mcp/issues/245) /
+[#267](https://github.com/bethington/ghidra-mcp/issues/267): the capability is
+unchanged, only what is advertised by default.
+
+Eager only ever existed for clients that ignore `tools/list_changed` and would
+therefore never see a later `load_tool_group()` registration. **Those clients
+keep an escape hatch, by either route:**
+
+```bash
+uv run bridge-mcp-ghidra --no-lazy   # when you control the command line
+export GHIDRA_MCP_LAZY=0             # when you don't (Docker, uvx, some client configs)
+```
+
+`GHIDRA_MCP_LAZY` is new here — `--no-lazy` alone is not an escape hatch for a
+container `ENTRYPOINT` or a client config that gives the user no way to add a
+flag. An explicit flag beats the variable; an unrecognised value is ignored with
+a warning rather than guessed at. Startup logs which mode is in effect.
+
+### Fixed — `program` in a POST body was silently ignored, sending writes to the wrong program
+
+`@Param.source()` defaults to `ParamSource.QUERY`. On a POST tool that declares
+its other parameters as `BODY`, any parameter left at that default was looked
+for in the query string only — so a caller following this project's own "POST
+params go in the body" convention had it dropped. **192 `program` declarations
+across 103 POST tools** have that shape.
+
+For `program` the consequence was not a missing argument but a wrong target:
+resolution fell through to `getProgramOrError(provider, "")`, i.e. the *current*
+program. A `set_bookmark`, `set_comment` or rename addressed to one program
+landed in whichever program happened to be active, and the response said
+`success` — with no `program` field to reveal where it actually went.
+
+Observed in the field: **16,442 bookmarks describing one DLL were written into
+another**, across two separate publishing runs, without a single error. The
+callers were correct; every one named its target program in the body.
+
+`resolveParam` now falls back to the other source when the declared one does not
+carry the parameter at all. The declared source still wins when it has a value,
+so the Python bridge's synthesized query params are unaffected. This generalises
+what `isDryRunRequested` already did by hand for `dry_run` — same root cause,
+found earlier, where a query-only check meant a dry run performed a real write.
+`resolveProgramForDryRun` was reading `query.get("program")` only and is fixed
+the same way.
+
+Covered by `AnnotationScannerParamSourceTest`, which fails against the previous
+behaviour (`expected:<D2Common.dll> but was:<null>`).
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was
