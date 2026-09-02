@@ -1,6 +1,7 @@
 """Command-line entry point for the GhidraMCP bridge."""
 
 import argparse
+import hmac
 import os
 import re
 import socket
@@ -10,7 +11,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 
 from . import state
-from .config import logger
+from .config import AUTH_TOKEN, logger
 from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
 
@@ -77,6 +78,35 @@ def _cors_origin_regex(bind_host: str) -> str:
     return rf"^https?://({alternatives})(:\d+)?$"
 
 
+class _BearerAuthMiddleware:
+    """Require the backend bearer token from clients of an exposed bridge."""
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.expected = f"Bearer {token}".encode("utf-8")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("method") != "OPTIONS":
+            headers = dict(scope.get("headers", ()))
+            supplied = headers.get(b"authorization", b"")
+            if not hmac.compare_digest(supplied, self.expected):
+                body = b"Unauthorized"
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"text/plain; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                            (b"www-authenticate", b"Bearer"),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
 def _build_http_app(transport: str, bind_host: str):
     """Return the transport's Starlette app wrapped in CORS middleware.
 
@@ -96,6 +126,10 @@ def _build_http_app(transport: str, bind_host: str):
         expose_headers=["mcp-session-id", "mcp-protocol-version"],
         max_age=3600,
     )
+    if AUTH_TOKEN and bind_host not in {"127.0.0.1", "localhost", "::1"}:
+        # The bridge reuses this credential for its backend requests.  Do not
+        # let an unauthenticated network client turn it into a confused deputy.
+        app = _BearerAuthMiddleware(app, AUTH_TOKEN)
     return app
 
 
