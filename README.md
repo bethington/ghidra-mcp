@@ -102,10 +102,10 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.1.2** (or compatible version)
+- **Ghidra 12.1.3** (or compatible version)
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
-> Shared Ghidra Server users: Ghidra 12.1.2 clients require a Ghidra
+> Shared Ghidra Server users: Ghidra 12.1.3 clients require a Ghidra
 > Server at 12.1, 12.0.5, or a newer compatible version. Upgrade the
 > server before using this plugin from a 12.1 client.
 >
