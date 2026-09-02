@@ -315,6 +315,25 @@ public void testDecompileFunction() {
 mvn test
 ```
 
+The cheap tier that needs no running Ghidra is the offline suite — run this
+before opening a pull request:
+
+```bash
+mvn test -Dtest='com.xebyte.offline.*Test'
+# or, with the Gradle backend:
+./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=/path/to/ghidra
+```
+
+It should be green on a clean checkout. If it is not, that is a bug in this
+repo, not something to work around — please say so in your pull request or
+open an issue, and include the failing test names. A few of these tests read
+the project's own Java sources to pin wiring properties in place; they go
+through `com.xebyte.offline.ProjectSource`, which anchors on the project root
+and normalises line endings, so they should not care how you cloned the repo
+or which directory you run from. (They used to care, and two contributors hit
+it — see the CHANGELOG entry "the offline test suite failed for anyone who
+cloned with Git for Windows' defaults".)
+
 ### Python Tests
 ```python
 # tests/test_bridge.py

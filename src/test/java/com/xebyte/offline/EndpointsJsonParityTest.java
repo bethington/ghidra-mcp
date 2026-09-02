@@ -128,7 +128,7 @@ public class EndpointsJsonParityTest extends TestCase {
      * added or removed an entry without updating the count.
      */
     public void testCatalogTotalEndpointsIsConsistent() throws IOException {
-        String raw = Files.readString(Paths.get(CATALOG_PATH));
+        String raw = ProjectSource.readProjectFile(CATALOG_PATH);
         JsonObject root = new Gson().fromJson(raw, JsonObject.class);
         int declared = root.get("total_endpoints").getAsInt();
         int actual = root.getAsJsonArray("endpoints").size();
@@ -150,7 +150,7 @@ public class EndpointsJsonParityTest extends TestCase {
      * present in no source file is a genuine orphan.
      */
     public void testNoOrphanCatalogEntries() throws IOException {
-        String allSrc = readAllJavaSources(Paths.get("src", "main", "java", "com", "xebyte"));
+        String allSrc = readAllJavaSources(ProjectSource.mainSourceRoot());
         List<String> orphans = new ArrayList<>();
         for (String path : catalog.keySet()) {
             if (!allSrc.contains("\"" + path + "\"")) {
@@ -175,7 +175,7 @@ public class EndpointsJsonParityTest extends TestCase {
         StringBuilder sb = new StringBuilder();
         try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
             for (Path p : (Iterable<Path>) paths.filter(f -> f.toString().endsWith(".java"))::iterator) {
-                sb.append(Files.readString(p)).append('\n');
+                sb.append(ProjectSource.read(p)).append('\n');
             }
         }
         return sb.toString();
@@ -200,14 +200,15 @@ public class EndpointsJsonParityTest extends TestCase {
     }
 
     private static Map<String, CatalogEntry> loadCatalog() throws IOException {
-        Path p = Paths.get(CATALOG_PATH);
+        Path p = ProjectSource.path(CATALOG_PATH);
         if (!Files.exists(p)) {
             throw new IOException(
-                "Expected catalog file " + CATALOG_PATH + " relative to project root. "
-              + "mvn test runs with working dir = project root; if you're running from "
-              + "a different dir, cd to the project root first.");
+                "Expected catalog file " + CATALOG_PATH + " under the project root, "
+              + "resolved to " + p + ". The root is found from the compiled test "
+              + "classes, not the working directory; pass -Dproject.basedir=<repo "
+              + "root> if it is wrong.");
         }
-        String raw = Files.readString(p);
+        String raw = ProjectSource.read(p);
         JsonObject root = new Gson().fromJson(raw, JsonObject.class);
         JsonArray arr = root.getAsJsonArray("endpoints");
 

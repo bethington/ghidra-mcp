@@ -150,6 +150,48 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### Fixed: the offline test suite failed for anyone who cloned with Git for Windows' defaults
+
+`HardeningWiringTest` and `RunGhidraScriptProgramPropagationTest` failed on a
+**clean checkout** — 2 failures out of 444 — for contributors whose Git had
+`core.autocrlf=true`, which is what the Git for Windows installer configures by
+default. Both tests located a method by `indexOf` on a string literal
+containing `"\n"`; such a clone materialises the LF-stored sources as CRLF, so
+the literal could not match and the tests reported `Could not locate 3-arg
+runGhidraScript`. That message reads like a real code regression, and it was
+believed to be one: two independent outside contributors (#447, #448) reported
+it as pre-existing breakage and shipped their pull requests without a green
+suite, one stating he had not run the tests as a result.
+
+- Source-reading tests now go through a new test helper,
+  `com.xebyte.offline.ProjectSource`, which **normalises line endings to LF**
+  and **locates the project root from the compiled test classes** rather than
+  from the JVM's working directory. Applied to `HardeningWiringTest`,
+  `RunGhidraScriptProgramPropagationTest`, `EndpointsJsonParityTest`,
+  `ManualToolDescriptorsParityTest` and `FunctionServiceThisTypeTest` — the
+  last three carried the same latent fragility and had simply not been
+  triggered yet.
+- The two method-signature lookups are now whitespace-tolerant regexes instead
+  of literals pinning an exact newline and indent, so a reformat of the
+  declaration no longer breaks them either.
+- `HardeningWiringTest` gains a **behavioural** check that the
+  `runGhidraScript` sink refuses before resolving the requested program
+  (passing a deliberately nonexistent program name); the source-ordering
+  assertion stays as the backstop for developers who have
+  `GHIDRA_MCP_ALLOW_SCRIPTS` set.
+- New `ProjectSourceTest` pins the helper's behaviour and fails the build if
+  any test reintroduces a working-directory-relative repo path.
+- Maven and Gradle now both pass `-Dproject.basedir` to the test JVM.
+
+Verified green from two working directories on both backends, including a
+fresh `core.autocrlf=true` clone — the exact checkout that previously failed
+2/444 now passes 451/451.
+
+Note for maintainers: 93 of the repo's 197 Java files are stored **CRLF in the
+index** and there is no `.gitattributes`, so a file's on-disk line ending is
+not something a test may assume. Normalising the index would touch ~300 files
+and is deliberately left as a separate, coordinated change.
+
 ### Documentation correctness: `doc_lint` + Function ID
 
 `analyze_function_completeness` measures whether documentation is *present*. It

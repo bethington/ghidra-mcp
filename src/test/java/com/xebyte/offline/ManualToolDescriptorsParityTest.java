@@ -4,10 +4,6 @@ import com.xebyte.core.ManualToolDescriptors;
 import junit.framework.TestCase;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -52,10 +48,9 @@ public class ManualToolDescriptorsParityTest extends TestCase {
         "/mcp/instance_info"
     );
 
+    /** Anchored on the project root and LF-normalised — see {@link ProjectSource}. */
     private static String readSource(String... parts) throws IOException {
-        Path p = Paths.get("src", "main", "java", "com", "xebyte");
-        for (String s : parts) p = p.resolve(s);
-        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        return ProjectSource.readMainSource(parts);
     }
 
     private static Set<String> extractPaths(Pattern pattern, String src) {
