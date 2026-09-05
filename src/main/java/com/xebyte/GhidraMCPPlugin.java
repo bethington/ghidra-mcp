@@ -926,7 +926,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String filePath = params.get("path") != null ? params.get("path").toString() : null;
             String comment = params.getOrDefault("comment", "Added via GhidraMCP").toString();
-            sendResponse(exchange, addToVersionControl(filePath, comment));
+            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
+            sendResponse(exchange, addToVersionControl(filePath, comment, keepCheckedOut));
         }));
 
         // --- Version History & Checkouts (2 endpoints) ---
@@ -2775,25 +2776,23 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * 2. ANALYZE_DATA_REGION - Comprehensive single-call data analysis
      */
     private String analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                      boolean includeXrefMap, boolean includeAssemblyPatterns,
+                                      boolean includeXrefMap,
                                       boolean includeBoundaryDetection) {
-        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection).toJson();
+        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection).toJson();
     }
 
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    private String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                      boolean analyzeIndexing, int maxScanRange) {
-        return analysisService.detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange).toJson();
+    private String detectArrayBounds(String addressStr, int maxScanRange) {
+        return analysisService.detectArrayBounds(addressStr, maxScanRange).toJson();
     }
 
     /**
      * 4. GET_ASSEMBLY_CONTEXT - Assembly pattern analysis
      */
-    private String getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
-                                      Object includePatternsObj) {
-        return xrefCallGraphService.getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj).toJson();
+    private String getAssemblyContext(Object xrefSourcesObj, int contextInstructions) {
+        return xrefCallGraphService.getAssemblyContext(xrefSourcesObj, contextInstructions).toJson();
     }
 
     /**
@@ -3683,7 +3682,18 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
     }
 
-    private String addToVersionControl(String filePath, String comment) {
+    /**
+     * Add a file to version control.
+     *
+     * @param filePath       project path of the file to add
+     * @param comment        initial version comment
+     * @param keepCheckedOut keep the file checked out afterwards, so local edits
+     *                       can continue without a second checkout round-trip.
+     *                       This was advertised on /server/version_control/add
+     *                       but hardcoded to false here until v7.0.1.
+     * @return JSON result
+     */
+    private String addToVersionControl(String filePath, String comment, boolean keepCheckedOut) {
         Project project = tool.getProject();
         if (project == null) return "{\"error\": \"No project open\"}";
         if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
@@ -3691,8 +3701,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
         if (file.isVersioned()) return "{\"error\": \"File already under version control: " + escapeJson(filePath) + "\"}";
         try {
-            file.addToVersionControl(comment, false, new ConsoleTaskMonitor());
-            return "{\"status\": \"added\", \"path\": \"" + escapeJson(filePath) + "\", \"comment\": \"" + escapeJson(comment) + "\"}";
+            file.addToVersionControl(comment, keepCheckedOut, new ConsoleTaskMonitor());
+            return "{\"status\": \"added\", \"path\": \"" + escapeJson(filePath) + "\", \"comment\": \"" + escapeJson(comment)
+                + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
         } catch (Exception e) {
             return "{\"error\": \"Add to version control failed: " + escapeJson(e.getMessage()) + "\"}";
         }

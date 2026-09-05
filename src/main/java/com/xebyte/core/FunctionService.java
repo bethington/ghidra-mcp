@@ -3314,7 +3314,12 @@ public class FunctionService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "variable_renames", source = ParamSource.BODY) Map<String, String> variableRenames,
-            @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false") boolean forceIndividual,
+            @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Skip the batched decompiler path and rename each variable on its own via "
+                               + "HighFunctionDBUtil. Slower, but it does not commit parameters to the database "
+                               + "or suppress events, and it reports per-variable failures instead of losing the "
+                               + "whole batch. Use it when the batch path fails or renames the wrong symbol; the "
+                               + "response carries \"method\": \"individual\".") boolean forceIndividual,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -3323,6 +3328,14 @@ public class FunctionService {
         // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        // force_individual asks for exactly the routine the batch path falls back
+        // to on failure (line ~3466). Dispatch straight there instead of running
+        // the batch attempt first -- otherwise the flag promises "skip batch mode"
+        // and delivers batch mode, which is what it did until now.
+        if (forceIndividual && variableRenames != null && !variableRenames.isEmpty()) {
+            return batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
+        }
 
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
@@ -3827,6 +3840,7 @@ public class FunctionService {
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        final List<String> warnings = new ArrayList<>();
 
         // Get function name for individual operations
         final String[] functionName = new String[1];
@@ -3854,12 +3868,21 @@ public class FunctionService {
 
             try {
                 Response renameResult = renameVariableInFunction(functionName[0], oldName, newName, programName);
-                String resultText = renameResult.toJson();
-                if (resultText.equals("Variable renamed")) {
+                // Inspect the Response, do NOT string-compare its serialized form.
+                // renameVariableInFunction returns Response.success("Variable
+                // renamed"), whose toJson() is {"status":"success","message":
+                // "Variable renamed"} -- it has never equalled the bare string
+                // this used to test for, so every successful rename was counted
+                // as a failure and its success payload filed as an error. The
+                // comparison was written against the pre-Response raw-text
+                // contract and was not updated when that contract changed.
+                if (isVariableRenameSuccess(renameResult)) {
                     variablesRenamed.incrementAndGet();
+                    collectRenameWarnings(renameResult, oldName, warnings);
                 } else {
                     variablesFailed.incrementAndGet();
-                    errors.add("Failed to rename '" + oldName + "' to '" + newName + "': " + resultText);
+                    errors.add("Failed to rename '" + oldName + "' to '" + newName + "': "
+                        + renameResult.toJson());
                 }
             } catch (Exception e) {
                 variablesFailed.incrementAndGet();
@@ -3868,14 +3891,52 @@ public class FunctionService {
         }
 
         Map<String, Object> resultMap = new LinkedHashMap<>();
-        resultMap.put("success", true);
+        // "success" must reflect what actually happened. Hardcoding true meant a
+        // run in which every rename failed still reported success.
+        resultMap.put("success", variablesFailed.get() == 0);
         resultMap.put("method", "individual");
         resultMap.put("variables_renamed", variablesRenamed.get());
         resultMap.put("variables_failed", variablesFailed.get());
+        if (!warnings.isEmpty()) {
+            resultMap.put("warnings", warnings);
+        }
         if (!errors.isEmpty()) {
             resultMap.put("errors", errors);
         }
         return Response.ok(resultMap);
+    }
+
+    /**
+     * True if a {@link #renameVariableInFunction} response reports a completed
+     * rename. Both of its success shapes are accepted: the plain
+     * {@code Response.success("Variable renamed")} envelope and the map form
+     * carrying Hungarian-notation warnings.
+     *
+     * @param response the response returned by renameVariableInFunction
+     * @return whether the rename succeeded
+     */
+    public static boolean isVariableRenameSuccess(Response response) {
+        if (!(response instanceof Response.Ok ok)) return false;
+        if (!(ok.data() instanceof Map<?, ?> data)) return false;
+        return "success".equals(String.valueOf(data.get("status")));
+    }
+
+    /**
+     * Copy any warnings from a single successful rename into the batch's warning
+     * list, prefixed with the variable they belong to. Without this the Hungarian
+     * -notation warnings the individual path produces are dropped on the floor.
+     *
+     * @param response the response returned by renameVariableInFunction
+     * @param oldName  the variable the response refers to
+     * @param sink     list that collects the prefixed warnings
+     */
+    public static void collectRenameWarnings(Response response, String oldName, List<String> sink) {
+        if (!(response instanceof Response.Ok ok)) return;
+        if (!(ok.data() instanceof Map<?, ?> data)) return;
+        if (!(data.get("warnings") instanceof List<?> found)) return;
+        for (Object w : found) {
+            if (w != null) sink.add(oldName + ": " + w);
+        }
     }
 
     public Response batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
