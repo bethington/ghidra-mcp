@@ -72,9 +72,35 @@ jobs:
           uv python install 3.13
           uv sync --python 3.13 --group test
 
-      - name: Build Benchmark.dll
+      # A "Build Benchmark.dll" step used to run here:
+      #     uv run python fun-doc\benchmark\build.py
+      # `fun-doc/` (and its benchmark fixture) moved to the d2-game-exe
+      # repository on 2026-08-10 (commit 10960f76), so that path has not
+      # existed in this tree since. The step could only ever fail.
+      #
+      # Removing it does NOT make the benchmark-backed tiers work — see the
+      # guard below. The fixture itself is gone, not just its build script.
+      - name: Check the requested tier can run in this repository
         shell: powershell
-        run: uv run python fun-doc\benchmark\build.py
+        run: |
+          # tools/setup/ghidra.py resets the Benchmark.dll fixture for these
+          # tiers (BENCHMARK_DEPLOY_TEST_MODES plus the negative-contract
+          # branch of run_deploy_tests). The fixture lives in d2-game-exe now,
+          # so reset_benchmark_fixture() raises before any assertion runs.
+          # Fail here instead: this costs seconds rather than failing after a
+          # full build, Ghidra restart and deploy.
+          $tier = "$env:GHIDRA_REGRESSION_TIER"
+          $needsBenchmark = @(
+            'release', 'benchmark-read', 'benchmark-write',
+            'multi-program', 'debugger-live', 'negative-contract'
+          )
+          if ($needsBenchmark -contains $tier) {
+            Write-Host "::error::Tier '$tier' needs the Benchmark.dll fixture, which moved to the d2-game-exe repository with fun-doc on 2026-08-10. It cannot run here."
+            Write-Host "Tiers that still run from this repository: endpoint-catalog, selected-contract."
+            Write-Host "Deciding what the release gate should be instead is a maintainer call - see docs/releases/RELEASE_CHECKLIST.md."
+            exit 1
+          }
+          Write-Host "Tier '$tier' does not need the benchmark fixture; continuing."
 
       - name: Install Ghidra jars
         shell: powershell
