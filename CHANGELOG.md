@@ -129,6 +129,47 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+#### A refusal is not a golden
+
+That class was wider than one case. **20 of 124 committed goldens were bodies
+consisting of nothing but `{"error": ...}`** — the server's correct refusal of a
+call whose *arguments* were wrong, recorded by `--record` as the expected
+result. Each of those cases then passed forever while asserting that the
+endpoint stays broken, because nothing in either assertion layer could see it:
+
+- `assert: is_error: false` checks the MCP **protocol** flag `isError`. A tool
+  that returns an error *body* did not raise a protocol error, so the flag is
+  false and the assertion passes.
+- `assert: nonempty: true` passes because an error string is not empty.
+- The snapshot then matched its own recorded refusal on every later run.
+
+Three changes, so this cannot recur:
+
+- **`search_instructions` fixed.** The case supplied `function`, `limit` and
+  `program` but neither `mnemonic` nor `operand_pattern`, and the endpoint
+  requires at least one — a cross-parameter constraint the schema has no way to
+  express, so the synthesizer could not have known. Verified against a live
+  server that supplying `mnemonic` returns matches: the endpoint was never
+  broken, the case was. The false golden is deleted rather than re-recorded,
+  because a golden must come from the benchmark fixture in a known state.
+- **`TOOL_ARG_OVERRIDES`** in `tests/conformance/cases.py` — a per-tool argument
+  override applied after name-keyed synthesis. `--generate` overwrites
+  `generated_baseline.yaml` wholesale, so a fix hand-edited into the YAML alone
+  would be silently reverted by the next regeneration; the override is the half
+  that survives.
+- **The runner refuses to record a bare error payload** as a golden, and reports
+  that refusal as a case *failure* rather than a snapshot tally. A case whose
+  point genuinely is the refusal opts in with `expect_error_payload: true`.
+
+`tests/unit/test_conformance_snapshots.py` covers all of it offline, and carries
+the remaining 19 as an enumerated debt list with a per-entry diagnosis. The list
+can only shrink: a new error golden fails, and so does an entry that has been
+fixed but not removed. Their root causes are two — one parameter name meaning
+different things in different tools (`pattern` is a type name for
+`search_data_types` and a hex byte string for `search_byte_patterns`;
+`source_type` is a Ghidra `SourceType`, not a data type), and a synthesized
+address that is real but wrong for that particular tool.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths

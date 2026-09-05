@@ -1400,9 +1400,9 @@ tool_cases:
 - tool: search_instructions
   tier: read
   args:
-    function: calc_crc16
     limit: 5
     program: Benchmark.dll
+    mnemonic: ret
   assert:
     is_error: false
     nonempty: true

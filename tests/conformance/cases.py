@@ -95,6 +95,40 @@ class ProgramFacts:
         self.second_program = second_program or program
 
 
+# Per-tool argument overrides, applied AFTER name-keyed synthesis.
+#
+# The synthesizer maps a parameter *name* to a value globally, which is what
+# makes it able to bootstrap ~250 cases at all. It has two blind spots that no
+# amount of name mapping can close:
+#
+# 1. A schema records each parameter's type, not the relationships BETWEEN
+#    parameters. `/search_instructions` declares `mnemonic` and
+#    `operand_pattern` both optional with `defaultValue = ""`, but rejects the
+#    call when both are empty ("At least one of 'mnemonic' or 'operand_pattern'
+#    must be non-empty"). The synthesizer filled only the parameters it had
+#    names for -- `function`, `limit`, `program` -- producing a structurally
+#    valid call that the endpoint correctly refuses.
+# 2. One name means different things in different tools. `pattern` is a type
+#    name for `/search_data_types` and a hex byte string for
+#    `/search_byte_patterns`; `source_type` is a Ghidra reference SourceType for
+#    `/add_memory_reference`, not a data type.
+#
+# Both produce a case that runs, returns `{"error": ...}`, and still passes --
+# the generated assertions are `is_error: false` (the MCP protocol flag, which
+# an error *payload* does not set) plus `nonempty: true` (an error string is
+# non-empty). Worse, `--record` then wrote that refusal out as the golden.
+#
+# A value of `None` drops a parameter the name mapping would otherwise supply.
+TOOL_ARG_OVERRIDES: dict[str, dict[str, Any]] = {
+    # Needs at least one of mnemonic/operand_pattern. `ret` is chosen because
+    # every ordinary function terminates in one, so the case has matches on any
+    # target rather than depending on what the benchmark happens to contain.
+    # `function` is dropped so the case exercises the default program-wide
+    # scope, which is the path callers actually take.
+    "search_instructions": {"mnemonic": "ret", "function": None},
+}
+
+
 def synthesize_args(tool: dict[str, Any], facts: ProgramFacts) -> tuple[dict[str, Any], str | None]:
     """Build arguments for a tool from its schema plus live program facts.
 
@@ -150,6 +184,17 @@ def synthesize_args(tool: dict[str, Any], facts: ProgramFacts) -> tuple[dict[str
             args[pname] = value
         elif param.get("required"):
             unresolved.append(pname)
+
+    # Per-tool overrides win over the name mapping: they encode cross-parameter
+    # validity constraints and per-tool meanings the schema cannot express.
+    tool_name = (tool.get("path") or "").lstrip("/").replace("/", "_")
+    for oname, ovalue in TOOL_ARG_OVERRIDES.get(tool_name, {}).items():
+        if ovalue is None:
+            args.pop(oname, None)
+        else:
+            args[oname] = ovalue
+        if oname in unresolved and ovalue is not None:
+            unresolved.remove(oname)
 
     if unresolved:
         return args, f"no synthetic value for required param(s): {sorted(unresolved)}"
@@ -233,6 +278,7 @@ def load_cases(path: Path) -> list[Case]:
             name=raw.get("name"),
             normalize_extra=[tuple(p) for p in (raw.get("normalize") or [])],
             extract=raw.get("extract") or {},
+            expect_error_payload=bool(raw.get("expect_error_payload", False)),
         ))
     return out
 
@@ -253,6 +299,7 @@ def dump_cases(cases: list[Case], path: Path, header: str = "") -> None:
                     "snapshot": c.snapshot,
                     "skip": c.skip,
                     "extract": c.extract or None,
+                    "expect_error_payload": c.expect_error_payload or None,
                 }.items() if v not in (None, {}, [])
             }
             for c in cases
