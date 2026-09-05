@@ -5,6 +5,9 @@ import json
 import os
 import threading
 import time
+from typing import Annotated
+
+from pydantic import Field
 
 from . import discovery
 from . import dispatch
@@ -206,6 +209,12 @@ def _load_groups_sync(group_names: list[str]) -> list[str]:
 
 @mcp.tool(name="list_instances")
 async def _list_instances_tool() -> str:
+    """
+    List known Ghidra instances from UDS discovery and the active TCP fallback.
+
+    Returns JSON with each instance's project name, PID, open programs, and
+    socket path or TCP URL. Also shows which instance is currently connected.
+    """
     return await state.run_in_worker(_list_instances_sync)
 
 
@@ -247,7 +256,10 @@ def _summarize_instance(inst: dict) -> dict:
 
 
 @mcp.tool()
-async def connect_instance(project: str, ctx: Context | None = None) -> str:
+async def connect_instance(
+    project: Annotated[str, Field(description="Project name (or substring) to connect to")],
+    ctx: Context | None = None,
+) -> str:
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
@@ -291,7 +303,10 @@ def list_tool_groups() -> str:
 
 
 @mcp.tool()
-async def load_tool_group(group: str, ctx: Context | None = None) -> str:
+async def load_tool_group(
+    group: Annotated[str, Field(description='Category name (e.g. "function", "datatype") or "all"')],
+    ctx: Context | None = None,
+) -> str:
     """
     Load all tools in a category. Accepts a category name or "all" to load everything.
 
@@ -361,7 +376,10 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
 
 
 @mcp.tool()
-async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
+async def unload_tool_group(
+    group: Annotated[str, Field(description="Category name to unload")],
+    ctx: Context | None = None,
+) -> str:
     """
     Unload all tools in a category. Default groups are protected from unloading.
 
@@ -396,7 +414,17 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
 
 
 @mcp.tool()
-async def check_tools(tools: str) -> str:
+async def check_tools(
+    tools: Annotated[
+        str,
+        Field(
+            description=(
+                "Comma-separated tool names, e.g. "
+                '"rename_symbol,batch_set_comments,analyze_function_completeness"'
+            )
+        ),
+    ],
+) -> str:
     """
     Check if specific tools are callable right now. Returns status for each tool:
     "callable", "not_loaded" (exists but group not loaded), or "not_found" (doesn't exist).
@@ -454,7 +482,13 @@ async def check_tools(tools: str) -> str:
 
 
 @mcp.tool()
-async def search_tools(query: str, limit: int = 15) -> str:
+async def search_tools(
+    query: Annotated[
+        str,
+        Field(description='Space-separated keywords, e.g. "rename function" or "xref struct".'),
+    ],
+    limit: Annotated[int, Field(description="Maximum number of results to return (default 15).")] = 15,
+) -> str:
     """
     Search the full Ghidra tool catalog by keyword — including tools whose group
     is not currently loaded. Use this to discover the right tool without paying
@@ -511,11 +545,30 @@ async def search_tools(query: str, limit: int = 15) -> str:
 
 @mcp.tool()
 async def import_file(
-    file_path: str,
-    project_folder: str = "/",
-    language: str | None = None,
-    compiler_spec: str | None = None,
-    auto_analyze: bool = True,
+    file_path: Annotated[str, Field(description="Absolute path to the binary file on disk")],
+    project_folder: Annotated[
+        str, Field(description='Destination folder in the Ghidra project (default: "/")')
+    ] = "/",
+    language: Annotated[
+        str | None,
+        Field(
+            description=(
+                'Language ID for raw binaries (e.g. "ARM:LE:32:Cortex", '
+                '"x86:LE:64:default")'
+            )
+        ),
+    ] = None,
+    compiler_spec: Annotated[
+        str | None,
+        Field(
+            description=(
+                'Compiler spec ID (e.g. "default", "gcc"). Uses language default if omitted.'
+            )
+        ),
+    ] = None,
+    auto_analyze: Annotated[
+        bool, Field(description="Start auto-analysis after import (default: true)")
+    ] = True,
     ctx: Context | None = None,
 ) -> str:
     """
