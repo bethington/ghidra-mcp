@@ -86,19 +86,53 @@ public class SymbolLabelService {
         return renameLabel(addressStr, oldName, newName, null);
     }
 
+    /**
+     * Pick the symbol {@code /rename_symbol} operates on.
+     *
+     * <p>One request value must not bind to two parameters. Until 7.0.0
+     * {@code old_name} was declared BOTH as a parameter in its own right and as an
+     * alias of {@code target}, because the two tools this endpoint replaced
+     * disagree about what the name means: {@code rename_global_variable(old_name,
+     * new_name)} meant "the symbol to rename", while {@code rename_label(address,
+     * old_name, new_name)} meant "which label at that address". With both
+     * declarations live, a body carrying only {@code old_name} filled in
+     * {@code target} <em>and</em> {@code oldName} from the same value, and
+     * {@code /mcp/schema} had no way to describe that.
+     *
+     * <p>The alias is gone; {@code old_name} is a parameter and nothing else. The
+     * {@code rename_global_variable} spelling keeps working through this fallback,
+     * which resolves in exactly the order the alias list produced: {@code target},
+     * then {@code address} / {@code function_address} (still aliases, resolved
+     * before this method is reached), then {@code old_name}.
+     *
+     * @param target  the {@code target} parameter as resolved from the request
+     * @param oldName the {@code old_name} parameter as resolved from the request
+     * @return {@code target} when the caller supplied one, otherwise {@code oldName}
+     */
+    public static String resolveRenameTarget(String target, String oldName) {
+        if (target != null && !target.isBlank()) return target;
+        if (oldName != null && !oldName.isBlank()) return oldName;
+        return target;
+    }
+
     @McpTool(path = "/rename_symbol", method = "POST",
              description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
              category = "symbol")
     public Response renameSymbol(
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
-                   aliases = {"address", "function_address", "old_name"},
-                   description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.") String target,
+                   aliases = {"address", "function_address"},
+                   description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename. "
+                               + "May be omitted when old_name carries the symbol name, which is how the "
+                               + "replaced rename_global_variable was called.") String target,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
                    description = "auto | data | global | label | external") String kind,
             @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
-                   description = "For kind=label only: the current label name at the address.") String oldName,
+                   description = "For kind=label: the current label name at the address given by target. "
+                               + "When target is omitted this is used as the target instead, for callers "
+                               + "migrated from rename_global_variable(old_name, new_name).") String oldName,
             @Param(value = "program", defaultValue = "") String programName) {
+        target = resolveRenameTarget(target, oldName);
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
             case "data":     return renameDataAtAddress(target, newName, programName);

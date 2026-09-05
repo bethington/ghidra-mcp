@@ -129,6 +129,57 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### Parameter aliases: published, and reachable — `/mcp/schema`, `/rename_symbol`
+
+Two defects in what the server told clients about itself. Neither changed
+behaviour for a caller who was already using a canonical spelling.
+
+**`/mcp/schema` never published `@Param` aliases.** `AnnotationScanner` resolves
+the canonical name and then each declared alias, for both query and body values,
+so the server genuinely serves every spelling — but `ParamDescriptor.toJson` had
+no `aliases` field, so the schema advertised only the canonical one. Anything
+reasoning about "is this a parameter the server accepts?" from the schema alone
+called a valid spelling unknown: `/get_function_labels` accepting `address=` was
+reported as a contract breach when `address` is a declared, working alias. The
+recorded schema snapshot shows the gap — 235 tools, **zero** parameters carrying
+aliases. `ParamDescriptor` now carries them and emits `"aliases": [...]`, omitted
+entirely when a parameter declares none, so the ~200 tools without aliases
+produce byte-identical schema. Six `@McpTool` routes and eleven spellings are
+affected: `/get_function_labels`, `/rename_function`, `/rename_symbol`,
+`/set_function_no_return`, `/set_function_this_type`, `/set_variable_type`.
+
+**The bridge could not use an alias even once the schema named it.** FastMCP
+validates arguments against the signature `registry._build_tool_function` builds,
+using a pydantic model whose `extra` policy is `ignore`. Measured: an alias
+argument against an optional canonical was **silently discarded** and the request
+went out without the value; against a *required* canonical the call was
+**rejected client-side** with a validation error, for a spelling the server would
+have served. The bridge now declares each alias as an optional parameter and
+folds it onto the canonical name before dispatch, in the same order Java
+resolves — canonical first, then each alias in declaration order. A required
+parameter that has aliases is no longer required in the signature (the alias may
+be the value); the check moved into the handler, which names every accepted
+spelling when none arrives. Address sanitisation applies to the folded value.
+
+**`/rename_symbol` bound one request value to two parameters.** `old_name` was
+declared both as a parameter in its own right *and* as an alias of `target`,
+because the two tools it replaced disagree about the name:
+`rename_global_variable(old_name, new_name)` meant "the symbol to rename", while
+`rename_label(address, old_name, new_name)` meant "which label at that address".
+A body carrying only `old_name` filled in `target` **and** `oldName` from the one
+value, and no schema can describe that. `target` now declares only `address` and
+`function_address`; `old_name` is a parameter and nothing else. The
+`rename_global_variable` call shape keeps working through an explicit fallback
+that resolves in exactly the order the alias list produced. **A caller sending
+both is unchanged**: `target` names the symbol, `old_name` stays the `kind=label`
+selector, and it is never used as the target while a target is present. Callers
+sending only `old_name`, only `target`, or only `address`/`function_address` are
+all unchanged too. A new offline guard fails the build if any tool ever again
+declares an alias that collides with another parameter's canonical name.
+
+Note for consumers: `tests/conformance/snapshots/mcp_schema.snap` predates this
+and will need refreshing against a deployed build before it reflects the aliases.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
