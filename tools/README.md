@@ -4,7 +4,7 @@ Utility scripts and tooling for the Ghidra MCP Server project.
 
 ## What's here
 
-```
+```text
 tools/
 ├── setup/         # Project setup, build, deploy, version-bump CLI
 │                  #   python -m tools.setup --help

@@ -87,7 +87,7 @@ Mirrors `<argLine>-Dnet.bytebuddy.experimental=true</argLine>` in `pom.xml`. Wit
 
 Reads `ghidra.version` from `pom.xml` and compares it against the version reported by `GHIDRA_INSTALL_DIR/Ghidra/application.properties`. Exits cleanly with no error if `GHIDRA_INSTALL_DIR` is not set.
 
-```
+```bash
 ./gradlew verifyVersion
 ./gradlew verifyVersion -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
 ```
@@ -100,7 +100,7 @@ Reads `ghidra.version` from `pom.xml` and compares it against the version report
 
 Validates Java on PATH, all 18 required Ghidra jars present, write access to both the Ghidra install extensions dir and the user-profile extensions dir. Depends on `verifyVersion`.
 
-```
+```bash
 ./gradlew preflight -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
 ```
 
@@ -112,7 +112,7 @@ Validates Java on PATH, all 18 required Ghidra jars present, write access to bot
 
 Checks that all 18 required Ghidra jars exist under `GHIDRA_INSTALL_DIR`. No `mvn install:install-file` step required — Gradle uses fileTree directly for compilation.
 
-```
+```bash
 ./gradlew prepareGhidraClasspath -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
 ```
 
@@ -195,7 +195,7 @@ Run these after applying item 10:
 These are the only files that change in Phase 2. The Gradle task design is complete.
 
 | File | Change |
-|---|---|
+| --- | --- |
 | `tools/setup/maven.py` | Add `find_gradle_command()` and `run_gradle(repo_root, tasks, dry_run)` |
 | `tools/setup/cli.py` | `cmd_build` → `run_gradle(..., ['buildExtension'])` |
 | `tools/setup/cli.py` | `cmd_clean` → `run_gradle(..., ['clean'])` |

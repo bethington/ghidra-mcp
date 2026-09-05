@@ -150,6 +150,57 @@ A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
+### CI: the Markdown lint gate had never linted anything
+
+`.github/workflows/tests.yml` passed `config: '.markdownlintrc'` to
+`markdownlint-cli2-action`. `.markdownlintrc` is a markdownlint-cli **v1**
+filename and markdownlint-cli2 refuses it, so every run aborted before opening
+a single Markdown file:
+
+```text
+markdownlint-cli2 v0.23.1 (markdownlint v0.41.1)
+##[error]Failed due to error: Error: Unable to use configuration file
+'/home/runner/work/ghidra-mcp/ghidra-mcp/.markdownlintrc'; Configuration file
+should be one of the supported names (e.g., '.markdownlint-cli2.jsonc') ...
+```
+
+`continue-on-error: true` then turned that abort into a green check —
+run `33332052889` logged the error above and still concluded `success`. The
+documentation quality gate was decorative for its whole life.
+
+- **The config is now `.markdownlint-cli2.jsonc`**, a name the tool accepts,
+  with every rule choice carrying a comment explaining it. `.markdownlintrc`
+  is deleted so it cannot silently become the wrong source of truth again.
+- **`continue-on-error` is gone.** The job stays advisory by being absent from
+  `build-status`'s `needs` — a Markdown violation now shows a real red X and
+  blocks nothing. Softening a finding and hiding a broken tool were the same
+  switch, which is why it went.
+- **2,598 violations across 91 files → 0.** Fixed, not suppressed: 2,483 by
+  `--fix` (blank lines around headings/lists/fences/tables, table pipe
+  spacing, trailing punctuation in headings, bare URLs), and 115 by hand,
+  including a language tag on 112 code fences that no tool can infer.
+- **Three rules are off, each because its auto-fix corrupted this repo's
+  prose.** MD037 (spaces in emphasis) turned `UnitAny* not int*` into
+  `UnitAny*not int*` and `g_ prefix` into `g_prefix` — RE documentation is
+  full of C pointer syntax and Hungarian prefixes, and all 11 hits were false
+  positives. MD029 (ordered-list prefix) renumbered a 1..13 backlog that runs
+  through four headings into four lists that each restart at 1, in a document
+  whose prose refers to items by number. MD036 (emphasis as heading) wanted to
+  promote bolded lead-ins such as CONTRIBUTING's closing thank-you into real
+  headings. MD060 is pinned to `compact` rather than the default `consistent`,
+  which otherwise infers a different expectation per file.
+- **`markdownlint --fix` is not safe unsupervised**, and this is the evidence:
+  besides MD037, it inserted blank-line blockquote markers at column 0 inside
+  an indented blockquote in README, terminating the list item that contained
+  it and breaking the numbering of the install steps. Both were caught by
+  diffing every file with whitespace collapsed, not by re-running the linter.
+- **`tests/unit/test_project_consistency.py::TestMarkdownLintConfig`** pins
+  the failure: the configured path must exist, must be a name
+  markdownlint-cli2 accepts, must parse, must justify every disabled rule in a
+  comment, and the job must not carry `continue-on-error` or gate
+  `build-status`. Each assertion was verified to fail when its condition is
+  violated.
+
 ### Documentation correctness: `doc_lint` + Function ID
 
 `analyze_function_completeness` measures whether documentation is *present*. It
@@ -198,7 +249,6 @@ sound and the answer is negative); and the Rich header of
 D2Common/D2Client/D2Game/Fog/Storm contains **zero** VC6-compiler objects, every
 entry being a 710-series product at build 6030 = VS .NET 2003 SP1. VC6 SP6 is
 build 8804.
-
 
 ### fun-doc: live-prove ABI detection + shared-build failure attribution
 
@@ -841,10 +891,10 @@ Patch release fixing Windows UDS/TCP fallback regression and decompiler output a
   in schema, with optional deprecation logging per alias hit (configurable). Non-breaking change:
   all existing API calls continue to work unchanged.
   
-  **Comprehensive Audit & Standardization Complete (v5.14.1)**: 
+  **Comprehensive Audit & Standardization Complete (v5.14.1)**:
   - Audited all 251 endpoints across 14 service classes (~20K lines)
   - 99%+ parameter naming compliance achieved (most services already compliant)
-  - FunctionService standardized: `/rename_variable`, `/set_local_variable_type`, 
+  - FunctionService standardized: `/rename_variable`, `/set_local_variable_type`,
     `/set_parameter_type`, `/set_function_this_type`, `/mark_no_return`
   - All remaining services verified 100% compliant with snake_case standard
   - Parameter resolution: canonical name first, then aliases in order, full backward compatibility
@@ -1039,6 +1089,7 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   traversal vector that could place or overwrite a program outside the
   intended folder. Covered offline by `GzfExportImportTest`.
 
+<!-- markdownlint-disable-next-line MD024 --><!-- repeats on purpose: carried over from 5.12.0, see lead-in above -->
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -1051,6 +1102,7 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   `" ARM:LE:32:Cortex "` resolve instead of failing the lookup. The
   success response now also echoes the resolved `language`.
 
+<!-- markdownlint-disable-next-line MD024 --><!-- repeats on purpose: carried over from 5.12.0, see lead-in above -->
 ### Fixed
 
 - **Headless: `/export_program` refuses to guess on an ambiguous bare
@@ -2362,8 +2414,7 @@ were biting the globals worker:
 
 ### Tests
 
-- **17 new offline JUnit tests** for `NamingConventions.checkGlobalNameQuality`
-  + `checkGlobalPlateComment` (53 total — was 47, +6 plate-comment).
+- **17 new offline JUnit tests** for `NamingConventions.checkGlobalNameQuality` + `checkGlobalPlateComment` (53 total — was 47, +6 plate-comment).
 - **19 new offline Python tests** for `global_scorer.py` (ordering,
   blacklist, pause-gate, persistence shape, threaded-class behavior).
 - **18 new live integration tests** in `tests/integration/test_global_endpoints.py`
@@ -2854,20 +2905,23 @@ changes. Semver PATCH bump.
   Changed the gate to `!= 0`.
 
   Live verification (2026-04-15 14:18–14:23, 5 runs across both providers):
-  ```
+
+  ```text
   InitializeVideoState            codex   59→100  (+41)  FULL:comments  completed
   ResetNpcMenuState               claude  59→100  (+41)  FULL:comments  completed
   CreateMissileCheckingSkillFlags codex   61→100  (+39)  FULL:comments  completed
   InitializeExpansionAudio        claude  61→ 92  (+31)  FULL:comments  completed
   ReinitializeExpansionAudio      codex   61→ 91  (+30)  FULL:comments  completed
   ```
+
   Average delta: **+36.4%** vs. yesterday's +13-25%. Five for five reached
   the `good_enough_score` (80) on the first attempt.
 
 - **Infinite re-pick loops on no-progress runs** — Selector had no
   mechanism to blacklist a function that keeps completing with zero
   progress. Observed pattern on 2026-04-15:
-  ```
+
+  ```text
   RenderResourceBarProgress       codex  ×46 runs, all +0%
   CLIENT_UpdateUnitDisplayEffects codex  ×68 + claude ×18, all +0%
   IsPathTargetMonsterBoss         codex  ×24 runs, 23 at +0% then +10
@@ -2875,6 +2929,7 @@ changes. Semver PATCH bump.
   CheckNetworkSessionTimeout      claude ×27 runs, pattern [-8,+8,+0×25]
   CLIENT_UpdateUnitDisplayEffects claude ×18 runs, all +0%
   ```
+
   Guard #2 (no-progress downgrade) requires `tool_calls_made == 0`, so
   `-1` from codex/claude never triggered it. `consecutive_fails` only
   tracks hard failures, not stagnant completions. `partial_runs >= 3`
@@ -2989,7 +3044,7 @@ Stability and observability hotfix on top of v5.3.0. Ships after a multi-hour li
 
 ### Live verification (final test session)
 
-```
+```text
 63 runs across 6 parallel workers (4×minimax, 1×codex, 1×claude)
   minimax: 37 runs, +20.9% avg score delta, 0 failures
   codex:   18 runs, +24.6% avg score delta, 0 failures
@@ -3123,13 +3178,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Breaking Changes
 
 | Tool / Behavior | Before | After (v5.0) |
-|-----------------|--------|--------------|
+| ----------------- | -------- | -------------- |
 | `batch_rename_variables` | endpoint name | **Renamed** to `rename_variables` — update all callers |
 | `add_struct_field` | `insertAtOffset` (shifts subsequent fields) | `replaceAtOffset` — same call, different field layout |
 | `set_local_variable_type` | accepted undefined→undefined silently | **Rejected with error** — type must actually change |
 | Struct field names | passed through as-is | **Auto-prefixed** with Hungarian notation based on data type |
 
 ### Completeness Scoring Redesign
+
 - **Log-scaled budget system**: Every per-count deduction category now has a fixed point budget with log-scaled penalties. No single category can dominate the score. Monster functions (5,000+ variables) no longer score 0%.
 - **Tiered plate comment scoring**: Missing plate (-35pts), stub (-25pts), incomplete (-15pts), minor (-8pts), complete (0pts). Rewards quality, not just presence.
 - **Effective score only counts fixable deductions**: Structural (unfixable) deductions are fully forgiven. Functions with only structural deductions score 100% effective.
@@ -3138,17 +3194,20 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **`__thiscall` ECX auto-param**: Correctly classified as structural/unfixable. `set_function_prototype` warns when `__thiscall` `this` type can't be changed.
 
 ### Naming Convention Enforcement
+
 - **NamingConventions.java**: Centralized validation utility -- PascalCase function names, Hungarian variable prefixes, `g_` global prefixes, snake_case labels, plate comment structure.
 - **Auto-fix struct field prefixes**: `create_struct`, `add_struct_field`, `modify_struct_field` automatically apply correct Hungarian prefixes based on field type.
 - **Function name validation**: Warns on non-PascalCase, missing verb, too short. Module prefixes (`UPPERCASE_`) accepted and validated separately.
 - **`set_local_variable_type` rejects undefined-to-undefined**: No-op type changes rejected with helpful error.
 
 ### New Tools
+
 - **`/set_variables`**: Atomic type + rename in a single transaction. Sets types first, decompiles, then renames with Hungarian validation. Eliminates SSA churn.
 - **`/check_tools`**: Verify if specific tools are callable. Returns `callable`, `not_loaded`, or `not_found` with fix suggestions.
 - **`/rename_variables`**: Renamed from `/batch_rename_variables` for conciseness.
 
 ### Tool Improvements
+
 - **`batch_set_comments`**: `decompiler_comments` and `disassembly_comments` arrays now optional (default `[]`). Omitting `plate_comment` leaves existing plate untouched.
 - **`add_struct_field`**: Uses `replaceAtOffset` instead of `insertAtOffset` -- overlays undefined bytes without shifting subsequent fields. Off-by-one at struct boundary fixed.
 - **`modify_struct_field`**: Accepts `offset:N` syntax (e.g., `offset:16` or `offset:0x10`) for unnamed fields.
@@ -3157,6 +3216,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **`get_current_function` / `get_current_address`**: Now discovers CodeBrowser instances via ToolManager (was broken in FrontEnd mode). Returns JSON with program path.
 
 ### Plate Comment Validation
+
 - **Summary line check**: First non-empty line must be >20 chars.
 - **Parameter count cross-validation**: Compares Parameters section entries against function signature.
 - **Returns/return-type match**: Catches void function with non-void docs and vice versa.
@@ -3165,6 +3225,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Parameter entry quality**: Flags entries lacking type + description.
 
 ### fun-doc Automation Engine
+
 - **Codex SDK integration**: `AI_PROVIDER = "codex"` routes to OpenAI Codex Python SDK with MCP tools. Claude Code SDK also integrated.
 - **Select mode (`-s`)**: Fetches current function from CodeBrowser, builds prompt. `--depth 2` recursively collects callers/callees.
 - **Manual mode (`-m -s`)**: Single-keypress flow -- copies prompt, press any key for next function, `q` to quit.
@@ -3173,6 +3234,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Smart mode routing**: >= 100% VERIFY, >= 70% FIX, < 70% FULL. No smart promotion.
 
 ### Prompt V6 Improvements
+
 - **Score removed from prompts**: Prevents models from coasting on high scores.
 - **Consistency checklist**: Step 5 requires function name vs plate comment alignment check.
 - **Module prefix decision**: 2-signal gate (Source file, behavior domain, callee family) before applying prefix.
@@ -3185,6 +3247,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Non-ASCII sanitized**: All em dashes and arrows replaced with ASCII equivalents.
 
 ### Bridge Improvements
+
 - **All tools loaded at startup** (`--lazy` default changed to False): Fixes Claude Code/Codex not seeing dynamically loaded tools.
 - **`load_tool_group` returns tool names**: Response includes exact list of newly loaded tools.
 - **TCP fallback in `list_instances()`**: Windows environments now show the active TCP connection (PR #90).
@@ -3192,6 +3255,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Xref tools accept address directly**: `get_function_callers`/`get_function_callees` no longer require name-only lookup.
 
 ### Bug Fixes
+
 - **`effective_score > max_achievable_score`**: Fixed -- effective score capped at max achievable.
 - **`analyze_for_documentation` pre-fetch**: Was using `address` instead of `function_address` param. Fixed.
 - **CodeBrowser detection**: `get_current_function`/`get_current_address` now search running CodeBrowser instances via ToolManager.
@@ -3204,12 +3268,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Annotation-Based Endpoints & Dynamic Bridge Registration
 
 #### `@McpTool`/`@Param` Annotation Infrastructure
+
 - All ~144 service methods across 12 service classes annotated with `@McpTool` and `@Param`
 - `AnnotationScanner` discovers annotated methods via reflection and generates `EndpointDef` records
 - `/mcp/schema` endpoint returns JSON schema describing all tools, parameters, types, and categories
 - New endpoints are now a single step: annotate the service method and it's automatically discoverable
 
 #### Dynamic Bridge Tool Registration
+
 - Bridge fetches `/mcp/schema` from Ghidra HTTP server at startup and auto-registers ~170 MCP tools
 - Reduced bridge from ~8,600 lines to ~2,400 lines (72% reduction)
 - 22 complex tools with bridge-side logic (retries, local I/O, multi-call, Knowledge DB) remain as static `@mcp.tool()` functions
@@ -3220,6 +3286,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Graceful fallback: if Ghidra is not running, logs warning and starts with only static tools
 
 #### Test Suite Updates
+
 - Rewrote `test_mcp_tool_functions.py` for dynamic registration architecture
 - Tests cover: schema type mapping, default conversion, handler creation, parameter routing, static tool availability
 - Updated endpoint count assertions for static-only decorator count (15-50 range)
@@ -3240,6 +3307,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Documentation Completeness Improvements
 
 #### `analyze_function_completeness` Enhancements
+
 - Added **context-aware scoring** for compiler/runtime helper functions (e.g., CRT/SEH helpers) to reduce false penalties.
 - Added **fixable vs structural deductions** in response payload:
   - `fixable_deductions`
@@ -3255,11 +3323,13 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Updated workflow recommendations to be **classification-aware** (compact helper workflow vs full workflow).
 
 ---
+
 ## v4.2.0 - 2026-03-02
 
 ### Knowledge Database Integration + BSim + Bug Fixes
 
 #### Knowledge Database (5 new MCP tools)
+
 - **`store_function_knowledge`** -- Store documented function data (name, prototype, comments, score) to PostgreSQL knowledge DB with fire-and-forget semantics
 - **`query_knowledge_context`** -- Keyword search across documented functions using PostgreSQL `ILIKE`/`tsvector` full-text search. Returns relevant prior documentation to inform new function analysis
 - **`store_ordinal_mapping`** -- Store ordinal-to-name mappings per binary version (e.g., D2Common.dll ordinal 10375 = GetUnitPosition)
@@ -3270,6 +3340,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Schema**: 3 new tables (`ordinal_mappings`, `documented_functions`, `propagation_log`) with full-text search indexes and `updated_at` triggers
 
 #### BSim Cross-Version Matching (4 new Ghidra scripts)
+
 - **`BSimIngestProgram.java`** -- Ingest all functions from current program into BSim PostgreSQL DB. One-time per binary version.
 - **`BSimQueryAndPropagate.java`** -- Query BSim for cross-version matches of a specific function, returns JSON sorted by similarity score
 - **`BSimBulkQuery.java`** -- Bulk query all undocumented (FUN_*) functions against BSim DB for batch propagation
@@ -3277,18 +3348,22 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **3-tier matching cascade** in RE loop: exact opcode hash (fastest) -> BSim LSH similarity (medium) -> fuzzy instruction pattern (slowest)
 
 #### Bug Fixes
+
 - **Fix #44**: Enum value parsing -- Gson parses JSON integers as `Double` (0 -> 0.0), causing `Long.parseLong("0.0")` to fail silently. Replaced hand-rolled parser with `JsonHelper.parseJson()` + `Number.longValue()`. Hex strings (`0x1F`) now also accepted.
 - **Improved error messages**: Enum creation with empty/invalid values now returns descriptive errors instead of silent failures
 
 #### Dead Code Cleanup
+
 - Removed ~243KB of deprecated workflow modules superseded by the RE loop skill
 - Deleted deprecated slash commands (`auto-document.md`, `improve-cycle.md`, `fix-issues.md`, `improve.md`)
 
 #### Migration Scripts
+
 - **`scripts/apply_schema.py`** -- Apply knowledge DB schema to PostgreSQL (idempotent, handles "already exists" gracefully)
 - **`scripts/migrate_learnings.py`** -- One-time migration from flat files (learnings.md, loop_state.json, community_names.json) to knowledge DB tables
 
 #### Counts
+
 - 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 
 ---
@@ -3298,22 +3373,26 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Parallel Multi-Binary Support
 
 #### Universal `program` Parameter
+
 - **Every program-scoped MCP tool now accepts an optional `program` parameter** -- Pass `program="D2Client.dll"` to any tool to target a specific open program without calling `switch_program` first
 - **Eliminates race conditions** -- Parallel requests targeting different programs no longer contend on shared `currentProgram` state
 - **Backward compatible** -- Omitting `program` falls back to the current/default program, preserving existing workflows
 - **Full stack coverage**: Bridge helpers (5), 136 MCP tools, 130+ GUI endpoints, 130+ headless endpoints, and all 9 service classes updated
 
 #### Service Layer Changes
+
 - All service methods now accept `String programName` and resolve via `getProgramOrError(programName)`
 - Backward-compatible overloads (`method(args)` delegates to `method(args, null)`) preserve internal callers
 - Services updated: FunctionService, CommentService, DataTypeService, SymbolLabelService, XrefCallGraphService, DocumentationHashService, AnalysisService, MalwareSecurityService, ProgramScriptService
 
 #### Bridge Changes
+
 - `safe_get`, `safe_get_json`, `safe_post`, `safe_post_json`, `make_request` all accept `program=` kwarg
 - GET helpers inject `program` into query params; POST helpers append `?program=X` to URL
 - `switch_program` docstring updated: now documented as setting the default fallback, with explicit `program=` recommended for parallel workflows
 
 #### Counts
+
 - 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 
 ---
@@ -3323,12 +3402,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Major Release -- Service Layer Architecture Refactor
 
 #### Architecture Refactor
+
 - **Monolith decomposition**: Extracted shared business logic from `GhidraMCPPlugin.java` (16,945 lines) into 12 focused service classes under `com.xebyte.core/`
 - **Plugin reduced 69%**: `GhidraMCPPlugin.java` went from 16,945 to 5,273 lines (server lifecycle, HTTP wiring, and GUI-only endpoints remain)
 - **Headless reduced 67%**: `HeadlessEndpointHandler.java` went from 6,452 to 2,153 lines by delegating to the same shared services
 - **Zero breaking changes**: All HTTP endpoint paths, parameter names, and JSON response formats are unchanged. The MCP bridge and all clients work without modification
 
 #### New Service Classes
+
 - `ServiceUtils` -- shared static utilities (escapeJson, paginateList, resolveDataType, convertNumber)
 - `ListingService` -- listing/enumeration endpoints (list_methods, list_functions, list_classes, etc.)
 - `FunctionService` -- decompilation, rename, prototype, variable management, batch operations
@@ -3342,12 +3423,15 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - `ProgramScriptService` -- program management, scripts, memory, bookmarks, metadata
 
 #### New Feature
+
 - **Auto-analyze on open_program**: `open_program` endpoint now accepts optional `auto_analyze=true` parameter to trigger Ghidra's auto-analysis after opening a program (inspired by PR #42 from @heeen)
 
 #### Counts
+
 - 184 MCP tools, 169 GUI endpoints, 173 headless endpoints
 
 #### Design Decisions
+
 - Instance-based services with constructor injection (`ProgramProvider` + `ThreadingStrategy`)
 - GUI mode uses `GuiProgramProvider` + `SwingThreadingStrategy`; headless uses `HeadlessProgramProvider` + `DirectThreadingStrategy`
 - Services return JSON strings (same as before); `Response` sealed interface deferred to v5.0
@@ -3360,14 +3444,17 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Bug Fixes + Version Management
 
 #### Bug Fixes (Cherry-picked from PR #38)
+
 - **Fixed trailing slash in DEFAULT_GHIDRA_SERVER** -- `urljoin` path resolution was broken when the base URL ended with `/`
 - **Fixed fuzzy match JSON parsing** -- `find_similar_functions_fuzzy` and `bulk_fuzzy_match` now use `safe_get_json` instead of `safe_get`, which was splitting JSON responses on newlines and destroying structure
 - **Fixed OSGi class cache collisions for inline scripts** -- Inline scripts now use unique class names (`Mcp_<hex>`) per invocation instead of the fixed `_mcp_inline_` prefix, which caused the OSGi bundle resolver to cache stale classloaders
 
 #### Bug Fixes
+
 - **Fixed multi-window port collision (#35)** -- Opening a second CodeBrowser window no longer crashes with "Address already in use". The HTTP server is now a static singleton shared across all plugin instances, with reference counting for clean shutdown
 
 #### Completeness Checker Improvements
+
 - **New `batch_analyze_completeness` endpoint** -- Analyze multiple functions in a single call, avoiding per-function HTTP overhead. Accepts JSON array of addresses, returns all scores at once
 - **Thunk comment density fix** -- Thunk stubs are no longer penalized for low inline comment density (thunks are single JMP instructions with no code to comment)
 - **Thunk comment density recommendations** -- `generateWorkflowRecommendations` no longer suggests adding inline comments to thunk functions
@@ -3377,6 +3464,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Relaxed thunk plate comment validation** -- Thunks only need to identify as forwarding stubs, not include full Algorithm/Parameters/Returns sections
 
 #### Infrastructure
+
 - **Fixed ENDPOINT_COUNT** -- Corrected from 146 to 149 to match actual `createContext` registration count
 - **Centralized version in extension.properties** -- Description now uses `${project.version}` Maven filtering instead of hardcoded version string
 - **Expanded version bump workflow** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
@@ -3389,11 +3477,13 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Feature Release -- Server Control Menu + Completeness Checker Fixes
 
 #### New Features
+
 - **Tools > GhidraMCP server control menu** -- Start/stop/restart the HTTP server from Ghidra's Tools menu with status indicator
 - **Deployment automation** -- TCD auto-activation patches tool config for plugin auto-enable; AutoOpen launches project on Ghidra startup; ServerPassword auto-fills server auth dialog
 - **Batch workflow improvements** -- Strengthened dispatch prompt with explicit storage type resolution instructions; added practical note for p-prefix pointer pattern
 
 #### Bug Fixes
+
 - **Completeness checker: register-only SSA variables** -- Variables with `unique:` storage that can't be renamed/retyped via Ghidra API are now tracked as unfixable, boosting `effective_score` accordingly
 - **Completeness checker: ordinal PRE_COMMENT detection** -- Ordinals documented via `set_decompiler_comment` appear on the line above the code in decompiled output; checker now checks previous line for PRE_COMMENT
 - **Completeness checker: Hungarian notation types** -- Added `dword`/`uint` (dw), `word`/`ushort` (w), `qword`/`ulonglong` (qw), `BOOL` (f) to expected prefix mappings
@@ -3407,47 +3497,56 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Major Release Ã¢â‚¬â€ Headless Server Parity + New Tool Categories
 
 #### Ã°Å¸â€“Â¥Ã¯Â¸Â Headless Server Expansion
+
 - **Full headless parity**: Ported 50+ endpoints from GUI plugin to headless server
 - All analysis, batch operation, and documentation endpoints now available without Ghidra GUI
 - Script execution (`run_ghidra_script`, `run_script_inline`) works headlessly via `GhidraScriptUtil`
 - New `exitServer()` endpoint for graceful headless shutdown
 
 #### Ã°Å¸â€œÂ Project Lifecycle (New Category)
+
 - `create_project` Ã¢â‚¬â€ create a new Ghidra project programmatically
 - `delete_project` Ã¢â‚¬â€ delete a project by path
 - `list_projects` Ã¢â‚¬â€ enumerate Ghidra projects in a directory
 - `open_project` / `close_project` Ã¢â‚¬â€ now exposed as MCP tools
 
 #### Ã°Å¸â€”â€šÃ¯Â¸Â Project Organization (New Category)
+
 - `create_folder` Ã¢â‚¬â€ create folders in project tree
 - `move_file` / `move_folder` Ã¢â‚¬â€ reorganize project contents
 - `delete_file` Ã¢â‚¬â€ remove domain files from project
 
 #### Ã°Å¸â€â€” Server Connection (New Category)
+
 - `connect_server` / `disconnect_server` Ã¢â‚¬â€ manage Ghidra Server connections
 - `server_status` Ã¢â‚¬â€ check server connectivity
 - `list_repositories` / `create_repository` Ã¢â‚¬â€ repository management
 
 #### Ã°Å¸â€œÅ’ Version Control (New Category)
+
 - `checkout_file` / `checkin_file` Ã¢â‚¬â€ file version control operations
 - `undo_checkout` / `add_to_version_control` Ã¢â‚¬â€ checkout management
 
 #### Ã°Å¸â€œÅ“ Version History (New Category)
+
 - `get_version_history` Ã¢â‚¬â€ full version history for a file
 - `get_checkouts` Ã¢â‚¬â€ active checkout status
 - `get_specific_version` Ã¢â‚¬â€ open a specific historical version
 
 #### Ã°Å¸â€˜Â¤ Admin (New Category)
+
 - `terminate_checkout` Ã¢â‚¬â€ admin checkout termination
 - `list_server_users` Ã¢â‚¬â€ enumerate server users
 - `set_user_permissions` Ã¢â‚¬â€ manage user access levels
 
 #### Ã¢Å¡â„¢Ã¯Â¸Â Analysis Control (New Category)
+
 - `list_analyzers` Ã¢â‚¬â€ enumerate available Ghidra analyzers
 - `configure_analyzer` Ã¢â‚¬â€ enable/disable and configure analyzers
 - `run_analysis` Ã¢â‚¬â€ trigger analysis programmatically
 
 #### Ã°Å¸â€Â§ Infrastructure
+
 - **Version bump workflow**: Single-command version bump across all 7 project files
 - **`tests/unit/`**: New unit test suite Ã¢â‚¬â€ endpoint catalog consistency, MCP tool functions, response schemas
 - **`.markdownlintrc`**: Markdown lint config for CI quality gate
@@ -3455,6 +3554,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Tool count: 179 MCP tools (up from 110), 147 GUI endpoints, 172 headless endpoints
 
 #### Ã°Å¸â€Å’ GUI Plugin Additions
+
 - `/get_function_count` Ã¢â‚¬â€ quick function count without full listing
 - `/search_strings` Ã¢â‚¬â€ regex/substring search over defined strings, returns JSON
 - `/list_analyzers` Ã¢â‚¬â€ enumerate all analyzers with enabled/disabled state
@@ -3468,6 +3568,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Patch Release - Ghidra 12.0.3 Support, Pagination for Large Functions
 
 #### Ã°Å¸Å¡â‚¬ Ghidra 12.0.3 Support (PR #29)
+
 - **Full compatibility** with Ghidra 12.0.3 (released Feb 11, 2026)
 - Updated `pom.xml` target version
 - Updated Docker build configuration
@@ -3476,6 +3577,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Fixes issue #14 for users on latest Ghidra
 
 #### Ã°Å¸â€œâ€ž Pagination for Large Functions (PR #30)
+
 - **New `offset` and `limit` parameters** for `decompile_function()` and `disassemble_function()`
 - Prevents LLM context overflow when working with large functions
 - Pagination metadata header shows total lines and next offset
@@ -3483,6 +3585,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Fixes issue #7
 
 **Example usage:**
+
 ```python
 # Get first 100 lines
 code = decompile_function(address='0x401000', offset=0, limit=100)
@@ -3492,6 +3595,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ```
 
 **Response includes metadata:**
+
 ```c
 /* PAGINATION: lines 1-100 of 523 (use offset=100 for next chunk) */
 ```
@@ -3503,22 +3607,26 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Patch Release - CI Fixes, Documentation, Setup Workflow Improvements
 
 #### Ã°Å¸â€Â§ CI/Build Fixes
+
 - **Fixed CI workflow**: Ghidra JARs now properly installed to Maven repository instead of just copied to lib/ (PR #23)
 - **Proper Maven dependency management**: Works correctly with pom.xml changes from v2.0.0
 - **Version as single source of truth**: `ghidra.version` now uses Maven filtering from pom.xml (PR #20)
 - **Endpoint count updated**: Correctly reports 144 endpoints
 
 #### Ã°Å¸â€œÂ Documentation
+
 - **New troubleshooting section**: Comprehensive guide for common setup issues (PR #22)
 - **Verification steps**: Added curl commands to verify server is working
 - **Better error guidance**: Covers 500 errors, 404s, missing menus, and installation issues
 
 #### Ã°Å¸â€“Â¥Ã¯Â¸Â Setup Workflow
+
 - **Fixed version sorting bug**: Now uses semantic version sorting instead of string sorting (PR #21)
 - **Correct Ghidra detection**: Properly selects `ghidra_12.0.2_PUBLIC` over `ghidra_12.0_PUBLIC`
 - Fixes issue #19
 
 #### Ã°Å¸ÂÂ³ Docker Integration
+
 - Added as submodule to [re-universe](https://github.com/bethington/re-universe) platform
 - Enables AI-assisted analysis alongside BSim similarity matching
 
@@ -3529,46 +3637,55 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Major Release - Security, Ghidra 12.0.2, Enhanced Documentation
 
 #### Ã°Å¸â€â€™ Security
+
 - **Localhost binding**: HTTP server now binds to `127.0.0.1` instead of `0.0.0.0` in both GUI plugin and headless server Ã¢â‚¬â€ prevents accidental network exposure on shared networks
 - Addresses the same concern as [LaurieWired/GhidraMCP#125](https://github.com/LaurieWired/GhidraMCP/issues/125)
 
 #### Ã¢Å¡â„¢Ã¯Â¸Â Configurable Decompile Timeout
+
 - New optional `timeout` parameter on `/decompile_function` endpoint
 - Defaults to 60s Ã¢â‚¬â€ no behavior change for existing callers
 - Allows longer timeouts for complex functions (e.g., `?timeout=300`)
 
 #### Ã°Å¸ÂÂ·Ã¯Â¸Â Label Deletion Endpoints
+
 - **New `delete_label` tool**: Delete individual labels at specified addresses
 - **New `batch_delete_labels` tool**: Efficiently delete multiple labels in a single atomic operation
 - Essential for cleaning up orphan labels after applying array types to pointer tables
 
 #### Ã°Å¸â€Â§ Environment Configuration
+
 - New `.env.template` with `GHIDRA_PATH` and other environment-specific settings
 - Deploy script reads `.env` file Ã¢â‚¬â€ no more hardcoded paths
 - Auto-detection of Ghidra installation from common paths
 - Python bridge respects `GHIDRA_SERVER_URL` environment variable
 
 #### Ã°Å¸Å¡â‚¬ Ghidra 12.0.2 Support
+
 - Updated all dependencies and paths for Ghidra 12.0.2
 - Updated library dependency documentation (14 required JARs)
 
 #### Ã°Å¸â€ºÂ Ã¯Â¸Â Tool Count
+
 - **Total MCP Tools**: 110 fully implemented
 - **Java REST Endpoints**: 133 (includes internal endpoints)
 - **New tools added**: 2 (delete_label, batch_delete_labels)
 
 #### Ã°Å¸â€œÅ¡ Documentation
+
 - Complete README rewrite with full tool listing organized by category
 - Added architecture overview, library dependency table, and project structure
 - Reorganized API documentation by category
 - Added comprehensive contributing guidelines
 
 #### Ã°Å¸Â§Âª Testing
+
 - New unit tests for bridge utilities (`test_bridge_utils.py`)
 - New unit tests for MCP tools (`test_mcp_tools.py`)
 - Updated CI workflow to latest GitHub Actions versions
 
 #### Ã°Å¸Â§Â¹ Cleanup
+
 - Removed superseded files: `cross_version_matcher.py`, `cross_version_verifier.py` (replaced by hash index system in v1.9.4)
 - Removed stale data files: `hash_matches_*.json`, `string_anchors.json`, `docs/KNOWN_ORDINALS.md`
 - Refactored workflow engine (`continuous_improvement.py`, `ghidra_manager.py`)
@@ -3580,6 +3697,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Function Hash Index Release
 
 #### Ã°Å¸â€â€” Cross-Binary Documentation Propagation
+
 - **Function Hash Index System**: Hash-based matching of identical functions across different binaries
 - **New Java Endpoints**:
   - `GET /get_function_hash` - Compute SHA-256 hash of normalized function opcodes
@@ -3596,6 +3714,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `propagate_documentation` - Apply docs to all matching instances
 
 #### Ã°Å¸Â§Â® Hash Normalization Algorithm
+
 - Normalizes opcodes for position-independent matching across different base addresses
 - **Internal jumps**: `REL+offset` (relative to function start)
 - **External calls**: `CALL_EXT` placeholder
@@ -3605,11 +3724,13 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Registers**: Preserved (part of algorithm logic)
 
 #### Ã¢Å“â€¦ Verified Cross-Version Matching
+
 - Tested D2Client.dll 1.07 Ã¢â€ â€™ 1.08: **1,313 undocumented functions** match documented functions
 - Successfully propagated `ConcatenatePathAndWriteFile` documentation across versions
 - Identical functions produce matching hashes despite different base addresses
 
 #### Ã°Å¸â€ºÂ  Tool Count
+
 - **Total MCP Tools**: 118 (112 implemented + 6 ROADMAP v2.0)
 - **New tools added**: 7 (4 Java endpoints + 3 Python index management tools)
 
@@ -3620,12 +3741,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Documentation & Workflow Enhancement Release
 
 #### Ã°Å¸â€œÅ¡ Documentation Organization
+
 - **Organized scattered markdown files**: Moved release files to proper `docs/releases/` structure
 - **Created comprehensive navigation**: Added `docs/README.md` with complete directory structure
 - **Enhanced release documentation**: Added `docs/releases/README.md` with version index
 - **Streamlined project structure**: Moved administrative docs to `docs/project-management/`
 
 #### Ã°Å¸â€Â§ Hungarian Notation Improvements
+
 - **Enhanced pointer type coverage**: Added comprehensive double pointer types (`void **` Ã¢â€ â€™ `pp`, `char **` Ã¢â€ â€™ `pplpsz`)
 - **Added const pointer support**: New rules for `const char *` Ã¢â€ â€™ `lpcsz`, `const void *` Ã¢â€ â€™ `pc`
 - **Windows SDK integration**: Added mappings for `LPVOID`, `LPCSTR`, `LPWSTR`, `PVOID`
@@ -3633,12 +3756,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Array vs pointer clarity**: Distinguished stack arrays from pointer parameters
 
 #### Ã°Å¸Å½Â¯ Variable Renaming Workflow
+
 - **Comprehensive variable identification**: Mandated examining both decompiled and assembly views
 - **Eliminated pre-filtering**: Attempt renaming ALL variables regardless of name patterns
 - **Enhanced failure handling**: Use `variables_renamed` count as sole reliability indicator
 - **Improved documentation**: Better comment examples for non-renameable variables
 
 #### Ã°Å¸â€ºÂ  Build & Development
+
 - **Fixed Ghidra script issues**: Resolved class name mismatches and deprecated API usage
 - **Improved workflow efficiency**: Streamlined function documentation processes
 - **Enhanced type mapping**: More precise Hungarian notation type-to-prefix mapping
@@ -3654,6 +3779,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸Å½Â¯ Major Improvements
 
 **Documentation Organization:**
+
 - Ã¢Å“â€¦ Created comprehensive `PROJECT_STRUCTURE.md` documenting entire project layout
 - Ã¢Å“â€¦ Consolidated `DOCUMENTATION_INDEX.md` merging duplicate indexes
 - Ã¢Å“â€¦ Enhanced `scripts/README.md` with categorization and workflows
@@ -3661,6 +3787,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Organized 40+ root-level files into clear categories
 
 **Project Structure:**
+
 - Ã¢Å“â€¦ Categorized all files by purpose (core, build, data, docs, scripts, tools)
 - Ã¢Å“â€¦ Created visual directory trees with emoji icons for clarity
 - Ã¢Å“â€¦ Defined clear guidelines for adding new files
@@ -3668,6 +3795,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Prepared 3-phase reorganization plan for future improvements
 
 **Standards & Conventions:**
+
 - Ã¢Å“â€¦ Established markdown file naming best practices (kebab-case)
 - Ã¢Å“â€¦ Defined special file naming rules (README.md, CHANGELOG.md, etc.)
 - Ã¢Å“â€¦ Created quick reference guides and checklists
@@ -3675,6 +3803,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Set up migration strategy for existing files
 
 **Release Preparation:**
+
 - Ã¢Å“â€¦ Created comprehensive release checklist (`RELEASE_CHECKLIST_v1.9.2.md`)
 - Ã¢Å“â€¦ Verified version consistency across project (pom.xml 1.9.2)
 - Ã¢Å“â€¦ Updated all documentation references
@@ -3684,7 +3813,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸â€œÅ¡ New Documentation Files
 
 | File | Purpose | Lines |
-|------|---------|-------|
+| ------ | --------- | ------- |
 | `PROJECT_STRUCTURE.md` | Complete project organization guide | 450+ |
 | `DOCUMENTATION_INDEX.md` | Consolidated master index | 300+ |
 | `ORGANIZATION_SUMMARY.md` | Documentation of organization work | 350+ |
@@ -3712,6 +3841,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸â€œÅ  Organization Achievements
 
 **Before November 2025:**
+
 - 50+ files cluttered in root directory
 - 2 separate documentation indexes (duplicate)
 - Unclear file categorization
@@ -3719,6 +3849,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Difficult navigation and discovery
 
 **After November 2025:**
+
 - 40 organized root files with clear categories
 - 1 consolidated master documentation index
 - Complete project structure documentation
@@ -3743,6 +3874,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Bug Fixes & Improvements - Read-Only Tools Testing
 
 **Critical Fixes:**
+
 - Ã¢Å“â€¦ **Fixed silent failures in `get_xrefs_to` and `get_xrefs_from`**
   - Previously returned empty output when no xrefs found
   - Now returns descriptive message: "No references found to/from address: 0x..."
@@ -3761,6 +3893,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Affects: Java plugin batchDecompileXrefSources() method (lines 7362-7411)
 
 **Quality Improvements:**
+
 - Ã¢Å“â€¦ **Improved `list_strings` filtering**
   - Added minimum length filter (4+ characters)
   - Added printable ratio requirement (80% printable ASCII)
@@ -3776,6 +3909,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Affects: Java plugin listDataTypes() and getDataTypeName() methods (lines 4683-4769)
 
 ### Testing
+
 - Systematically tested all **53 read-only MCP tools** against D2Client.dll
 - **100% success rate** across 6 categories:
   - Metadata & Connection (3 tools)
@@ -3786,6 +3920,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Advanced Analysis (9 tools)
 
 ### Impact
+
 - More robust error handling with descriptive messages instead of silent failures
 - Completion of previously stubbed implementations
 - Better string detection quality (fewer false positives)
@@ -3797,17 +3932,20 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.3 - 2025-10-26
 
 ### Removed Tools - API Cleanup
+
 - Ã¢ÂÅ’ **Removed 3 redundant/non-functional MCP tools** (108 Ã¢â€ â€™ 105 tools)
   - `analyze_function_complexity` - Never implemented, returned placeholder JSON only
   - `analyze_data_types` - Superseded by comprehensive `analyze_data_region` tool
   - `auto_create_struct_from_memory` - Low-quality automated output, better workflow exists
 
 ### Rationale
+
 - **analyze_function_complexity**: Marked "not yet implemented" for multiple versions, no demand
 - **analyze_data_types**: Basic 18-line implementation completely replaced by `analyze_data_region` (200+ lines, comprehensive batch operation with xref mapping, boundary detection, stride analysis)
 - **auto_create_struct_from_memory**: Naive field inference produced generic field_0, field_4 names without context; better workflow is `analyze_data_region` Ã¢â€ â€™ manual `create_struct` with meaningful names
 
 ### Impact
+
 - Cleaner API surface with less confusion
 - Removed dead code from both Python bridge and Java plugin
 - No breaking changes for active users (tools were redundant or non-functional)
@@ -3818,6 +3956,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.2 - 2025-10-26
 
 ### New External Location Management Tools
+
 - Ã¢Å“â€¦ **Three New MCP Tools** - External location management for ordinal import fixing
   - `list_external_locations()` - List all external locations (imports, ordinal imports)
   - `get_external_location()` - Get details about specific external location
@@ -3825,6 +3964,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Enables mass fixing of broken ordinal-based imports when DLL functions change
 
 ### New Documentation
+
 - Ã¢Å“â€¦ **`EXTERNAL_LOCATION_TOOLS.md`** - Complete API reference for external location tools
   - Full tool signatures and parameters
   - Use cases and examples
@@ -3837,6 +3977,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Performance tips for large binaries
 
 ### Implementation Details
+
 - Added `listExternalLocations()` method to Java plugin (lines 10479-10509)
 - Added `getExternalLocationDetails()` method to Java plugin (lines 10511-10562)
 - Added `renameExternalLocation()` method to Java plugin (lines 10567-10626)
@@ -3851,6 +3992,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.1 - 2025-10-25
 
 ### Documentation Reorganization
+
 - Ã¢Å“â€¦ **Project Structure Overhaul** - Cleaned and reorganized entire documentation
   - Consolidated prompts: 12 files Ã¢â€ â€™ 8 focused workflow files
   - Created `docs/examples/` with punit/ and diablo2/ subdirectories
@@ -3860,18 +4002,21 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Removed ~70 obsolete files (old reports, duplicates, summaries)
 
 ### New Calling Convention
+
 - Ã¢Å“â€¦ **__d2edicall Convention** - Diablo II EDI-based context passing
   - Documented in `docs/conventions/D2CALL_CONVENTION_REFERENCE.md`
   - Applied to BuildNearbyRoomsList function
   - Installed in x86win.cspec
 
 ### Bug Fixes
+
 - Ã¢Å“â€¦ **Fixed DocumentFunctionWithClaude.java** - Windows compatibility
   - Resolved "claude: CreateProcess error=2"
   - Now uses full path: `%APPDATA%\npm\claude.cmd`
   - Changed keybinding from Ctrl+Shift+D to Ctrl+Shift+P
 
 ### New Files & Tools
+
 - Ã¢Å“â€¦ **ghidra_scripts/** - Example Ghidra scripts
   - `DocumentFunctionWithClaude.java` - AI-assisted function documentation
   - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
@@ -3880,12 +4025,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ **hybrid function processor workflow** - Automated analysis workflows
 
 ### Enhanced Documentation
+
 - Ã¢Å“â€¦ **examples/punit/** - Complete UnitAny structure case study (8 files)
 - Ã¢Å“â€¦ **examples/diablo2/** - Diablo II structure references (2 files)
 - Ã¢Å“â€¦ **conventions/** - Calling convention documentation (5 files)
 - Ã¢Å“â€¦ **guides/** - Structure discovery methodology (4 files)
 
 ### Cleanup
+
 - Ã¢ÂÅ’ Removed obsolete implementation/completion reports
 - Ã¢ÂÅ’ Removed duplicate function documentation workflows
 - Ã¢ÂÅ’ Removed old D2-specific installation guides
@@ -3900,6 +4047,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.0 - 2025-10-16
 
 ### Major Features
+
 - Ã¢Å“â€¦ **6 New Structure Field Analysis Tools** - Comprehensive struct field reverse engineering
   - `analyze_struct_field_usage` - Analyze field access patterns across functions
   - `get_field_access_context` - Get assembly/decompilation context for specific field offsets
@@ -3909,6 +4057,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `get_assembly_context` - Get assembly instructions with context for xref sources
 
 ### Documentation Suite
+
 - Ã¢Å“â€¦ **6 Comprehensive Reverse Engineering Guides** (in `docs/guides/`)
   - CALL_RETURN_OVERRIDE_CLEANUP.md - Flow override debugging
   - EBP_REGISTER_REUSE_SOLUTIONS.md - Register reuse pattern analysis
@@ -3924,6 +4073,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - OPTIMIZED_FUNCTION_DOCUMENTATION.md - Enhanced workflow
 
 ### Utility Scripts
+
 - Ã¢Å“â€¦ **9 Reverse Engineering Scripts** (in `scripts/`)
   - ClearCallReturnOverrides.java - Clear orphaned flow overrides
   - b_extract_data_with_xrefs.py - Bulk data extraction
@@ -3933,6 +4083,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - data extraction and function-processing helpers - automation utilities used during that release cycle
 
 ### Project Organization
+
 - Ã¢Å“â€¦ **Restructured Documentation**
   - Release notes Ã¢â€ â€™ `docs/releases/v1.7.x/`
   - Code reviews Ã¢â€ â€™ `docs/code-reviews/`
@@ -3940,6 +4091,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Guides consolidated in `docs/guides/`
 
 ### Changed Files
+
 - `bridge_mcp_ghidra.py` (+585 lines) - 6 new MCP tools, enhanced field analysis
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` (+188 lines) - Struct analysis endpoints
 - `pom.xml` (Version 1.7.3 Ã¢â€ â€™ 1.8.0)
@@ -3952,18 +4104,22 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.3 - 2025-10-13
 
 ### Critical Bug Fix
+
 - Ã¢Å“â€¦ **Fixed disassemble_bytes transaction commit** - Added missing `success = true` flag assignment before transaction commit, ensuring disassembled instructions are properly persisted to Ghidra database
 
 ### Impact
+
 - **High** - All `disassemble_bytes` operations now correctly save changes
 - Resolves issue where API reported success but changes were rolled back
 
 ### Testing
+
 - Ã¢Å“â€¦ Verified with test case at address 0x6fb4ca14 (21 bytes)
 - Ã¢Å“â€¦ Transaction commits successfully and persists across server restarts
 - Ã¢Å“â€¦ Complete verification documented in `DISASSEMBLE_BYTES_VERIFICATION.md`
 
 ### Changed Files
+
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` (Line 9716: Added `success = true`)
 - `pom.xml` (Version 1.7.2 Ã¢â€ â€™ 1.7.3)
 - `src/main/resources/extension.properties` (Version 1.7.2 Ã¢â€ â€™ 1.7.3)
@@ -3975,9 +4131,11 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.2 - 2025-10-12
 
 ### Critical Bug Fix
+
 - Ã¢Å“â€¦ **Fixed disassemble_bytes connection abort** - Added explicit response flushing and enhanced error logging to prevent HTTP connection abort errors
 
 ### Documentation
+
 - Ã¢Å“â€¦ Comprehensive code review documented in `CODE_REVIEW_2025-10-13.md`
 - Ã¢Å“â€¦ Overall rating: 4/5 (Very Good) - Production-ready with minor improvements identified
 
@@ -3988,12 +4146,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.0 - 2025-10-11
 
 ### Major Features
+
 - Ã¢Å“â€¦ **Variable storage control** - `set_variable_storage` endpoint for fixing register reuse issues
 - Ã¢Å“â€¦ **Ghidra script automation** - `run_script` and `list_scripts` endpoints
 - Ã¢Å“â€¦ **Forced decompilation** - `force_decompile` endpoint for cache clearing
 - Ã¢Å“â€¦ **Flow override control** - `clear_instruction_flow_override` and `set_function_no_return` endpoints
 
 ### Capabilities
+
 - **Register reuse fixes** - Resolve EBP and other register conflicts
 - **Automated analysis** - Execute Python/Java Ghidra scripts programmatically
 - **Flow analysis control** - Fix incorrect CALL_TERMINATOR overrides
@@ -4005,6 +4165,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.6.0 - 2025-10-10
 
 ### New Features
+
 - Ã¢Å“â€¦ **7 New MCP Tools**: Validation, batch operations, and comprehensive analysis
   - `validate_function_prototype` - Pre-flight validation for function prototypes
   - `validate_data_type_exists` - Check if types exist before using them
@@ -4015,6 +4176,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `search_functions_enhanced` - Advanced search with filtering, regex, sorting
 
 ### Documentation
+
 - Ã¢Å“â€¦ **Reorganized structure**: Created `docs/guides/`, `docs/releases/v1.6.0/`
 - Ã¢Å“â€¦ **Renamed**: `RELEASE_NOTES.md` Ã¢â€ â€™ `CHANGELOG.md`
 - Ã¢Å“â€¦ **Moved utility scripts** to `tools/` directory
@@ -4022,11 +4184,13 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ **New prompt**: `FUNCTION_DOCUMENTATION_WORKFLOW.md`
 
 ### Performance
+
 - **93% API call reduction** for complete function documentation
 - **Atomic transactions** with rollback support
 - **Pre-flight validation** prevents errors before execution
 
 ### Quality
+
 - **Implementation verification**: 99/108 Python tools (91.7%) have Java endpoints
 - **100% documentation coverage**: All 108 tools documented
 - **Professional structure**: Industry-standard organization
@@ -4038,20 +4202,24 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.5.1 - 2025-01-10
 
 ### Critical Bug Fixes
+
 - Ã¢Å“â€¦ **Fixed batch_set_comments JSON parsing error** - Eliminated ClassCastException that caused 90% of batch operation failures
 - Ã¢Å“â€¦ **Added missing AtomicInteger import** - Resolved compilation issue
 
 ### New Features
+
 - Ã¢Å“â€¦ **batch_create_labels endpoint** - Create multiple labels in single atomic transaction
 - Ã¢Å“â€¦ **Enhanced JSON parsing** - Support for nested objects and arrays in batch operations
 - Ã¢Å“â€¦ **ROADMAP v2.0 documentation** - All 10 placeholder tools clearly marked with implementation plans
 
 ### Performance Improvements
+
 - Ã¢Å“â€¦ **91% reduction in API calls** - Function documentation workflow: 57 calls Ã¢â€ â€™ 5 calls
 - Ã¢Å“â€¦ **Atomic transactions** - All-or-nothing semantics for batch operations
 - Ã¢Å“â€¦ **Eliminated user interruption issues** - Batch operations prevent hook triggers
 
 ### Documentation Enhancements
+
 - Ã¢Å“â€¦ **Improved rename_data documentation** - Clear explanation of "defined data" requirement
 - Ã¢Å“â€¦ **Comprehensive ROADMAP** - Transparent status for all placeholder tools
 - Ã¢Å“â€¦ **Organized documentation structure** - New docs/ subdirectories for better navigation

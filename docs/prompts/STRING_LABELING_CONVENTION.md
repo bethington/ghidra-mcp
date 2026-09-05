@@ -8,7 +8,7 @@ Rename ALL defined strings in the current Ghidra program with descriptive labels
 
 ### Phase 1: Retrieve All Defined Strings
 
-```
+```text
 1. Use list_strings(offset=0, limit=5000) to get all defined strings
 2. Note the total count for progress tracking
 3. If more than 5000 strings, paginate with offset
@@ -18,7 +18,7 @@ Rename ALL defined strings in the current Ghidra program with descriptive labels
 
 For each string, analyze its content and determine the appropriate category:
 
-```
+```text
 1. Read the string content
 2. Identify its purpose/usage:
    - Is it an API function name? -> szApi_
@@ -36,7 +36,7 @@ For each string, analyze its content and determine the appropriate category:
 
 ### Phase 3: Batch Application
 
-```
+```text
 1. Group strings by category (process 20-30 at a time)
 2. Use create_label with array of {address, name} pairs
 3. Track success/skip/fail counts
@@ -45,7 +45,7 @@ For each string, analyze its content and determine the appropriate category:
 
 ### Phase 4: Verification
 
-```
+```text
 1. Re-run list_strings to confirm labels applied
 2. Check for any remaining unlabeled strings (s_*, DAT_*)
 3. Apply labels to any missed strings
@@ -57,12 +57,12 @@ For each string, analyze its content and determine the appropriate category:
 
 ### Structure
 
-```
+```text
 sz[Category]_[Description][Suffix]
 ```
 
 | Component | Purpose | Example |
-|-----------|---------|---------|
+| ----------- | --------- | --------- |
 | `sz` | Type prefix (null-terminated string) | `sz` |
 | `Category` | Functional domain | `Api`, `Err`, `Path` |
 | `_` | Separator | `_` |
@@ -76,7 +76,7 @@ sz[Category]_[Description][Suffix]
 ### System/Runtime
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Win32 API names (GetTickCount, CreateFileA) | `szApi_` | `szApi_GetTickCount` |
 | DLL names (kernel32.dll, user32.dll) | `szDllName_` | `szDllName_Kernel32` |
 | CRT errors (R6025, R6028, runtime error) | `szCRT_` | `szCRT_R6025_PureVirtualCall` |
@@ -87,7 +87,7 @@ sz[Category]_[Description][Suffix]
 ### Paths and Files
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Static paths (Data\Global\) | `szPath_` | `szPath_GlobalMonsters` |
 | Format paths with %s (%s\UI\%s) | `szFmtPath_` | `szFmtPath_LoadingScreen` |
 | UI resource paths (Panel\, Menu\) | `szUIPath_` | `szUIPath_PanelInvChar` |
@@ -97,7 +97,7 @@ sz[Category]_[Description][Suffix]
 ### UI and Display
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Menu labels (Options, Previous) | `szMenu_` | `szMenu_Options` |
 | Option names (Gamma, Contrast) | `szOpt_` | `szOpt_LightQuality` |
 | UI element names | `szUI_` | `szUI_MiniPanel` |
@@ -107,7 +107,7 @@ sz[Category]_[Description][Suffix]
 ### Format and Debug Strings
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Printf format (%d, %s, %f) | `szFmt_` | `szFmt_IPAddress` |
 | Debug output formats | `szDbg_` | `szDbg_FpsSkipFmt` |
 | Memory debug formats | `szMem_` | `szMem_TotalBlocksFmt` |
@@ -115,7 +115,7 @@ sz[Category]_[Description][Suffix]
 ### Error and Warning Messages
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Error messages | `szErr_` | `szErr_FileOpen` |
 | Warning messages | `szWarn_` | `szWarn_InsufficientMemory` |
 | Security messages | `szSec_` | `szSec_BufferOverrun` |
@@ -123,7 +123,7 @@ sz[Category]_[Description][Suffix]
 ### Date and Time
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Month names (January, February) | `szMonth_` | `szMonth_January` |
 | Day names (Monday, Tuesday) | `szDay_` | `szDay_Monday` |
 | Date formats (MM/dd/yy) | `szDateFormat_` | `szDateFormat_ShortDate` |
@@ -132,7 +132,7 @@ sz[Category]_[Description][Suffix]
 ### Network and Multiplayer
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Battle.net strings | `szBnet_` | `szBnet_ChatPrefix` |
 | Server IPs/addresses | `szServer_` | `szServer_BnetIP1` |
 | Chat commands (/whisper) | `szChat_` | `szChat_Whisper` |
@@ -141,7 +141,7 @@ sz[Category]_[Description][Suffix]
 ### Audio and Video
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Sound parameters (EAX, Reverb) | `szSound_` | `szSound_EaxReverb` |
 | Video mode names | `szVideo_` | `szVideo_Direct3D` |
 | Bink video files (.bik) | `szBik_` | `szBik_D2Intro` |
@@ -150,7 +150,7 @@ sz[Category]_[Description][Suffix]
 ### Game-Specific
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Game strings | `szGame_` | `szGame_Expansion` |
 | Item strings | `szItem_` | `szItem_Ethereal` |
 | State strings | `szState_` | `szState_GameOver` |
@@ -161,13 +161,13 @@ sz[Category]_[Description][Suffix]
 ### Compression/Library
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | zlib/inflate strings | `szZlib_` | `szZlib_StreamError` |
 
 ### Input/Cursor
 
 | Content Pattern | Category | Example Label |
-|-----------------|----------|---------------|
+| ----------------- | ---------- | --------------- |
 | Cursor names | `szCursor_` | `szCursor_Buysell` |
 | Input types | `szInput_` | `szInput_Alphanumeric` |
 | Mouse strings | `szMouse_` | `szMouse_WheelSupportMsg` |
@@ -179,7 +179,8 @@ sz[Category]_[Description][Suffix]
 ### Duplicate Handling
 
 When identical strings appear at multiple addresses:
-```
+
+```text
 szOpt_SmallOff      # First instance
 szOpt_SmallOff2     # Second instance
 szOpt_SmallOff3     # Third instance
@@ -188,7 +189,7 @@ szOpt_SmallOff3     # Third instance
 ### Descriptive Suffixes
 
 | Suffix | When to Use | Example |
-|--------|-------------|---------|
+| -------- | ------------- | --------- |
 | `Fmt` | Format strings | `szDbg_TileCacheFmt` |
 | `Msg` | Message body | `szSecurity_BufferOverrunMsg` |
 | `Title` | Dialog title | `szSecurity_BufferOverrunTitle` |
@@ -202,7 +203,7 @@ szOpt_SmallOff3     # Third instance
 
 ## Quick Decision Tree
 
-```
+```text
 String Content                          -> Category Prefix
 ─────────────────────────────────────────────────────────
 Contains ".dll" or ".DLL"               -> szDllName_
@@ -229,7 +230,7 @@ Default fallback                        -> szGame_ or szStr_
 ## MCP Tools Used
 
 | Tool | Purpose |
-|------|---------|
+| ------ | --------- |
 | `list_strings` | Retrieve all defined strings with addresses |
 | `create_label` | Apply labels efficiently in batches |
 | `create_label` | Apply single label |

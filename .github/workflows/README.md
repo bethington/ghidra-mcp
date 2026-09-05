@@ -6,7 +6,7 @@ workflows for GhidraMCP.
 ## Workflows
 
 | Workflow | Trigger | Runner | Purpose |
-|----------|---------|--------|---------|
+| ---------- | --------- | -------- | --------- |
 | `tests.yml` | Push and pull request to `main`/`develop` | GitHub-hosted Ubuntu/Windows | Merge-gating build, unit, offline Java, Pester, and docs checks. |
 | `build.yml` | Project build triggers | GitHub-hosted | Build-focused CI path. |
 | `release-regression.yml` | Manual, reusable workflow call, PR label | Self-hosted Windows | Live Ghidra deploy and benchmark regression. |

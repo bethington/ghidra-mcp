@@ -19,7 +19,7 @@ All 251 ghidra-mcp MCP tools consume **12,922 tokens** when registered with an L
 ### Token Budget Breakdown
 
 | Component | Tokens | % of Context |
-|-----------|--------|--------------|
+| ----------- | -------- | -------------- |
 | Endpoints.json (full catalog) | 12,922 | 6.5% |
 | User query | ~2,000 | 1.0% |
 | Chat history | ~5,000 | 2.5% |
@@ -29,7 +29,7 @@ All 251 ghidra-mcp MCP tools consume **12,922 tokens** when registered with an L
 ### Context Impact Across LLM Models
 
 | Model | Context Window | Endpoints.json % |
-|-------|---|---|
+| ------- | --- | --- |
 | Claude 3.5 Haiku | 200,000 | 6.46% |
 | Claude 3.5 Sonnet | 200,000 | 6.46% |
 | Claude 3 Opus | 200,000 | 6.46% |
@@ -41,7 +41,7 @@ Even on smaller context windows, the overhead is modest.
 ### Cost Breakdown by Category
 
 | Category | Endpoints | Tokens | % of Total |
-|----------|---|---|---|
+| ---------- | --- | --- | --- |
 | Data Types | 36 | 2,079 | 16.1% |
 | Analysis | 36 | 1,833 | 14.2% |
 | Functions | 15 | 1,038 | 8.0% |
@@ -68,7 +68,7 @@ Data types and analysis tools are the largest consumers, but still reasonable pe
 ### Description Cost Analysis
 
 | Metric | Value |
-|--------|-------|
+| -------- | ------- |
 | Total description tokens | 3,114 (24.1% of total) |
 | Avg per endpoint | 12 tokens |
 | Most expensive description | 107 tokens |
@@ -83,13 +83,14 @@ Descriptions are concise by design and could be shortened further if needed, but
 What would happen if we made different choices?
 
 | Scenario | Tokens | Savings |
-|----------|--------|---------|
+| ---------- | -------- | --------- |
 | **Full MCP Schema (with inputSchema)** | 18,385 | +42.3% overhead |
 | **Endpoints.json (current)** | 12,922 | baseline |
 | **MCP Schema (no descriptions)** | 8,998 | -30.4% |
 | **Top 50 endpoints only** | 2,818 | -78.2% |
 
 **Analysis**:
+
 - Removing descriptions saves only 3.9K tokens (3% of total context) but loses all semantic meaning — **not worth it**
 - Limiting to top 50 tools would save significant tokens but reduces power to 1/5 of available capability
 - Current approach (all tools + rich descriptions) is the right balance
@@ -194,11 +195,13 @@ Both scripts read from `tests/endpoints.json` (the authoritative catalog of all 
 ### Adding This to Release Workflow
 
 Before releasing, run:
+
 ```bash
 python tools/context_analysis/measure_context.py > release_context_budget.txt
 ```
 
 Compare against previous releases to track:
+
 - Token count trend (should stay flat or decrease)
 - Average tokens per endpoint
 - Category breakdown changes
@@ -207,31 +210,36 @@ Compare against previous releases to track:
 
 ## Academic References
 
-- **RAG-MCP: Mitigating Prompt Bloat in LLM Tool Selection** — https://arxiv.org/abs/2505.03275
+- **RAG-MCP: Mitigating Prompt Bloat in LLM Tool Selection** — <https://arxiv.org/abs/2505.03275>
 - **LongFuncEval** — Kate et al., 2025
-- **How Many Tools Should an LLM Agent See?** — https://arxiv.org/abs/2605.24660
-- **From REST to MCP** (empirical study) — https://arxiv.org/abs/2507.16044
-- **TPS-Bench** (hundreds of MCP tools) — https://arxiv.org/abs/2511.01527
-- **Toolshed** — https://arxiv.org/abs/2410.14594
-- **MemTool** (pruning hundreds of tools) — https://arxiv.org/abs/2507.21428
+- **How Many Tools Should an LLM Agent See?** — <https://arxiv.org/abs/2605.24660>
+- **From REST to MCP** (empirical study) — <https://arxiv.org/abs/2507.16044>
+- **TPS-Bench** (hundreds of MCP tools) — <https://arxiv.org/abs/2511.01527>
+- **Toolshed** — <https://arxiv.org/abs/2410.14594>
+- **MemTool** (pruning hundreds of tools) — <https://arxiv.org/abs/2507.21428>
 
 ---
 
 ## FAQ
 
 ### Q: Won't 251 tools confuse the LLM?
+
 **A**: Without retrieval, yes (13.6% accuracy). With tool search/semantic routing, no (43.1% accuracy). We're adding the retrieval layer.
 
 ### Q: Should we remove low-usage tools?
+
 **A**: Not yet. Track actual usage first. Many "edge case" tools become critical in specific workflows.
 
 ### Q: What if we hit the context window limit?
+
 **A**: At 6.5% for all tools, we'd need to add ~7x more endpoints to become a constraint. By then, we'll have better retrieval mechanisms.
 
 ### Q: Can descriptions be shorter?
+
 **A**: Yes, but the trade-off isn't worth it. Current descriptions (avg 12 tokens) provide semantic clarity that helps retrieval algorithms. Cutting them saves <4K tokens.
 
 ### Q: Why not publish only the top 50 tools?
+
 **A**: Because hidden tools = missed functionality. AI can't discover what it doesn't know about. Discovery (retrieval) solves this better than suppression.
 
 ---

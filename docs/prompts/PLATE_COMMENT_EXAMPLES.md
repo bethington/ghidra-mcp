@@ -6,7 +6,7 @@ This document provides complete, real-world examples of properly formatted plate
 
 ## Example 1: Validation Function
 
-```
+```text
 Validates whether armor equipment can be equipped by a player.
 
 Algorithm:
@@ -33,7 +33,7 @@ Special Cases:
 
 ## Example 2: Data Processing Function with Structure
 
-```
+```text
 Processes timed spell effects for all active players in the game.
 
 Algorithm:
@@ -68,7 +68,7 @@ Special Cases:
 
 ## Example 3: Initialization Function
 
-```
+```text
 Initializes game resource system and loads configuration data.
 
 Algorithm:
@@ -99,7 +99,7 @@ Special Cases:
 
 ## Example 4: String Processing Function
 
-```
+```text
 Converts locale-specific string using character mapping table.
 
 Algorithm:
@@ -131,7 +131,7 @@ Special Cases:
 
 ## Example 5: Array/Table Processing
 
-```
+```text
 Searches MonthNameTable for matching month string and returns index.
 
 Algorithm:
@@ -168,7 +168,7 @@ Special Cases:
 
 ## Example 6: Minimal Function (Simple Getter)
 
-```
+```text
 Returns the current player's skill level for specified skill ID.
 
 Algorithm:
@@ -206,7 +206,7 @@ When creating a plate comment, verify:
 
 For quick prototyping, use this minimal template and expand:
 
-```
+```text
 [FUNCTION PURPOSE IN ONE SENTENCE]
 
 Algorithm:

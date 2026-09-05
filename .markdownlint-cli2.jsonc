@@ -1,0 +1,100 @@
+// markdownlint-cli2 configuration for this repository.
+//
+// WHY THE FILENAME MATTERS. This file was `.markdownlintrc` until 2026-08-30.
+// That name is a markdownlint-cli (v1) convention and markdownlint-cli2 refuses
+// it outright:
+//
+//   Error: Unable to use configuration file '.../.markdownlintrc'; Configuration
+//   file should be one of the supported names (e.g., '.markdownlint-cli2.jsonc')
+//   or a prefix with a supported name ... or have a supported extension.
+//
+// The CI job passed `config: '.markdownlintrc'` to the action, so every run
+// aborted before reading a single Markdown file -- and `continue-on-error: true`
+// turned that abort into a green check. The documentation gate reported success
+// while linting nothing, for as long as it had existed. Do not rename this file
+// back, and do not add `continue-on-error` to the job: those two together are
+// what made the failure invisible.
+//
+// Run it locally exactly as CI does:
+//   npx markdownlint-cli2@0.23.1 --config .markdownlint-cli2.jsonc "**/*.md"
+// Add `--fix` to apply the mechanical fixes.
+{
+  "config": {
+    "default": true,
+
+    // MD013 line-length. Prose here is wrapped for the source file, not to a
+    // column limit, and the docs embed absolute paths, Ghidra addresses and
+    // wide tables that cannot be wrapped without becoming unreadable.
+    "MD013": false,
+
+    // MD033 inline HTML. README's header block and the badge row are HTML, and
+    // several docs use <details> for collapsible sections.
+    "MD033": false,
+
+    // MD041 first-line-heading. Some documents open with a badge block or an
+    // HTML header rather than an H1; requiring one would mean restructuring
+    // documents to satisfy a linter.
+    "MD041": false,
+
+    // MD024 duplicate headings, siblings only. CHANGELOG.md follows
+    // Keep a Changelog, so every release legitimately repeats "### Added" and
+    // "### Fixed". siblings_only still catches a genuine duplicate within one
+    // section, which is the case that actually confuses a reader.
+    "MD024": { "siblings_only": true },
+
+    // MD036 emphasis-as-heading. A heuristic that cannot distinguish a heading
+    // from a bolded lead-in, and every one of the 17 hits in this repo was a
+    // false positive: CONTRIBUTING's closing "**Thank you for contributing...**"
+    // and "**Test Case 1: ...**" labels inside archived release notes.
+    // Promoting those to real headings would change each document's structure
+    // -- and its rendered table of contents -- to satisfy a guess.
+    "MD036": false,
+
+    // MD037 spaces-inside-emphasis. Disabled because its AUTO-FIX silently
+    // corrupted this repo's documentation when the rule was first switched on.
+    // Reverse-engineering prose is full of C pointer syntax and Hungarian
+    // prefixes, and the rule reads `*` and `_` as emphasis markers:
+    //
+    //   "UnitAny* not int*"     --fix-->  "UnitAny*not int*"
+    //   "int *, void *, uint *" --fix-->  "int *, void*, uint *"
+    //   "g_ prefix for mutable" --fix-->  "g_prefix for mutable"
+    //
+    // The first of those destroys a word boundary in an instruction the doc
+    // gives to a model. All 11 hits in the repo were of this kind; there was
+    // not one true positive. Formatting a document must never change what it
+    // says, so the rule goes rather than the prose.
+    "MD037": false,
+
+    // MD029 ordered-list prefix. Several documents number a single logical
+    // sequence across intervening headings -- AUDIT_STRUCTURAL_BACKLOG.md runs
+    // items 1..13 through four `##` sections, and the archived v1.4.0 code
+    // review runs a 1..14 priority plan the same way. CommonMark ends a list at
+    // a heading but honours the start number, so those render exactly as
+    // written; markdownlint sees four lists that each fail to start at 1.
+    // Its --fix renumbered all of them to 1,2,3..., producing three separate
+    // "item 1"s in a document whose prose refers to items by number, and
+    // indented the final group into a sub-list. No MD029 style permits a list
+    // that starts at 4, so the choice is the rule or the numbering.
+    "MD029": false,
+
+    // MD060 table-column-style, pinned rather than left at the default
+    // "consistent". "consistent" infers the expected style from the first table
+    // in each file, so one file can demand aligned pipes while the next demands
+    // compact ones and a contributor gets a different answer per file.
+    // "compact" is one repo-wide rule that --fix can always reach.
+    "MD060": { "style": "compact" }
+  },
+
+  // CI checks out a clean tree, so these only matter locally. Without them a
+  // developer's local run reports violations CI cannot see, which is the same
+  // class of "the gate says something different from reality" problem as the
+  // bug above.
+  "ignores": [
+    ".claude",      // agent worktrees and scratch; gitignored
+    "node_modules",
+    "target",       // Maven build output
+    "build",        // Gradle build output
+    ".pytest_cache", // pytest writes a README.md in here
+    ".venv"
+  ]
+}

@@ -67,7 +67,7 @@ public abstract class AbstractHandler implements EndpointHandler {
 ### 3. Domain-Specific Handler Groups
 
 | Package | Responsibility | Example Endpoints |
-|---------|---------------|-------------------|
+| --------- | --------------- | ------------------- |
 | `handlers.functions` | Function operations | list_functions, rename_function, decompile_function |
 | `handlers.data` | Data item operations | list_data_items, rename_data, apply_data_type |
 | `handlers.analysis` | Analysis operations | analyze_function_completeness, detect_array_bounds |
@@ -134,21 +134,25 @@ public class ListFunctionsHandler extends AbstractHandler {
 ## Migration Strategy
 
 ### Phase 1: Create Infrastructure (Low Risk)
+
 1. Create handler interfaces and abstract base class
 2. Create HandlerRegistry
 3. Create utility classes for common operations
 
 ### Phase 2: Migrate Read-Only Endpoints (Medium Risk)
+
 1. Start with simple GET endpoints (list_functions, list_data_items)
 2. Keep original inline handlers as fallback
 3. Test extensively before removing old code
 
 ### Phase 3: Migrate Write Endpoints (Higher Risk)
+
 1. Migrate rename operations
 2. Migrate comment operations  
 3. Migrate type operations
 
 ### Phase 4: Remove Old Code
+
 1. Remove inline lambdas
 2. Clean up GhidraMCPPlugin.java
 3. Final testing
@@ -156,6 +160,7 @@ public class ListFunctionsHandler extends AbstractHandler {
 ## Testing Considerations
 
 With handlers extracted, we can:
+
 1. Mock Program and test handler logic
 2. Create unit tests for each handler
 3. Test response formatting independently
@@ -164,7 +169,7 @@ With handlers extracted, we can:
 ## Benefits
 
 | Before | After |
-|--------|-------|
+| -------- | ------- |
 | 13,821 lines in one file | ~500 lines per handler file |
 | Hard to test | Unit testable |
 | Hard to find code | Organized by domain |

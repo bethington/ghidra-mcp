@@ -7,6 +7,7 @@ When setting plate comments via `batch_set_comments` or `set_comment(type='plate
 ## The Issue
 
 Ghidra's event system is asynchronous. When you set a plate comment:
+
 1. The comment is stored in the Function object
 2. Events are flushed to propagate the change
 3. A 500ms delay is added for cache refresh
@@ -138,6 +139,7 @@ When you immediately call `analyze_function_completeness`:
 ### Pitfall 1: Checking Decompiled Code for Plate Comment
 
 ❌ **Wrong:**
+
 ```python
 # Set plate comment
 batch_set_comments(function_address="0x6fb6aef0", plate_comment=comment)
@@ -153,6 +155,7 @@ if "Algorithm:" in decompiled:
 **Why it fails:** The decompiled C code (`getDecompiledFunction().getC()`) does NOT include the plate comment. Plate comments only appear in Ghidra's UI header, not in the decompilation output.
 
 ✅ **Correct:**
+
 ```python
 # Set plate comment
 batch_set_comments(function_address="0x6fb6aef0", plate_comment=comment)
@@ -170,6 +173,7 @@ if not completeness['plate_comment_issues']:
 ### Pitfall 2: No Delay in Loops
 
 ❌ **Wrong:**
+
 ```python
 for func_addr in functions:
     batch_set_comments(func_addr, plate_comment=comments[func_addr])
@@ -177,6 +181,7 @@ for func_addr in functions:
 ```
 
 ✅ **Correct:**
+
 ```python
 for func_addr in functions:
     batch_set_comments(func_addr, plate_comment=comments[func_addr])
@@ -187,6 +192,7 @@ for func_addr in functions:
 ### Pitfall 3: Assuming 500ms is Enough
 
 The server already waits 500ms internally, but this is not always sufficient when:
+
 - Multiple functions are being documented rapidly
 - Ghidra's event queue is backed up
 - The decompiler cache is being heavily used
@@ -205,7 +211,7 @@ For `analyze_function_completeness` to report 100% completeness, your plate comm
 
 ### Valid Example
 
-```
+```text
 Algorithm:
 1. Initialize context variables
 2. Validate input parameters
@@ -225,7 +231,8 @@ Returns:
 ### Invalid Examples
 
 ❌ **Too short (only 5 lines):**
-```
+
+```text
 Process data.
 
 Parameters:
@@ -235,7 +242,8 @@ Returns: Success code
 ```
 
 ❌ **Missing numbered steps:**
-```
+
+```text
 Algorithm:
 Initialize variables, validate inputs, process data, return result.
 
@@ -247,7 +255,8 @@ Returns:
 ```
 
 ❌ **Missing sections:**
-```
+
+```text
 Algorithm:
 1. Initialize
 2. Process
@@ -291,6 +300,7 @@ python test_plate_comment_timing.py 0x6fb6aef0
 ```
 
 This will show you:
+
 - Immediate analysis results (may have issues)
 - Delayed analysis results (should be correct)
 - Timing hypothesis confirmation
@@ -298,12 +308,14 @@ This will show you:
 ### Tip 3: Check Ghidra Console
 
 If issues persist, check Ghidra's console for:
+
 - Event processing warnings
 - Transaction rollback messages
 - Cache invalidation logs
 
 Look for messages like:
-```
+
+```text
 INFO  Refreshed decompiler cache before completeness analysis for ProcessSkillCooldowns
 WARN  Failed to refresh cache before completeness analysis: ...
 ```
@@ -313,11 +325,13 @@ WARN  Failed to refresh cache before completeness analysis: ...
 ### Trade-offs
 
 **Shorter delay (0.5s):**
+
 - Faster workflow
 - Risk of stale data
 - May need retries
 
 **Longer delay (2s):**
+
 - More reliable
 - Slower workflow
 - No retries needed
@@ -327,6 +341,7 @@ WARN  Failed to refresh cache before completeness analysis: ...
 ### Batch Operations
 
 For bulk documentation (100+ functions), consider:
+
 1. **Set all comments first** (no delays)
 2. **Wait 5 seconds** for bulk propagation
 3. **Verify all completeness** (with 1s delays between checks)
@@ -347,11 +362,13 @@ Until these are implemented, use the delay patterns shown in this guide.
 ## Summary
 
 ✅ **Do:**
+
 - Wait 1-2 seconds between setting and analyzing
 - Use `analyze_function_completeness` to verify plate comments
 - Follow the plate comment format requirements (10+ lines, sections, numbered steps)
 
 ❌ **Don't:**
+
 - Immediately analyze after setting (race condition)
 - Look for plate comments in decompiled C code (they're not there)
 - Assume 500ms is enough (it's not always)

@@ -264,8 +264,19 @@ jobs:
       run: uvx black --check python/bridge_mcp_ghidra/ 2>/dev/null || echo "black check skipped"
 
   markdown-lint:
-    # ADVISORY / non-blocking: continue-on-error means findings never fail CI, and
-    # build-status does not depend on this job. Informational doc-lint only.
+    # ADVISORY BUT REAL. This job is deliberately NOT in build-status's `needs`,
+    # so a Markdown violation reports red here and blocks nothing. It also no
+    # longer carries `continue-on-error`, and that is the whole point:
+    #
+    # Until 2026-08-30 this job passed `config: '.markdownlintrc'`, a filename
+    # markdownlint-cli2 rejects. Every run aborted before reading a file, and
+    # `continue-on-error: true` reported the abort as success. Run 33332052889
+    # logged `##[error]Unable to use configuration file ... .markdownlintrc` and
+    # still concluded `success`. The gate had never linted anything.
+    #
+    # `continue-on-error` is what made a broken gate indistinguishable from a
+    # clean one. Leaving this job out of build-status is enough to keep it
+    # non-blocking; do not re-add continue-on-error to soften a real finding.
     name: Documentation Quality (advisory, non-blocking)
     runs-on: ubuntu-latest
 
@@ -276,8 +287,11 @@ jobs:
       uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe  # v24.1.0
       with:
         globs: '**/*.md'
-        config: '.markdownlintrc'
-      continue-on-error: true
+        # Passed explicitly rather than relying on auto-discovery: a wrong or
+        # missing path now fails the step loudly instead of silently linting
+        # with default rules. tests/unit/test_project_consistency.py asserts
+        # this path exists and that markdownlint-cli2 accepts the name.
+        config: '.markdownlint-cli2.jsonc'
 
   pester-tests:
     name: Pester (ghidra-mcp-setup.ps1)

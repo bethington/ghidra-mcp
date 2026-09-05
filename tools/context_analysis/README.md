@@ -18,16 +18,20 @@ python tools/context_analysis/advanced_context_analysis.py
 ## What These Tools Do
 
 ### `measure_context.py`
+
 **Purpose**: Fast baseline measurement of token usage  
-**Output**: 
+**Output**:
+
 - Total tokens in endpoints.json
 - Per-endpoint average
 - Breakdown by tool category
 - Context window impact across major LLM models
 
 ### `advanced_context_analysis.py`
+
 **Purpose**: In-depth analysis with optimization scenarios  
 **Output**:
+
 - MCP schema registration overhead
 - Description cost breakdown
 - What-if scenarios (e.g., "Top 50 tools only")
@@ -36,7 +40,7 @@ python tools/context_analysis/advanced_context_analysis.py
 ## Key Findings
 
 | Metric | Value |
-|--------|-------|
+| -------- | ------- |
 | **All 251 endpoints** | **12,922 tokens** |
 | **% of typical 200K context** | **6.5%** |
 | **Avg per endpoint** | **51 tokens** |
@@ -46,6 +50,7 @@ See the [Context Window Analysis](../../wiki/Context-Window-Analysis) wiki page 
 ## How It Works
 
 Both scripts:
+
 1. Load `tests/endpoints.json` (the master catalog of all 251 tools)
 2. Use `tiktoken` to count Claude tokens (cl100k_base encoding)
 3. Analyze by category, description cost, and registration format
@@ -58,11 +63,13 @@ If `tiktoken` is not installed, scripts fall back to a rough estimate (1 token �
 ## Integration with CI/CD
 
 These scripts are designed to be run:
+
 - **Before releases** — verify token budget hasn't grown significantly
 - **After major tool additions** — track overhead of new endpoints
 - **For architecture decisions** — compare scenarios before implementing
 
 To add to release checklist:
+
 ```bash
 python tools/context_analysis/measure_context.py > token_report.txt
 ```

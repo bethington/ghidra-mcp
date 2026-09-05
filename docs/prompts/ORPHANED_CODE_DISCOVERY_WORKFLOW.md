@@ -14,13 +14,14 @@ You are scanning Ghidra binaries for orphaned code — valid instructions that e
 Ask the user which scope to scan:
 
 | Scope | Description | How |
-|-------|-------------|-----|
+| ------- | ------------- | ----- |
 | **Current binary** | Only the active program | Run scanner once |
 | **Version folder** | All binaries in the same version folder as the current program | `list_project_files()` to find sibling binaries, iterate with `switch_program()` |
 | **All project binaries** | Every binary in the Ghidra project | `list_project_files("/")` recursively, iterate with `switch_program()` |
 
 For multi-binary scopes, process one binary at a time:
-```
+
+```text
 for each binary in scope:
     switch_program(binary_name)
     run scanner (Step 1)
@@ -34,6 +35,7 @@ for each binary in scope:
 Execute the scanner script via `run_script_inline`. This scans gaps between consecutive known functions in executable memory segments.
 
 The scanner performs three passes per gap:
+
 - **Pass 1**: Check for already-disassembled instructions not in any function (highest confidence)
 - **Pass 2**: Check raw bytes for known function prologue patterns (variable confidence)
 - **Pass 3**: Fallback — any non-padding bytes with a RET that Pass 2 missed (lowest confidence, catches MOVSX/MOVZX/byte-MOV starts)
@@ -272,12 +274,14 @@ public class FindOrphanedCode extends GhidraScript {
 Classify each candidate into one of these types based on scanner output and quick inspection:
 
 ### Type A: Import Thunk / Trampoline
+
 - **Pattern**: Single `JMP` instruction (5 bytes), gap = 5
 - **Confidence**: HIGH (disassembled, 1 instr)
 - **Action**: `create_function` → set plate comment: `"Import thunk — redirects to <target>"`
 - **Priority**: Low (mechanical redirect, no logic to document)
 
 ### Type B: Already Disassembled — Real Function
+
 - **Pattern**: HIGH (already disassembled, N instrs) where N > 1
 - **Confidence**: Very high — Ghidra analyzed the code but never created a function boundary
 - **Action**: `create_function` → quick decompile to classify → set triage plate comment
@@ -285,12 +289,14 @@ Classify each candidate into one of these types based on scanner output and quic
 - **Verify**: Decompile after creation to confirm it's coherent code, not a jump table fragment
 
 ### Type C: Undisassembled — Standard Prologue (HIGH)
+
 - **Pattern**: `PUSH_EBP+FRAME` or `HOTPATCH+FRAME` in raw bytes
 - **Confidence**: High — standard x86 function prologue
 - **Action**: `create_function` (will auto-disassemble) → decompile → set triage plate comment
 - **Priority**: High (almost certainly a real function)
 
 ### Type D: Undisassembled — Callee-Save / Operand Prologue (MEDIUM)
+
 - **Pattern**: `PUSH_ESI`, `PUSH_EDI`, `PUSH_EBX`, `PUSH_ECX`, `SUB_ESP`, `MOVSX_*`, `MOVZX_*`, `MOV_R8_RM8`, `XOR_R32_RM32`, `TEST_R32_R32`
 - **Confidence**: Medium — common but not unique to function starts
 - **Action**: `create_function` → decompile → verify the code makes sense as a standalone function
@@ -302,6 +308,7 @@ Classify each candidate into one of these types based on scanner output and quic
   - `XOR EAX, EAX; ...` — register zeroing before conditional logic
 
 ### Type E: Undisassembled — Atypical Start (LOW)
+
 - **Pattern**: `MOV_R32_RM32`, `MOV_EAX_MEM`, `PUSH_IMM8`, `CALL_REL32`, `MOV_RM32_R32`, `MOV_RM8_R8`, `CMP_R32_RM32`, `ALU_RM8_IMM8`, etc.
 - **Confidence**: Low — could be data, jump table entries, or code fragments
 - **Action**: Inspect first. Use `inspect_memory_content` or `disassemble_bytes` to preview. Only create if the disassembly forms a coherent function.
@@ -312,6 +319,7 @@ Classify each candidate into one of these types based on scanner output and quic
   - `JMP_REL32` alone (likely a thunk, but verify target exists)
 
 ### Type G: Undisassembled — Unknown Prologue (REVIEW)
+
 - **Pattern**: Pass 3 hit — non-padding bytes with a RET instruction, but first byte doesn't match any known prologue pattern
 - **Confidence**: Requires manual review — the scanner cannot classify the start bytes
 - **Action**: Always inspect first with `disassemble_bytes` or `inspect_memory_content`. Check `MULTI-RET(N)` flag — if N > 1, the gap likely contains multiple adjacent functions
@@ -323,6 +331,7 @@ Classify each candidate into one of these types based on scanner output and quic
 - **Red flags**: Same as Type E — verify it's not a data table before creating
 
 ### Type F: Getter / Converter / Thin Wrapper
+
 - **Pattern**: Any type, but estimated size < 15 bytes
 - **Sub-patterns**:
   - `MOV EAX,[addr]; RET` (global getter, ~6 bytes)
@@ -337,14 +346,15 @@ Process candidates in order: Type B first, then C, D, F, A, E, G.
 
 For each approved candidate:
 
-```
+```text
 1. create_function(address)
 2. decompile_function(address) — quick sanity check
 3. set_comment(type='plate') with triage metadata:
 ```
 
 **Triage plate comment format** (plain text):
-```
+
+```text
 [TRIAGE] Orphaned code discovered by scanner.
 Type: <A|B|C|D|E|F|G> — <type description>
 Confidence: <HIGH|MEDIUM|LOW>
@@ -354,13 +364,15 @@ Status: Awaiting full documentation (FUNCTION_DOC_WORKFLOW_V5)
 ```
 
 For **Type A thunks**, use a shorter comment:
-```
+
+```text
 Import thunk — redirects to <target_function_name> at <target_address>
 ```
 
 ### Batch creation pattern
 
 Process in batches of 5-10 candidates. After each batch:
+
 - Verify no creation errors
 - Spot-check 1-2 decompilations for sanity
 - Continue to next batch
@@ -371,7 +383,7 @@ Do NOT attempt full V5 documentation during this workflow. The goal is function 
 
 After processing all candidates for a binary, output:
 
-```
+```text
 === ORPHANED CODE REPORT: <program_name> ===
 Created: N functions
   Type A (thunks): N
@@ -390,7 +402,7 @@ Next: Re-run scanner to check for newly exposed gaps
 
 When processing multiple binaries, output a final summary:
 
-```
+```text
 === PROJECT SCAN COMPLETE ===
 Binaries scanned: N
 Total functions created: N
@@ -402,6 +414,7 @@ Total functions created: N
 ## Step 5: Iterative Re-scan (Optional)
 
 Creating functions changes gap boundaries. A second scanner pass may reveal:
+
 - New candidates previously hidden inside larger gaps
 - Gaps that were too small before but now contain visible code
 
@@ -418,7 +431,7 @@ Re-run the scanner once after batch creation. If new candidates appear, triage a
 
 ## Output
 
-```
+```text
 SCAN COMPLETE: <program_name>
 Created: N functions (Type breakdown)
 Ready for documentation via FUNCTION_DOC_WORKFLOW_V5

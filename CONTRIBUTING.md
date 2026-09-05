@@ -28,9 +28,11 @@ If you ever see any of this violated, flag it. It's a standard, not a nicety.
 ## Types of Contributions
 
 ### 1. Bug Reports
+
 **When**: You found something broken
 
 **How**:
+
 1. Check [existing issues](https://github.com/bethington/ghidra-mcp/issues) first
 2. Create new issue with:
    - Clear title: "Connection timeout when decompiling large functions"
@@ -40,7 +42,8 @@ If you ever see any of this violated, flag it. It's a standard, not a nicety.
    - Error message or logs
 
 **Example**:
-```
+
+```text
 Title: Decompile timeout on binary > 10MB
 
 Environment:
@@ -61,9 +64,11 @@ Expected: Decompilation completes or returns gracefully
 ---
 
 ### 2. Feature Requests
+
 **When**: You want a new MCP tool or capability
 
 **How**:
+
 1. Search [existing discussions](https://github.com/bethington/ghidra-mcp/discussions)
 2. Open Discussion or Issue with:
    - Use case: Why do you need this?
@@ -72,7 +77,8 @@ Expected: Decompilation completes or returns gracefully
    - Priority (critical/high/medium/low)
 
 **Example**:
-```
+
+```text
 Title: Add tool to analyze register usage patterns
 
 Use Case:
@@ -91,26 +97,31 @@ Priority: Medium - helpful for malware analysis
 ### 3. Code Contributions
 
 #### 3a. Fix a Bug
+
 **Steps**:
 
 1. Fork repository
+
    ```bash
    git clone https://github.com/YOUR-USERNAME/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
 2. Create feature branch
+
    ```bash
    git checkout -b fix/connection-timeout-issue
    ```
 
 3. Make changes and test
+
    ```bash
    mvn clean test  # Run tests
    python -m pytest tests/  # Python tests
    ```
 
 4. Commit with clear message
+
    ```bash
    git commit -m "Fix: Increase default timeout for large binaries
 
@@ -122,6 +133,7 @@ Priority: Medium - helpful for malware analysis
    ```
 
 5. Push and create Pull Request
+
    ```bash
    git push origin fix/connection-timeout-issue
    ```
@@ -129,6 +141,7 @@ Priority: Medium - helpful for malware analysis
 #### 3b. Add a New MCP Tool
 
 **Requirements**:
+
 - Solves a real problem (check discussions first)
 - Follows existing code patterns
 - Includes error handling
@@ -138,6 +151,7 @@ Priority: Medium - helpful for malware analysis
 **Steps**:
 
 1. Understand tool categories in `python/bridge_mcp_ghidra/` (static tools live in `static_tools.py` / `debugger.py`):
+
    ```python
    @mcp.tool()
    def my_new_tool(param1: str, param2: int = 0) -> dict:
@@ -159,6 +173,7 @@ Priority: Medium - helpful for malware analysis
    ```
 
 2. Add Java endpoint in `GhidraMCPPlugin.java`:
+
    ```java
    @Override
    public void processEvent(PluginEvent event) {
@@ -174,6 +189,7 @@ Priority: Medium - helpful for malware analysis
    ```
 
 3. Document in `tests/endpoints.json`:
+
    ```json
    {
      "path": "/my_new_tool",
@@ -185,6 +201,7 @@ Priority: Medium - helpful for malware analysis
    ```
 
 4. Add example in `examples/`:
+
    ```python
    # examples/use-new-tool.py
    result = my_new_tool("example")
@@ -192,6 +209,7 @@ Priority: Medium - helpful for malware analysis
    ```
 
 5. Test and commit:
+
    ```bash
    git commit -m "feat: Add my_new_tool() for analysis
 
@@ -206,6 +224,7 @@ Priority: Medium - helpful for malware analysis
 #### 3c. Improve Documentation
 
 **What to contribute**:
+
 - Fix typos
 - Add examples
 - Clarify confusing sections
@@ -213,6 +232,7 @@ Priority: Medium - helpful for malware analysis
 - Update outdated information
 
 **How**:
+
 ```bash
 # 1. Edit documentation
 vim tests/endpoints.json
@@ -287,6 +307,7 @@ def my_tool(param: str, optional: int = 0) -> dict:
 ```
 
 **Style Guide**:
+
 - PEP 8 for Python
 - Use type hints
 - Clear variable names (not `x`, `y`, `z`)
@@ -299,6 +320,7 @@ def my_tool(param: str, optional: int = 0) -> dict:
 ## Testing
 
 ### Java Tests
+
 ```java
 // src/test/java/com/xebyte/GhidraMCPPluginTest.java
 
@@ -311,11 +333,13 @@ public void testDecompileFunction() {
 ```
 
 **Run tests**:
+
 ```bash
 mvn test
 ```
 
 ### Python Tests
+
 ```python
 # tests/test_bridge.py
 
@@ -326,11 +350,13 @@ def test_list_functions():
 ```
 
 **Run tests**:
+
 ```bash
 pytest tests/ -v
 ```
 
 **Add tests for**:
+
 - New functionality
 - Edge cases
 - Error handling
@@ -348,6 +374,7 @@ pytest tests/ -v
    - [ ] Test changes manually if possible
 
 2. **Create PR**:
+
    ```markdown
    ## Description
    Brief summary of changes
@@ -378,6 +405,7 @@ pytest tests/ -v
 ## Contribution Ideas
 
 ### Quick Wins (1-2 hours)
+
 - [ ] Fix typos in documentation
 - [ ] Add error handling example to docs
 - [ ] Create unit test for existing tool
@@ -385,6 +413,7 @@ pytest tests/ -v
 - [ ] Update example scripts with new features
 
 ### Medium Tasks (4-8 hours)
+
 - [ ] Write comprehensive example script
 - [ ] Add performance benchmarks
 - [ ] Create troubleshooting guide section
@@ -392,6 +421,7 @@ pytest tests/ -v
 - [ ] Add logging to problematic areas
 
 ### Larger Features (1-2 weeks)
+
 - [ ] Implement new MCP tool
 - [ ] Add comprehensive test suite
 - [ ] Create web dashboard UI
@@ -403,12 +433,14 @@ pytest tests/ -v
 ## Development Setup
 
 ### Prerequisites
+
 - Java 21 LTS
 - Apache Maven 3.9+
 - Python 3.10+
 - Ghidra 12.1
 
 ### Local Development
+
 ```bash
 # 1. Clone repository
 git clone https://github.com/YOUR-USERNAME/ghidra-mcp.git
@@ -432,6 +464,7 @@ pytest tests/ -v
 ```
 
 ### Building Documentation
+
 ```bash
 # Tools are auto-documented from docstrings
 # Manually update docs/ folder
@@ -439,15 +472,18 @@ pytest tests/ -v
 # Preview markdown
 cat tests/endpoints.json | more
 
-# Check for linting errors (optional)
-markdownlint docs/
+# Lint Markdown exactly as CI does (advisory job, non-blocking)
+npx markdownlint-cli2@0.23.1 --config .markdownlint-cli2.jsonc "**/*.md"
+
+# Same command with --fix applies every mechanical fix
+npx markdownlint-cli2@0.23.1 --fix --config .markdownlint-cli2.jsonc "**/*.md"
 ```
 
 ---
 
 ## Commit Message Convention
 
-```
+```text
 <type>(<scope>): <subject>
 
 <body>
@@ -456,6 +492,7 @@ markdownlint docs/
 ```
 
 **Types**:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation
@@ -465,7 +502,8 @@ markdownlint docs/
 - `perf`: Performance
 
 **Example**:
-```
+
+```text
 feat(tools): Add batch_analyze_structures tool
 
 - Implements bulk structure discovery
@@ -517,6 +555,7 @@ By contributing, you agree that your contributions will be licensed under the sa
 ## Recognition
 
 Contributors are recognized in:
+
 - `CHANGELOG.md` - Release notes
 - GitHub profile - As contributor
 - `CONTRIBUTORS.md` - List of contributors

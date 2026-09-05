@@ -10,26 +10,32 @@
 ### New MCP Tools (7 tools added)
 
 #### Validation & Safety Tools
+
 - ✅ **validate_function_prototype** - Validate prototypes before applying
 - ✅ **validate_data_type_exists** - Check if types exist in Ghidra
 - ✅ **can_rename_at_address** - Determine address type and suggest operation
 
 #### Batch Operations
+
 - ✅ **batch_rename_variables** - Atomically rename multiple variables with partial success reporting
 
 #### Comprehensive Analysis
+
 - ✅ **analyze_function_complete** - Single-call complete function analysis (replaces 5+ calls)
 - ✅ **document_function_complete** - Atomic all-in-one documentation with rollback (replaces 15-20 calls)
 
 #### Enhanced Search
+
 - ✅ **search_functions_enhanced** - Advanced function search with filtering, regex, and sorting
 
 ### Performance Improvements
+
 - ✅ **93% reduction in API calls** - Complete function documentation: 15-20 calls → 1 call
 - ✅ **Atomic transactions** - All-or-nothing semantics for complex operations
 - ✅ **Pre-flight validation** - Catch errors before operations execute
 
 ### Quality Assurance
+
 - ✅ **Implementation verification** - Confirmed 99/107 Python tools (92.5%) have Java endpoints
 - ✅ **100% synchronization** - Python MCP bridge and Java plugin fully aligned
 - ✅ **Comprehensive testing** - All new tools validated against real binaries
@@ -39,10 +45,12 @@
 ## 📊 Tool Summary
 
 ### Total MCP Tools: 107
+
 - **97 Fully Implemented** - Production-ready tools
 - **10 ROADMAP v2.0** - Documented placeholders for future malware analysis features
 
-### By Category:
+### By Category
+
 - **Function Analysis**: 25 tools
 - **Symbol Management**: 18 tools
 - **Data Types**: 22 tools
@@ -58,6 +66,7 @@
 ### 1. Atomic Function Documentation
 
 **Before v1.6.0**: 15-20 individual API calls
+
 ```python
 rename_function(addr, "ProcessEvent")
 set_function_prototype(addr, "void ProcessEvent(int param1)")
@@ -67,6 +76,7 @@ set_plate_comment(addr, "Processes UI events")
 ```
 
 **After v1.6.0**: 1 atomic API call
+
 ```python
 document_function_complete(
     function_address="0x401000",
@@ -83,6 +93,7 @@ document_function_complete(
 ### 2. Pre-flight Validation
 
 **Prevent errors before they happen:**
+
 ```python
 # Validate type exists
 result = validate_data_type_exists("MyStruct")
@@ -103,6 +114,7 @@ result = can_rename_at_address("0x401000")
 ### 3. Enhanced Function Search
 
 **Powerful filtering and sorting:**
+
 ```python
 # Find undocumented functions with 2+ xrefs
 search_functions_enhanced(
@@ -124,6 +136,7 @@ search_functions_enhanced(
 ### 4. Comprehensive Function Analysis
 
 **Single call for complete analysis:**
+
 ```python
 result = analyze_function_complete(
     name="FUN_401000",
@@ -178,11 +191,13 @@ python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ## 🔄 Migration Guide
 
 ### Breaking Changes
+
 **NONE** - All changes are 100% backward compatible
 
 ### New Recommended Workflows
 
 #### Function Documentation (Recommended)
+
 ```python
 # OLD WORKFLOW (still works)
 rename_function(addr, name)
@@ -202,6 +217,7 @@ document_function_complete(
 ```
 
 #### Function Analysis (Recommended)
+
 ```python
 # OLD WORKFLOW (still works)
 decompiled = decompile_function(name)
@@ -224,18 +240,21 @@ result = analyze_function_complete(
 ## 📚 Documentation Updates
 
 ### New Documentation
+
 - [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical implementation details
 - [Verification Report](VERIFICATION_REPORT.md) - Python/Java synchronization analysis
 - [Feature Status](FEATURE_STATUS.md) - Recommendations implementation status
 - [Quick Start Prompt](../../prompts/QUICK_START_PROMPT.md) - Simplified workflow for beginners
 
 ### Updated Documentation
+
 - [README.md](../../../README.md) - Updated to v1.6.0 statistics
 - [CHANGELOG.md](../../../CHANGELOG.md) - Complete version history
 - [DOCUMENTATION_INDEX.md](../../DOCUMENTATION_INDEX.md) - Reorganized structure
 - [API_REFERENCE.md](../../API_REFERENCE.md) - Added 7 new tools
 
 ### Documentation Reorganization
+
 - ✅ Created `docs/guides/` for specialized topics
 - ✅ Created `docs/releases/v1.6.0/` for version-specific docs
 - ✅ Moved utility scripts to `tools/` directory
@@ -248,12 +267,14 @@ result = analyze_function_complete(
 ## 🐛 Known Issues
 
 ### Resolved in This Release
+
 - ✅ No way to validate operations before execution (FIXED - validation tools added)
 - ✅ Complex workflows require 15-20 API calls (FIXED - atomic operations added)
 - ✅ No advanced function search capabilities (FIXED - enhanced search added)
 - ✅ Documentation scattered across root and docs/ (FIXED - reorganized)
 
 ### Remaining (Low Priority)
+
 - ⚠️ `readMemory` endpoint exists but no Python wrapper (use `inspect_memory_content` instead)
 - ⚠️ Legacy camelCase endpoints (renameData, renameFunction, renameVariable) still exist for compatibility
 
@@ -264,17 +285,20 @@ result = analyze_function_complete(
 ### Files Modified
 
 #### Python Bridge (`bridge_mcp_ghidra.py`)
+
 - Added 7 new `@mcp.tool()` decorated functions
 - Lines added: ~350 (tool definitions + documentation)
 - No breaking changes to existing tools
 
 #### Java Plugin (`GhidraMCPPlugin.java`)
+
 - Added 7 new HTTP endpoint handlers
 - Added backend implementation for validation and analysis
 - Added comprehensive error handling
 - Lines added: ~500 (endpoints + implementation)
 
 ### Architecture Improvements
+
 - **Transaction Management**: All batch operations use Ghidra transactions with rollback
 - **Error Propagation**: Detailed error messages with actionable context
 - **Input Validation**: Pre-flight checks prevent invalid operations
@@ -285,20 +309,23 @@ result = analyze_function_complete(
 ## 📈 Statistics
 
 ### Code Quality
+
 - **Compilation**: ✅ 100% success
 - **Test Coverage**: ✅ All functionality verified
 - **Backward Compatibility**: ✅ 100% maintained
 - **Documentation Coverage**: ✅ 100% (107/107 tools)
 
 ### Performance Metrics
+
 | Metric | v1.5.1 | v1.6.0 | Improvement |
-|--------|--------|--------|-------------|
+| -------- | -------- | -------- | ------------- |
 | Function documentation API calls | 15-20 | 1 | 93% reduction |
 | Function analysis API calls | 5+ | 1 | 80% reduction |
 | Pre-execution validation | None | Yes | 100% error prevention |
 | Atomic operations | Limited | Comprehensive | 100% rollback support |
 
 ### Implementation Verification
+
 - **Python Tools**: 107 total (97 implemented + 10 ROADMAP)
 - **Java Endpoints**: 120 total
 - **Python → Java**: 99/107 tools have endpoints (92.5%)
@@ -310,18 +337,21 @@ result = analyze_function_complete(
 ## 🏆 Quality Achievements
 
 ### Implementation Quality: EXCELLENT ✅
+
 - 92.5% Python→Java synchronization
 - 98.3% Java→Python synchronization
 - Only 2 true implementation gaps
 - 4 legacy endpoints (backward compatibility)
 
 ### Documentation Quality: 100% ✅
+
 - All 107 tools documented
 - Clear usage examples
 - Comprehensive troubleshooting
 - Organized structure
 
 ### Performance Quality: EXCELLENT ✅
+
 - 93% API call reduction
 - Sub-second response times
 - Connection pooling and caching
@@ -332,7 +362,9 @@ result = analyze_function_complete(
 ## 🔮 Roadmap
 
 ### v2.0 (Planned)
+
 **Malware Analysis Tools** (10 ROADMAP placeholders):
+
 - Crypto constant detection
 - Similar function finding (structural analysis)
 - Control flow complexity analysis
@@ -343,6 +375,7 @@ result = analyze_function_complete(
 - Malware behavior detection
 
 **Additional Enhancements**:
+
 - Data type import from C headers/JSON
 - Progress indicators for large operations
 - Standardized error response format
@@ -360,7 +393,7 @@ result = analyze_function_complete(
 
 ## 📞 Support
 
-- **Issues**: https://github.com/bethington/ghidra-mcp/issues
+- **Issues**: <https://github.com/bethington/ghidra-mcp/issues>
 - **Documentation**: [DOCUMENTATION_INDEX.md](../../DOCUMENTATION_INDEX.md)
 - **Troubleshooting**: [troubleshooting/](../../troubleshooting/)
 

@@ -23,7 +23,7 @@ request.
 
 ## File location
 
-```
+```text
 <your-ghidra-project>/                 ← whatever Project.getProjectDir() returns
 └── .ghidra-mcp/
     └── conventions.json

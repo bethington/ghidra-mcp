@@ -407,4 +407,3 @@ Please review the RFC and comment especially on:
 - Whether the first milestone should support batch search.
 - Which parts of this milestone you would be willing to sponsor or help test.
 ```
-
