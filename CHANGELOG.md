@@ -129,6 +129,45 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### Setup: `preflight` resolves the launcher your MCP client has to spawn (#441)
+
+A client started from a **systemd user service** or a GUI/desktop launcher
+inherits *that launcher's* PATH, which routinely lacks `~/.local/bin` and
+`~/.cargo/bin`. The documented `"command": "uv"` then dies with
+`spawn uv ENOENT` at process-spawn time — before any bridge code runs, so
+nothing appears in any log. `python -m tools.setup preflight` now resolves `uv`
+and the `bridge-mcp-ghidra` console script with `shutil.which`, prints the
+absolute path when found, prints **every PATH entry it searched** (plus PATHEXT
+on Windows) when a required launcher is missing, and emits a ready-to-paste
+client-config snippet with the absolute path already substituted in.
+
+The check is deliberately **advisory and self-limiting**: it resolves against
+the PATH of the shell running preflight, not the client's, and its output says
+so in as many words. Implying otherwise would send people looking in the wrong
+place when the spawn still fails, which is worse than not checking at all. A
+missing console script never fails preflight — `uv run` does not install one.
+
+Every client-config example in the repo (`README.md` quick start, the macOS
+Cursor/Claude config, the Autohand invocation, and the repo's own `.mcp.json`)
+now uses an absolute `command` path, and a new troubleshooting entry covers
+`spawn uv ENOENT` directly. Reported by @Arshad-Kamal on Fedora.
+
+### Docs: minimal read-only tool allowlist
+
+For clients that gate tools through a narrow allowlist, `README.md` now
+documents a **closed** four-tool read-only set — `get_metadata`,
+`list_methods`, `get_entry_points`, `decompile_function` — plus the ordered
+next additions. The point is that an allowlist without a discovery tool is
+self-defeating: the agent cannot enumerate functions through MCP, so it falls
+back to `curl`-ing the HTTP API directly and the allowlist buys nothing.
+`list_methods` is the addition that closes the loop over the three tools
+suggested in #441 (all of which exist under exactly those names).
+
+The section also notes that tool **groups** come from the `category` on the
+Java `@McpTool` annotation as published at `/mcp/schema` — not the `category`
+column in `tests/endpoints.json`, which is separately maintained and disagrees
+for 63 of the 201 annotated endpoints.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
