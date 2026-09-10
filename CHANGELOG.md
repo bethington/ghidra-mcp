@@ -117,6 +117,48 @@ One shape bug this exposed and fixed: parameters can now declare that an empty
 string is *meaningful*, rather than treating empty as absent. Clearing a comment
 did not work end to end before that.
 
+### Every schema parameter now describes itself
+
+`/mcp/schema` used to advertise **294 parameters with no description at all** —
+239 of the 674 `@Param` declarations on `@McpTool` methods, plus all 55
+parameters of the hand-registered routes in `ManualToolDescriptors`. The bridge
+builds each tool's `inputSchema` from that schema, so those reached the model as
+a bare name and a type, and it had to guess formats the server already knew:
+whether an address wants a `0x` prefix, whether a count is bytes or elements,
+what a boolean does in its *false* state. That guessing is the expensive half of
+a large tool surface, and nothing failed while it went on — the annotation
+compiled, the endpoint worked, the schema was just quieter than it should be.
+
+All 294 are now written against what the code actually does with the value, and
+`ParamDescriptionCoverageTest` (offline) fails the build if a new one appears.
+
+The descriptions record behaviour that was previously only discoverable by
+experiment, for example:
+
+- **Paging is not uniform.** Endpoints going through `ServiceUtils.paged` treat
+  `limit <= 0` as "no limit"; `search_strings`, `list_functions_enhanced`,
+  `list_external_locations`, `search_functions_enhanced` and `find_code_gaps`
+  slice by hand, so `limit=0` returns an **empty** page there. `list_class_members`
+  is neither — it clamps `limit` to a minimum of 1, so `0` returns one member.
+- **Units.** `create_array_type.length` is elements; `resize_struct.new_size`,
+  `create_memory_block.size`, `add_struct_field.offset`, `max_scan_bytes` and
+  `field_offset` are bytes; `search_strings.min_length` is characters of decoded
+  text.
+- **Silent no-ops.** `batch_rename_function_components.return_type` is resolved
+  by exact data-type-manager *path*, not the recursive resolver, and a failed
+  lookup is skipped without error while the call still reports success.
+- **Five parameters are accepted and never read** by the method that declares
+  them: `analyze_data_region.include_assembly_patterns`,
+  `detect_array_bounds.analyze_loop_bounds`, `detect_array_bounds.analyze_indexing`,
+  `get_assembly_context.include_patterns`, and
+  `run_ghidra_script.capture_output`. Each is now described as such rather than
+  as a switch that does something.
+
+One existing description was wrong rather than missing and is corrected:
+`search_strings.encoding` claimed to be a "String encoding filter (omit for all
+encodings)". It never filtered — the value is echoed into each match's
+`encoding` field, substituting the literal `ascii` when blank.
+
 ### MCP-protocol conformance suite
 
 `tests/conformance/` drives the server through a real MCP client rather than raw

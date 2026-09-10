@@ -233,8 +233,15 @@ public class DocumentationHashService {
      */
     @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation")
     public Response getBulkFunctionHashes(
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of matching functions to skip before this page starts; 0 begins "
+                               + "at the first. The filter is applied before the skip, so paging is stable "
+                               + "only within one filter value.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum functions whose hash is computed and returned in this page "
+                               + "(default 100). The walk still visits every function to produce "
+                               + "total_matching, so 0 returns an EMPTY page rather than "
+                               + "everything.") int limit,
             @Param(value = "filter", description = "Name filter") String filter,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -472,7 +479,16 @@ public class DocumentationHashService {
 
     @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response applyFunctionDocumentation(
-            @Param(value = "json_body", source = ParamSource.BODY) String jsonBody,
+            @Param(value = "json_body", source = ParamSource.BODY,
+                   description = "The whole payload as one JSON STRING, in the shape "
+                               + "get_function_documentation emits. Required key: target_address. Optional "
+                               + "top-level keys: function_name, return_type, calling_convention, "
+                               + "plate_comment, plus the arrays parameters and comments. It is read with a "
+                               + "flat string extractor, so those keys must sit at the TOP level — a nested "
+                               + "object wrapping them is not looked into. An empty plate_comment is "
+                               + "skipped rather than clearing, and a name, convention or return type that "
+                               + "fails to apply is only logged: changes_applied reports what actually "
+                               + "landed.") String jsonBody,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1007,7 +1023,10 @@ public class DocumentationHashService {
             @Param(value = "source_program", description = "Source program name") String sourceProgramName,
             @Param(value = "target_program", description = "Target program name") String targetProgramName,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
-            @Param(value = "limit", defaultValue = "20") int limit) {
+            @Param(value = "limit", defaultValue = "20",
+                   description = "Maximum matches returned, highest similarity first (default 20). It "
+                               + "truncates the result only: every candidate in the target program is still "
+                               + "scored, so a small limit does not make the call cheaper.") int limit) {
         // Source program: use sourceProgramName if given, otherwise current program
         ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
         if (srcPe.hasError()) return srcPe.error();
@@ -1043,8 +1062,15 @@ public class DocumentationHashService {
             @Param(value = "source_program", description = "Source program name") String sourceProgramName,
             @Param(value = "target_program", description = "Target program name") String targetProgramName,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "50") int limit,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of SOURCE functions to skip before this page starts; 0 begins at "
+                               + "the first. Negative values are clamped to 0, and an offset past the end "
+                               + "returns an empty match list.") int offset,
+            @Param(value = "limit", defaultValue = "50",
+                   description = "How many SOURCE functions this page tries to match (default 50) — it "
+                               + "slices the source list, not the matches. 0 returns an EMPTY page; "
+                               + "total_source_functions reports the full count to page "
+                               + "against.") int limit,
             @Param(value = "filter", description = "Name filter") String filter) {
         if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
             return Response.err("source_program parameter is required");
