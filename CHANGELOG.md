@@ -190,6 +190,15 @@ the number is not re-derived from scratch next time.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
+- **`upgrade_project_language.py --verify` ignored `--stray-file`.** It recorded
+  leaked exclusive checkouts to a hardcoded `reports/verify_stray_checkouts.json`
+  while `--release-checkouts` read the configurable `--stray-file`, so the two
+  halves of the leak workflow agreed only at the default. Passing the flag to
+  both made the release step print "Nothing to do" while the checkouts stayed
+  stranded — clearable only by restarting Ghidra, and one probe has stranded 140
+  of them. `--verify` now writes to `args.stray_file`, and the leak warning names
+  a non-default stray file in the `--release-checkouts` command it prints. Found
+  by the coverage work above, which had pinned the broken behaviour deliberately.
 
 A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined

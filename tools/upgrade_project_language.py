@@ -887,7 +887,10 @@ def main() -> int:
         if stale:
             print("      -> re-run with --apply (optionally scoped with --folder)")
         if leaked:
-            leak_path = Path("reports") / "verify_stray_checkouts.json"
+            # Must be args.stray_file, NOT a hardcoded path: --release-checkouts
+            # reads that same argument, so a non-default path recorded here but
+            # read from there loses the record silently.
+            leak_path = Path(args.stray_file)
             leak_path.parent.mkdir(parents=True, exist_ok=True)
             existing = []
             if leak_path.exists():
@@ -898,11 +901,19 @@ def main() -> int:
             leak_path.write_text(
                 json.dumps(sorted(set(existing) | set(leaked)), indent=2), encoding="utf-8"
             )
+            # Name the stray file in the remedy when it is not the default, so the
+            # printed command reads back what this run just wrote. Compare as
+            # PATHS, not strings: str(Path("reports/x.json")) is backslashed on
+            # Windows and never equals argparse's forward-slashed default, which
+            # would append a redundant --stray-file to every default run.
+            release_cmd = "python tools/upgrade_project_language.py --release-checkouts"
+            if leak_path != Path(parser.get_default("stray_file")):
+                release_cmd += f" --stray-file {leak_path}"
             print(
                 f"\n  WARNING: {len(leaked)} exclusive checkout(s) could NOT be released.\n"
                 f"  Recorded in {leak_path}. They block a future headless pass on those\n"
                 "  files. To clear: restart Ghidra (which drops the leaked consumers),\n"
-                "  then run:  python tools/upgrade_project_language.py --release-checkouts"
+                f"  then run:  {release_cmd}"
             )
         # "unknown" is not "passed": an unreadable probe must never be reported
         # as a clean result, or the verification quietly certifies nothing.

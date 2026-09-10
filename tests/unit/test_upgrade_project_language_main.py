@@ -605,12 +605,71 @@ def test_leaked_checkouts_are_recorded_and_warned_about_LOUDLY(env, monkeypatch,
     assert "restart Ghidra" in out
     assert "--release-checkouts" in out
 
-    # NOTE: --verify always records to this fixed path; it does not honour
-    # --stray-file, which only --release-checkouts reads. Pinned as-is so a
-    # deliberate fix has to update this assertion rather than drift past it.
+    # With no --stray-file, this is that flag's default -- the same path
+    # --release-checkouts will read back.
     recorded = json.loads((env["cwd"] / "reports" / "verify_stray_checkouts.json")
                           .read_text(encoding="utf-8"))
     assert recorded == ["/Vanilla/1.01/D2Game.dll", "/Vanilla/1.02/D2Win.dll"]
+
+
+def test_verify_records_to_the_stray_file_release_checkouts_will_read(env, monkeypatch):
+    """The two halves of the leak workflow must name the SAME file.
+
+    --verify used to record to a hardcoded reports/verify_stray_checkouts.json
+    while --release-checkouts read --stray-file, so any operator who passed the
+    flag got "Nothing to do" from a run whose leaks had been written elsewhere.
+    Those checkouts are only clearable by restarting Ghidra, and a single probe
+    once stranded 140 of them, so losing the record is expensive.
+    """
+    monkeypatch.setattr(upl, "probe_language_state",
+                        lambda b, p, leaked=None: (leaked.append(p), ("current", "{}"))[1])
+    chosen = env["cwd"] / "elsewhere" / "strays.json"
+
+    assert _main(monkeypatch, "--verify", "--stray-file", str(chosen)) == 1
+
+    assert json.loads(chosen.read_text(encoding="utf-8")) == [
+        "/Vanilla/1.01/D2Game.dll", "/Vanilla/1.02/D2Win.dll"]
+    assert not (env["cwd"] / "reports").exists(), (
+        "the default path must not be written when --stray-file was given")
+
+    # ...and the other half finds it, rather than reporting a clean no-op.
+    undone, _ = _live_server(monkeypatch, ["/Vanilla/1.01/D2Game.dll",
+                                          "/Vanilla/1.02/D2Win.dll"])
+
+    assert _main(monkeypatch, "--release-checkouts", "--stray-file", str(chosen)) == 0
+    assert undone == ["/Vanilla/1.01/D2Game.dll", "/Vanilla/1.02/D2Win.dll"]
+
+
+def test_the_leak_warning_names_a_non_default_stray_file_in_its_remedy(
+        env, monkeypatch, capsys):
+    """The printed command has to read back what THIS run wrote; bare
+    --release-checkouts would go to the default and find nothing."""
+    monkeypatch.setattr(upl, "probe_language_state",
+                        lambda b, p, leaked=None: (leaked.append(p), ("current", "{}"))[1])
+    chosen = env["cwd"] / "strays.json"
+
+    _main(monkeypatch, "--verify", "--stray-file", str(chosen))
+
+    out = capsys.readouterr().out
+    assert f"--release-checkouts --stray-file {chosen}" in out
+
+
+def test_the_leak_warning_omits_stray_file_when_it_is_the_default(env, monkeypatch, capsys):
+    """The remedy must stay copy-pasteable in the common case.
+
+    The default comparison has to be PATH-wise, not string-wise: on Windows
+    str(Path("reports/verify_stray_checkouts.json")) is backslashed and never
+    equals argparse's forward-slashed default, which appended a redundant
+    --stray-file to every default run.
+    """
+    monkeypatch.setattr(upl, "probe_language_state",
+                        lambda b, p, leaked=None: (leaked.append(p), ("current", "{}"))[1])
+
+    _main(monkeypatch, "--verify")
+
+    out = capsys.readouterr().out
+    assert "--release-checkouts" in out
+    assert "--stray-file" not in out
 
 
 def test_newly_leaked_checkouts_are_merged_with_previously_recorded_ones(env, monkeypatch):
