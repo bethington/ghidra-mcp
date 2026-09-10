@@ -840,7 +840,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `clear_instruction_flow_override` - Clear flow override
 - `configure_analyzer` - Configure an analysis plugin
 - `create_function` - Create function at address
-- `create_memory_block` - Create memory block
+- `create_memory_block` - Create memory block, optionally initialized with byte contents (hex or base64)
 - `delete_function` - Delete function at address
 - `detect_array_bounds` - Detect array bounds
 - `detect_crypto_constants` - Detect crypto constants
