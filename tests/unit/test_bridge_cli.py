@@ -265,6 +265,221 @@ class TestWildcardAllowedHosts(unittest.TestCase):
         self.assertIn("::1:*", hosts)
         self.assertIn("[::1]:*", hosts)
 
+    def test_portless_forms_present_for_default_port_proxies(self):
+        """A TLS proxy on :443 forwards a PORTLESS Host header.
+
+        `host:*` matches only when the Host header actually carries a
+        port, so a `:*`-only allowlist answers 421 Misdirected Request to
+        every proxied request -- which reads as a network fault, not a
+        policy one.
+        """
+        hosts = cli._wildcard_allowed_hosts()
+        self.assertIn("localhost", hosts)
+        self.assertIn("127.0.0.1", hosts)
+
+
+class TestRequestGatesAgree(unittest.TestCase):
+    """The two Origin gates must never disagree (#399).
+
+    Every request carries the Origin header past TWO independent checks:
+    `CORSMiddleware` (browser-facing, answers the preflight) and the SDK's
+    `TransportSecurityMiddleware` (DNS-rebinding, inside the transport
+    app). They have different syntaxes, so hand-maintained side by side
+    they drift -- and the symptom is a 200 preflight followed by a 421/403
+    on the real POST, i.e. the fix LOOKS applied while still being broken.
+
+    These tests use the SDK's own validators as the oracle, so they fail
+    if either side is edited alone.
+    """
+
+    def _validator(self, bind_host):
+        from mcp.server.transport_security import TransportSecurityMiddleware
+
+        return TransportSecurityMiddleware(cli._transport_security(bind_host))
+
+    def _cors_allows(self, bind_host, origin):
+        import re
+
+        return re.match(cli._cors_origin_regex(bind_host), origin) is not None
+
+    def test_every_cors_approved_origin_passes_the_rebinding_gate(self):
+        for bind_host in ("192.168.1.50", "ghidra.example.com", "0.0.0.0"):
+            validator = self._validator(bind_host)
+            hosts = cli._policy_hosts(bind_host)
+            for host in cli._bracketed(hosts):
+                for scheme in ("http", "https"):
+                    for origin in (f"{scheme}://{host}", f"{scheme}://{host}:8443"):
+                        if not self._cors_allows(bind_host, origin):
+                            continue
+                        self.assertTrue(
+                            validator._validate_origin(origin),
+                            f"bind={bind_host}: CORS approved {origin} but the "
+                            "DNS-rebinding gate refuses it (403 after a 200 "
+                            "preflight)",
+                        )
+
+    def test_proxy_host_headers_pass_the_rebinding_gate(self):
+        """Portless (proxy on a default port) and ported forms both pass."""
+        for bind_host in ("192.168.1.50", "ghidra.example.com"):
+            validator = self._validator(bind_host)
+            for host in (bind_host, f"{bind_host}:8443", "localhost", "localhost:6274"):
+                self.assertTrue(
+                    validator._validate_host(host),
+                    f"bind={bind_host}: Host {host!r} refused (421)",
+                )
+
+    def test_https_origins_are_accepted_behind_tls_termination(self):
+        validator = self._validator("ghidra.example.com")
+        self.assertTrue(validator._validate_origin("https://ghidra.example.com"))
+        self.assertTrue(validator._validate_origin("https://ghidra.example.com:8443"))
+
+    def test_strangers_are_still_refused_by_both_gates(self):
+        validator = self._validator("ghidra.example.com")
+        self.assertFalse(validator._validate_origin("http://evil.attacker.test"))
+        self.assertFalse(validator._validate_host("evil.attacker.test"))
+        self.assertFalse(self._cors_allows("ghidra.example.com", "http://evil.attacker.test"))
+
+    def test_allowed_hosts_env_widens_both_gates_together(self):
+        """GHIDRA_MCP_ALLOWED_HOSTS is the operator's escape hatch.
+
+        Widening one gate and not the other leaves the client just as
+        rejected, only at a different layer.
+        """
+        with patch.dict("os.environ", {"GHIDRA_MCP_ALLOWED_HOSTS": "re-lab.internal"}):
+            validator = self._validator("192.168.1.50")
+            self.assertTrue(self._cors_allows("192.168.1.50", "https://re-lab.internal"))
+            self.assertTrue(validator._validate_origin("https://re-lab.internal"))
+            self.assertTrue(validator._validate_host("re-lab.internal"))
+
+
+class TestRemoteBindPreflight(unittest.TestCase):
+    """A real preflight AND a real POST through an exposed bridge (#399).
+
+    TestHttpAppPreflight covers the loopback bind, where the SDK's
+    rebinding gate is off entirely. This drives the configuration where
+    both gates are live, which is where they could disagree -- and where
+    a preflight-only test would report success over a broken bridge.
+    """
+
+    REMOTE = "ghidra.example.com"
+
+    @classmethod
+    def setUpClass(cls):
+        from starlette.testclient import TestClient
+
+        cls._saved = getattr(mcp.settings, "transport_security", None)
+        mcp.settings.transport_security = cli._transport_security(cls.REMOTE)
+        # FastMCP builds its StreamableHTTPSessionManager ONCE
+        # (`if self._session_manager is None`) and freezes
+        # `security_settings` at that moment. Any earlier test that built
+        # a streamable-http app -- TestHttpAppPreflight does, on a
+        # loopback bind where rebinding protection is off entirely --
+        # leaves that permissive manager cached on the shared `mcp`
+        # singleton, and every later assertion about the rebinding gate
+        # passes without the gate ever running. Dropping the cache is
+        # what keeps these tests from being vacuous.
+        cls._saved_mgr = mcp._session_manager
+        mcp._session_manager = None
+        # Entered as a context manager so the lifespan runs: unlike a
+        # preflight, a real POST reaches the session manager, which needs
+        # its task group started.
+        cls._ctx = TestClient(cli._build_http_app("streamable-http", cls.REMOTE))
+        cls.client = cls._ctx.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ctx.__exit__(None, None, None)
+        mcp._session_manager = cls._saved_mgr
+        mcp.settings.transport_security = cls._saved
+
+    def test_the_rebinding_gate_is_actually_live_in_this_fixture(self):
+        """Guard the guard: prove the inner gate can still say no.
+
+        Without this, a cached permissive session manager would make
+        every other POST assertion in this class pass for the wrong
+        reason.
+        """
+        resp = self._post("evil.attacker.test", f"https://{self.REMOTE}")
+        self.assertEqual(resp.status_code, 421)
+
+    def _preflight(self, host, origin):
+        return self.client.options(
+            "/mcp",
+            headers={
+                "Host": host,
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type, mcp-session-id",
+            },
+        )
+
+    def _post(self, host, origin):
+        return self.client.post(
+            "/mcp",
+            headers={
+                "Host": host,
+                "Origin": origin,
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "1"},
+                },
+            },
+        )
+
+    def test_preflight_grants_the_session_id_header(self):
+        resp = self._preflight(self.REMOTE, f"https://{self.REMOTE}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.headers["access-control-allow-origin"], f"https://{self.REMOTE}"
+        )
+        self.assertIn("POST", resp.headers["access-control-allow-methods"])
+        self.assertIn(
+            "mcp-session-id", resp.headers["access-control-allow-headers"].lower()
+        )
+
+    def test_portless_host_and_https_origin_are_not_refused_after_preflight(self):
+        """The regression: TLS proxy on :443 got 200 preflight then 421/403.
+
+        Asserting only on the preflight would pass while the bridge was
+        still unusable, so this asserts the request the preflight
+        authorized actually goes through.
+        """
+        self.assertEqual(self._preflight(self.REMOTE, f"https://{self.REMOTE}").status_code, 200)
+        resp = self._post(self.REMOTE, f"https://{self.REMOTE}")
+        self.assertNotEqual(resp.status_code, 421, "portless Host refused: 421")
+        self.assertNotEqual(resp.status_code, 403, "https Origin refused: 403")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_session_id_is_readable_by_the_browser_on_the_real_response(self):
+        resp = self._post(self.REMOTE, f"https://{self.REMOTE}")
+        self.assertIn(
+            "mcp-session-id", resp.headers["access-control-expose-headers"].lower()
+        )
+        # Without ACAO on the ACTUAL response the browser discards it, so
+        # expose_headers alone does not make the session id readable.
+        self.assertEqual(
+            resp.headers["access-control-allow-origin"], f"https://{self.REMOTE}"
+        )
+
+    def test_loopback_client_still_reaches_an_exposed_bridge(self):
+        resp = self._preflight("localhost:8081", "http://localhost:6274")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.headers["access-control-allow-origin"], "http://localhost:6274"
+        )
+
+    def test_foreign_origin_gets_no_cors_grant(self):
+        resp = self._preflight(self.REMOTE, "http://evil.attacker.test")
+        self.assertNotIn("access-control-allow-origin", resp.headers)
+
 
 if __name__ == "__main__":
     unittest.main()
