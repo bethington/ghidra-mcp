@@ -177,27 +177,37 @@ jobs:
         # points below the measured baseline to absorb platform/version skew;
         # raise it as coverage improves, never lower it.
         #
-        # Lowered 63.6% -> 58 -> 55 on 2026-08-25. The drop is NOT a test
-        # regression: commit 6f7e7e8 (2026-08-12, one day after the 63.6%
-        # baseline was recorded) dissolved scripts/ into tools/, and tools/ is
-        # a coverage source while scripts/ was not. That moved 533 uncovered
-        # statements into the DENOMINATOR in one commit:
-        # upgrade_project_language.py (530 stmts / 343 missed),
-        # build_reference_index.py (147 / 147) and
-        # ghidra_server_health_check.py (43 / 43), taking the measured total
-        # to 57-58%. Nothing got less tested; the measured scope grew.
+        # History, so the next person does not re-derive it:
+        #   63.6% (2026-08-11) — baseline after the debugger package moved to
+        #     d2-game-exe and left the denominator. Floor 58.
+        #   57-58% (2026-08-12) — commit 6f7e7e8 dissolved scripts/ into
+        #     tools/, and tools/ is a coverage source while scripts/ was not.
+        #     That moved 533 uncovered statements into the DENOMINATOR in one
+        #     commit: upgrade_project_language.py (530 stmts / 343 missed),
+        #     build_reference_index.py (147/147) and
+        #     ghidra_server_health_check.py (43/43). Nothing got less tested;
+        #     the measured scope grew. With the floor still at 58 the gate sat
+        #     exactly on the knife-edge and failed PRs that touch no Python at
+        #     all — #442 is two .md files and reported Build Status=FAILURE,
+        #     and 6 of 8 open dependabot PRs were red for the same reason. The
+        #     floor was dropped to 55 to unblock the queue. That was a
+        #     stopgap, not a fix.
+        #   69.2% (2026-08-30) — the debt is paid: those three operator
+        #     scripts are now COVERED, not scoped out. They reach 99%, 99% and
+        #     98% respectively (the only missed line in each is the
+        #     `sys.exit(main())` under `if __name__ == "__main__"`, which
+        #     cannot execute under import). tests/unit/ gained
+        #     test_ghidra_server_health_check.py,
+        #     test_build_reference_index.py and
+        #     test_upgrade_project_language_main.py; no module was added to
+        #     [tool.coverage.run] omit.
         #
-        # Leaving the floor at 58 with the real number at 57-58 put the gate
-        # exactly on the knife-edge, so it failed PRs that touch no Python at
-        # all: #442 is two .md files and reported Build Status=FAILURE, and 6
-        # of 8 open dependabot PRs were red for the same reason. A ratchet
-        # that blocks a docs-only change is measuring the wrong thing.
-        #
-        # The honest way back up is to cover those three operator scripts, or
-        # scope them out of the coverage sources -- not to re-raise this
-        # number and re-block the queue.
+        # Floor 67 against a measured 69.22% — a ~2pt margin, not the ~0.5pt
+        # knife-edge that caused the outage above. That is ~98 statements of
+        # headroom for platform skew between this ubuntu matrix and the
+        # Windows leg where the baseline was measured.
         uv run --python ${{ matrix.python-version }} --group test \
-          pytest tests/unit/ -v --tb=short --cov-fail-under=55
+          pytest tests/unit/ -v --tb=short --cov-fail-under=67
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
