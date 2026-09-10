@@ -16,6 +16,9 @@ import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.lang.InjectPayload;
+import ghidra.program.model.lang.Register;
+import ghidra.program.model.pcode.Varnode;
+import ghidra.util.exception.InvalidInputException;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
@@ -2129,15 +2132,29 @@ public class FunctionService {
     /**
      * Set custom storage for a local variable or parameter (v1.7.0).
      *
-     * This allows overriding Ghidra's automatic variable storage detection.
-     * Useful for cases where registers are reused or compiler optimizations confuse the decompiler.
+     * This overrides Ghidra's automatic variable storage detection, which is
+     * the only way to express an argument layout no calling convention can
+     * describe -- a prototype that assigns registers in a fixed ordered run,
+     * say, so a function takes its arguments in R0+R2 or in a lone R28. Adding
+     * a convention to the .cspec cannot express those; custom storage can.
+     *
+     * Until 2026-08-25 this method was a NO-OP: it read the current storage,
+     * logged the request and returned HTTP 200. The stated reason (Ghidra's
+     * storage API being "limited") was wrong -- Variable.setDataType(type,
+     * storage, force, source) together with Function.setCustomVariableStorage
+     * has been public API for many versions. Reporting success for a write
+     * that never happened is worse than refusing it, because a caller cannot
+     * tell the difference (#446).
      *
      * @param functionAddrStr Function address containing the variable
      * @param variableName Name of the variable to modify
-     * @param storageSpec Storage specification (e.g., "Stack[-0x10]:4", "EBP:4", "EAX:4")
-     * @return Success or error message
+     * @param storageSpec Storage specification: "EAX", "EAX:4", "R0:4,R2:4",
+     *                    "Stack[-0x10]:4". Size defaults to the variable's
+     *                    current data-type length when omitted.
+     * @return The storage read back off the variable, or an error explaining
+     *         why the requested location was refused
      */
-    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set variable storage location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setVariableStorage(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2170,6 +2187,9 @@ public class FunctionService {
         final AtomicReference<String> errorMessage = new AtomicReference<>();
         final AtomicReference<String> functionName = new AtomicReference<>();
         final AtomicReference<String> oldStorageRef = new AtomicReference<>();
+        final AtomicReference<String> newStorageRef = new AtomicReference<>();
+        final AtomicBoolean enabledCustom = new AtomicBoolean(false);
+        final AtomicReference<String> variableKind = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Set variable storage", () -> {
@@ -2179,8 +2199,8 @@ public class FunctionService {
                     errorMessage.set("No function found at address " + functionAddrStr);
                     return null;
                 }
+                functionName.set(func.getName());
 
-                // Find the variable
                 Variable targetVar = null;
                 for (Variable var : func.getAllVariables()) {
                     if (var.getName().equals(variableName)) {
@@ -2188,45 +2208,255 @@ public class FunctionService {
                         break;
                     }
                 }
-
                 if (targetVar == null) {
                     errorMessage.set("Variable '" + variableName + "' not found in function " + func.getName());
                     return null;
                 }
+                oldStorageRef.set(targetVar.getVariableStorage().toString());
+                boolean isParam = targetVar instanceof Parameter;
+                variableKind.set(isParam ? "parameter" : "local");
 
-                String oldStorage = targetVar.getVariableStorage().toString();
-                functionName.set(func.getName());
-                oldStorageRef.set(oldStorage);
+                // PARSE BEFORE TOUCHING THE FUNCTION'S STORAGE MODE. Enabling
+                // custom storage is a FUNCTION-WIDE change -- it pins every
+                // other parameter at its current location too -- so it must
+                // never survive behind an error response. Parsing after
+                // enabling it meant the most ordinary mistake there is, a
+                // mistyped register name, answered "Unknown register 'R99'"
+                // having already detached the whole parameter list from the
+                // calling convention, with nothing in the response to say so.
+                DataType currentType = targetVar.getDataType();
+                int defaultSize = currentType != null ? currentType.getLength() : targetVar.getLength();
+                VariableStorage newStorage;
+                try {
+                    newStorage = parseStorageSpec(program, storageSpec, defaultSize);
+                } catch (InvalidInputException e) {
+                    errorMessage.set(e.getMessage());
+                    return null;
+                }
 
-                // Ghidra's variable storage API has limited programmatic access;
-                // this call reports the current/requested storage rather than
-                // actually changing it -- see the manual workaround in the
-                // response's "message"/"see_also" fields.
+                // A parameter's storage is owned by the calling convention until
+                // custom storage is switched on; without this the assignment
+                // below is silently re-derived from the .cspec and the caller
+                // sees the convention's answer, not theirs. Enabling it REBUILDS
+                // the parameter objects, so the old handle is stale and the
+                // variable must be looked up again afterwards.
+                if (isParam && !func.hasCustomVariableStorage()) {
+                    func.setCustomVariableStorage(true);
+                    enabledCustom.set(true);
+                    targetVar = null;
+                    for (Variable var : func.getAllVariables()) {
+                        if (var.getName().equals(variableName)) {
+                            targetVar = var;
+                            break;
+                        }
+                    }
+                    if (targetVar == null) {
+                        errorMessage.set("Variable '" + variableName + "' disappeared when custom storage was "
+                                + "enabled on " + func.getName() + "; storage was not changed.");
+                        revertCustomStorage(func, enabledCustom);
+                        return null;
+                    }
+                    currentType = targetVar.getDataType();
+                }
+
+                try {
+                    // force=true so a size difference retypes rather than
+                    // refusing; an invalid request still throws and is reported.
+                    targetVar.setDataType(currentType, newStorage, true, SourceType.USER_DEFINED);
+                } catch (InvalidInputException e) {
+                    // VariableSizeException extends InvalidInputException, so
+                    // this one catch covers both.
+                    errorMessage.set("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
+                            + "': " + e.getMessage());
+                    revertCustomStorage(func, enabledCustom);
+                    return null;
+                }
+
+                // Read the storage back off the variable rather than echoing the
+                // request. Ghidra normalises (and can coalesce) what it stores,
+                // so the request is not evidence that the write took -- which is
+                // exactly the failure this endpoint used to ship.
+                Variable readBack = null;
+                for (Variable var : func.getAllVariables()) {
+                    if (var.getName().equals(variableName)) {
+                        readBack = var;
+                        break;
+                    }
+                }
+                if (readBack == null) {
+                    errorMessage.set("Variable '" + variableName + "' could not be read back after the write");
+                    revertCustomStorage(func, enabledCustom);
+                    return null;
+                }
+                VariableStorage actual = readBack.getVariableStorage();
+                newStorageRef.set(actual.toString());
+                if (actual.compareTo(newStorage) != 0) {
+                    errorMessage.set("Storage did not take: requested " + newStorage
+                            + " but the variable now reads " + actual
+                            + ". This usually means the location overlaps another variable's storage.");
+                    revertCustomStorage(func, enabledCustom);
+                    return null;
+                }
+
                 success.set(true);
-                Msg.info(this, "Variable storage query for: " + variableName + " in " + func.getName() +
-                         " (current: " + oldStorage + ", requested: " + storageSpec + ")");
+                Msg.info(this, "Set variable storage for " + variableName + " in " + func.getName()
+                        + ": " + oldStorageRef.get() + " -> " + actual);
                 return null;
             });
         } catch (Exception e) {
-            errorMessage.set("Failed to execute on Swing thread: " + e.getMessage());
-            Msg.error(this, "Failed to execute set variable storage on Swing thread", e);
+            errorMessage.set("Failed to set variable storage: " + e.getMessage());
+            Msg.error(this, "Failed to execute set variable storage", e);
         }
 
         if (!success.get()) {
             return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
         }
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "unsupported");
+        out.put("status", "success");
         out.put("variable", variableName);
+        out.put("variable_kind", variableKind.get());
         out.put("function", functionName.get());
         out.put("address", functionAddrStr);
-        out.put("current_storage", oldStorageRef.get());
+        out.put("previous_storage", oldStorageRef.get());
+        out.put("storage", newStorageRef.get());
         out.put("requested_storage", storageSpec);
-        out.put("message", "Programmatic variable storage control is limited in Ghidra; use the Decompiler UI "
-                + "(right-click the variable > Edit Data Type/Retype Variable) or run_ghidra_script with the "
-                + "high-level Pcode/HighVariable API.");
-        out.put("see_also", "FixEBPRegisterReuse.java");
+        if (enabledCustom.get()) {
+            // Say it: this is a function-wide mode change, not a per-variable
+            // one. Every other parameter is now pinned at whatever the calling
+            // convention had assigned it, and will no longer track a later
+            // change of convention.
+            out.put("custom_storage_enabled", true);
+            out.put("note", "Custom variable storage was switched on for " + functionName.get()
+                    + " so this parameter's storage could be set. All of the function's parameters are "
+                    + "now held at their current locations instead of being derived from its calling "
+                    + "convention.");
+        }
         return Response.ok(out);
+    }
+
+
+    // ========================================================================
+    // Variable storage (#446)
+    // ========================================================================
+
+    /**
+     * Undo a custom-variable-storage mode change THIS call made, so a refused
+     * request never leaves the function's whole parameter list detached from its
+     * calling convention. Only ever called when this call is the one that turned
+     * it on -- a function that already had custom storage is left alone.
+     *
+     * This is load-bearing because the endpoint's error paths set a message and
+     * return NORMALLY, so the surrounding transaction commits. Without it, a
+     * request that was refused would still have permanently changed the
+     * function, which is the mirror image of the bug #446 was filed for.
+     */
+    private static void revertCustomStorage(Function func, AtomicBoolean enabledHere) {
+        if (!enabledHere.get()) {
+            return;
+        }
+        try {
+            func.setCustomVariableStorage(false);
+            enabledHere.set(false);
+        } catch (Exception e) {
+            Msg.warn(FunctionService.class, "Could not restore convention-derived storage on "
+                    + func.getName() + " after a refused set_variable_storage: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Parse a signed integer that may be written in hex ("-0x10", "0x1c") or
+     * decimal ("-16"). Long.decode handles the sign for both bases; parseInt
+     * does not understand "0x" at all, which is the form Ghidra itself prints.
+     */
+    private static int parseSignedInt(String text) throws InvalidInputException {
+        try {
+            return Long.decode(text.trim()).intValue();
+        } catch (NumberFormatException e) {
+            throw new InvalidInputException("not an integer: '" + text + "'");
+        }
+    }
+
+    /**
+     * Turn a storage spec into a {@link VariableStorage}.
+     *
+     * Accepts the same shapes Ghidra prints in the Decompiler and that
+     * get_function_variables already returns, so a caller can read storage from
+     * one endpoint and hand it straight back to this one:
+     *
+     *   EAX                  register, sized from the variable's data type
+     *   EAX:4                register, explicit size
+     *   R0:4,R2:4            multi-piece (one value split across registers)
+     *   Stack[-0x10]:4       stack slot at a signed offset
+     *   Stack[-0x10]         stack slot, sized from the variable's data type
+     *
+     * defaultSize is the variable's current data-type length and is used for
+     * any piece that does not carry an explicit ":size".
+     */
+    private static VariableStorage parseStorageSpec(Program program, String spec, int defaultSize)
+            throws InvalidInputException {
+        if (spec == null || spec.trim().isEmpty()) {
+            throw new InvalidInputException("Storage specification is empty");
+        }
+        List<Varnode> varnodes = new ArrayList<>();
+        for (String rawPiece : spec.split(",")) {
+            String piece = rawPiece.trim();
+            if (piece.isEmpty()) continue;
+
+            // Split a trailing ":<size>". The size colon is always the LAST
+            // colon and always after any ']', which keeps "Stack[-0x10]:4"
+            // from being cut inside its brackets.
+            int size = -1;
+            String location = piece;
+            int bracket = piece.lastIndexOf(']');
+            int colon = piece.lastIndexOf(':');
+            if (colon > bracket && colon > 0 && colon < piece.length() - 1) {
+                String tail = piece.substring(colon + 1).trim();
+                if (tail.matches("\\d+")) {
+                    size = Integer.parseInt(tail);
+                    location = piece.substring(0, colon).trim();
+                }
+            }
+            if (size == 0) {
+                throw new InvalidInputException("Storage size must be greater than zero: '" + piece + "'");
+            }
+
+            if (location.toLowerCase(Locale.ROOT).startsWith("stack[")) {
+                int close = location.indexOf(']');
+                if (close < 0) {
+                    throw new InvalidInputException("Unterminated stack offset in '" + piece + "' (expected Stack[-0x10]:4)");
+                }
+                int stackOffset = parseSignedInt(location.substring("stack[".length(), close));
+                int stackSize = size > 0 ? size : defaultSize;
+                if (stackSize <= 0) {
+                    throw new InvalidInputException(
+                            "Cannot infer a size for '" + piece + "'; give one explicitly (e.g. Stack[-0x10]:4)");
+                }
+                Address stackAddr = program.getAddressFactory().getStackSpace().getAddress(stackOffset);
+                varnodes.add(new Varnode(stackAddr, stackSize));
+                continue;
+            }
+
+            Register register = program.getRegister(location);
+            if (register == null) {
+                throw new InvalidInputException(
+                        "Unknown register '" + location + "' for language "
+                                + program.getLanguage().getLanguageID()
+                                + ". Use a register name from this processor, or the "
+                                + "Stack[-0x10]:4 form for a stack slot.");
+            }
+            int regSize = size > 0 ? size : (defaultSize > 0 ? defaultSize : register.getMinimumByteSize());
+            if (regSize > register.getMinimumByteSize()) {
+                throw new InvalidInputException(
+                        "Requested size " + regSize + " exceeds register " + register.getName()
+                                + " (" + register.getMinimumByteSize() + " bytes). Split the value across "
+                                + "registers with a comma, e.g. \"" + register.getName() + ":4,<other>:4\".");
+            }
+            varnodes.add(new Varnode(register.getAddress(), regSize));
+        }
+        if (varnodes.isEmpty()) {
+            throw new InvalidInputException("Storage specification '" + spec + "' named no locations");
+        }
+        return new VariableStorage(program, varnodes.toArray(new Varnode[0]));
     }
 
     public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {

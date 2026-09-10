@@ -71,10 +71,12 @@ class TestStaticTools(unittest.TestCase):
 class TestToolGroupManagement(unittest.TestCase):
     """Test tool group management tools."""
 
-    def test_lazy_loading_disabled_by_default(self):
+    def test_lazy_loading_enabled_by_default(self):
+        # See state._lazy_mode (#440). Eager loading put every endpoint in a
+        # single tools/list, over Gemini's function-declaration limit.
         import bridge_mcp_ghidra as bridge
 
-        self.assertFalse(bridge.state._lazy_mode)
+        self.assertTrue(bridge.state._lazy_mode)
 
     def test_list_tool_groups_registered(self):
         import bridge_mcp_ghidra as bridge
