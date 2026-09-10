@@ -15,6 +15,7 @@ import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.lang.InjectPayload;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.pcode.HighFunction;
@@ -495,7 +496,7 @@ public class FunctionService {
      * Get assembly code for a function.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.", category = "function")
     public Response disassembleFunction(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -520,6 +521,92 @@ public class FunctionService {
             Address start = func.getEntryPoint();
             Address end = func.getBody().getMaxAddress();
 
+            // A DEGENERATE BODY IS NOT A ONE-INSTRUCTION FUNCTION.
+            //
+            // Ghidra's boundary analysis fails on a measured fraction of these
+            // binaries and records body_end == body_start. `end` is then the
+            // entry point itself, the loop below emits exactly ONE instruction
+            // and stops, and nothing in the response says so. Measured
+            // 2026-08-11 against Game.exe: 8 of 24 launcher functions, 7 of
+            // them returning a single instruction -- IsFieldSeparator is 44
+            // bytes and answered with `MOV EAX,[0x0040cf30]`, count 1.
+            //
+            // That is the same defect already known to corrupt manifests
+            // (extent 1 scoring a vacuous 1-byte "match"), reaching a second
+            // victim. It is worse here, because a truncated listing is shaped
+            // exactly like a complete one: a caller cannot tell "the function
+            // ends here" from "I stopped looking", so it reads a fragment as
+            // the whole function and reasons from it.
+            //
+            // The decompiler does not have this problem -- it re-derives flow
+            // from the entry point rather than trusting the stored body -- so
+            // the information is there; only this path was throwing it away.
+            // The bound is the next function's entry -- what the listing
+            // itself uses to separate one function from the next -- clamped to
+            // the containing memory block. See below for why the clamp is not
+            // optional.
+            boolean degenerateBody = isDegenerateBody(func, listing);
+            String boundedBy = "function_body";
+            if (degenerateBody) {
+                // Two candidate bounds, and the TIGHTER of the two wins.
+                //
+                // The next function's entry is the obvious one, but it is not
+                // sufficient by itself: the function iterator walks the whole
+                // program in address order, so for the last function in a
+                // block the "next function" can sit in a DIFFERENT block --
+                // or, on a program with several address spaces, in a different
+                // space entirely, where compareTo() orders by space id first
+                // and the resulting bound is meaningless. Clamping to the
+                // memory block that contains the entry point keeps the listing
+                // inside that block in every one of those cases.
+                MemoryBlock block = program.getMemory().getBlock(start);
+                Address blockEnd = (block != null) ? block.getEnd() : null;
+
+                // FunctionManager has no getFunctionAfter(); the iterator
+                // starts AT this function, so skip anything at or before our
+                // own entry point. Entry points are unique, so the first
+                // candidate strictly greater than ours IS the next function.
+                Address nextEntry = null;
+                FunctionIterator after =
+                        program.getFunctionManager().getFunctions(start, true);
+                while (after.hasNext()) {
+                    Address cand = after.next().getEntryPoint();
+                    if (cand == null) continue;
+                    if (!cand.getAddressSpace().equals(start.getAddressSpace())) {
+                        // The ordered walk has left our space (external
+                        // functions live in one of their own). Nothing past
+                        // that point can bound us.
+                        if (cand.compareTo(start) > 0) break;
+                        continue;
+                    }
+                    if (cand.compareTo(start) > 0) {
+                        nextEntry = cand;
+                        break;
+                    }
+                }
+
+                Address limit = null;
+                if (nextEntry != null) {
+                    // `end` is inclusive, so stop one address short of the
+                    // next function's entry.
+                    limit = nextEntry.previous();
+                    boundedBy = "next_function";
+                }
+                if (blockEnd != null && (limit == null || blockEnd.compareTo(limit) < 0)) {
+                    limit = blockEnd;
+                    boundedBy = "memory_block";
+                }
+                if (limit != null && limit.compareTo(start) >= 0) {
+                    end = limit;
+                } else {
+                    // Neither bound is usable. Say so rather than inventing
+                    // one: the listing degrades to Ghidra's own answer, but
+                    // the caller still learns the extent is untrustworthy.
+                    end = start;
+                    boundedBy = "function_body";
+                }
+            }
+
             List<Map<String, Object>> instructions_out = new ArrayList<>();
             InstructionIterator instructions = listing.getInstructions(start, true);
             while (instructions.hasNext()) {
@@ -538,7 +625,54 @@ public class FunctionService {
                 instructions_out.add(entry);
             }
 
-            return ServiceUtils.listed("instructions", instructions_out);
+            if (!degenerateBody) {
+                return ServiceUtils.listed("instructions", instructions_out);
+            }
+
+            // Bounded by the NEXT function (or by the block end), so the tail
+            // carries whatever alignment fill the linker put between them.
+            // That is not part of this function and including it would make
+            // the listing disagree with any byte-level measurement of the
+            // same function.
+            //
+            // Only NOP/INT3 need trimming. Undefined filler needs none:
+            // getInstructions() yields Instruction code units ONLY, so the
+            // undefined bytes that the Ghidra listing renders as `??` are Data
+            // and never reach this list in the first place. The instruction at
+            // the entry point is never trimmed -- a function whose only
+            // visible instruction is padding-shaped is still better reported
+            // as that instruction than as an empty listing.
+            int last = instructions_out.size() - 1;
+            while (last >= 1) {
+                String text = String.valueOf(
+                        instructions_out.get(last).get("instruction")).trim();
+                if (isAlignmentFill(text)) {
+                    instructions_out.remove(last);
+                    last--;
+                } else {
+                    break;
+                }
+            }
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("instructions", instructions_out);
+            out.put("count", instructions_out.size());
+            // Say it, rather than quietly producing a better answer. A caller
+            // that cached the old one-instruction result, or that cross-checks
+            // this against get_function_by_address's body_start/body_end,
+            // needs to know why they disagree -- and a caller measuring bytes
+            // must not trust this function's stored extent either.
+            out.put("body_degenerate", true);
+            out.put("bounded_by", boundedBy);
+            out.put("warning",
+                    "This function's stored body is degenerate (body_end == "
+                  + "body_start), so Ghidra's own boundary would have returned "
+                  + "a single instruction. The listing above was bounded by the "
+                  + boundedBy + " instead and is the real code at this address. "
+                  + "Anything relying on this function's stored extent -- "
+                  + "including a byte-for-byte comparison -- is unreliable "
+                  + "here; re-derive the extent rather than trusting it.");
+            return Response.ok(out);
         } catch (Exception e) {
             return Response.err("Error disassembling function: " + e.getMessage());
         }
@@ -547,6 +681,57 @@ public class FunctionService {
     // Backward compatible overload for internal callers
     public Response disassembleFunction(String addressStr) {
         return disassembleFunction(addressStr, null);
+    }
+
+    /**
+     * True when a function's stored body cannot be the whole function.
+     *
+     * <p>The measured defect is {@code body_end == body_start} -- a body of a
+     * single address. But "one address" is NOT by itself proof of breakage:
+     * a one-byte function is a real thing (an empty {@code __cdecl} compiles
+     * to a bare {@code RET}), and flagging those would attach a degeneracy
+     * warning to a listing that was already correct. The discriminator is
+     * whether the body reaches the end of its OWN FIRST INSTRUCTION. A body
+     * that stops short of that is broken by construction, whatever the
+     * architecture's instruction lengths look like.
+     *
+     * <p>Compared by address rather than by {@code getLength()} on purpose:
+     * {@code getNumAddresses()} counts addressable units and
+     * {@code getLength()} counts bytes, which are the same number only when
+     * the addressable unit is one byte.
+     *
+     * <p>Deliberately anchored to the measured population: a body of more than
+     * one address is left alone even if it also looks short. Widening the net
+     * would change the response shape for cases nobody has measured.
+     */
+    public static boolean isDegenerateBody(Function func, Listing listing) {
+        AddressSetView body = func.getBody();
+        Address bodyEnd = body.getMaxAddress();
+        if (bodyEnd == null) {
+            return true; // empty body: getMaxAddress() would have NPE'd the loop
+        }
+        if (body.getNumAddresses() > 1) {
+            return false;
+        }
+        Instruction first = listing.getInstructionAt(func.getEntryPoint());
+        if (first == null) {
+            return true; // one address and not even an instruction on it
+        }
+        return bodyEnd.compareTo(first.getMaxAddress()) < 0;
+    }
+
+    /**
+     * True for the inter-function alignment fill emitted by linkers.
+     *
+     * <p>Matched on the whole mnemonic, not a bare {@code startsWith}, so a
+     * future mnemonic that merely begins with these letters cannot be eaten.
+     * The trailing-space forms keep the multi-byte NOP encodings that Ghidra
+     * renders with operands (e.g. {@code NOP dword ptr [EAX + EAX*0x1]}).
+     */
+    public static boolean isAlignmentFill(String text) {
+        if (text == null) return false;
+        return text.equals("NOP") || text.startsWith("NOP ")
+            || text.equals("INT3") || text.startsWith("INT3 ");
     }
 
     // ========================================================================
