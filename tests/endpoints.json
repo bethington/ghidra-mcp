@@ -3,21 +3,24 @@
   "description": "GhidraMCP REST API Endpoint Specification",
   "total_endpoints": 253,
   "categories": {
-    "listing": "List program data",
-    "getter": "Get specific data",
-    "rename": "Rename symbols",
-    "search": "Search functionality",
-    "decompile": "Decompilation/disassembly",
-    "comment": "Set comments",
-    "xref": "Cross-references",
-    "datatype": "Data type operations",
-    "analysis": "Analysis tools",
-    "program": "Program management",
+    "analysis": "Completeness analysis, control flow, similarity, memory inspection",
+    "comment": "Plate, decompiler, disassembly and repeatable comments",
+    "datatype": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+    "debugger": "Ghidra TraceRmi debugger control (GUI only)",
+    "documentation": "Function hashing, cross-binary documentation transfer, undocumented discovery",
+    "emulation": "P-code emulation (run functions with controlled inputs)",
+    "function": "Decompile, disassemble, rename, prototype, variables, create/delete functions",
+    "getter": "Current GUI context (address, function, selection)",
+    "headless": "Headless server program management (no GUI required)",
+    "listing": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data",
+    "malware": "Anti-analysis detection, suspicious instructions, IOC extraction, crypto constants",
+    "program": "Program management, script execution, memory read, bookmarks, save",
     "project": "Project lifecycle management",
-    "server": "Server connection and version control",
-    "script": "Script execution",
-    "utility": "Utility endpoints",
-    "emulation": "P-code emulation (run functions with controlled inputs)"
+    "server": "Ghidra Server connection and version control",
+    "symbol": "Create/rename/delete labels, rename data, globals, external locations",
+    "system": "Server-side prompt/automation policy",
+    "utility": "Health checks, schema, version, tool control",
+    "xref": "Cross-references, call graphs, incoming/outgoing calls, data refs"
   },
   "endpoints": [
     {
@@ -71,7 +74,7 @@
     {
       "path": "/analyze_api_call_chains",
       "method": "GET",
-      "category": "analysis",
+      "category": "malware",
       "params": [
         "program"
       ],
@@ -80,7 +83,7 @@
     {
       "path": "/analyze_call_graph",
       "method": "GET",
-      "category": "analysis",
+      "category": "xref",
       "params": [
         "start_function",
         "end_function",
@@ -178,7 +181,7 @@
     {
       "path": "/analyze_struct_field_usage",
       "method": "POST",
-      "category": "analysis",
+      "category": "datatype",
       "params": [
         "address",
         "struct_name",
@@ -190,7 +193,7 @@
     {
       "path": "/apply_data_classification",
       "method": "POST",
-      "category": "analysis",
+      "category": "datatype",
       "params": [
         "address",
         "classification",
@@ -217,7 +220,7 @@
     {
       "path": "/apply_function_documentation",
       "method": "POST",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "json_body",
         "program"
@@ -313,7 +316,7 @@
     {
       "path": "/batch_rename_function_components",
       "method": "POST",
-      "category": "rename",
+      "category": "function",
       "params": [
         "function_address",
         "function_name",
@@ -364,7 +367,7 @@
     {
       "path": "/can_rename_at_address",
       "method": "GET",
-      "category": "analysis",
+      "category": "symbol",
       "params": [
         "address",
         "program"
@@ -416,7 +419,7 @@
     {
       "path": "/clear_instruction_flow_override",
       "method": "POST",
-      "category": "analysis",
+      "category": "function",
       "params": [
         "address",
         "program"
@@ -454,7 +457,7 @@
     {
       "path": "/compare_programs_documentation",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "program"
       ],
@@ -474,7 +477,7 @@
     {
       "path": "/convert_number",
       "method": "GET",
-      "category": "utility",
+      "category": "listing",
       "params": [
         "text",
         "size"
@@ -528,7 +531,7 @@
     {
       "path": "/create_function",
       "method": "POST",
-      "category": "analysis",
+      "category": "function",
       "params": [
         "address",
         "name",
@@ -563,7 +566,7 @@
     {
       "path": "/create_label",
       "method": "POST",
-      "category": "rename",
+      "category": "symbol",
       "params": [
         "address",
         "name",
@@ -575,7 +578,7 @@
     {
       "path": "/create_memory_block",
       "method": "POST",
-      "category": "analysis",
+      "category": "program",
       "params": [
         "name",
         "address",
@@ -808,7 +811,7 @@
     {
       "path": "/decompile_function",
       "method": "GET",
-      "category": "decompile",
+      "category": "function",
       "params": [
         "address",
         "functions",
@@ -820,7 +823,7 @@
     {
       "path": "/delete_bookmark",
       "method": "POST",
-      "category": "comment",
+      "category": "program",
       "params": [
         "address",
         "category",
@@ -851,7 +854,7 @@
     {
       "path": "/delete_function",
       "method": "POST",
-      "category": "analysis",
+      "category": "function",
       "params": [
         "address",
         "program"
@@ -871,7 +874,7 @@
     {
       "path": "/delete_label",
       "method": "POST",
-      "category": "rename",
+      "category": "symbol",
       "params": [
         "address",
         "name",
@@ -915,7 +918,7 @@
     {
       "path": "/detect_crypto_constants",
       "method": "GET",
-      "category": "analysis",
+      "category": "malware",
       "params": [
         "program"
       ],
@@ -924,7 +927,7 @@
     {
       "path": "/detect_malware_behaviors",
       "method": "GET",
-      "category": "analysis",
+      "category": "malware",
       "params": [
         "program"
       ],
@@ -933,7 +936,7 @@
     {
       "path": "/diff_functions",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address_a",
         "address_b",
@@ -945,7 +948,7 @@
     {
       "path": "/disassemble_bytes",
       "method": "POST",
-      "category": "decompile",
+      "category": "function",
       "params": [
         "start_address",
         "end_address",
@@ -960,7 +963,7 @@
     {
       "path": "/disassemble_function",
       "method": "GET",
-      "category": "decompile",
+      "category": "function",
       "params": [
         "address",
         "program"
@@ -1031,7 +1034,7 @@
     {
       "path": "/extract_iocs_with_context",
       "method": "GET",
-      "category": "analysis",
+      "category": "malware",
       "params": [
         "program"
       ],
@@ -1040,7 +1043,7 @@
     {
       "path": "/find_anti_analysis_techniques",
       "method": "GET",
-      "category": "analysis",
+      "category": "malware",
       "params": [
         "program"
       ],
@@ -1084,7 +1087,7 @@
     {
       "path": "/find_similar_functions",
       "method": "GET",
-      "category": "search",
+      "category": "analysis",
       "params": [
         "target_function",
         "threshold",
@@ -1108,7 +1111,7 @@
     {
       "path": "/find_undocumented_by_string",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address",
         "program"
@@ -1118,7 +1121,7 @@
     {
       "path": "/force_decompile",
       "method": "GET",
-      "category": "decompile",
+      "category": "function",
       "params": [
         "address",
         "program"
@@ -1137,7 +1140,7 @@
     {
       "path": "/get_assembly_context",
       "method": "POST",
-      "category": "analysis",
+      "category": "xref",
       "params": [
         "xref_sources",
         "context_instructions",
@@ -1149,7 +1152,7 @@
     {
       "path": "/get_bulk_function_hashes",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "offset",
         "limit",
@@ -1211,7 +1214,7 @@
     {
       "path": "/get_entry_points",
       "method": "GET",
-      "category": "getter",
+      "category": "listing",
       "params": [
         "program"
       ],
@@ -1220,7 +1223,7 @@
     {
       "path": "/get_enum_values",
       "method": "GET",
-      "category": "getter",
+      "category": "datatype",
       "params": [
         "enum_name",
         "program"
@@ -1230,7 +1233,7 @@
     {
       "path": "/get_external_location",
       "method": "GET",
-      "category": "getter",
+      "category": "listing",
       "params": [
         "address",
         "dll_name",
@@ -1253,7 +1256,7 @@
     {
       "path": "/get_full_call_graph",
       "method": "GET",
-      "category": "getter",
+      "category": "xref",
       "params": [
         "format",
         "limit",
@@ -1264,7 +1267,7 @@
     {
       "path": "/get_function_by_address",
       "method": "GET",
-      "category": "getter",
+      "category": "function",
       "params": [
         "address",
         "program"
@@ -1274,7 +1277,7 @@
     {
       "path": "/get_function_call_graph",
       "method": "GET",
-      "category": "getter",
+      "category": "xref",
       "params": [
         "name",
         "address",
@@ -1287,7 +1290,7 @@
     {
       "path": "/get_function_callees",
       "method": "GET",
-      "category": "getter",
+      "category": "xref",
       "params": [
         "name",
         "address",
@@ -1300,7 +1303,7 @@
     {
       "path": "/get_function_callers",
       "method": "GET",
-      "category": "getter",
+      "category": "xref",
       "params": [
         "name",
         "address",
@@ -1313,7 +1316,7 @@
     {
       "path": "/get_function_count",
       "method": "GET",
-      "category": "getter",
+      "category": "listing",
       "params": [
         "program"
       ],
@@ -1322,7 +1325,7 @@
     {
       "path": "/get_function_documentation",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address",
         "program"
@@ -1332,7 +1335,7 @@
     {
       "path": "/get_function_hash",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address",
         "program"
@@ -1342,7 +1345,7 @@
     {
       "path": "/get_function_jump_targets",
       "method": "GET",
-      "category": "getter",
+      "category": "xref",
       "params": [
         "name",
         "address",
@@ -1355,7 +1358,7 @@
     {
       "path": "/get_function_labels",
       "method": "GET",
-      "category": "getter",
+      "category": "symbol",
       "params": [
         "name",
         "offset",
@@ -1378,7 +1381,7 @@
     {
       "path": "/get_function_signature",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address",
         "program"
@@ -1398,7 +1401,7 @@
     {
       "path": "/get_function_variables",
       "method": "GET",
-      "category": "getter",
+      "category": "function",
       "params": [
         "function_name",
         "address",
@@ -1435,7 +1438,7 @@
     {
       "path": "/get_metadata",
       "method": "GET",
-      "category": "utility",
+      "category": "program",
       "params": [
         "program"
       ],
@@ -1472,7 +1475,7 @@
     {
       "path": "/get_struct_layout",
       "method": "GET",
-      "category": "getter",
+      "category": "datatype",
       "params": [
         "struct_name",
         "program"
@@ -1492,7 +1495,7 @@
     {
       "path": "/get_valid_data_types",
       "method": "GET",
-      "category": "getter",
+      "category": "datatype",
       "params": [
         "category",
         "program"
@@ -1597,7 +1600,7 @@
     {
       "path": "/list_bookmarks",
       "method": "GET",
-      "category": "listing",
+      "category": "program",
       "params": [
         "category",
         "address",
@@ -1849,7 +1852,7 @@
     {
       "path": "/list_scripts",
       "method": "GET",
-      "category": "listing",
+      "category": "program",
       "params": [
         "filter"
       ],
@@ -2033,7 +2036,7 @@
     {
       "path": "/read_memory",
       "method": "GET",
-      "category": "analysis",
+      "category": "program",
       "params": [
         "address",
         "length",
@@ -2135,7 +2138,7 @@
     {
       "path": "/rename_function",
       "method": "POST",
-      "category": "rename",
+      "category": "function",
       "params": [
         "old_name",
         "new_name",
@@ -2160,7 +2163,7 @@
     {
       "path": "/rename_variables",
       "method": "POST",
-      "category": "rename",
+      "category": "function",
       "params": [
         "function_address",
         "variable_renames",
@@ -2216,7 +2219,7 @@
     {
       "path": "/run_ghidra_script",
       "method": "POST",
-      "category": "script",
+      "category": "program",
       "params": [
         "script_name",
         "args",
@@ -2229,7 +2232,7 @@
     {
       "path": "/run_script_inline",
       "method": "POST",
-      "category": "script",
+      "category": "program",
       "params": [
         "code",
         "args",
@@ -2256,7 +2259,7 @@
     {
       "path": "/search_byte_patterns",
       "method": "GET",
-      "category": "search",
+      "category": "analysis",
       "params": [
         "pattern",
         "mask",
@@ -2267,7 +2270,7 @@
     {
       "path": "/search_data_types",
       "method": "GET",
-      "category": "search",
+      "category": "datatype",
       "params": [
         "pattern",
         "offset",
@@ -2279,7 +2282,7 @@
     {
       "path": "/search_functions",
       "method": "GET",
-      "category": "search",
+      "category": "listing",
       "params": [
         "name_pattern",
         "offset",
@@ -2303,7 +2306,7 @@
     {
       "path": "/search_functions_enhanced",
       "method": "GET",
-      "category": "search",
+      "category": "analysis",
       "params": [
         "name_pattern",
         "min_xrefs",
@@ -2336,7 +2339,7 @@
     {
       "path": "/search_strings",
       "method": "GET",
-      "category": "search",
+      "category": "listing",
       "params": [
         "search_term",
         "min_length",
@@ -2523,7 +2526,7 @@
     {
       "path": "/set_bookmark",
       "method": "POST",
-      "category": "comment",
+      "category": "program",
       "params": [
         "address",
         "category",
@@ -2558,7 +2561,7 @@
     {
       "path": "/set_function_prototype",
       "method": "POST",
-      "category": "datatype",
+      "category": "function",
       "params": [
         "function_address",
         "prototype",
@@ -2643,7 +2646,7 @@
     {
       "path": "/set_variable_storage",
       "method": "POST",
-      "category": "datatype",
+      "category": "function",
       "params": [
         "function_address",
         "variable_name",
@@ -2678,7 +2681,7 @@
     {
       "path": "/suggest_field_names",
       "method": "POST",
-      "category": "analysis",
+      "category": "datatype",
       "params": [
         "struct_address",
         "struct_size",

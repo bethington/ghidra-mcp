@@ -117,6 +117,78 @@ One shape bug this exposed and fixed: parameters can now declare that an empty
 string is *meaningful*, rather than treating empty as absent. Clearing a comment
 did not work end to end before that.
 
+### Tool catalog: `category` is the tool group, and 63 entries named the wrong one
+
+`tests/endpoints.json` records a `category` per endpoint and CLAUDE.md points at
+it as the authoritative tool inventory. That field is not a label — it is the
+**tool group** the bridge lazy-loads by (`list_tool_groups`, `load_tool_group`,
+`check_tools`, `search_tools`, and `CORE_GROUPS`). But the bridge never reads the
+catalog: it groups on the `category` field of `/mcp/schema`, which the plugin
+generates from `@McpTool` / `@McpToolGroup`. Nothing compared the two, so they
+drifted freely — **63 of 219 annotation-scanned entries disagreed**.
+
+The catalog had been left on a pre-tool-group *verb* taxonomy. Forty-one entries
+carried a category naming a group that does not exist at runtime at all —
+`getter` (14, as a verb sense), `utility` (10), `search` (6), `rename` (5),
+`decompile` (4), `script` (2) — so `load_tool_group("decompile")` could never
+resolve. The other 22 named a real group that does not own the tool
+(`analysis` 16, plus `listing`/`comment`/`datatype` 2 each, e.g. `set_bookmark`
+filed under `comment` when it lives in `ProgramScriptService`/`program`).
+`malware` had **zero** catalog entries while holding five real tools.
+
+**User-visible effect, now corrected.** With lazy tool-group loading becoming the
+default, "which group is this tool in" decides whether a tool is available on
+connect. `CORE_GROUPS` is `{listing, function, program}`. The catalog placed
+**27 tools** in non-default groups that the annotations — i.e. the runtime — put
+in default ones, so the published catalog understated what is available without a
+`load_tool_group` call. The drift was entirely one-directional: **no** tool the
+catalog called default was actually non-default, so nothing that read the catalog
+was told a tool was available when it was not. The 27:
+
+`batch_rename_function_components`, `clear_instruction_flow_override`,
+`convert_number`, `create_function`, `create_memory_block`, `decompile_function`,
+`delete_bookmark`, `delete_function`, `disassemble_bytes`, `disassemble_function`,
+`force_decompile`, `get_entry_points`, `get_external_location`,
+`get_function_by_address`, `get_function_count`, `get_function_variables`,
+`get_metadata`, `read_memory`, `rename_function`, `rename_variables`,
+`run_ghidra_script`, `run_script_inline`, `search_functions`, `search_strings`,
+`set_bookmark`, `set_function_prototype`, `set_variable_storage`.
+
+The annotations were right in all 63 cases and none were changed. Verified
+against `tests/conformance/snapshots/mcp_schema.snap` — a capture of a live
+server's `/mcp/schema` — which agrees with the annotations on **all 235** tools
+it contains and needed no refresh.
+
+- **The catalog now follows the annotations.** `RegenerateEndpointsJson` no
+  longer preserves the catalog's `category` the way it preserves hand-authored
+  descriptions. Preserving it is what made the drift permanent: every
+  regeneration copied the stale value forward. To move a tool between groups,
+  change `@McpTool.category` or the class's `@McpToolGroup`; the catalog follows.
+- **The catalog's top-level `categories` map** was the last place the dead verb
+  taxonomy was still documented as real. Rewritten to the 18 groups actually in
+  use, adding the previously undescribed `documentation`, `function`, `headless`,
+  `debugger`, `malware`, `symbol`, `system` and `xref`.
+- **Three new guards in `EndpointsJsonParityTest`** so this cannot drift again:
+  catalog category vs. scanned category; catalog category vs.
+  `ManualToolDescriptors` (the runtime group for hand-registered routes); and the
+  `categories` map covering exactly the categories in use, with nothing stale.
+- **`tools/audit_endpoint_categories.py`** reproduces the finding without Maven,
+  a JVM or Ghidra by parsing the Java sources directly, mirroring
+  `AnnotationScanner`'s resolution rule. Run it with `--json` for the raw diff.
+  Its independent count agreed exactly with the regenerator's (`updated from
+  scanner: 63`).
+- **`PromptPolicyService` was missing from the offline `ServiceFactory`**, so
+  `/prompt_policy` — live, registered by `GhidraMCPPlugin`, and present in
+  `/mcp/schema` — sat outside every offline parity test. Added; the scanned
+  surface those tests cover is now 219, not 218.
+- README's API Reference is regenerated from the corrected catalog: its sections
+  are now the real loadable groups, so the four dead headings (Search,
+  Decompilation & Disassembly, Renaming & Labels, Scripting) are gone and
+  Malware & Anti-Analysis and Symbols, Labels & Globals appear.
+- `.gitignore`'s blanket `audit_*.py` one-off rule would have silently swallowed
+  the reproducer — the same trap that had already cost `fun-doc/scripts/` its
+  first-class audit tooling. `tools/` is now negated too.
+
 ### MCP-protocol conformance suite
 
 `tests/conformance/` drives the server through a real MCP client rather than raw
