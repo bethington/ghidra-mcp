@@ -3,10 +3,6 @@ package com.xebyte.offline;
 import junit.framework.TestCase;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,15 +32,18 @@ import java.util.regex.Pattern;
  * of which we can stand up cheaply in CI. A grep-based assertion is
  * cheap, deterministic, and would catch any regression where someone
  * changes the call back to the 2-arg form.
+ *
+ * <p>The source is read through {@link ProjectSource}, which anchors on the
+ * project root instead of the working directory and normalises line endings
+ * to LF. Before that, this class asserted against literals containing
+ * {@code "\n"}, so it failed on any checkout made with Git for Windows'
+ * default {@code core.autocrlf=true} — reported as a broken test suite by two
+ * separate outside contributors (#447, #448).
  */
 public class RunGhidraScriptProgramPropagationTest extends TestCase {
 
-    private static final Path SOURCE = Paths.get(
-            "src", "main", "java", "com", "xebyte", "core",
-            "ProgramScriptService.java");
-
     private String readSource() throws IOException {
-        return new String(Files.readAllBytes(SOURCE), StandardCharsets.UTF_8);
+        return ProjectSource.readMainSource("core", "ProgramScriptService.java");
     }
 
     /** Extract the body of the {@code @McpTool(path = "/<path>", ...)}-
@@ -157,9 +156,12 @@ public class RunGhidraScriptProgramPropagationTest extends TestCase {
                         + "JavaScriptProvider cannot find the OSGi bundle.",
                 src.contains(".enable(new generic.jar.ResourceFile(scriptDirectory))"));
 
-        int methodStart = src.indexOf("public Response runGhidraScript(\n"
-                + "            @Param(value = \"script_path\"");
-        assertTrue("Could not locate 3-arg runGhidraScript method", methodStart >= 0);
+        // Whitespace-tolerant: the previous form was a literal containing
+        // "\n" plus exactly twelve spaces, which broke on a CRLF checkout and
+        // would also break on any reformat of the declaration.
+        int methodStart = HardeningWiringTest.indexOfScriptPathOverload(src);
+        assertTrue("Could not locate the runGhidraScript overload declaring the "
+                + "script_path @Param", methodStart >= 0);
 
         int initCall = src.indexOf("ensureScriptBundleHostInitialized("
                 + "scriptFileForExecution.getParentFile())", methodStart);

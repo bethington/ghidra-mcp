@@ -1,12 +1,13 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.ProgramScriptService;
+import com.xebyte.core.Response;
+import com.xebyte.core.SecurityConfig;
 import junit.framework.TestCase;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Source-level regression tests pinning the v5.17 pre-release hardening in
@@ -16,13 +17,17 @@ import java.nio.file.Paths;
  * {@code GHIDRA_MCP_PROJECT_FOLDER} — none of which stand up cheaply in CI —
  * but a wiring regression (someone deleting a guard during a refactor) is
  * exactly the failure mode that a cheap source assertion catches.
+ *
+ * <p>Sources are read through {@link ProjectSource}, which anchors on the
+ * project root rather than the working directory and normalises line endings.
+ * See that class for why: this test and
+ * {@code RunGhidraScriptProgramPropagationTest} were the two that failed on a
+ * CRLF checkout, which is what Git for Windows produces by default.
  */
 public class HardeningWiringTest extends TestCase {
 
     private static String read(String... parts) throws IOException {
-        Path p = Paths.get("src", "main", "java", "com", "xebyte");
-        for (String s : parts) p = p.resolve(s);
-        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        return ProjectSource.readMainSource(parts);
     }
 
     /** The TCP request wrapper must invoke the cross-origin guard. */
@@ -71,12 +76,47 @@ public class HardeningWiringTest extends TestCase {
     /**
      * The script-execution gate must live on the sink (the 3-arg
      * runGhidraScript), not only on the callers, so no route can bypass it.
+     *
+     * <p>Behavioural check: with {@code GHIDRA_MCP_ALLOW_SCRIPTS} unset the
+     * sink must refuse, and it must refuse <em>before</em> resolving the
+     * program — which is why a deliberately nonexistent program name is
+     * passed. If the gate ever moved after program resolution, the stub
+     * provider would produce a "program not found" error instead and this
+     * assertion would fail. That is a strictly stronger statement than the
+     * source ordering check below, which stays as the backstop for the case
+     * where a developer has scripts enabled in their environment.
+     */
+    public void testRunGhidraScriptSinkRefusesBeforeResolvingProgram() {
+        if (SecurityConfig.getInstance().areScriptsAllowed()) {
+            // GHIDRA_MCP_ALLOW_SCRIPTS is set in this environment, so the gate
+            // is deliberately open and its refusal cannot be observed. The
+            // source-level ordering check below still runs.
+            return;
+        }
+        ProgramScriptService scripts = new ProgramScriptService(
+                ServiceFactory.stubProvider(), new NoopThreadingStrategy());
+        Response r = scripts.runGhidraScript(
+                "AnyScript.java", "", "no-such-program-should-never-resolve", 0);
+        assertTrue("Sink must return an error when scripts are disabled",
+                r instanceof Response.Err);
+        String msg = ((Response.Err) r).message();
+        assertTrue("The 3-arg/4-arg runGhidraScript sink must refuse with the "
+                        + "script-execution gate message before it resolves the "
+                        + "requested program — got: " + msg,
+                msg.contains("Script execution disabled"));
+    }
+
+    /**
+     * Source backstop for the same property: the {@code areScriptsAllowed()}
+     * gate must textually precede program resolution inside the sink. Kept
+     * because the behavioural test above cannot observe the gate when a
+     * developer has {@code GHIDRA_MCP_ALLOW_SCRIPTS} set.
      */
     public void testRunGhidraScriptSinkIsGated() throws IOException {
         String src = read("core", "ProgramScriptService.java");
-        int sig = src.indexOf("public Response runGhidraScript(\n"
-                + "            @Param(value = \"script_path\"");
-        assertTrue("Could not locate 3-arg runGhidraScript", sig >= 0);
+        int sig = indexOfScriptPathOverload(src);
+        assertTrue("Could not locate the runGhidraScript overload declaring the "
+                + "script_path @Param", sig >= 0);
         // The areScriptsAllowed() gate must appear early in the method body,
         // before the program is resolved.
         int gate = src.indexOf("areScriptsAllowed()", sig);
@@ -84,6 +124,25 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("runGhidraScript sink must check areScriptsAllowed()", gate >= 0);
         assertTrue("Gate must precede program resolution", gate < resolve);
     }
+
+    /**
+     * Locate the {@code runGhidraScript} overload whose first parameter is the
+     * {@code script_path} {@code @Param}. Whitespace-tolerant on purpose: the
+     * previous form was a literal containing {@code "\n"} plus exactly twelve
+     * spaces, so it broke both on a CRLF checkout and on any reformat of the
+     * declaration.
+     *
+     * @return offset of the declaration, or -1
+     */
+    static int indexOfScriptPathOverload(String src) {
+        Matcher m = SCRIPT_PATH_OVERLOAD.matcher(src);
+        return m.find() ? m.start() : -1;
+    }
+
+    static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
+            "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
+                    + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
+            Pattern.MULTILINE | Pattern.DOTALL);
 
     /** The dead, ungated /run_script route must stay unregistered.
      *  (The old dead EndpointRegistry router was removed in 7.0.0.) */

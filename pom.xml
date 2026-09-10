@@ -194,6 +194,14 @@
                 <version>3.5.6</version>
                 <configuration>
                     <argLine>@{argLine} -Dnet.bytebuddy.experimental=true</argLine>
+                    <systemPropertyVariables>
+                        <!-- The offline tests that assert on source text locate the
+                             repo through com.xebyte.offline.ProjectSource. It can
+                             find the root on its own (from the compiled test
+                             classes), but passing it explicitly means the answer is
+                             the build's, not an inference. -->
+                        <project.basedir>${project.basedir}</project.basedir>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             <!-- JaCoCo — line coverage for the offline test tier. Report lands in
