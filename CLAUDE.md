@@ -62,7 +62,7 @@ stopped this repo being the answer by default — the rehoming is what finished 
 
 ## Architecture
 
-```
+```text
 AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> Ghidra Plugin (GhidraMCPPlugin.jar)
 ```
 
@@ -86,6 +86,7 @@ AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> Ghidra Plugin (GhidraMCP
 - **Annotation Scanner**: `AnnotationScanner.java` discovers `@McpTool` methods, generates `/mcp/schema`
 
 Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
+
 - FrontEnd mode: `FrontEndProgramProvider` + `DirectThreadingStrategy`
 - Headless mode: `HeadlessProgramProvider` + `DirectThreadingStrategy`
 
@@ -238,6 +239,7 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | `python/bridge_mcp_ghidra/debugger.py` (the 22 proxy tools) | `tests/unit/test_bridge_utils.py::TestDebuggerEnabled` + `::TestDebuggerToolRegistration`. The debugger SERVER moved to `d2-game-exe` on 2026-08-11 along with its 7 unit tests; these gate whether the proxies register at all, so they are what stops the bridge advertising 22 tools that point at nothing. |
 | `tools/setup/*`, `build.gradle`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_gradle_tasks.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
 | `tests/endpoints.json` hand-edit | Offline (Java) — `EndpointsJsonParityTest` verifies every `@McpTool` is listed and hand-authored descriptions are preserved |
+| Any `*.md` file, or `.markdownlint-cli2.jsonc` | `npx markdownlint-cli2@0.23.1 --config .markdownlint-cli2.jsonc "**/*.md"` (add `--fix` to apply the mechanical fixes) + `tests/unit/test_project_consistency.py -k Markdown`. The CI job is advisory (not in `build-status`'s `needs`) but it is REAL: it carries no `continue-on-error`, so a violation shows a red X. **`--fix` is not safe unsupervised** — MD037 and MD029 are disabled precisely because their fixes changed what documents said (`UnitAny* not int*` -> `UnitAny*not int*`; a 1..13 numbered backlog renumbered into four lists starting at 1), and MD031 wrote a blockquote continuation at column 0 inside an indented blockquote, terminating the list item around it. After any `--fix`, diff every file with whitespace collapsed and read what is left; re-running the linter cannot see these. |
 | CLI: `bridge-mcp-ghidra --transport` / `python -m bridge_mcp_ghidra`, `tools.setup` subcommands | `tests/unit/test_setup_cli.py` + manual invocation |
 
 ### Commands

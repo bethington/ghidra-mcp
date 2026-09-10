@@ -13,6 +13,7 @@ After comprehensive analysis of the Ghidra MCP codebase against the recommended 
 ### ✅ ALREADY IMPLEMENTED (Priority 1-3)
 
 #### 1. Connection Stability & Retry Logic ⭐ PRIORITY 1
+
 **Status**: ✅ FULLY IMPLEMENTED
 **Location**: `bridge_mcp_ghidra.py:39-46`
 
@@ -26,6 +27,7 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=20, pool_maxs
 ```
 
 **Features**:
+
 - Exponential backoff (0.5s, 1s, 2s, 4s sequence)
 - Connection pooling (20 concurrent connections)
 - Automatic retry on server errors
@@ -36,6 +38,7 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=20, pool_maxs
 ---
 
 #### 2. Variable Discovery Tool ⭐ PRIORITY 2
+
 **Status**: ✅ FULLY IMPLEMENTED (v1.5.0)
 **Location**: `bridge_mcp_ghidra.py:2909-2924`
 
@@ -55,6 +58,7 @@ def get_function_variables(function_name: str) -> list:
 ---
 
 #### 3. Enhanced document_function_complete ⭐ PRIORITY 3
+
 **Status**: ✅ FULLY IMPLEMENTED (v1.6.0)
 **Location**: `bridge_mcp_ghidra.py:3244-3315`
 
@@ -75,6 +79,7 @@ def document_function_complete(
 ```
 
 **Features**:
+
 - Atomic transaction (all-or-nothing)
 - Combines 15-20 individual operations
 - Rollback on partial failure
@@ -85,6 +90,7 @@ def document_function_complete(
 ---
 
 #### 4. Pre-flight Validation ⭐ PRIORITY 4
+
 **Status**: ✅ FULLY IMPLEMENTED (v1.6.0)
 **Location**: Multiple tools
 
@@ -111,6 +117,7 @@ def can_rename_at_address(address: str) -> str:
 ---
 
 #### 5. Enhanced Search Filters ⭐ PRIORITY 7
+
 **Status**: ✅ FULLY IMPLEMENTED (v1.6.0)
 **Location**: `bridge_mcp_ghidra.py:3318-3385`
 
@@ -130,6 +137,7 @@ def search_functions_enhanced(
 ```
 
 **Features Implemented**:
+
 - ✅ Filter by custom name (finds undocumented functions)
 - ✅ Filter by xref count range
 - ✅ Sort by address, name, or xref count
@@ -137,6 +145,7 @@ def search_functions_enhanced(
 - ✅ Calling convention filter
 
 **Requested but Not Yet Implemented**:
+
 - ❌ `has_custom_prototype` filter
 - ❌ `has_plate_comment` filter
 - ❌ `min_complexity` filter (cyclomatic complexity)
@@ -145,9 +154,11 @@ def search_functions_enhanced(
 ---
 
 #### 6. Batch Operations
+
 **Status**: ✅ EXTENSIVELY IMPLEMENTED
 
 Existing batch tools:
+
 - `batch_create_labels` (v1.5.1) - Create multiple labels atomically
 - `batch_set_comments` (v1.5.0) - Set plate/decompiler/disassembly comments
 - `batch_rename_variables` (v1.6.0) - Rename multiple variables
@@ -161,6 +172,7 @@ Existing batch tools:
 ---
 
 #### 7. Analysis & Completeness Tools
+
 **Status**: ✅ FULLY IMPLEMENTED (v1.5.0-1.6.0)
 
 ```python
@@ -203,9 +215,11 @@ def analyze_function_complete(
 ### ⚠️ PARTIALLY IMPLEMENTED / MINOR GAPS
 
 #### 8. Data Structure Analysis Tools
+
 **Status**: ✅ MOSTLY IMPLEMENTED (v1.5.1)
 
 Existing tools:
+
 - ✅ `analyze_struct_field_usage` - AI-assisted field naming from usage
 - ✅ `get_field_access_context` - Assembly context for field offsets
 - ✅ `suggest_field_names` - Hungarian notation suggestions
@@ -214,6 +228,7 @@ Existing tools:
 - ✅ `inspect_memory_content` - Raw memory with string detection
 
 **Minor Gap**:
+
 - ❌ `analyze_global_usage(address)` - Specific tool for global data xref analysis
 
 **Workaround**: Use `get_xrefs_to(address)` + `batch_decompile_xref_sources(address)` for same functionality.
@@ -221,13 +236,16 @@ Existing tools:
 ---
 
 #### 9. Error Message Improvements
+
 **Status**: ⚠️ NEEDS ENHANCEMENT
 
 Current behavior:
+
 - "Variable not found" doesn't indicate why (register variable, already renamed, etc.)
 - Connection errors don't always provide actionable context
 
 **Recommendation**: Enhance error responses from Java plugin to include:
+
 - Variable storage class (stack/register/global)
 - Current name if already renamed
 - Specific constraint that failed
@@ -239,9 +257,11 @@ Current behavior:
 ### ❌ NOT IMPLEMENTED (LOW PRIORITY)
 
 #### 10. Session/Transaction Management (ROADMAP)
+
 **Status**: ❌ NOT IMPLEMENTED
 
 Requested tools:
+
 ```python
 start_transaction(description)
 commit_transaction()
@@ -249,6 +269,7 @@ rollback_transaction()
 ```
 
 **Reason Not Implemented**:
+
 - Individual atomic operations (like `document_function_complete`) already have internal rollback
 - Global transaction state would complicate error handling
 - Ghidra's internal transaction model is complex
@@ -258,6 +279,7 @@ rollback_transaction()
 ---
 
 #### 11. Additional Discovery Tools (OPTIONAL)
+
 **Status**: ❌ NOT IMPLEMENTED
 
 ```python
@@ -274,12 +296,15 @@ find_call_patterns(function_name)  # Common call sequences
 ## Root Cause Analysis: Why Did Issues Occur?
 
 ### 1. Connection Drops During `document_function_complete`
+
 **Likely Causes**:
+
 - Large payload size (many comments/labels)
 - Ghidra server processing time exceeded timeout
 - Swing EDT thread blocking in Java plugin
 
 **Mitigation**:
+
 - Increase `REQUEST_TIMEOUT` from 30s to 60s for large operations
 - Add payload size warnings
 - Monitor Ghidra server logs for EDT blocking
@@ -287,9 +312,11 @@ find_call_patterns(function_name)  # Common call sequences
 ---
 
 ### 2. Variable Rename Failures
+
 **Root Cause**: Race condition between prototype changes and variable existence
 
 **Example Scenario**:
+
 1. User calls `set_function_prototype(addr, "void foo(int param1)")`
 2. Ghidra creates `param1` parameter
 3. User immediately calls `rename_variable(func, "param_1", "param1")`
@@ -300,7 +327,9 @@ find_call_patterns(function_name)  # Common call sequences
 ---
 
 ### 3. Variables "Not Found"
+
 **Root Causes**:
+
 - **Register variables**: `uVar2` may be EAX register artifact, not renameable
 - **Compiler optimizations**: Variable eliminated by dead code elimination
 - **Decompiler display names**: Shown in decompiled output but not in variable table
@@ -312,14 +341,16 @@ find_call_patterns(function_name)  # Common call sequences
 ## Performance Metrics (Current Implementation)
 
 ### Workflow Reduction
+
 | Operation | Old Method | New Method | Savings |
-|-----------|-----------|------------|---------|
+| ----------- | ----------- | ------------ | --------- |
 | Document function | 15-20 API calls | 1 call (`document_function_complete`) | **93% reduction** |
 | Create multiple labels | N calls | 1 call (`batch_create_labels`) | **95% reduction** |
 | Set all comments | 20+ calls | 1 call (`batch_set_comments`) | **95% reduction** |
 | Type variables | N calls | 1 call (`batch_set_variable_types`) | **90% reduction** |
 
 ### Caching Performance
+
 - GET requests cached for 3 minutes (180s)
 - Cache size: 256 entries (~1MB memory)
 - Hit rate: ~40-60% for repeated queries
@@ -331,9 +362,11 @@ find_call_patterns(function_name)  # Common call sequences
 ### HIGH PRIORITY
 
 #### 1. Enhance Error Messages (Java Plugin)
+
 **Location**: `GhidraMCPPlugin.java`
 
 Add to variable rename error responses:
+
 ```json
 {
   "success": false,
@@ -351,9 +384,11 @@ Add to variable rename error responses:
 ---
 
 #### 2. Add Request Size Warnings
+
 **Location**: `bridge_mcp_ghidra.py`
 
 Before large operations:
+
 ```python
 def document_function_complete(...):
     # Calculate estimated payload size
@@ -370,9 +405,11 @@ def document_function_complete(...):
 ---
 
 #### 3. Implement Remaining Search Filters (v1.7.0)
+
 **Location**: `GhidraMCPPlugin.java` + `bridge_mcp_ghidra.py`
 
 Add to `search_functions_enhanced`:
+
 ```python
 has_custom_prototype: bool = None  # Filter by FUN_ default signatures
 has_plate_comment: bool = None     # Filter by documentation
@@ -385,6 +422,7 @@ exclude_patterns: str = None       # Comma-separated exclusion patterns
 ### MEDIUM PRIORITY
 
 #### 4. Add Global Data Analysis Tool (v1.7.0)
+
 ```python
 @mcp.tool()
 def analyze_global_usage(address: str) -> dict:
@@ -403,9 +441,11 @@ def analyze_global_usage(address: str) -> dict:
 ---
 
 #### 5. Improve Connection Timeout Handling
+
 **Location**: `bridge_mcp_ghidra.py:safe_post_json`
 
 Add adaptive timeout based on operation:
+
 ```python
 OPERATION_TIMEOUTS = {
     "document_function_complete": 60,  # Large operations
@@ -419,7 +459,9 @@ OPERATION_TIMEOUTS = {
 ### LOW PRIORITY (NICE TO HAVE)
 
 #### 6. Deprecation Warnings for Suboptimal Patterns
+
 When users call individual operations that should use batch:
+
 ```python
 @mcp.tool()
 def rename_variable(...):
@@ -434,6 +476,7 @@ def rename_variable(...):
 ## Testing Recommendations
 
 ### Unit Tests to Add
+
 1. **Connection retry behavior**:
    - Verify exponential backoff timing
    - Confirm retry count limits
@@ -450,6 +493,7 @@ def rename_variable(...):
    - Confirm performance impact
 
 ### Integration Tests
+
 1. **Large payload handling**:
    - Document function with 50+ comments
    - Create 100 labels atomically
@@ -471,17 +515,20 @@ The Ghidra MCP tools are **significantly more mature than initially assessed**. 
 - ❌ **2 are not implemented** (14%)
 
 The issues encountered during function documentation were primarily due to:
+
 1. **User workflow patterns** (not using existing batch tools)
 2. **Ghidra server-side limitations** (EDT thread blocking, timeout issues)
 3. **Documentation gaps** (users unaware of existing tools like `document_function_complete`)
 
 ### Immediate Action Items
+
 1. ✅ **Update user documentation** to highlight batch tools and best practices
 2. ⚠️ **Add payload size warnings** for large operations
 3. ⚠️ **Enhance Java plugin error messages** with context
 4. ❌ **Implement remaining search filters** (low effort, high value)
 
 ### Long-term Improvements
+
 - Monitor Ghidra server performance and optimize EDT thread usage
 - Add request size limits and automatic chunking for large operations
 - Implement adaptive timeouts based on operation type
