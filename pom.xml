@@ -163,6 +163,19 @@
             <version>2.0.6.1</version>
             <scope>test</scope>
         </dependency>
+        <!-- Graph (test only) — ghidra.program.database.data.CompositeDBAdapter and the
+             SLEIGH language loader reach ghidra.graph.GEdge while a real Program is being
+             built. No main source touches ghidra.graph, so this must NOT be compile- or
+             provided-scoped: widening it would put Graph.jar in target/lib and ship it
+             inside the extension zip, where Ghidra already provides it.
+             All three workflows (tests/release/pre-release) already `install-file` this
+             jar; only the pom never declared it. -->
+        <dependency>
+            <groupId>ghidra</groupId>
+            <artifactId>Graph</artifactId>
+            <version>${ghidra.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <finalName>${project.artifactId}-${project.version}</finalName>
@@ -429,6 +442,94 @@
                                 </configuration>
                             </execution>
                         </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Real-Ghidra test tier (src/test/java/com/xebyte/core/*GhidraTest.java).
+
+             Those tests build an actual ProgramDB through ghidra.program.database.ProgramBuilder,
+             which loads the x86 SLEIGH language for real. That drags in a dozen third-party
+             libraries that Ghidra BUNDLES inside its installation but that the pom's
+             hand-enumerated `ghidra:*` module jars do not carry: the module jars were installed
+             with `install-file`, which records no transitive dependencies at all.
+
+             The result, before this profile existed, was a tier that could not pass ANYWHERE
+             under Maven: with GHIDRA_INSTALL_DIR set it died in @Before with
+             NoClassDefFoundError: org/apache/logging/log4j/LogManager, and with it unset the
+             @BeforeClass assumeTrue skipped every test. The Gradle backend was already green,
+             because build.gradle puts the whole installation on the classpath via fileTree —
+             this profile is the Maven equivalent, narrowed to what the tier actually resolves.
+
+             ApplicationConfiguration.setInitializeLogging(false) does NOT avoid the log4j
+             requirement: DefaultLanguageService's static initializer resolves LogManager
+             before any configuration flag is consulted.
+
+             The chain was measured by leave-one-out on 2026-08-31 against Ghidra 12.1.2 —
+             every jar below except failureaccess is load-bearing, i.e. removing it turns
+             7 passing tests into 7 errors.
+
+             Activated by the presence of GHIDRA_INSTALL_DIR, which is exactly the condition
+             the tier's own assumeTrue gates on, so the classpath is extended precisely when
+             the tests intend to run. GhidraRuntimeClasspathGhidraTest fails loudly, naming
+             the missing file, if a Ghidra upgrade renames one of these jars — the JVM
+             silently ignores a classpath element that does not exist, so without that test
+             a rename resurfaces as an unrelated-looking NoClassDefFoundError.
+             A Ghidra version retarget must revisit the versions below; see the
+             `ghidra-runtime-tests` row in CLAUDE.md's "Match change -> tests" table. -->
+        <profile>
+            <id>ghidra-runtime-tests</id>
+            <activation>
+                <property>
+                    <name>env.GHIDRA_INSTALL_DIR</name>
+                </property>
+            </activation>
+            <properties>
+                <ghidra.generic.lib>${env.GHIDRA_INSTALL_DIR}/Ghidra/Framework/Generic/lib</ghidra.generic.lib>
+                <ghidra.swmodeling.lib>${env.GHIDRA_INSTALL_DIR}/Ghidra/Framework/SoftwareModeling/lib</ghidra.swmodeling.lib>
+                <ghidra.help.lib>${env.GHIDRA_INSTALL_DIR}/Ghidra/Framework/Help/lib</ghidra.help.lib>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <additionalClasspathElements>
+                                <!-- Framework/Generic/lib -->
+                                <!-- log4j: DefaultLanguageService.<clinit> -> LogManager. -->
+                                <element>${ghidra.generic.lib}/log4j-api-2.25.4.jar</element>
+                                <element>${ghidra.generic.lib}/log4j-core-2.25.4.jar</element>
+                                <!-- guava: SleighLanguage's caches -> com.google.common.collect.BiMap. -->
+                                <element>${ghidra.generic.lib}/guava-32.1.3-jre.jar</element>
+                                <!-- failureaccess is guava's declared runtime companion. The current
+                                     tests never reach it (leave-one-out still passes without it), but
+                                     any guava future/AbstractFuture path would, so it ships with guava
+                                     rather than waiting to appear as the next NoClassDefFoundError. -->
+                                <element>${ghidra.generic.lib}/failureaccess-1.0.1.jar</element>
+                                <!-- commons-lang3: db.TableRecord.<clinit> -> ArrayUtils. -->
+                                <element>${ghidra.generic.lib}/commons-lang3-3.20.0.jar</element>
+                                <!-- commons-collections4: listing iteration -> IteratorUtils. -->
+                                <element>${ghidra.generic.lib}/commons-collections4-4.1.jar</element>
+
+                                <!-- Framework/SoftwareModeling/lib -->
+                                <!-- antlr: SleighLanguageProvider parses the .sla grammar. -->
+                                <element>${ghidra.swmodeling.lib}/antlr-runtime-3.5.2.jar</element>
+                                <!-- msv + friends: RELAX NG validation of the language definition XML
+                                     (org.iso_relax.verifier.VerifierFactory). All four are required. -->
+                                <element>${ghidra.swmodeling.lib}/isorelax-20050913.jar</element>
+                                <element>${ghidra.swmodeling.lib}/msv-20050913.jar</element>
+                                <element>${ghidra.swmodeling.lib}/relaxngDatatype-20050913.jar</element>
+                                <element>${ghidra.swmodeling.lib}/xsdlib-20050913.jar</element>
+
+                                <!-- Framework/Help/lib -->
+                                <!-- javahelp: CompositeDBAdapter.<clinit> reaches
+                                     javax.help.UnsupportedOperationException through Ghidra's
+                                     help-annotated exception hierarchy. -->
+                                <element>${ghidra.help.lib}/javahelp-2.0.05.jar</element>
+                            </additionalClasspathElements>
+                        </configuration>
                     </plugin>
                 </plugins>
             </build>
