@@ -908,7 +908,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_admin_users` - List all users on the server
 - `server_authenticate` - Register server credentials for programmatic authentication
 - `server_checkouts` - List all checked-out files in a folder, including server-side checkouts
-- `server_connect` - Connect to a Ghidra server
+- `server_connect` - Report/establish the Ghidra server connection
 - `server_disconnect` - Disconnect from the Ghidra server
 - `server_repositories` - List repositories on the connected server
 - `server_repository_create` - Create a new repository on the server

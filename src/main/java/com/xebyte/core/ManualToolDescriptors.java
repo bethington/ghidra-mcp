@@ -83,7 +83,11 @@ public final class ManualToolDescriptors {
         add(m, "/server/admin/users", "GET", "server", "List all users on the server");
         add(m, "/server/authenticate", "POST", "server", "Register server credentials for programmatic authentication", "username", "password");
         add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts", "path");
-        add(m, "/server/connect", "POST", "server", "Connect to a Ghidra server", "host", "port");
+        // No parameters: GUI mode reports the already-open project, and headless
+        // mode connects with the host/port GhidraServerManager read from
+        // GHIDRA_SERVER_HOST/GHIDRA_SERVER_PORT at construction. Neither handler
+        // has ever read a per-request host/port.
+        add(m, "/server/connect", "POST", "server", "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.");
         add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server");
         add(m, "/server/repositories", "GET", "server", "List repositories on the connected server");
         add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server", "name");

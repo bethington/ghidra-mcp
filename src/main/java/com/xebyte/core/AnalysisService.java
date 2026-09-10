@@ -262,9 +262,9 @@ public class AnalysisService {
     }
 
     public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
+                                    boolean includeXrefMap,
                                     boolean includeBoundaryDetection) {
-        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
+        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
     }
 
     @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
@@ -277,7 +277,6 @@ public class AnalysisService {
                                + "address is unambiguous.") String startAddressStr,
             @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024") int maxScanBytes,
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
-            @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
             @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true") boolean includeBoundaryDetection,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -435,9 +434,8 @@ public class AnalysisService {
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public Response detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange) {
-        return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
+    public Response detectArrayBounds(String addressStr, int maxScanRange) {
+        return detectArrayBounds(addressStr, maxScanRange, null);
     }
 
     @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
@@ -448,8 +446,6 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
-            @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
