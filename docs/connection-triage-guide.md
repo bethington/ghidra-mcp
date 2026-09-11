@@ -51,11 +51,39 @@ python tools/ghidra_server_health_check.py `
   --retry-delay 2
 ```
 
+For a machine-readable layered report, use the same helper in opt-in doctor
+mode:
+
+```powershell
+python tools/ghidra_server_health_check.py `
+  --mode doctor `
+  --base-url "$ghidraUrl" `
+  --format json
+```
+
+The doctor checks `/check_connection`, `/mcp/instance_info`, `/mcp/health`, and
+`/mcp/schema` without printing response bodies. If a bridge endpoint is
+available, add its caller-supplied `/mcp` or `/sse` URL with `--mcp-url`; the
+doctor sends only a bounded `OPTIONS` request to identify the route. It does
+not initialize an MCP session, call a tool, restart a process, edit
+configuration, or change project state. Therefore `mcp_initialize_healthy` is
+`null` unless a future explicit session probe is added. Exit code `0` means
+every requested check passed; exit code `1` preserves the failing layer and
+the recommended next action in the report.
+
+The default `--server-kind auto` recognizes the GUI and headless
+`/check_connection` responses. For a headless server it checks `/health` and
+records GUI-only `/mcp/instance_info` as not applicable; use
+`--server-kind headless` when a custom wrapper does not use the standard
+connection banner. Use `--server-kind gui` to require the GUI endpoints.
+
 Interpret the results as follows:
 
-- `200` from `/mcp/health` means the HTTP server can answer a health request.
-- `200` from `/mcp/instance_info` means the server can report instance metadata such as
-  its process, project, and open-program state.
+- `200` from `/mcp/health` (GUI) or `/health` (headless) means the HTTP server can
+  answer a health request.
+- `200` from GUI `/mcp/instance_info` means the server can report instance metadata
+  such as its process, project, and open-program state. Headless mode records this
+  GUI-only check as not applicable.
 - A successful `/check_connection` response proves the basic plugin/headless connection
   path, but it is not a replacement for instance metadata when more than one instance
   may be running.
@@ -65,6 +93,9 @@ Interpret the results as follows:
 
 If authentication is enabled, send the configured bearer token without printing it
 into a transcript:
+
+Doctor mode reads `GHIDRA_MCP_AUTH_TOKEN` by default (override the variable name
+with `--auth-token-env`) and never includes the token in its JSON or text report.
 
 ```powershell
 curl.exe -H "Authorization: Bearer $env:GHIDRA_MCP_AUTH_TOKEN" `
