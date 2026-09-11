@@ -16,7 +16,7 @@ classifiers = [
 ]
 dependencies = [
     # Core MCP server framework
-    "mcp>=1.28.1,<2.0.0",
+    "mcp>=1.28.1,<3.0.0",
 ]
 # NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
 # has no `requests` runtime dependency. `requests` is only needed by the repo's
