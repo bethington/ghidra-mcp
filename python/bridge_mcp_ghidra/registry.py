@@ -4,6 +4,9 @@ import asyncio
 import inspect
 import json
 import sys
+from typing import Annotated
+
+from pydantic import Field
 
 from . import dispatch
 from . import state
@@ -128,7 +131,14 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             default = None
             py_type = py_type | None if py_type != str else str | None
 
-        param = inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=py_type)
+        # Carry the @Param description from /mcp/schema into the MCP inputSchema.
+        # FastMCP derives inputSchema from this signature via pydantic, so a bare
+        # annotation drops the text the server already published and the model
+        # sees a nameless, undocumented parameter.
+        pdesc = pdef.get("description")
+        annotation = Annotated[py_type, Field(description=pdesc)] if pdesc else py_type
+
+        param = inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=annotation)
         if default is inspect.Parameter.empty:
             required_params.append(param)
         else:
@@ -142,7 +152,16 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 "dry_run",
                 inspect.Parameter.KEYWORD_ONLY,
                 default=False,
-                annotation=bool,
+                annotation=Annotated[
+                    bool,
+                    Field(
+                        description=(
+                            "Preview the change without applying it. When true the server "
+                            "validates the request and reports what would happen, leaving the "
+                            "program unmodified. Defaults to false."
+                        )
+                    ),
+                ],
             )
         )
     handler.__signature__ = inspect.Signature(sig_params, return_annotation=str)

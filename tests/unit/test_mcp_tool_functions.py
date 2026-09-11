@@ -568,5 +568,88 @@ class TestProgramRequired(unittest.TestCase):
         self.assertFalse(self.bridge.state._require_selectors)
 
 
+class TestParamDescriptionsReachSchema(unittest.TestCase):
+    """@Param descriptions from /mcp/schema must survive into inputSchema.
+
+    FastMCP derives inputSchema from the generated signature via pydantic, so a
+    bare annotation silently drops the text the server already publishes and the
+    model sees an undocumented parameter.
+    """
+
+    @staticmethod
+    def _described(fn, pname):
+        """The pydantic Field description on a generated parameter, if any."""
+        annotation = fn.__signature__.parameters[pname].annotation
+        for meta in getattr(annotation, "__metadata__", ()):
+            if getattr(meta, "description", None):
+                return meta.description
+        return None
+
+    def test_description_is_attached_to_parameter(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Function address in hex"},
+                "limit": {"type": "integer", "description": "Max results", "default": 100},
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/list_functions", "GET", schema)
+        self.assertEqual(self._described(fn, "address"), "Function address in hex")
+        self.assertEqual(self._described(fn, "limit"), "Max results")
+
+    def test_undescribed_parameter_is_left_bare(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {"type": "object", "properties": {"address": {"type": "string"}}, "required": ["address"]}
+        fn = _build_tool_function("/x", "GET", schema)
+        self.assertIsNone(self._described(fn, "address"))
+
+    def test_synthetic_dry_run_is_described(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+        fn = _build_tool_function("/rename_function", "POST", schema)
+        self.assertIn("dry_run", fn.__signature__.parameters)
+        self.assertIsNotNone(self._described(fn, "dry_run"))
+
+    def test_description_does_not_disturb_dispatch(self):
+        """The annotation is metadata only — calls must behave exactly as before."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "old_name": {"type": "string", "description": "Current name"},
+                "new_name": {"type": "string", "description": "Replacement name"},
+            },
+            "required": ["old_name", "new_name"],
+        }
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
+            mock_post.return_value = "ok"
+            fn = _build_tool_function("/rename_function", "POST", schema)
+            result = fn(old_name="FUN_00401000", new_name="ParseHeader")
+        self.assertEqual(result, "ok")
+        endpoint, kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
+        self.assertEqual(endpoint, "/rename_function")
+        self.assertEqual(kwargs["data"], {"old_name": "FUN_00401000", "new_name": "ParseHeader"})
+
+    def test_optional_param_keeps_none_default_and_description(self):
+        """Optional params become `T | None`; the description must ride along."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {"program": {"type": "string", "description": "Program name"}},
+            "required": [],
+        }
+        fn = _build_tool_function("/list_functions", "GET", schema)
+        param = fn.__signature__.parameters["program"]
+        self.assertIsNone(param.default)
+        self.assertEqual(self._described(fn, "program"), "Program name")
+
+
 if __name__ == "__main__":
     unittest.main()
