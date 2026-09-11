@@ -216,6 +216,15 @@ margin, deliberately not the ~0.5 point knife-edge that caused the outage. The
 comment block in `.github/workflows/tests.yml` now records the whole history so
 the number is not re-derived from scratch next time.
 
+### Added
+
+- **Transport-aware doctor mode** for `tools/ghidra_server_health_check.py`.
+  `--mode health` remains the original single `/check_connection` probe.
+  Opt-in `--mode doctor` adds bounded, read-only checks for plugin connection,
+  GUI versus headless health routing, `/mcp/schema`, and an optional MCP
+  `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
+  or mutate Ghidra/project state.
+
 ### Fixed
 
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
