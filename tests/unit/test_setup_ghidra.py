@@ -1300,7 +1300,7 @@ def test_install_ghidratrace_skips_when_no_wheel(
     assert "No ghidratrace wheel found" in capsys.readouterr().out
 
 
-def test_install_ghidratrace_dry_run_does_not_invoke_pip(
+def test_install_ghidratrace_dry_run_does_not_invoke_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ):
     from tools.setup import ghidra
@@ -1328,7 +1328,7 @@ def test_install_ghidratrace_dry_run_does_not_invoke_pip(
     assert "ghidratrace-12.1" in out
 
 
-def test_install_ghidratrace_invokes_pip_with_force_reinstall(
+def test_install_ghidratrace_invokes_uv_for_target_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from tools.setup import ghidra
@@ -1340,6 +1340,7 @@ def test_install_ghidratrace_invokes_pip_with_force_reinstall(
     fake_py = tmp_path / "debugger-python.exe"
     fake_py.write_text("", encoding="utf-8")
     monkeypatch.setenv("GHIDRA_DEBUGGER_PYTHON", str(fake_py))
+    monkeypatch.setattr(ghidra, "uv_executable", lambda: "uv-test")
 
     invocations: list[list[str]] = []
 
@@ -1357,14 +1358,19 @@ def test_install_ghidratrace_invokes_pip_with_force_reinstall(
     )
     assert rc == 0
     assert len(invocations) == 2, (
-        "expected 2 pip invocations (protobuf + ghidratrace)"
+        "expected 2 uv invocations (protobuf + ghidratrace)"
     )
     # First: protobuf upgrade
-    assert invocations[0][0] == str(fake_py)
-    assert invocations[0][1:5] == ["-m", "pip", "install", "--upgrade"]
+    assert invocations[0][:5] == [
+        "uv-test", "pip", "install", "--python", str(fake_py)
+    ]
+    assert "--upgrade" in invocations[0]
     assert any("protobuf" in arg for arg in invocations[0])
-    # Second: ghidratrace --force-reinstall pointing at the bundled wheel
-    assert invocations[1][1:5] == ["-m", "pip", "install", "--force-reinstall"]
+    # Second: ghidratrace reinstall pointing at the bundled wheel
+    assert invocations[1][:5] == [
+        "uv-test", "pip", "install", "--python", str(fake_py)
+    ]
+    assert "--reinstall" in invocations[1]
     assert str(wheel) in invocations[1]
 
 

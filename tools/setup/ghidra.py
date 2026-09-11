@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .envfile import load_env_file
 from .maven import find_maven_command
+from .requirements import uv_executable
 from .versioning import (
     infer_ghidra_install_meta,
     infer_ghidra_version_from_path,
@@ -2209,15 +2210,38 @@ def install_ghidratrace_for_debugger(
         print("  Could not resolve a debugger Python (set GHIDRA_DEBUGGER_PYTHON) — skipping")
         return 0
 
+    uv = uv_executable()
+    protobuf_command = [
+        uv,
+        "pip",
+        "install",
+        "--python",
+        str(debugger_python),
+        "--upgrade",
+        "protobuf>=6.31.0",
+    ]
+    ghidratrace_command = [
+        uv,
+        "pip",
+        "install",
+        "--python",
+        str(debugger_python),
+        "--reinstall",
+        str(wheel),
+    ]
+
     if dry_run:
-        print(f"DRY RUN: {debugger_python} -m pip install --force-reinstall {wheel}")
-        print(f"DRY RUN: {debugger_python} -m pip install --upgrade 'protobuf>=6.31.0'")
+        for command in (protobuf_command, ghidratrace_command):
+            print("DRY RUN:", end=" ")
+            print_command(command)
         return 0
 
     # protobuf>=6.31.0 is gated separately by ghidratrace.setuputils — install
     # it before the wheel so the post-install setuputils check doesn't trip.
+    # Use uv rather than ``python -m pip`` because uv-managed environments do
+    # not include pip unless the project declares it as a dependency.
     pb = subprocess.run(
-        [str(debugger_python), "-m", "pip", "install", "--upgrade", "protobuf>=6.31.0"],
+        protobuf_command,
         check=False, capture_output=True, text=True,
     )
     if pb.returncode != 0:
@@ -2225,7 +2249,7 @@ def install_ghidratrace_for_debugger(
         return pb.returncode
 
     gt = subprocess.run(
-        [str(debugger_python), "-m", "pip", "install", "--force-reinstall", str(wheel)],
+        ghidratrace_command,
         check=False, capture_output=True, text=True,
     )
     if gt.returncode != 0:
