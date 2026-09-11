@@ -5,7 +5,6 @@
 # Covers every package ecosystem in the repo:
 #   * GitHub Actions used by the workflows under .github/workflows/
 #   * Python requirements at the repo root (bridge runtime + test + debugger)
-#   * Python requirements under fun-doc/ (the documentation workflow)
 #   * Maven (pom.xml) for the Java plugin
 #   * Gradle (build.gradle) for the alternate Gradle build path
 #
@@ -26,6 +25,19 @@ updates:
     labels:
       - dependencies
       - github-actions
+    # github/codeql-action/init and .../analyze MUST move together. CodeQL
+    # refuses to run when the two halves disagree, failing with
+    # "Loaded a configuration file for version 'X', but running version 'Y'".
+    # Ungrouped, Dependabot files one PR per path, so each one is red on its
+    # own and neither can be merged to prove the other — measured on #443
+    # (init 4.37.6 -> 4.37.7) and #445 (analyze 4.37.6 -> 4.37.7), both of
+    # which failed Analyze (java-kotlin) and Analyze (python) for exactly
+    # this reason while every other check passed. Grouping them makes the
+    # pair arrive as a single mergeable PR.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: pip
     directory: "/"
@@ -35,16 +47,6 @@ updates:
     labels:
       - dependencies
       - python
-
-  - package-ecosystem: pip
-    directory: "/fun-doc"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - python
-      - fun-doc
 
   - package-ecosystem: maven
     directory: "/"
