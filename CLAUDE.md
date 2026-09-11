@@ -4,7 +4,7 @@
 
 MCP server bridging Ghidra reverse engineering with AI tools. 253 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 7.0.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
+- **Package**: `com.xebyte` | **Version**: 7.0.0 | **Java**: 21 LTS | **Ghidra**: 12.1.3
 
 ## Boil the ocean
 
@@ -107,29 +107,29 @@ Two backends are supported. Maven is the default used by `tools.setup`; Gradle i
 
 ```text
 # Direct Gradle invocation — no tools.setup required
-./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
+./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
+./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
+./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
 
 # Via tools.setup facade (same commands, Gradle backend)
 $env:TOOLS_SETUP_BACKEND = "gradle"
 python -m tools.setup build
-python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.2_PUBLIC
-python -m tools.setup deploy    --ghidra-path F:\ghidra_12.1.2_PUBLIC
+python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.3_PUBLIC
+python -m tools.setup deploy    --ghidra-path F:\ghidra_12.1.3_PUBLIC
 ```
 
 **Maven (default — existing tooling unchanged):**
 
 ```text
 python -m tools.setup build
-python -m tools.setup preflight      --ghidra-path F:\ghidra_12.1.2_PUBLIC
-python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.2_PUBLIC
-python -m tools.setup deploy         --ghidra-path F:\ghidra_12.1.2_PUBLIC
+python -m tools.setup preflight      --ghidra-path F:\ghidra_12.1.3_PUBLIC
+python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.3_PUBLIC
+python -m tools.setup deploy         --ghidra-path F:\ghidra_12.1.3_PUBLIC
 ```
 
 - Maven: `C:\Users\benam\tools\apache-maven-3.9.6\bin\mvn.cmd`
-- Ghidra install: `F:\ghidra_12.1.2_PUBLIC`
+- Ghidra install: `F:\ghidra_12.1.3_PUBLIC`
 - `tools.setup` delegates to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route the same commands to Gradle
 - Deploy handles: build, extension install, FrontEndTool.xml patching, Ghidra restart
 - Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
@@ -146,7 +146,7 @@ Release floor before tagging or publishing:
 python -m tools.setup verify-version
 python -m tools.setup build
 pytest tests/unit/ -v --no-cov
-python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC --test release
+python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.3_PUBLIC --test release
 ```
 
 Run UI-touching deploy/regression only after confirming the current Ghidra UI
@@ -252,7 +252,7 @@ pytest tests/unit/ --no-cov
 
 ```text
 # Gradle
-./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
+./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
 # Maven
 mvn test -Dtest='com.xebyte.offline.*Test'
 ```
@@ -261,7 +261,7 @@ mvn test -Dtest='com.xebyte.offline.*Test'
 
 ```text
 # Java
-./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC   # or: mvn test
+./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC   # or: mvn test
 # Python — subset by marker
 pytest tests/ -m readonly          # safe, no writes
 pytest tests/ -m safe_write        # identity writes only
