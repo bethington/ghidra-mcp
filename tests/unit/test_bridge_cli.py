@@ -254,6 +254,50 @@ class TestHttpAppPreflight(unittest.TestCase):
         self.assertIn("mcp-session-id", cors[0].kwargs["expose_headers"])
 
 
+class TestBridgeBearerAuth(unittest.TestCase):
+    """An exposed bridge must not replay its backend token for strangers."""
+
+    def setUp(self):
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        async def endpoint(_request):
+            return PlainTextResponse("proxied")
+
+        app = Starlette(routes=[Route("/mcp", endpoint, methods=["POST", "OPTIONS"])])
+        self.client = TestClient(cli._BearerAuthMiddleware(app, "bridge-secret"))
+
+    def test_missing_token_is_rejected(self):
+        response = self.client.post("/mcp")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["www-authenticate"], "Bearer")
+
+    def test_wrong_token_is_rejected(self):
+        response = self.client.post("/mcp", headers={"Authorization": "Bearer wrong"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_matching_token_reaches_bridge(self):
+        response = self.client.post("/mcp", headers={"Authorization": "Bearer bridge-secret"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "proxied")
+
+    def test_cors_preflight_does_not_require_credentials(self):
+        response = self.client.options("/mcp")
+        self.assertNotEqual(response.status_code, 401)
+
+    def test_remote_http_app_is_wrapped_when_backend_token_is_set(self):
+        with patch.object(cli, "AUTH_TOKEN", "bridge-secret"):
+            app = cli._build_http_app("streamable-http", "0.0.0.0")
+        self.assertIsInstance(app, cli._BearerAuthMiddleware)
+
+    def test_loopback_http_app_preserves_local_unauthenticated_access(self):
+        with patch.object(cli, "AUTH_TOKEN", "bridge-secret"):
+            app = cli._build_http_app("streamable-http", "127.0.0.1")
+        self.assertNotIsInstance(app, cli._BearerAuthMiddleware)
+
+
 class TestWildcardAllowedHosts(unittest.TestCase):
     def test_includes_loopbacks_with_port_wildcards(self):
         hosts = cli._wildcard_allowed_hosts()
