@@ -91,6 +91,16 @@ dependencies {
 // classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
 test {
     jvmArgs '-Dnet.bytebuddy.experimental=true'
+
+    // The real-Ghidra tier (com.xebyte.core.*GhidraTest) gates itself on the
+    // GHIDRA_INSTALL_DIR *environment variable*, while every other task here accepts
+    // -PGHIDRA_INSTALL_DIR. Without this passthrough, `./gradlew test -PGHIDRA_INSTALL_DIR=...`
+    // compiles and runs against a full Ghidra classpath and then assumeTrue-SKIPS the
+    // whole tier — reported as success. Forward the resolved value so the property
+    // route works the same as the environment route.
+    if (ghidraInstallDirValue) {
+        environment 'GHIDRA_INSTALL_DIR', ghidraInstallDirValue
+    }
 }
 
 // ---------------------------------------------------------------------------

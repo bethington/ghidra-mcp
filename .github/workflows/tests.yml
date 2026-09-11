@@ -98,6 +98,12 @@ jobs:
 
         echo "✅ Installed Ghidra JARs to Maven local repository"
 
+        # Publish the resolved path for the real-Ghidra test step below. Deliberately
+        # NOT named GHIDRA_INSTALL_DIR: that variable activates the pom's
+        # `ghidra-runtime-tests` profile and un-skips the real-Ghidra tier, and the
+        # offline step immediately after this one must stay offline.
+        echo "GHIDRA_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+
     - name: Build with Maven
       run: mvn clean package assembly:single -q -DskipTests
 
@@ -109,12 +115,60 @@ jobs:
         # EndpointRegistrationTest, AppTest) require a running Ghidra instance and are
         # excluded from this run.
         #
-        # com.xebyte.core is included too: those are Mockito/ProgramBuilder tests
-        # that need no server either, and they cover the no-return + flow-repair
-        # behavior (#384/#385). Matching only com.xebyte.offline meant they never
-        # ran in CI at all. The one ProgramBuilder suite self-skips via assumeTrue
-        # when GHIDRA_INSTALL_DIR is unset, which is the case here.
+        # com.xebyte.core is included too: those are Mockito tests that need no
+        # server either, and they cover the no-return + flow-repair behavior
+        # (#384/#385). Matching only com.xebyte.offline meant they never ran in CI
+        # at all.
+        #
+        # GHIDRA_INSTALL_DIR is deliberately NOT set for THIS step, so the
+        # *GhidraTest classes self-skip via assumeTrue and the coverage ratchet keeps
+        # measuring the same offline tier it has always measured. The real-Ghidra
+        # tier runs in its own step below.
         mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+
+    - name: Run real-Ghidra Java tests
+      # src/test/java/com/xebyte/core/*GhidraTest.java builds a REAL ProgramDB through
+      # ghidra.program.database.ProgramBuilder and exercises actual disassembly and
+      # flow-override repair -- behavior no mock reproduces.
+      #
+      # Until 2026-08-31 this tier had never run anywhere. With GHIDRA_INSTALL_DIR set it
+      # died in @Before with NoClassDefFoundError, because Ghidra bundles a dozen libraries
+      # that the `install-file`d module jars record no dependency on; with it unset every
+      # test self-skipped through assumeTrue. CI took the second branch, so the suite was
+      # green while testing nothing. The pom's `ghidra-runtime-tests` profile -- which this
+      # variable activates -- supplies the missing jars.
+      #
+      # Ghidra is already downloaded and unzipped above, so the marginal cost here is the
+      # test time alone. Verified headless on Linux with no DISPLAY before being enabled.
+      env:
+        GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_DIR }}
+      run: |
+        # jacoco is skipped so this run does not overwrite the offline-tier coverage report
+        # that the upload step publishes, and so the ratchet keeps its original meaning.
+        mvn -q test -Djacoco.skip=true -Dtest='com.xebyte.core.*GhidraTest'
+
+        # A green `mvn test` is NOT proof the tier ran: assumeTrue reports skips as success,
+        # which is precisely how this tier stayed dead for so long. Assert on the counts.
+        shopt -s nullglob
+        reports=(target/surefire-reports/TEST-com.xebyte.core.*GhidraTest.xml)
+        if [ ${#reports[@]} -eq 0 ]; then
+          echo "::error::No real-Ghidra surefire report was produced - the tier did not run."
+          exit 1
+        fi
+        total=0
+        skipped=0
+        for report in "${reports[@]}"; do
+          header=$(grep -m1 '<testsuite' "$report")
+          count=$(sed -n 's/.* tests="\([0-9]*\)".*/\1/p' <<<"$header")
+          missed=$(sed -n 's/.* skipped="\([0-9]*\)".*/\1/p' <<<"$header")
+          total=$(( total + ${count:-0} ))
+          skipped=$(( skipped + ${missed:-0} ))
+        done
+        echo "real-Ghidra tier: ${total} test(s) run, ${skipped} skipped"
+        if [ "$total" -eq 0 ] || [ "$skipped" -ne 0 ]; then
+          echo "::error::The real-Ghidra tier skipped ${skipped} of ${total} tests. GHIDRA_INSTALL_DIR is set for this step on purpose; a skip here means it is testing nothing."
+          exit 1
+        fi
 
     - name: Verify build artifacts
       run: |
