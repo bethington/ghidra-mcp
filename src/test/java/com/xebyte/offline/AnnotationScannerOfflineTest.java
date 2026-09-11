@@ -235,6 +235,108 @@ public class AnnotationScannerOfflineTest extends TestCase {
     }
 
     /**
+     * Regression test: a boxed param declared with an EMPTY {@code defaultValue}
+     * must resolve to {@code null} ("unset"), not to a concrete value.
+     *
+     * <p>This is the counterpart to the H13 fix above, which overcorrected. H13
+     * changed the boxed branches to {@code hasDef ? Boolean.valueOf(def) : null},
+     * but {@code hasDef} is true for {@code defaultValue = ""} (it only tests
+     * against the {@code NO_DEFAULT} sentinel), and {@code Boolean.valueOf("")}
+     * is {@code false}. Every nullable tri-state filter in the codebase is
+     * declared exactly that way — e.g. {@code has_custom_name}, {@code is_thunk},
+     * {@code is_external} on {@code /search_functions_enhanced}. The effect was
+     * that OMITTING such a filter silently applied it as {@code == false}:
+     * {@code search_functions_enhanced} with a name_pattern and no other args
+     * returned zero results for every user-named function, reporting a
+     * well-formed empty list rather than an error.
+     *
+     * <p>{@code Integer} was unaffected only by accident — {@code Integer.valueOf("")}
+     * throws {@code NumberFormatException}, which that branch already catches and
+     * turns into {@code null}. {@code Boolean.valueOf} never throws, so the Boolean
+     * branch failed silently. Both are asserted here so the behaviour is pinned
+     * explicitly rather than resting on a parse failure.
+     */
+    public void testBoxedParamWithEmptyDefaultResolvesToNull() throws Exception {
+        BoxedDefaultFixture fixture = new BoxedDefaultFixture();
+        AnnotationScanner fixtureScanner = new AnnotationScanner(fixture);
+
+        EndpointDef getEndpoint = null;
+        EndpointDef postEndpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_empty_default_query".equals(ep.path())) getEndpoint = ep;
+            if ("/test_empty_default_body".equals(ep.path()))  postEndpoint = ep;
+        }
+        assertNotNull("GET empty-default fixture endpoint not found", getEndpoint);
+        assertNotNull("POST empty-default fixture endpoint not found", postEndpoint);
+
+        Map<String, String> emptyQuery = Collections.emptyMap();
+        Map<String, Object> emptyBody  = Collections.emptyMap();
+
+        fixture.lastOptFilter = Boolean.TRUE;   // poison, so a no-op write is visible
+        fixture.lastOptCount  = Integer.valueOf(-1);
+        getEndpoint.handler().handle(emptyQuery, emptyBody);
+        assertNull("QUERY: boxed Boolean with defaultValue=\"\" and absent value must be null (unset), "
+            + "not false — otherwise an omitted tri-state filter is applied as '== false'",
+            fixture.lastOptFilter);
+        assertNull("QUERY: boxed Integer with defaultValue=\"\" and absent value must be null",
+            fixture.lastOptCount);
+
+        fixture.lastBodyOptFilter = Boolean.TRUE;
+        fixture.lastBodyOptCount  = Integer.valueOf(-1);
+        postEndpoint.handler().handle(emptyQuery, emptyBody);
+        assertNull("BODY: boxed Boolean with defaultValue=\"\" and absent value must be null (unset), not false",
+            fixture.lastBodyOptFilter);
+        assertNull("BODY: boxed Integer with defaultValue=\"\" and absent value must be null",
+            fixture.lastBodyOptCount);
+    }
+
+    /**
+     * An EXPLICIT value must still win over the empty default, in both directions —
+     * the fix must not make these params unsettable.
+     */
+    public void testBoxedParamWithEmptyDefaultStillHonorsExplicitValue() throws Exception {
+        BoxedDefaultFixture fixture = new BoxedDefaultFixture();
+        AnnotationScanner fixtureScanner = new AnnotationScanner(fixture);
+
+        EndpointDef getEndpoint = null;
+        EndpointDef postEndpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_empty_default_query".equals(ep.path())) getEndpoint = ep;
+            if ("/test_empty_default_body".equals(ep.path())) postEndpoint = ep;
+        }
+        assertNotNull("GET empty-default fixture endpoint not found", getEndpoint);
+        assertNotNull("POST empty-default fixture endpoint not found", postEndpoint);
+
+        Map<String, String> query = new HashMap<>();
+        query.put("opt_filter", "true");
+        query.put("opt_count", "7");
+        getEndpoint.handler().handle(query, Collections.emptyMap());
+        assertEquals("Explicit true must survive the empty default",
+            Boolean.TRUE, fixture.lastOptFilter);
+        assertEquals("Explicit 7 must survive the empty default",
+            Integer.valueOf(7), fixture.lastOptCount);
+
+        query.put("opt_filter", "false");
+        getEndpoint.handler().handle(query, Collections.emptyMap());
+        assertEquals("Explicit false must be distinguishable from unset",
+            Boolean.FALSE, fixture.lastOptFilter);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("opt_filter", Boolean.TRUE);
+        body.put("opt_count", Integer.valueOf(9));
+        postEndpoint.handler().handle(Collections.emptyMap(), body);
+        assertEquals("BODY: explicit true must survive the empty default",
+            Boolean.TRUE, fixture.lastBodyOptFilter);
+        assertEquals("BODY: explicit 9 must survive the empty default",
+            Integer.valueOf(9), fixture.lastBodyOptCount);
+
+        body.put("opt_filter", Boolean.FALSE);
+        postEndpoint.handler().handle(Collections.emptyMap(), body);
+        assertEquals("BODY: explicit false must be distinguishable from unset",
+            Boolean.FALSE, fixture.lastBodyOptFilter);
+    }
+
+    /**
      * Tiny fixture service scanned by {@link #testBoxedParamHonorsDefaultValue}.
      * The two {@code @McpTool} methods capture their resolved arguments so the test
      * can assert the values without needing to parse the Response JSON.
@@ -256,6 +358,32 @@ public class AnnotationScannerOfflineTest extends TestCase {
                 @Param(value = "strict", defaultValue = "true") Boolean strict) {
             lastLength = length;
             lastStrict = strict;
+            return Response.ok("ok");
+        }
+
+        // Captured by the empty-default handlers
+        volatile Boolean lastOptFilter;
+        volatile Integer lastOptCount;
+        volatile Boolean lastBodyOptFilter;
+        volatile Integer lastBodyOptCount;
+
+        @McpTool(path = "/test_empty_default_query", method = "GET",
+                 description = "Fixture: boxed params with an EMPTY defaultValue via QUERY source")
+        public Response queryEmptyDefault(
+                @Param(value = "opt_filter", defaultValue = "") Boolean optFilter,
+                @Param(value = "opt_count", defaultValue = "") Integer optCount) {
+            lastOptFilter = optFilter;
+            lastOptCount = optCount;
+            return Response.ok("ok");
+        }
+
+        @McpTool(path = "/test_empty_default_body", method = "POST",
+                 description = "Fixture: boxed params with an EMPTY defaultValue via BODY source")
+        public Response bodyEmptyDefault(
+                @Param(value = "opt_filter", source = ParamSource.BODY, defaultValue = "") Boolean optFilter,
+                @Param(value = "opt_count", source = ParamSource.BODY, defaultValue = "") Integer optCount) {
+            lastBodyOptFilter = optFilter;
+            lastBodyOptCount = optCount;
             return Response.ok("ok");
         }
 
@@ -342,3 +470,4 @@ public class AnnotationScannerOfflineTest extends TestCase {
         }
     }
 }
+

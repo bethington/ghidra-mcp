@@ -300,7 +300,11 @@ public class AnnotationScanner {
 
         } else if (type == Boolean.class) {
             if (value == null || value.isEmpty()) {
-                return hasDef ? Boolean.valueOf(def) : null;
+                // An EMPTY defaultValue means "no default" for a nullable tri-state
+                // filter, exactly as the String/Integer branches above treat it.
+                // Boolean.valueOf("") is false, so returning it here would turn an
+                // OMITTED filter into an active "== false" filter.
+                return (hasDef && !def.isEmpty()) ? Boolean.valueOf(def) : null;
             }
             return Boolean.parseBoolean(value);
 
@@ -369,7 +373,9 @@ public class AnnotationScanner {
 
         } else if (type == Boolean.class) {
             if (raw == null) {
-                return hasDef ? Boolean.valueOf(def) : null;
+                // See the note in the query-string coercion above: an empty
+                // defaultValue means "unset", not "false".
+                return (hasDef && !def.isEmpty()) ? Boolean.valueOf(def) : null;
             }
             if (raw instanceof Boolean b) return b;
             return Boolean.parseBoolean(String.valueOf(raw));
@@ -543,3 +549,4 @@ public class AnnotationScanner {
         }
     }
 }
+
