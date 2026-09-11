@@ -620,6 +620,7 @@ version = "7.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
+    { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
@@ -675,7 +676,10 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", specifier = ">=1.28.1,<2.0.0" }]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.28.1,<2.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+]
 
 [package.metadata.requires-dev]
 debugger = [

@@ -650,6 +650,41 @@ class TestParamDescriptionsReachSchema(unittest.TestCase):
         self.assertIsNone(param.default)
         self.assertEqual(self._described(fn, "program"), "Program name")
 
+    def test_description_reaches_registered_tool_json_schema(self):
+        """End-to-end: a signature-level description must survive into the
+        inputSchema FastMCP actually publishes to a client, not just the
+        intermediate `Annotated[...]` metadata `_described()` inspects above.
+        """
+        import bridge_mcp_ghidra as bridge
+
+        schema = [
+            {
+                "name": "zz_test_description_e2e",
+                "description": "test tool",
+                "endpoint": "/zz_test_description_e2e",
+                "http_method": "GET",
+                "category": "zz_test_description_e2e_group",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {"type": "string", "description": "Function address in hex"},
+                        "untouched": {"type": "string"},
+                    },
+                    "required": ["address"],
+                },
+            }
+        ]
+        try:
+            bridge.register_tools_from_schema(schema, groups={"zz_test_description_e2e_group"})
+            tool = bridge.mcp._tool_manager._tools["zz_test_description_e2e"]
+            self.assertEqual(
+                tool.parameters["properties"]["address"]["description"],
+                "Function address in hex",
+            )
+            self.assertNotIn("description", tool.parameters["properties"]["untouched"])
+        finally:
+            bridge.register_tools_from_schema([])
+
 
 if __name__ == "__main__":
     unittest.main()
