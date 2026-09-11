@@ -19,6 +19,16 @@ the same cycle.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Added
+
+- **Transport-aware doctor mode** for `tools/ghidra_server_health_check.py`.
+  `--mode health` remains the original single `/check_connection` probe.
+  Opt-in `--mode doctor` adds bounded, read-only checks for plugin connection,
+  GUI versus headless health routing, `/mcp/schema`, and an optional MCP
+  `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
+  or mutate Ghidra/project state. Health-route selection is checked against
+  the `servers` field in `tests/endpoints.json`.
+
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
 `FunctionManagerDB.doRemoveFunction` iterates a function's own tag set while
