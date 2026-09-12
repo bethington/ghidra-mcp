@@ -143,6 +143,8 @@ testing nothing.
   documented optional.
 - **`get_comment` silently omitted comment kinds** — it now emits all five.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
+- **`list_project_files`, `create_folder`, and `delete_file` failed in headless mode with `"requires GUI mode"`.**
+  Now routed through `resolveProject()` to operate across GUI, FrontEnd, and headless modes alike.
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
 

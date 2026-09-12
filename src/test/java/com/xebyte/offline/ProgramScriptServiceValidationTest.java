@@ -46,11 +46,23 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("file_path is required"));
     }
 
-    public void testListProjectFilesRequiresGuiMode() {
-        // Stub provider exposes no PluginTool, so the GUI-only guard must fire.
+    public void testListProjectFilesRequiresProject() {
+        // Stub provider exposes no Project, so the project guard must fire.
         Response r = scripts.listProjectFiles("/");
         assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("requires GUI mode"));
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
+    }
+
+    public void testCreateFolderRequiresProject() {
+        Response r = scripts.createFolder("/test", "");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
+    }
+
+    public void testDeleteFileRequiresProject() {
+        Response r = scripts.deleteFile("/test.exe");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
     }
 
     public void testRunScriptInlineGatedByDefault() {

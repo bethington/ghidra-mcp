@@ -1458,12 +1458,7 @@ public class ProgramScriptService {
     @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program")
     public Response listProjectFiles(
             @Param(value = "folder", description = "Project folder path") String folderPath) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Project listing requires GUI mode (PluginTool not available)");
-        }
-
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1520,11 +1515,7 @@ public class ProgramScriptService {
     public Response createFolder(
             @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Folder creation requires GUI mode (PluginTool not available)");
-        }
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1557,11 +1548,7 @@ public class ProgramScriptService {
     @McpTool(path = "/delete_file", method = "POST", description = "Delete a file from the project", category = "project")
     public Response deleteFile(
             @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("File deletion requires GUI mode (PluginTool not available)");
-        }
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1581,7 +1568,7 @@ public class ProgramScriptService {
             if (domainFile == null) {
                 return Response.ok(JsonHelper.mapOf("success", true, "deleted", false, "filePath", filePath));
             }
-            closeOpenProgramForFile(tool, filePath);
+            closeOpenProgramForFile(getToolFromProvider(), filePath);
             domainFile.delete();
             return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
         } catch (Exception e) {
@@ -1777,6 +1764,10 @@ public class ProgramScriptService {
     private void closeOpenProgramForFile(PluginTool tool, String filePath) {
         if (programProvider instanceof MultiToolProgramProvider mtp) {
             mtp.closeProgramByPath(filePath);
+            return;
+        }
+        if (tool == null) {
+            closeProgram(filePath, false);
             return;
         }
         // Close paths must NEVER spawn a CodeBrowser — there is nothing useful
