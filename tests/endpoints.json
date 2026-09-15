@@ -132,7 +132,8 @@
       "category": "analysis",
       "params": [
         "function_address",
-        "program"
+        "program",
+        "variant"
       ],
       "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
     },
@@ -148,7 +149,8 @@
         "include_disasm",
         "include_variables",
         "include_completeness",
-        "program"
+        "program",
+        "variant"
       ],
       "description": "Comprehensive single-call function analysis. Accepts function name or address."
     },
@@ -813,9 +815,10 @@
         "address",
         "functions",
         "program",
-        "timeout"
+        "timeout",
+        "variant"
       ],
-      "description": "Decompile function"
+      "description": "Decompile function (variant= required when the processor has multiple SLEIGH variants)"
     },
     {
       "path": "/delete_bookmark",
@@ -1121,9 +1124,10 @@
       "category": "decompile",
       "params": [
         "address",
-        "program"
+        "program",
+        "variant"
       ],
-      "description": "Force fresh decompilation"
+      "description": "Force fresh decompilation (variant= required when the processor has multiple SLEIGH variants)"
     },
     {
       "path": "/get_address_spaces",

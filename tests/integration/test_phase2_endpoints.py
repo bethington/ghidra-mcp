@@ -288,21 +288,27 @@ class TestForceDecompile:
     """Test force decompilation endpoint."""
 
     @pytest.mark.requires_program
-    def test_force_decompile_by_address(self, http_client, sample_address):
+    def test_force_decompile_by_address(self, http_client, sample_address, program_variant):
         """Test force decompiling by address."""
-        # GUI plugin uses function_address param, headless uses address
+        # GUI plugin uses function_address param, headless uses address.
+        # variant= is mandatory on a multi-variant processor; without it this
+        # endpoint answers 200 with a refusal body, which would satisfy the
+        # assertions below while testing nothing.
         response = http_client.get("/force_decompile", params={
-            "function_address": sample_address
+            "function_address": sample_address,
+            "variant": program_variant,
         })
         if response.status_code == 400:
             # Try alternate param name for headless
             response = http_client.get("/force_decompile", params={
-                "address": sample_address
+                "address": sample_address,
+                "variant": program_variant,
             })
         assert response.status_code == 200
         # Should return decompiled code
         text = response.text
         assert len(text) > 0
+        assert "variant_required" not in text
 
     @pytest.mark.requires_program
     def test_force_decompile_invalid_address(self, http_client):

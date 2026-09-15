@@ -403,12 +403,21 @@ class TestFunctionAnalysis:
         )
         assert response.status_code == 200
 
-    def test_decompile_function(self, http_client, first_function_address):
+    def test_decompile_function(self, http_client, first_function_address, program_variant):
         """Decompile a function (read-only)."""
         response = http_client.get(
-            "/decompile_function", params={"address": first_function_address}
+            "/decompile_function",
+            params={"address": first_function_address, "variant": program_variant},
         )
         assert response.status_code == 200
+        # A refusal is also HTTP 200, so assert on the body: passing the loaded
+        # variant must produce code, not a gate rejection.
+        try:
+            data = response.json()
+        except ValueError:
+            pytest.skip("server predates the 7.0.0 JSON response contract")
+        assert data.get("error") != "variant_required", data
+        assert data.get("decompiled")
 
     def test_get_decompiled_code(self, http_client, first_function_address):
         """Get decompiled code for a function (alias endpoint)."""
@@ -915,3 +924,197 @@ class TestShadowedGlobalsConsistency:
                    if s["address"].lower().lstrip("0") not in untyped]
         assert not missing, (
             f"shadowed globals not selected by type_filter=undefined: {missing[:5]}")
+
+class TestDecompileVariantGate:
+    """The decompile endpoints must not hand back pseudocode until the caller has
+    named the SLEIGH variant it believes it is reading.
+
+    Ghidra's loader guesses the variant column (PowerPC 'default' vs
+    'PowerISA-VLE-64-32addr'),
+    and the two decode the same bytes into different instruction streams. The
+    wrong guess produces C that is syntactically perfect and wholly fictional,
+    with nothing in the output to say so, so the gate refuses rather than warns
+    and the accepted answer is stamped with the language that produced it.
+
+    Every assertion here reads the response body, never just the status code: a
+    refusal is a structured HTTP 200, precisely so a caller can see why.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _requires_variant_gate(self, language_metadata):
+        """Skip the whole class against a server built before the gate, rather
+        than reporting its absence as a stack of failures."""
+        if "variant_required" not in language_metadata:
+            pytest.skip("server predates the decompile variant gate (redeploy the plugin)")
+
+    def _meta(self, http_client):
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "false", "include_default_symbols": "false"},
+        )
+        if response.status_code != 200:
+            pytest.skip("/get_language_metadata not available on this build")
+        data = response.json()
+        if not isinstance(data, dict) or "variant" not in data:
+            pytest.skip("build predates the variant gate")
+        return data
+
+    def test_language_metadata_exposes_the_variant_choice(self, http_client, program_loaded):
+        """A required parameter whose legal values cannot be enumerated anywhere
+        is a dead end. This endpoint is where they are enumerated."""
+        if not program_loaded:
+            pytest.skip("No program loaded")
+        data = self._meta(http_client)
+        assert "variant_required" in data
+        variants = data.get("available_variants")
+        assert isinstance(variants, list) and variants, data
+        # The loaded variant is always one of the candidates, flagged as such.
+        loaded = [v for v in variants if v.get("loaded")]
+        assert len(loaded) == 1, variants
+        assert loaded[0].get("variant") == data.get("variant")
+        # variant_required must agree with the candidate list it derives from.
+        assert data["variant_required"] == (len(variants) > 1)
+
+    def test_omitting_the_variant_is_refused_when_the_processor_offers_a_choice(
+        self, http_client, sample_address, variant_required
+    ):
+        if not variant_required:
+            pytest.skip("single-variant processor: nothing to confirm")
+        response = http_client.get(
+            "/decompile_function", params={"address": sample_address}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("error") == "variant_required", data
+        assert data.get("status") == "rejected"
+        # The refusal has to be answerable from itself.
+        assert data.get("loaded_variant")
+        assert len(data.get("available_variants") or []) > 1
+        assert "import_file(language=" in data.get("suggestion", "")
+
+    def test_omitting_the_variant_is_fine_when_there_is_no_choice(
+        self, http_client, sample_address, variant_required
+    ):
+        if variant_required:
+            pytest.skip("multi-variant processor: selection is mandatory")
+        response = http_client.get(
+            "/decompile_function", params={"address": sample_address}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("error") != "variant_required", data
+
+    def test_naming_the_loaded_variant_decompiles_and_stamps_the_language(
+        self, http_client, sample_address, program_variant, language_metadata
+    ):
+        response = http_client.get(
+            "/decompile_function",
+            params={"address": sample_address, "variant": program_variant},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("decompiled"), data
+        # The dialect travels with the code, so the output can be audited later.
+        assert data.get("variant") == language_metadata.get("variant")
+        assert data.get("language_id") == language_metadata.get("language_id")
+
+    def test_the_full_language_id_is_accepted_too(
+        self, http_client, sample_address, language_metadata
+    ):
+        """get_language_metadata reports language_id, and echoing back what you
+        were just shown is the first thing anyone tries."""
+        response = http_client.get(
+            "/decompile_function",
+            params={
+                "address": sample_address,
+                "variant": language_metadata.get("language_id"),
+            },
+        )
+        assert response.status_code == 200
+        assert response.json().get("decompiled")
+
+    def test_a_variant_this_processor_does_not_have_is_refused(
+        self, http_client, sample_address
+    ):
+        response = http_client.get(
+            "/decompile_function",
+            params={"address": sample_address, "variant": "NotARealVariant"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("error") == "unknown_variant", data
+        assert not data.get("decompiled")
+
+    def test_a_real_but_unloaded_variant_is_refused_rather_than_answered(
+        self, http_client, sample_address, language_metadata
+    ):
+        """Asking for a variant the program is not loaded under must not quietly
+        return the loaded variant's output under the requested label."""
+        others = [
+            v.get("variant")
+            for v in language_metadata.get("available_variants") or []
+            if not v.get("loaded")
+        ]
+        if not others:
+            pytest.skip("single-variant processor: no other variant to ask for")
+        response = http_client.get(
+            "/decompile_function",
+            params={"address": sample_address, "variant": others[0]},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("error") == "variant_mismatch", data
+        assert not data.get("decompiled")
+
+    def test_force_decompile_is_gated_on_the_same_terms(
+        self, http_client, sample_address, variant_required, program_variant
+    ):
+        """force_decompile is reached for when ordinary output looks wrong, which
+        is exactly when a wrong variant gets mistaken for a stale cache."""
+        if variant_required:
+            response = http_client.get(
+                "/force_decompile", params={"address": sample_address}
+            )
+            assert response.status_code == 200
+            assert response.json().get("error") == "variant_required"
+
+        response = http_client.get(
+            "/force_decompile",
+            params={"address": sample_address, "variant": program_variant},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("decompiled"), data
+        assert data.get("variant") == program_variant
+
+    def test_composites_withhold_pseudocode_instead_of_failing(
+        self, http_client, sample_address, variant_required, program_variant
+    ):
+        """A caller refused by decompile_function must not be able to get the same
+        C out of a composite analysis. The rest of the composite still answers;
+        only the pseudocode field is held back."""
+        if not variant_required:
+            pytest.skip("single-variant processor: nothing is withheld")
+        response = http_client.get(
+            "/analyze_for_documentation",
+            params={"function_address": sample_address},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "decompiled_code" not in data, "pseudocode escaped the gate"
+        withheld = data.get("decompiled_code_withheld")
+        assert isinstance(withheld, dict) and withheld.get("error") == "variant_required"
+        # The composite still did its job.
+        assert data.get("name") or data.get("address"), data
+
+        response = http_client.get(
+            "/analyze_for_documentation",
+            params={
+                "function_address": sample_address,
+                "variant": program_variant,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "decompiled_code_withheld" not in data
+        assert data.get("decompiled_code")
