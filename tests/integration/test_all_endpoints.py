@@ -176,11 +176,14 @@ class TestDecompilationEndpoints:
 
     @pytest.mark.requires_program
     @pytest.mark.slow
-    def test_decompile_by_address(self, http_client, sample_address):
+    def test_decompile_by_address(self, http_client, sample_address, program_variant):
         """decompile_function should return C code."""
+        # variant= is mandatory on a multi-variant processor. Omitting it would
+        # still return HTTP 200 (with a structured refusal), so a test that did
+        # not pass it would keep passing while testing nothing.
         response = http_client.get(
             "/decompile_function",
-            params={"address": sample_address},
+            params={"address": sample_address, "variant": program_variant},
             timeout=120,  # Decompilation can be slow
         )
         assert response.status_code == 200

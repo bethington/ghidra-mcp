@@ -738,10 +738,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Decompilation & Disassembly
 
-- `decompile_function` - Decompile function
+- `decompile_function` - Decompile function (variant= required when the processor has multiple SLEIGH variants)
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation
+- `force_decompile` - Force fresh decompilation (variant= required when the processor has multiple SLEIGH variants)
 
 ### Function Tags, Variables & Attributes
 

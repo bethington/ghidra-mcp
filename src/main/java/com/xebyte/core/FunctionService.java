@@ -152,24 +152,49 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. REQUIRES variant= when the program's processor offers more than one SLEIGH variant at its endian/size (PowerPC vs PowerPC VLE, x86 vs System Management Mode): the same bytes decode into different instructions per variant, so the wrong one returns confident, wrong C. Call get_language_metadata for available_variants. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
     public Response decompileFunctionByAddress(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
             @Param(value = "functions", defaultValue = "",
                    description = "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.") String functionsParam,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName,
-            @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds) {
+            @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds,
+            @Param(value = "variant", defaultValue = "",
+                   description = "SLEIGH language variant this decompile is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). REQUIRED whenever the program's processor offers more than one variant at its endian/size; optional when it offers exactly one. It must name the variant the program is actually loaded under — this endpoint decodes with the program's own language and will not reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_required.") String variant) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Ahead of the bulk dispatch on purpose. Bulk mode is the same decompile
+        // action multiplied, so gating only the single-function path would leave
+        // functions= standing as the ungated way to ask the same question — the
+        // same "next tool in the chain" hole the eviction guard had to close by
+        // sharing one check across all three of its writers.
+        Response variantReject = ServiceUtils.variantGate(program, variant);
+        if (variantReject != null) return variantReject;
+
         if (functionsParam != null && !functionsParam.trim().isEmpty()) {
             return batchDecompileFunctions(functionsParam, programName);
         }
+        return decompileAt(program, addressStr, timeoutSeconds);
+    }
+
+    /**
+     * The decompile itself, with no variant gate.
+     *
+     * <p>Split out so the gate sits exactly on the MCP boundary. Internal Java
+     * callers (composite analyses, the legacy headless handler) have already
+     * established which program they are working on and never reach the tool
+     * layer, so making them answer a question posed to external callers would
+     * break them without protecting anyone.
+     */
+    private Response decompileAt(Program program, String addressStr, int timeoutSeconds) {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required (or pass functions= for bulk)");
-        // Checked after the bulk dispatch, not before: batchDecompileFunctions
-        // takes no timeout, so validating it there would reject a bulk call
-        // over a parameter that path never reads.
+        // Validated here rather than in the tool method: this runs only after the
+        // bulk dispatch, and batchDecompileFunctions takes no timeout, so checking
+        // it any earlier would reject a bulk call over a parameter that path never
+        // reads.
         if (timeoutSeconds <= 0 || timeoutSeconds > MAX_DECOMPILE_TIMEOUT_SECONDS) {
             return Response.err("timeout must be between 1 and " + MAX_DECOMPILE_TIMEOUT_SECONDS + " seconds");
         }
@@ -199,6 +224,11 @@ public class FunctionService {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("name", func.getName());
             out.put("address", func.getEntryPoint().toString(false));
+            // Stamped before the code so the dialect that produced it travels with
+            // it. Pseudocode with no record of the variant that decoded it cannot
+            // be audited after the fact, which is how a VLE-as-classic-PowerPC
+            // mistake survives review.
+            ServiceUtils.putLanguageSelection(out, program);
             out.put("decompiled", decompResult.getDecompiledFunction().getC());
             return Response.ok(out);
         } catch (Throwable e) {
@@ -213,7 +243,9 @@ public class FunctionService {
 
     // Backward compatible overloads for internal callers
     public Response decompileFunctionByAddress(String addressStr, String programName, int timeout) {
-        return decompileFunctionByAddress(addressStr, "", programName, timeout);
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        return decompileAt(pe.program(), addressStr, timeout);
     }
 
     public Response decompileFunctionByAddress(String addressStr, String programName) {
@@ -386,7 +418,7 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. REQUIRES variant= when the program's processor offers more than one SLEIGH variant at its endian/size (PowerPC vs PowerPC VLE) — a cache flush re-runs the same language, so the wrong variant simply re-derives the same wrong C. Call get_language_metadata for available_variants. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response forceDecompile(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -394,10 +426,19 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "variant", defaultValue = "",
+                   description = "SLEIGH language variant this decompile is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). REQUIRED whenever the program's processor offers more than one variant at its endian/size; optional when it offers exactly one. It must name the variant the program is actually loaded under — flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_required.") String variant) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // The same gate /decompile_function runs. This endpoint exists to be
+        // reached for when ordinary decompile output looks wrong, which is the
+        // moment a caller is most likely to be staring at wrong-variant C and
+        // treating it as a stale-cache problem.
+        Response variantReject = ServiceUtils.variantGate(program, variant);
+        if (variantReject != null) return variantReject;
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
             return Response.err("Function address is required");
@@ -479,12 +520,20 @@ public class FunctionService {
         out.put("status", "success");
         out.put("address", functionAddrStr);
         out.put("name", functionName.get());
+        // See decompileAt: the dialect that produced the code travels with it.
+        ServiceUtils.putLanguageSelection(out, program);
         out.put("decompiled", decompiledCode.get());
         return Response.ok(out);
     }
 
+    // Backward compatible overloads for internal callers. Ungated for the same
+    // reason decompileAt is: they never cross the MCP boundary.
+    public Response forceDecompile(String functionAddrStr, String programName) {
+        return forceDecompile(functionAddrStr, programName, "");
+    }
+
     public Response forceDecompile(String functionAddrStr) {
-        return forceDecompile(functionAddrStr, null);
+        return forceDecompile(functionAddrStr, null, "");
     }
 
     // ========================================================================
