@@ -1027,6 +1027,66 @@ it contains and needed no refresh.
 - `.gitignore`'s blanket `audit_*.py` one-off rule would have silently swallowed
   the reproducer. `tools/` is now negated too.
 
+### Decompiling requires naming the language variant (breaking on multi-variant processors)
+
+Ghidra's language picker has five columns — processor, endian, size, **variant**,
+compiler. The first three come off the file header and the loader gets them
+right; the variant is the column it *guesses*, and it is the one that changes
+what the bytes mean. `PowerPC:BE:32:default` and `PowerPC:BE:64:VLE-32addr` (VLE)
+decode the same bytes into different instruction streams, so a VLE image opened
+as classic PowerPC decompiles into C that is syntactically perfect and entirely
+fictional. The decompiler reports success, the pseudocode reads plausibly, and
+nothing in the response says which of eleven dialects produced it.
+
+This server never exposed that choice at all. Now:
+
+- **`decompile_function` and `force_decompile` take `variant=`**, and **require**
+  it whenever the program's processor offers more than one variant at its endian
+  and size. Omitting it returns a structured refusal
+  (`error: variant_required`) that lists every candidate with its language id and
+  description, says which one the program is currently loaded under, and names
+  both remedies for a genuinely wrong one — re-import via
+  `import_file(language=...)`, or Ghidra's Language > Set Language. The refusal is
+  answerable from itself; it never leaves a caller with a mandatory parameter and
+  no way to discover its legal values.
+- **A variant that is not the loaded one is refused, not quietly ignored**
+  (`variant_mismatch`). The decompiler decodes with the language the program was
+  imported under and cannot be asked for another, so answering would return one
+  dialect's output under a label the caller chose — worse than no answer, because
+  the label makes it look checked. A full language id (`PowerPC:BE:64:VLE-32addr`) is
+  accepted as well as a bare variant name, and is compared whole, so
+  `PowerPC:BE:64:default` cannot satisfy a 32-bit program on a variant-column
+  match.
+- **Accepted output is stamped** with `language_id` and `variant`, so pseudocode
+  can be audited after the fact for the dialect that produced it.
+- **`get_language_metadata` reports `variant_required` and `available_variants`**
+  (each with `variant`, `language_id`, `description`, and a `loaded` flag). This
+  is where the mandatory value is looked up.
+- **`analyze_function_complete` and `analyze_for_documentation` withhold only the
+  pseudocode.** Both return `decompiled_code`, so gating just the two decompile
+  endpoints would have left the same C reachable one tool over — the exact shape
+  of the eviction-guard bypass in `set_global`. Without `variant=` they now return
+  their full analysis minus that one field, with `decompiled_code_withheld`
+  carrying the refusal. Endpoints that decompile internally to derive a score or a
+  field-usage map (`analyze_function_completeness`, `analyze_struct_field_usage`)
+  are untouched: they hand back no pseudocode.
+
+**Blast radius, measured against Ghidra 12.1.2's `.ldefs` files:** of 83
+processor/endian/size buckets, **30 offer a choice**, covering **124 of 177
+non-deprecated languages**. This is not an embedded-only concern — 32-bit x86 has
+`default` and `System Management Mode`, 64-bit x86 has `default` and `compat32`,
+ARM/LE/32 has ten, and the PowerPC/BE/32 bucket this was built for has eleven.
+The buckets that stay silent are mostly small cores (6502, AVR8, MSP430,
+RISCV/64, Sparc, SuperH4, Xtensa). Expect to pass `variant=` on essentially every
+mainstream target; that is the point, not a side effect. Internal Java callers are
+not gated: the check sits on the MCP boundary, where the question is being asked.
+
+The decision table is pure and Ghidra-free in `LanguageVariants`, covered offline
+by `LanguageVariantsTest` (20 cases); the live behavior is pinned by
+`tests/integration/test_readonly_endpoints.py::TestDecompileVariantGate`, which
+skips itself against a server built before the gate rather than reporting its
+absence as failures.
+
 ### MCP-protocol conformance suite
 
 `tests/conformance/` drives the server through a real MCP client rather than raw
