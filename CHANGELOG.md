@@ -811,6 +811,10 @@ name-quality rejection that `rename_data` applied.
 
 **Bug fixes shipped with the merges.**
 
+- `GHIDRA_MCP_ALLOWED_HOSTS` now extends Host/Origin validation for loopback
+  HTTP binds as well as wildcard binds. Containers can therefore address a
+  bridge through a host-routing alias while the listener remains bound to
+  `127.0.0.1`; defaults and DNS-rebinding protection remain unchanged.
 - `validate_data_type_exists` returned a false negative for every bare type
   name (`int`, `DWORD`, `char *`) because it required a full category path. The
   survivor reuses `get_type_size`'s resolver.
