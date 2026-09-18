@@ -171,17 +171,22 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    python -m tools.setup build
    ```
 
-   Supported build path: `python -m tools.setup build` uses Maven under the hood and is the canonical workflow used by the repo tasks and docs.
+   Two Java backends are supported. **Gradle is the default for local work** — it reads Ghidra's jars straight out of the installation, so there is no `install-file` step and nothing to install beyond a JDK. **CI builds and gates with Maven**, so Maven is a maintained peer rather than a fallback.
 
    ```bash
-   # Manual Maven build (requires Ghidra deps already installed in local .m2)
+   # Gradle (default) -- the wrapper is committed, so no Gradle install is needed.
+   # -PGHIDRA_INSTALL_DIR or the GHIDRA_INSTALL_DIR env var both work.
+   # In Git Bash use forward slashes; a backslash path is mangled before Gradle sees it.
+   ./gradlew buildExtension -PGHIDRA_INSTALL_DIR=/path/to/ghidra
+   ```
+
+   ```bash
+   # Maven (peer backend; what CI uses). Needs Ghidra's jars in the local .m2 first:
+   #   python -m tools.setup ensure-prereqs --ghidra-path /path/to/ghidra
    mvn clean package assembly:single -DskipTests
    ```
 
-   ```bash
-   # Secondary/manual Gradle build path only (not used by tools.setup or VS Code tasks)
-   GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
-   ```
+   `python -m tools.setup build` routes to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route it to Gradle instead.
 
 ### Installation (Linux — Ubuntu/Debian)
 
@@ -1449,7 +1454,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Build and test your changes (`mvn clean package assembly:single -DskipTests` or `GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension`)
+3. Build and test your changes (`./gradlew buildExtension -PGHIDRA_INSTALL_DIR=/path/to/ghidra`, or `mvn clean package assembly:single -DskipTests` under the Maven backend)
 4. Update documentation as needed
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)

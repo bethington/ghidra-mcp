@@ -114,6 +114,11 @@ fails without it.
 
 ### Build with Maven
 
+These two are **Maven-only**: `headless` and `docker` are `pom.xml` profiles and
+`build.gradle` registers no equivalent task. Gradle's `buildExtension` produces
+the GUI extension zip, not the headless assembly or the container image — so
+even though Gradle is the default backend for ordinary builds, these need Maven.
+
 ```bash
 # Build headless JAR
 mvn clean package -P headless -DskipTests

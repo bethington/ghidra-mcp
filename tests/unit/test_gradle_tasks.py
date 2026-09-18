@@ -8,6 +8,7 @@ requiring GHIDRA_INSTALL_DIR.  They are intentionally slow — deselect with
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -131,4 +132,102 @@ def test_gradlew_reads_version_from_pom():
     import re
     assert re.search(r"version: \d+\.\d+\.\d+", result.stdout), (
         f"No semver found in 'version' property output:\n{result.stdout}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Offline: the docs must not name a Gradle task that does not exist.
+#
+# Gradle became the documented default on 2026-09-18. The hazard that creates
+# is a plausible-looking `./gradlew <something>` in a runbook that was never
+# run: Gradle answers an unknown task with a hard error, so the cost lands on
+# whoever followed the doc, usually mid-release.
+#
+# These need no Gradle daemon, so they are not marked slow.
+# ---------------------------------------------------------------------------
+
+#: Tasks the java/base plugins provide that `build.gradle` does not register.
+#: Anything here is genuinely runnable; anything else must be registered.
+GRADLE_BUILTIN_TASKS = frozenset(
+    {
+        "assemble", "build", "check", "classes", "clean", "compileJava",
+        "compileTestJava", "dependencies", "help", "jar", "javadoc",
+        "processResources", "projects", "properties", "tasks", "test",
+        "testClasses", "wrapper",
+    }
+)
+
+#: Where a `./gradlew` invocation is a operator instruction rather than prose.
+_DOCS_WITH_GRADLE_COMMANDS = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "docs/TESTING.md",
+    "docs/releases/RELEASE_CHECKLIST.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+]
+
+#: Matches `./gradlew test`, `.\gradlew.bat test` and a bare `gradlew.bat test`,
+#: capturing the run of task names that follows (options start with `-` and so
+#: terminate the run).
+_GRADLEW_INVOCATION = re.compile(r"gradlew(?:\.bat)?\s+((?:[A-Za-z][\w:]*\s*)+)")
+
+
+def registered_gradle_tasks() -> set[str]:
+    """Task names `build.gradle` registers, read from the file itself."""
+    text = (REPO_ROOT / "build.gradle").read_text(encoding="utf-8")
+    return set(re.findall(r"tasks\.register\(\s*['\"]([A-Za-z][\w]*)['\"]", text))
+
+
+def test_build_gradle_registers_the_tasks_this_file_expects():
+    """Keep the offline task list honest against build.gradle itself."""
+    registered = registered_gradle_tasks()
+    assert "buildExtension" in registered and "deploy" in registered, (
+        f"build.gradle no longer registers the core tasks; parsed: "
+        f"{sorted(registered)}"
+    )
+
+
+def test_docs_only_name_gradle_tasks_that_exist():
+    """No `./gradlew <task>` in a runbook may name an unregistered task."""
+    known = registered_gradle_tasks() | GRADLE_BUILTIN_TASKS
+    problems = []
+    for rel in _DOCS_WITH_GRADLE_COMMANDS:
+        path = REPO_ROOT / rel
+        assert path.is_file(), f"{rel} is missing; update _DOCS_WITH_GRADLE_COMMANDS"
+        text = path.read_text(encoding="utf-8")
+        for match in _GRADLEW_INVOCATION.finditer(text):
+            for name in match.group(1).split():
+                if name in known:
+                    continue
+                context = " ".join(
+                    text[max(0, match.start() - 40): match.end() + 40].split()
+                )
+                problems.append(
+                    f"{rel}: './gradlew {name}' names a task build.gradle does "
+                    f"not register and Gradle does not provide.\n    ...{context}..."
+                )
+    assert not problems, (
+        "The documentation invents a Gradle task. Gradle fails hard on an "
+        "unknown task, so this lands on whoever follows the doc:\n"
+        + "\n".join(problems)
+    )
+
+
+def test_every_documented_gradle_task_is_reachable_from_at_least_one_doc():
+    """A registered task nobody documents is fine; the reverse is not.
+
+    This is the ratchet's other side: it records which tasks the docs actually
+    lead a reader to, so deleting a task without touching the docs fails above
+    rather than silently.
+    """
+    documented: set[str] = set()
+    for rel in _DOCS_WITH_GRADLE_COMMANDS:
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        for match in _GRADLEW_INVOCATION.finditer(text):
+            documented.update(match.group(1).split())
+    assert {"buildExtension", "test", "preflight", "deploy"} <= documented, (
+        f"The runbooks no longer name the core Gradle workflow. Documented: "
+        f"{sorted(documented)}"
     )
