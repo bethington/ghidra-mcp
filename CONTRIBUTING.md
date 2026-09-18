@@ -328,9 +328,9 @@ benchmark binary in the active project — that is why they are opt-in.
 | Python Tests (pytest) | **Yes** | `tests/unit/` on Python 3.10, 3.11, 3.12, 3.13 with the coverage floor |
 | Python Tests (pytest, Windows) | **Yes** | `tests/unit/` on Windows, no coverage floor — it exists so both sides of every `os.name == "nt"` branch execute |
 | Pester | **Yes** | `tests/pester/Run-Tests.ps1 -CI` |
-| Build Status | **Yes** | Aggregate of the four above — this is the check to watch |
+| Documentation Quality | **Yes** | markdownlint over every tracked `.md`, using `.markdownlint-cli2.jsonc` |
+| Build Status | **Yes** | Aggregate of the five above — this is the check to watch |
 | Code Quality | No | flake8 and black, advisory: every step ends in `\|\| true` |
-| Documentation Quality | No | markdownlint, advisory: `continue-on-error: true` |
 | CodeQL | No | Separate workflow; static analysis for Java and Python, findings land in the Security tab |
 
 `scorecard.yml` runs only on pushes to the default branch and on a schedule, so
@@ -489,7 +489,16 @@ listed in `STATIC_TOOL_NAMES` in `config.py`.
   `pyproject.toml`). flake8 and black run advisory in CI; matching them is
   appreciated and not enforced.
 - **Java**: explicit error handling, clear names, comments on non-obvious logic.
-- **Markdown**: `.markdownlintrc` holds the rule set. The lint job is advisory.
+- **Markdown**: `.markdownlint-cli2.jsonc` holds the rule set, and the lint job
+  blocks. Run it exactly as CI does before pushing:
+
+  ```bash
+  npx markdownlint-cli2 --config .markdownlint-cli2.jsonc "**/*.md"
+  ```
+
+  Add `--fix` for the mechanical ones. A rule this repo has switched off carries
+  a comment saying why, next to the setting; if a rule is fighting real prose,
+  add it there with the reason rather than reformatting the prose to suit it.
 
 ### Resource ownership checklist
 
