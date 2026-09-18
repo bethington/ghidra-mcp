@@ -804,7 +804,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 - `analysis_status` - Get auto-analysis status for open programs
 - `close_program` - Close an open program by project path or name
-- `create_memory_block` - Create memory block
+- `create_memory_block` - Create memory block, optionally initialized with byte contents (hex or base64)
 - `create_property_map` - Create a user property map to store typed values keyed by address
 - `delete_bookmark` - Delete bookmark
 - `delete_property_map` - Delete a user property map and all values it holds
