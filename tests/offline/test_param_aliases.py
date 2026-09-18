@@ -62,7 +62,7 @@ def test_scan_finds_most_of_the_catalog():
         (
             "/rename_symbol",
             "POST",
-            {"address": "target", "function_address": "target", "old_name": "target"},
+            {"address": "target", "function_address": "target"},
         ),
         ("/set_function_no_return", "POST", {"noReturn": "no_return"}),
         ("/set_function_this_type", "POST", {"thisType": "this_type"}),
@@ -107,10 +107,10 @@ def test_every_alias_target_is_a_real_declared_parameter():
             )
 
 
-# One route declares a name as BOTH a real parameter and an alias of another
-# parameter. It is recorded rather than asserted away, and the list must not
-# grow -- see test_no_alias_collides_with_a_declared_parameter.
-KNOWN_ALIAS_COLLISIONS = {("/rename_symbol", "POST"): {"old_name"}}
+# Empty, and it must stay empty: a name that is both a real parameter and an
+# alias of another parameter is a dispatch ambiguity, fixed in the annotation.
+# /rename_symbol was the one entry here until #470 removed the old_name alias.
+KNOWN_ALIAS_COLLISIONS: dict[tuple[str, str], set[str]] = {}
 
 
 def test_no_alias_collides_with_a_declared_parameter():
@@ -119,14 +119,13 @@ def test_no_alias_collides_with_a_declared_parameter():
     ``AnnotationScanner`` resolves the canonical name first and each alias
     after, so when a name is both, ONE request value binds to TWO parameters.
 
-    /rename_symbol does exactly this: ``target`` lists ``old_name`` among its
-    aliases while ``old_name`` is also its own declared parameter ("For
-    kind=label only: the current label name at the address"). A caller
-    following that instruction -- ``{kind: "label", old_name: "LAB_x",
-    new_name: "y"}`` with no ``target`` -- gets ``target`` filled from the
-    same value, and ``renameLabel`` then receives the label name where it
-    expects the address. Reported, not fixed here: it is an endpoint change,
-    not a test change.
+    /rename_symbol used to do exactly this: ``target`` listed ``old_name``
+    among its aliases while ``old_name`` was also its own declared parameter,
+    so ``{kind: "label", old_name: "LAB_x", new_name: "y"}`` with no
+    ``target`` filled both from one value and handed ``renameLabel`` a label
+    name where it expects an address. #470 removed that alias and routes the
+    fallback through resolveRenameTarget instead, so the expected set is now
+    empty -- a new entry here is a defect to fix in the annotation.
     """
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["tools"]
     declared = {

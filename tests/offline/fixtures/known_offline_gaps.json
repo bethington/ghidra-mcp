@@ -67,6 +67,11 @@
       "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_operand_filter_substring_match",
       "cause": "bad_fixture",
       "reason": "same recorded-error snapshot as test_response_shape_for_mnemonic_search."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_rejects_empty_filters",
+      "cause": "recording_gap",
+      "reason": "asserts the endpoint REFUSES a call with no filters. The only recorded /search_instructions response was that refusal itself, which #466 deleted as a false golden -- a server's error is not a snapshot of its behaviour. With no recording the fake synthesizes a body, which has no 'error' key, so the assertion cannot be answered offline. Note this test only passed before because the recorded ERROR body happened to contain the key it looks for: it was asserting on the refusal, not on the endpoint. Re-record /search_instructions with a valid mnemonic and the sibling cases unblock too; this one needs a recorded refusal shape."
     }
   ]
 }
