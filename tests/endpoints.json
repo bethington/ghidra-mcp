@@ -33,6 +33,10 @@
         "assignments",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist."
     },
     {
@@ -47,6 +51,10 @@
         "operand_index",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables). Leaves the underlying bytes untouched while adding proper bidirectional navigation. ref_type accepts any RefType name (DATA, READ, WRITE, COMPUTED_CALL, UNCONDITIONAL_JUMP, ...); source_type defaults to USER_DEFINED so refs are distinct from analyzer output and survive re-analysis. Accepts space-prefixed addresses (mem:1000)."
     },
     {
@@ -60,6 +68,10 @@
         "offset",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Add struct field"
     },
     {
@@ -69,6 +81,10 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get auto-analysis status for open programs"
     },
     {
@@ -77,6 +93,10 @@
       "category": "malware",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Analyze API call chains"
     },
@@ -90,6 +110,10 @@
         "analysis_type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Analyze function call graph patterns"
     },
     {
@@ -99,6 +123,10 @@
       "params": [
         "function_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Analyze control flow"
     },
@@ -113,6 +141,10 @@
         "include_boundary_detection",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Analyze data region"
     },
     {
@@ -126,6 +158,10 @@
         "max_steps",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Trace value propagation through a function (PCode graph, forward/backward)"
     },
     {
@@ -135,6 +171,10 @@
       "params": [
         "function_address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
     },
@@ -152,6 +192,10 @@
         "include_completeness",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Comprehensive single-call function analysis. Accepts function name or address."
     },
     {
@@ -164,6 +208,10 @@
         "addresses",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Analyze documentation completeness"
     },
     {
@@ -174,6 +222,10 @@
         "address",
         "compact",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are â€” apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
     },
@@ -186,6 +238,10 @@
         "struct_name",
         "max_functions",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Analyze struct field usage"
     },
@@ -201,6 +257,10 @@
         "type_definition",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Apply data classification"
     },
     {
@@ -214,6 +274,10 @@
         "program",
         "strict_mode"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Apply data type"
     },
     {
@@ -223,6 +287,10 @@
       "params": [
         "json_body",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Apply function documentation"
     },
@@ -235,6 +303,10 @@
         "program",
         "version_override",
         "dry_run"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk."
     },
@@ -249,6 +321,10 @@
         "skip_default_named",
         "dry_run"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Bulk-ingest every function in a program into the cross-version documentation archive. Posts each to /v1/doc_archive/upsert. Returns per-binary counts (created / updated / conflicts_enqueued / errors)."
     },
     {
@@ -258,6 +334,9 @@
       "params": [
         "output_dir",
         "output_name"
+      ],
+      "servers": [
+        "headless"
       ],
       "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File â†’ Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) â€” unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
     },
@@ -269,6 +348,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing."
     },
     {
@@ -278,6 +361,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool â€” start every doc pass with this when the function has global xrefs."
     },
@@ -299,6 +386,9 @@
         "score",
         "program"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Apply all documentation to a function in one call"
     },
     {
@@ -309,6 +399,10 @@
         "addresses",
         "only_with_comments",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
     },
@@ -324,6 +418,10 @@
         "return_type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Batch rename function components"
     },
     {
@@ -337,6 +435,10 @@
         "plate_comment",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set multiple comments"
     },
     {
@@ -346,6 +448,10 @@
       "params": [
         "pattern",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Report of source file strings and their FUN_* functions"
     },
@@ -361,6 +467,10 @@
         "limit",
         "filter"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Bulk cross-binary function matching"
     },
     {
@@ -371,6 +481,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Check if address can be renamed"
     },
     {
@@ -378,6 +492,10 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Health check endpoint"
     },
     {
@@ -389,6 +507,9 @@
         "comment",
         "keep_checked_out"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Check an open program back in to the shared Ghidra Server as a new version"
     },
     {
@@ -399,6 +520,10 @@
         "start_address",
         "end_address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable â€” a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code â€” inspect the before/after observations and resulting disassembly after every call."
     },
@@ -413,6 +538,10 @@
         "clear_eol",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Clear all comments for a function"
     },
     {
@@ -422,6 +551,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Clear flow override"
     },
@@ -434,6 +567,10 @@
         "new_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Clone data type"
     },
     {
@@ -444,6 +581,10 @@
         "name",
         "save"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Close an open program by project path or name. Never prompts interactively: unsaved changes are saved first by default (save=true) or silently discarded (save=false) before closing, so this cannot block the caller on a GUI confirmation dialog the way Ghidra's own close normally would."
     },
     {
@@ -451,6 +592,9 @@
       "method": "POST",
       "category": "headless",
       "params": [],
+      "servers": [
+        "headless"
+      ],
       "description": "Close the currently open project"
     },
     {
@@ -459,6 +603,10 @@
       "category": "documentation",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Compare documentation across programs"
     },
@@ -471,6 +619,9 @@
         "enabled",
         "program"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Configure an analysis plugin"
     },
     {
@@ -480,6 +631,10 @@
       "params": [
         "text",
         "size"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Convert number between bases"
     },
@@ -493,6 +648,10 @@
         "name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create array type"
     },
     {
@@ -502,6 +661,10 @@
       "params": [
         "category_path",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create data type category"
     },
@@ -515,6 +678,10 @@
         "size",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create enumeration"
     },
     {
@@ -524,6 +691,10 @@
       "params": [
         "path",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create a folder in the project"
     },
@@ -537,6 +708,10 @@
         "disassemble_first",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create function at address"
     },
     {
@@ -549,6 +724,10 @@
         "parameters",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create function signature type"
     },
     {
@@ -559,6 +738,10 @@
         "name",
         "comment",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create a program-wide function tag definition with an optional comment. Use add_function_tag to attach it to functions."
     },
@@ -571,6 +754,10 @@
         "name",
         "labels",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create label"
     },
@@ -594,6 +781,10 @@
         "overlay",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create memory block, optionally initialized with byte contents (hex or base64)"
     },
     {
@@ -605,6 +796,10 @@
         "name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create pointer type"
     },
     {
@@ -614,6 +809,9 @@
       "params": [
         "parentDir",
         "name"
+      ],
+      "servers": [
+        "headless"
       ],
       "description": "Create a new Ghidra project"
     },
@@ -625,6 +823,10 @@
         "name",
         "type",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist."
     },
@@ -638,6 +840,10 @@
         "replace_placeholder",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create structure. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name."
     },
     {
@@ -648,6 +854,10 @@
         "name",
         "base_type",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create typedef"
     },
@@ -660,6 +870,10 @@
         "fields",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Create union"
     },
     {
@@ -669,6 +883,9 @@
       "params": [
         "address"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Translate a runtime dynamic address from the current trace back to a static Ghidra program address"
     },
     {
@@ -676,6 +893,9 @@
       "method": "POST",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Interrupt (break into) the running target"
     },
     {
@@ -691,6 +911,9 @@
         "offer",
         "python_executable"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Launch an executable through Ghidra's Trace RMI debugger launcher"
     },
     {
@@ -700,6 +923,9 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "List available debugger launch/attach options for the current program"
     },
     {
@@ -707,6 +933,9 @@
       "method": "GET",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "List all breakpoints in the current trace"
     },
     {
@@ -714,6 +943,9 @@
       "method": "GET",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "List modules (DLLs/EXEs) loaded in the debugged process"
     },
     {
@@ -724,6 +956,9 @@
         "address",
         "size"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Read memory from the debugged process. Returns hex dump and DWORD interpretation."
     },
     {
@@ -731,6 +966,9 @@
       "method": "GET",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Read CPU registers from the current debug trace snapshot. Shows general-purpose registers (EAX-EDI, EIP, ESP, EFLAGS for x86)"
     },
     {
@@ -740,6 +978,9 @@
       "params": [
         "address"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Remove a breakpoint at an address"
     },
     {
@@ -747,6 +988,9 @@
       "method": "POST",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Resume execution of the debugged process"
     },
     {
@@ -756,6 +1000,9 @@
       "params": [
         "address"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Set a software execution breakpoint at an address in the trace"
     },
     {
@@ -764,6 +1011,9 @@
       "category": "debugger",
       "params": [
         "depth"
+      ],
+      "servers": [
+        "gui"
       ],
       "description": "Get the call stack backtrace for the current thread"
     },
@@ -775,6 +1025,9 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Translate a static Ghidra program address to a runtime dynamic address in the current trace"
     },
     {
@@ -782,6 +1035,9 @@
       "method": "GET",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Get debugger status: active trace, thread, execution state, module count"
     },
     {
@@ -789,6 +1045,9 @@
       "method": "POST",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Single-step into the next instruction (follows calls)"
     },
     {
@@ -796,6 +1055,9 @@
       "method": "POST",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Step out of the current function (run to return)"
     },
     {
@@ -803,6 +1065,9 @@
       "method": "POST",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Step over the next instruction (does not follow calls)"
     },
     {
@@ -810,6 +1075,9 @@
       "method": "GET",
       "category": "debugger",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "List all open debug traces"
     },
     {
@@ -822,6 +1090,10 @@
         "program",
         "timeout"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Decompile function"
     },
     {
@@ -832,6 +1104,10 @@
         "address",
         "category",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Delete bookmark"
     },
@@ -844,6 +1120,10 @@
         "resolve_demangler_duplicate",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Delete data type"
     },
     {
@@ -852,6 +1132,10 @@
       "category": "project",
       "params": [
         "filePath"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Delete a file from the project"
     },
@@ -863,6 +1147,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Delete function at address"
     },
     {
@@ -872,6 +1160,10 @@
       "params": [
         "name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Delete a program-wide function tag definition. This detaches the tag from every function that had it."
     },
@@ -885,6 +1177,10 @@
         "labels",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Delete label at address"
     },
     {
@@ -893,6 +1189,9 @@
       "category": "project",
       "params": [
         "projectPath"
+      ],
+      "servers": [
+        "headless"
       ],
       "description": "Delete a Ghidra project"
     },
@@ -903,6 +1202,10 @@
       "params": [
         "name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Delete a user property map and all values it holds. Call save_program to persist."
     },
@@ -915,6 +1218,10 @@
         "max_scan_range",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Detect array bounds"
     },
     {
@@ -924,6 +1231,10 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Detect crypto constants"
     },
     {
@@ -932,6 +1243,10 @@
       "category": "malware",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Detect malware behaviors"
     },
@@ -944,6 +1259,10 @@
         "address_b",
         "program_a",
         "program_b"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Diff two functions"
     },
@@ -960,6 +1279,10 @@
         "max_instructions",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Disassemble byte range"
     },
     {
@@ -969,6 +1292,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Disassemble function"
     },
@@ -981,6 +1308,10 @@
         "field_name",
         "embedded_struct",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally."
     },
@@ -996,6 +1327,10 @@
         "return_registers",
         "read_memory_after",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Emulate a single function with controlled register/memory inputs. Returns final register state after execution. Ideal for understanding hash functions, crypto routines, or any pure-computation code path."
     },
@@ -1013,6 +1348,10 @@
         "wide_string",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Brute-force API hash resolution. Emulates a hash function with each candidate API name and returns the one that produces the target hash. Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms."
     },
     {
@@ -1020,6 +1359,10 @@
       "method": "POST",
       "category": "program",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Save and exit Ghidra"
     },
     {
@@ -1031,6 +1374,9 @@
         "output_dir",
         "output_name"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Export an open or project-resident program to a Ghidra Zip File (.gzf). Looks up the program in the open-programs map first (so it works on file-loaded programs without a project), then falls back to the open project's DomainFile."
     },
     {
@@ -1040,6 +1386,10 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Extract IOCs with context"
     },
     {
@@ -1048,6 +1398,10 @@
       "category": "malware",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Find anti-analysis techniques"
     },
@@ -1061,6 +1415,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Find gaps of undefined bytes between functions in executable memory"
     },
     {
@@ -1070,6 +1428,10 @@
       "params": [
         "function_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Find dead code"
     },
@@ -1084,6 +1446,10 @@
         "direction",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Find next undefined function"
     },
     {
@@ -1094,6 +1460,10 @@
         "target_function",
         "threshold",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Find similar functions"
     },
@@ -1108,6 +1478,10 @@
         "threshold",
         "limit"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
     },
     {
@@ -1117,6 +1491,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Find undocumented functions referencing string"
     },
@@ -1128,6 +1506,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Force fresh decompilation"
     },
     {
@@ -1136,6 +1518,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)"
     },
@@ -1147,6 +1533,10 @@
         "xref_sources",
         "context_instructions",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get assembly context"
     },
@@ -1160,6 +1550,10 @@
         "filter",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get bulk function hashes"
     },
     {
@@ -1169,6 +1563,10 @@
       "params": [
         "addresses",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get xrefs for multiple addresses"
     },
@@ -1180,6 +1578,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
     },
     {
@@ -1187,6 +1589,10 @@
       "method": "GET",
       "category": "getter",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get cursor address (GUI only)"
     },
     {
@@ -1194,6 +1600,10 @@
       "method": "GET",
       "category": "getter",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get function at cursor (GUI only)"
     },
     {
@@ -1203,6 +1613,10 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get current program info"
     },
     {
@@ -1210,6 +1624,9 @@
       "method": "GET",
       "category": "getter",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
     },
     {
@@ -1218,6 +1635,10 @@
       "category": "listing",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get program entry points"
     },
@@ -1229,6 +1650,10 @@
         "enum_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get enumeration values"
     },
     {
@@ -1239,6 +1664,10 @@
         "address",
         "dll_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get external location details"
     },
@@ -1252,6 +1681,10 @@
         "num_examples",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get field access context"
     },
     {
@@ -1263,6 +1696,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get full call graph"
     },
     {
@@ -1272,6 +1709,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get function at address"
     },
@@ -1286,6 +1727,10 @@
         "direction",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get call graph"
     },
     {
@@ -1298,6 +1743,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get functions called"
     },
@@ -1312,6 +1761,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get calling functions"
     },
     {
@@ -1320,6 +1773,10 @@
       "category": "listing",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Return the number of functions in the loaded program"
     },
@@ -1331,6 +1788,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Export function documentation"
     },
     {
@@ -1340,6 +1801,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get function hash"
     },
@@ -1354,6 +1819,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get jump targets"
     },
     {
@@ -1366,6 +1835,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get labels in function"
     },
     {
@@ -1377,6 +1850,10 @@
         "granularity",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers."
     },
     {
@@ -1387,6 +1864,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get function feature signature"
     },
     {
@@ -1396,6 +1877,10 @@
       "params": [
         "function",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List all tags assigned to a specific function. Accepts either a function address or a function name."
     },
@@ -1410,6 +1895,10 @@
         "limit",
         "filter"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all variables in a function. Accepts function_name or address (address takes precedence). Use address to avoid name-lookup issues after a recent rename."
     },
     {
@@ -1423,6 +1912,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get function cross-references"
     },
     {
@@ -1434,6 +1927,10 @@
         "include_default_symbols",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections."
     },
     {
@@ -1442,6 +1939,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get program metadata"
     },
@@ -1453,6 +1954,10 @@
         "group",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names."
     },
     {
@@ -1460,6 +1965,9 @@
       "method": "GET",
       "category": "headless",
       "params": [],
+      "servers": [
+        "headless"
+      ],
       "description": "Get info about the currently open project"
     },
     {
@@ -1471,6 +1979,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property."
     },
     {
@@ -1480,6 +1992,10 @@
       "params": [
         "struct_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get structure layout"
     },
@@ -1491,6 +2007,10 @@
         "type_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get data type size and info"
     },
     {
@@ -1501,6 +2021,10 @@
         "category",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get valid data type names"
     },
     {
@@ -1508,6 +2032,10 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get plugin version"
     },
     {
@@ -1519,6 +2047,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get references from address"
     },
@@ -1532,6 +2064,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get references to address"
     },
     {
@@ -1539,6 +2075,9 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "headless"
+      ],
       "description": "Health check endpoint for headless server"
     },
     {
@@ -1549,6 +2088,10 @@
         "source",
         "format",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Import data types from GDT"
     },
@@ -1563,6 +2106,10 @@
         "compiler_spec",
         "auto_analyze"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Import a binary file from disk into the current Ghidra project and open it. For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default')."
     },
     {
@@ -1574,6 +2121,9 @@
         "target_folder",
         "target_name",
         "overwrite"
+      ],
+      "servers": [
+        "headless"
       ],
       "description": "Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/'). Refuses to overwrite a program that is currently loaded in memory."
     },
@@ -1587,6 +2137,10 @@
         "detect_strings",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Inspect memory bytes"
     },
     {
@@ -1595,6 +2149,10 @@
       "category": "analysis",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List available analysis plugins"
     },
@@ -1607,6 +2165,10 @@
         "address",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List bookmarks"
     },
     {
@@ -1615,6 +2177,10 @@
       "category": "listing",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List available calling conventions"
     },
@@ -1628,6 +2194,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow."
     },
     {
@@ -1639,6 +2209,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List namespace/class names"
     },
     {
@@ -1649,6 +2223,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List defined data"
     },
@@ -1666,6 +2244,10 @@
         "include_all_sections",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List data sorted by xref count"
     },
     {
@@ -1676,6 +2258,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List data type categories"
     },
@@ -1689,6 +2275,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List data types"
     },
     {
@@ -1699,6 +2289,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List exported symbols"
     },
@@ -1711,6 +2305,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List external locations"
     },
     {
@@ -1722,6 +2320,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all program-wide function tag definitions with their use counts."
     },
     {
@@ -1730,6 +2332,10 @@
       "category": "listing",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List functions with addresses"
     },
@@ -1741,6 +2347,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List functions with metadata"
     },
@@ -1758,6 +2368,10 @@
         "name_substring",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List global variables"
     },
     {
@@ -1768,6 +2382,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List imported symbols"
     },
@@ -1780,6 +2398,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all function names with pagination"
     },
     {
@@ -1791,6 +2413,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all namespaces"
     },
     {
@@ -1798,6 +2424,10 @@
       "method": "GET",
       "category": "program",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List open programs"
     },
     {
@@ -1806,6 +2436,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed keyâ†’value settings; use get_program_options to read a group's entries."
     },
@@ -1816,6 +2450,10 @@
       "params": [
         "folder"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List project files"
     },
     {
@@ -1824,6 +2462,9 @@
       "category": "project",
       "params": [
         "searchDir"
+      ],
+      "servers": [
+        "headless"
       ],
       "description": "List available Ghidra projects"
     },
@@ -1839,6 +2480,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end."
     },
     {
@@ -1848,6 +2493,10 @@
       "params": [
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List user-defined property maps â€” typed per-address keyâ†’value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
     },
     {
@@ -1856,6 +2505,10 @@
       "category": "program",
       "params": [
         "filter"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List available Ghidra scripts"
     },
@@ -1867,6 +2520,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List memory segments"
     },
@@ -1880,6 +2537,10 @@
         "include_all_sections",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals - it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong."
     },
     {
@@ -1892,6 +2553,10 @@
         "filter",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List defined strings"
     },
     {
@@ -1903,6 +2568,9 @@
         "language",
         "compiler_spec"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Load a binary file into the headless server for analysis. For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary with the requested processor. When `language` is omitted, the loader auto-detects the format."
     },
     {
@@ -1912,6 +2580,9 @@
       "params": [
         "path"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Load program from Ghidra project (headless)"
     },
     {
@@ -1919,6 +2590,9 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "HTTP server health: pool stats, uptime, memory, active request count"
     },
     {
@@ -1926,6 +2600,10 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Machine-readable API schema with endpoint metadata"
     },
     {
@@ -1936,6 +2614,10 @@
         "source",
         "target",
         "dry_run"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses. Server-side iteration in a single transaction. Designed for the orphan-rescue workflow: source is typically '<name>_recovered', target is the original '<name>.dll'. Set dry_run=true to count without writing."
     },
@@ -1950,6 +2632,10 @@
         "new_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Modify struct field"
     },
     {
@@ -1962,6 +2648,10 @@
         "new_type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only."
     },
     {
@@ -1973,6 +2663,10 @@
         "category_path",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Move data type to category"
     },
     {
@@ -1982,6 +2676,10 @@
       "params": [
         "filePath",
         "destFolder"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Move a program file to a different folder in the project, preserving analysis and documentation. Refuses on unsaved changes; closes, moves and reopens a program that is open but clean."
     },
@@ -1993,6 +2691,10 @@
         "sourcePath",
         "destPath"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Move a project folder and everything under it into another folder. Refuses to move a folder into itself or its own descendant."
     },
     {
@@ -2002,6 +2704,10 @@
       "params": [
         "path",
         "auto_analyze"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Open program from project"
     },
@@ -2014,6 +2720,10 @@
         "headless",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
     },
     {
@@ -2021,6 +2731,9 @@
       "method": "GET",
       "category": "project",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "Get detailed project info including running tools and open programs"
     },
     {
@@ -2031,6 +2744,9 @@
         "action",
         "reason",
         "seconds"
+      ],
+      "servers": [
+        "gui"
       ],
       "description": "Temporarily enable, disable, or query scoped automation prompt handling"
     },
@@ -2043,6 +2759,10 @@
         "length",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Read raw memory"
     },
     {
@@ -2051,6 +2771,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Trigger full auto-analysis on a program"
     },
@@ -2066,6 +2790,10 @@
         "force",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced."
     },
     {
@@ -2078,6 +2806,10 @@
         "assignments",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition â€” use delete_function_tag for that."
     },
     {
@@ -2089,6 +2821,10 @@
         "name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist."
     },
     {
@@ -2099,6 +2835,10 @@
         "map",
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Remove the value stored at a single address in a property map. Call save_program to persist."
     },
@@ -2112,6 +2852,10 @@
         "operand_index",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
     },
     {
@@ -2122,6 +2866,10 @@
         "struct_name",
         "field_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Remove struct field"
     },
@@ -2134,6 +2882,10 @@
         "new_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it"
     },
     {
@@ -2145,6 +2897,10 @@
         "new_name",
         "program",
         "strict_mode"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Rename function by name"
     },
@@ -2159,6 +2915,10 @@
         "old_name",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location."
     },
     {
@@ -2170,6 +2930,10 @@
         "variable_renames",
         "force_individual",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Batch rename variables"
     },
@@ -2184,6 +2948,10 @@
         "force",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md."
     },
     {
@@ -2194,6 +2962,10 @@
         "type_name",
         "delete_demangler_stub",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders."
     },
@@ -2206,6 +2978,9 @@
         "parent_dir",
         "project_name"
       ],
+      "servers": [
+        "headless"
+      ],
       "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
     },
     {
@@ -2214,6 +2989,10 @@
       "category": "analysis",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Run auto-analysis on the current program"
     },
@@ -2228,6 +3007,10 @@
         "capture_output",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Run script with output capture"
     },
     {
@@ -2239,6 +3022,10 @@
         "args",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Run inline script code"
     },
     {
@@ -2246,6 +3033,10 @@
       "method": "GET",
       "category": "program",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Save all open programs"
     },
     {
@@ -2254,6 +3045,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Save current program"
     },
@@ -2265,6 +3060,10 @@
         "pattern",
         "mask",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Search for byte patterns"
     },
@@ -2278,6 +3077,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Search data types"
     },
     {
@@ -2290,6 +3093,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Search functions by name"
     },
     {
@@ -2301,6 +3108,10 @@
         "offset",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "List all functions that have a specified tag attached. Returns name + entry address."
     },
@@ -2322,6 +3133,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Advanced function search"
     },
     {
@@ -2334,6 +3149,10 @@
         "function",
         "limit",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Search for instructions by mnemonic and/or operand substring. Complement to /search_byte_patterns (byte-level); this matches after Ghidra has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without knowing the encoding. Case-insensitive substring match on both fields. Returns {address, function, mnemonic, operands, bytes} per match."
     },
@@ -2349,6 +3168,10 @@
         "limit",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Search defined strings by a regex/substring pattern"
     },
     {
@@ -2360,6 +3183,10 @@
         "user",
         "accessLevel"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set user permissions on a repository"
     },
     {
@@ -2369,6 +3196,10 @@
       "params": [
         "repo",
         "path"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Terminate all checkouts in a folder recursively"
     },
@@ -2382,6 +3213,10 @@
         "checkoutId",
         "checkout_id"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Terminate all checkouts on a single file"
     },
     {
@@ -2389,6 +3224,10 @@
       "method": "GET",
       "category": "server",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all users on the server"
     },
     {
@@ -2399,6 +3238,9 @@
         "username",
         "password"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Register server credentials for programmatic authentication"
     },
     {
@@ -2408,6 +3250,10 @@
       "params": [
         "path"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List all checked-out files in a folder, including server-side checkouts"
     },
     {
@@ -2415,6 +3261,10 @@
       "method": "POST",
       "category": "server",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables."
     },
     {
@@ -2422,6 +3272,10 @@
       "method": "POST",
       "category": "server",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Disconnect from the Ghidra server"
     },
     {
@@ -2429,6 +3283,10 @@
       "method": "GET",
       "category": "server",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List repositories on the connected server"
     },
     {
@@ -2437,6 +3295,10 @@
       "category": "server",
       "params": [
         "name"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Create a new repository on the server"
     },
@@ -2448,6 +3310,10 @@
         "repo",
         "path"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Get file info from a server repository"
     },
     {
@@ -2458,6 +3324,10 @@
         "repo",
         "path"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "List files in a server repository folder"
     },
     {
@@ -2465,6 +3335,10 @@
       "method": "GET",
       "category": "headless",
       "params": [],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Check headless server connection status"
     },
     {
@@ -2476,6 +3350,10 @@
         "path",
         "comment",
         "keepCheckedOut"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Add a file to version control"
     },
@@ -2489,6 +3367,10 @@
         "comment",
         "keepCheckedOut"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Check in a version-controlled file"
     },
     {
@@ -2498,6 +3380,10 @@
       "params": [
         "repo",
         "path"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Check out a version-controlled file"
     },
@@ -2509,6 +3395,10 @@
         "repo",
         "path"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Undo a file checkout"
     },
     {
@@ -2518,6 +3408,10 @@
       "params": [
         "repo",
         "path"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Get version history for a file"
     },
@@ -2531,6 +3425,10 @@
         "comment",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set bookmark"
     },
     {
@@ -2543,6 +3441,10 @@
         "type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; sets a PLATE comment on a function or a data global alike."
     },
     {
@@ -2553,6 +3455,10 @@
         "function_address",
         "no_return",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Set no-return attribute"
     },
@@ -2566,6 +3472,10 @@
         "calling_convention",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function â€” call rename_function separately if needed."
     },
     {
@@ -2577,6 +3487,10 @@
         "comment",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Update the comment/description on an existing program-wide function tag."
     },
     {
@@ -2587,6 +3501,10 @@
         "function_address",
         "this_type",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall). Use after set_function_prototype when decompile still shows void* this or a wrong class. Accepts 'MyClass *' or 'MyClass'. On programs with multiple address spaces, prefix function_address with the space name (mem:1000)."
     },
@@ -2604,6 +3522,10 @@
         "strict_mode",
         "allow_evict"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type â†’ rename_data â†’ batch_set_comments â†’ create_label)."
     },
     {
@@ -2613,6 +3535,10 @@
       "params": [
         "address",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Set the base address of the program (rebases all addresses)"
     },
@@ -2627,6 +3553,10 @@
         "type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist."
     },
     {
@@ -2638,6 +3568,10 @@
         "address",
         "value",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist."
     },
@@ -2651,6 +3585,10 @@
         "storage",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set variable storage"
     },
     {
@@ -2663,6 +3601,10 @@
         "new_type",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type."
     },
     {
@@ -2673,6 +3615,10 @@
         "function_address",
         "variables",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name."
     },
@@ -2685,6 +3631,10 @@
         "struct_size",
         "program"
       ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
       "description": "Suggest field names"
     },
     {
@@ -2693,6 +3643,10 @@
       "category": "program",
       "params": [
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Switch current program"
     },
@@ -2703,6 +3657,9 @@
       "params": [
         "address"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Navigate CodeBrowser listing and decompiler to a specific address"
     },
     {
@@ -2712,6 +3669,9 @@
       "params": [
         "path"
       ],
+      "servers": [
+        "gui"
+      ],
       "description": "Open a file in CodeBrowser, launching a new one if needed"
     },
     {
@@ -2719,6 +3679,9 @@
       "method": "GET",
       "category": "utility",
       "params": [],
+      "servers": [
+        "gui"
+      ],
       "description": "List all running Ghidra tool windows"
     },
     {
@@ -2729,6 +3692,10 @@
         "address",
         "type_name",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Validate data type syntax"
     },
@@ -2741,6 +3708,10 @@
         "prototype",
         "calling_convention",
         "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
       ],
       "description": "Validate function prototype"
     }
