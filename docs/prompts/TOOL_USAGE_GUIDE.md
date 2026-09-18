@@ -7,6 +7,7 @@ The enhanced analysis prompt has been updated to use the **correct and reliable 
 ### Issue Fixed: Type Application Pattern
 
 **Previous approach (causes retries):**
+
 ```python
 # ❌ PROBLEMATIC - create_and_apply_data_type has parameter format issues
 create_and_apply_data_type(address, "PRIMITIVE", '{"type": "dword"}', "dwName", "comment")
@@ -14,6 +15,7 @@ create_and_apply_data_type(address, "PRIMITIVE", '{"type": "dword"}', "dwName", 
 ```
 
 **New approach (works first time):**
+
 ```python
 # ✅ RELIABLE - Use separate, proven tools
 apply_data_type(address, "dword")           # Step 1: Apply type
@@ -41,6 +43,7 @@ set_comment(address, documentation, type='pre')
 ### Supported Type Names for apply_data_type()
 
 **Primitive Types:**
+
 - `"dword"` - 32-bit unsigned integer
 - `"word"` - 16-bit unsigned integer
 - `"byte"` - 8-bit unsigned integer
@@ -55,6 +58,7 @@ set_comment(address, documentation, type='pre')
 - `"bool"` - Boolean type
 
 **String/Array Types:**
+
 - `"char[N]"` - ASCII/ANSI string (e.g., `"char[6]"`, `"char[256]"`)
 - `"word[N]"` - Array of 16-bit words
 - `"dword[N]"` - Array of 32-bit dwords
@@ -66,7 +70,7 @@ set_comment(address, documentation, type='pre')
 Always use type prefixes in step 2 (rename_symbol):
 
 | Type | Prefix | Examples |
-|------|--------|----------|
+| ------ | -------- | ---------- |
 | DWORD (unsigned 32-bit) | `dw` | `dwFlags`, `dwCount`, `dwUnitId` |
 | WORD (unsigned 16-bit) | `w` | `wX`, `wY`, `wPort` |
 | BYTE (unsigned 8-bit) | `b`, `by` | `bValue`, `byOpcode` |
@@ -107,11 +111,13 @@ set_comment(address, documentation, type='pre')
 ### Documentation Template Sections
 
 **Mandatory:**
+
 - `TYPE:` - Data type, size in bytes, brief description
 - `VALUE:` - Hex and decimal values
 - `PURPOSE:` - What the data represents and its primary usage
 
 **Optional (add as relevant):**
+
 - `SOURCE REFERENCE:` - Where data comes from (file, structure, etc.)
 - `XREF COUNT:` - Number of cross-references
 - `USAGE PATTERN:` - How/where the data is accessed
@@ -156,26 +162,31 @@ XREF COUNT: 2 references
 ## When to Use Which Tool
 
 ### For Primitives (1-8 bytes)
+
 1. `apply_data_type()` with primitive type name
 2. `rename_symbol()` with `dw`, `w`, `n`, or `b` prefix
 3. `set_comment(type='pre')` with documentation
 
 ### For Strings
+
 1. `apply_data_type()` with `"char[N]"` or `"wchar_t[N]"`
 2. `rename_symbol()` with `sz` or `wsz` prefix
 3. `set_comment(type='pre')` with documentation
 
 ### For Pointers
+
 1. `apply_data_type()` with `"pointer"`
 2. `rename_symbol()` with `p` or `lp` prefix
 3. `set_comment(type='pre')` with documentation
 
 ### For Arrays
+
 1. `apply_data_type()` with `"type[count]"` (e.g., `"dword[64]"`)
 2. `rename_symbol()` with type prefix (e.g., `adwValues`)
 3. `set_comment(type='pre')` with documentation
 
 ### For Structures
+
 1. `create_struct()` to define the structure with fields
 2. `apply_data_type()` with structure name
 3. `rename_symbol()` with descriptive instance name
@@ -195,16 +206,19 @@ XREF COUNT: 2 references
 ## Related Tools
 
 **For structure creation:**
+
 - `create_struct(name, fields)` - Create a new structure type
 - `modify_struct_field(struct_name, field_name, new_type, new_name)` - Update fields
 - `search_data_types(pattern)` - Search for structures by name pattern
 
 **For analysis:**
+
 - `analyze_data_region(address)` - Get data type and boundaries
 - `inspect_memory_content(address, length)` - Read raw memory
 - `get_bulk_xrefs(addresses)` - Get cross-references
 
 **For validation:**
+
 - `validate_data_type(type_name)` - Check if type exists
 - `can_rename_at_address(address)` - Check what operation is appropriate
 
@@ -349,7 +363,7 @@ propagate_documentation(
 The hash algorithm normalizes position-dependent values so identical functions at different addresses produce the same hash:
 
 | Pattern | Normalization | Reason |
-|---------|---------------|--------|
+| --------- | --------------- | -------- |
 | Internal jumps | `REL+offset` | Relative to function start |
 | External calls | `CALL_EXT` | Different addresses per binary |
 | External data | `DATA_EXT` | Different addresses per binary |
@@ -494,7 +508,7 @@ Tags are case-sensitive; `search_functions_by_tag` rejects unknown tag names (re
 GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev box. Configure these before binding beyond loopback:
 
 | Env var | Effect |
-|---|---|
+| --- | --- |
 | `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are always exempt. |
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** (breaking change — these endpoints execute arbitrary Java against the Ghidra process). |
 | `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/load_program`, `/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |

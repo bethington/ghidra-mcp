@@ -9,20 +9,24 @@
 ## What Was Changed
 
 ### 1. Created `src/main/resources/version.properties`
+
 - Contains `app.version=${project.version}` (Maven variable substitution)
 - Maven replaces `${project.version}` with value from `pom.xml` during build
 - This is the only place where version is stored (other than pom.xml)
 
 ### 2. Updated `pom.xml`
+
 - Added `<resources>` section with `<filtering>true</filtering>`
 - Enables Maven variable substitution in properties files
 - `version` element remains single source of truth
 
 ### 3. Updated `src/main/resources/extension.properties`
+
 - Changed `version=1.9.2` to `version=${project.version}`
 - Maven automatically updates this during build
 
 ### 4. Modified Java Plugin (`GhidraMCPPlugin.java`)
+
 - Added `VersionInfo` class that reads from `version.properties` at runtime
 - Plugin loads version dynamically from properties file
 - Falls back to default if file not found
@@ -30,6 +34,7 @@
 - Updated `getVersion()` method to use `VersionInfo.getVersion()`
 
 ### 5. Removed Version Hardcoding from Documentation
+
 - **README.md**: Removed version badge, kept feature descriptions
 - **CLAUDE.md**: Changed "Current Version: 1.9.2" to "Current Version: Configured in pom.xml"
 - **docs/TOOL_REFERENCE.md**: Removed version from header
@@ -43,7 +48,8 @@
 ## How It Works
 
 ### Build Process
-```
+
+```text
 1. Developer updates pom.xml: <version>X.Y.Z</version>
 2. Maven build runs: mvn clean package assembly:single
 3. Maven processes resources:
@@ -55,8 +61,9 @@
 ```
 
 ### Version Sources
+
 | Location | Purpose | Updated By |
-|----------|---------|-----------|
+| ---------- | --------- | ----------- |
 | `pom.xml` | **Single source of truth** | Manual (once per release) |
 | `version.properties` | Java runtime properties | Maven (automatic) |
 | `extension.properties` | Ghidra extension metadata | Maven (automatic) |
@@ -70,6 +77,7 @@
 ### When Releasing New Version
 
 **Old Workflow** (20+ manual updates):
+
 ```bash
 # Edit 20+ files:
 pom.xml
@@ -87,6 +95,7 @@ DOCUMENTATION_INDEX.md
 ```
 
 **New Workflow** (single update):
+
 ```bash
 # Edit ONE file:
 vim pom.xml
@@ -108,6 +117,7 @@ git tag v1.9.3
 ## Files That Now DO NOT Reference Versions
 
 ✅ **These files no longer hardcode versions**:
+
 - README.md
 - CLAUDE.md
 - DOCUMENTATION_INDEX.md
@@ -126,6 +136,7 @@ git tag v1.9.3
 ## Verification
 
 ### Build Verification
+
 ```bash
 mvn clean package assembly:single
 
@@ -138,6 +149,7 @@ mvn clean package assembly:single
 ```
 
 ### Runtime Verification
+
 ```bash
 # When plugin runs in Ghidra:
 # Call GET /version endpoint
@@ -164,18 +176,21 @@ mvn clean package assembly:single
 ## Technical Details
 
 ### Maven Variable Substitution
+
 - Works because `<filtering>true</filtering>` enables it
 - Only applies to resources in `<resource>` section
 - Other resources use `<filtering>false</filtering>` for performance
 - Production-standard Maven feature (used by thousands of projects)
 
 ### Java Version Loading
+
 - `VersionInfo` class loads properties at static initialization
 - Happens before plugin is instantiated
 - Uses try-catch with fallback for safety
 - No performance impact (only runs once at plugin load)
 
 ### Documentation Philosophy
+
 - **Avoid hardcoding version numbers in docs**
 - **Keep docs general and version-agnostic**
 - **CHANGELOG.md is the only version reference** (as it should be)
@@ -186,14 +201,19 @@ mvn clean package assembly:single
 ## Future Enhancements
 
 ### Optional: Semantic Versioning Enforcement
+
 If you want automatic version bumping in future:
+
 ```bash
 mvn release:prepare release:perform
 ```
+
 This would automatically update version numbers and tag releases.
 
 ### Optional: GitHub Actions Check
+
 Could add a workflow to verify that:
+
 - Documentation doesn't reference hardcoded versions
 - CHANGELOG.md contains release notes for new versions
 - pom.xml version is valid semantic version
@@ -205,6 +225,7 @@ Could add a workflow to verify that:
 **Implementation Complete** ✅
 
 You now have a professional, scalable version management system where:
+
 - **Only `pom.xml` contains the version number**
 - **All references are automatic via Maven**
 - **Documentation stays clean and version-agnostic**

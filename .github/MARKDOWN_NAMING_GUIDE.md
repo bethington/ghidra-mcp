@@ -42,21 +42,21 @@
 ### Root Level Files
 
 | Current Name | Recommended Name | Reason | Priority |
-|--------------|------------------|--------|----------|
-| **Keep As-Is (Industry Standards)** ||||
+| -------------- | ------------------ | -------- | ---------- |
+| **Keep As-Is (Industry Standards)** | | | |
 | `README.md` | ✅ Keep | GitHub/industry standard | - |
 | `CHANGELOG.md` | ✅ Keep | Industry standard | - |
 | `CONTRIBUTING.md` | ✅ Keep | GitHub standard | - |
 | `LICENSE` | ✅ Keep | Legal standard | - |
-| **Project Core** ||||
+| **Project Core** | | | |
 | `START_HERE.md` | `getting-started.md` | More descriptive, kebab-case | High |
 | `CLAUDE.md` | `ai-assistant-guide.md` | Generic, descriptive | Medium |
 | `DOCUMENTATION_INDEX.md` | `docs-index.md` | Shorter, kebab-case | High |
 | `PROJECT_STRUCTURE.md` | `project-structure.md` | Consistent casing | Medium |
-| **Configuration** ||||
+| **Configuration** | | | |
 | `NAMING_CONVENTIONS.md` | `naming-conventions.md` | Kebab-case | Medium |
 | `MAVEN_VERSION_MANAGEMENT.md` | `maven-guide.md` | Shorter, clearer | Low |
-| **Reports** ||||
+| **Reports** | | | |
 | `ORGANIZATION_SUMMARY.md` | `reports/organization-summary.md` | Move to reports/, kebab-case | High |
 | `PROJECT_CLEANUP_SUMMARY.md` | `reports/cleanup-summary.md` | Move to reports/, shorter | High |
 | `QUICKWIN_COMPLETION_REPORT.md` | `reports/quickwin-report.md` | Move to reports/, shorter | High |
@@ -65,7 +65,7 @@
 | `VERSION_FIX_COMPLETE.md` | `reports/version-fix-complete.md` | Move to reports/, kebab-case | High |
 | `VERSION_MANAGEMENT_COMPLETE.md` | `reports/version-management-complete.md` | Move to reports/, kebab-case | High |
 | `VERSION_MANAGEMENT_STRATEGY.md` | `reports/version-management-strategy.md` | Move to reports/, kebab-case | High |
-| **Improvements** ||||
+| **Improvements** | | | |
 | `IMPROVEMENTS.md` | `improvements.md` | Kebab-case | Low |
 | `IMPROVEMENTS_QUICK_REFERENCE.md` | `improvements-quick-ref.md` | Shorter, kebab-case | Medium |
 | `MCP_TOOLS_IMPROVEMENTS.md` | `mcp-tools-improvements.md` | Kebab-case | Medium |
@@ -80,6 +80,7 @@
 **Pattern**: `<topic>-<type>.md`
 
 Examples:
+
 - `api-reference.md` ✅
 - `development-guide.md` ✅
 - `troubleshooting-guide.md` ✅
@@ -90,6 +91,7 @@ Examples:
 **Pattern**: `<subject>-guide.md` or `<subject>-<action>.md`
 
 Examples:
+
 - `ordinal-restoration-guide.md` ✅
 - `structure-discovery-guide.md` ✅
 - `register-reuse-fix.md` ✅
@@ -99,6 +101,7 @@ Examples:
 **Pattern**: `<binary-name>-analysis.md`
 
 Examples:
+
 - `game-exe-analysis.md` ✅
 - `d2client-analysis.md` ✅
 - `storm-library-analysis.md` ✅
@@ -108,6 +111,7 @@ Examples:
 **Pattern**: `<topic>-report.md` or `<topic>-<date>.md`
 
 Examples:
+
 - `cleanup-report.md` ✅
 - `performance-report-2025-11.md` ✅
 - `organization-summary.md` ✅
@@ -153,6 +157,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 ### Phase 3: Reference Updates (Required after renaming)
 
 **Action items**:
+
 1. Update all internal links in markdown files
 2. Update references in code/scripts
 3. Update VSCode settings
@@ -166,7 +171,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 ### Documentation Files
 
 | Type | Pattern | Example |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | Guide | `<topic>-guide.md` | `installation-guide.md` |
 | Reference | `<topic>-reference.md` | `api-reference.md` |
 | Tutorial | `<topic>-tutorial.md` | `quickstart-tutorial.md` |
@@ -175,7 +180,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 ### Analysis Files
 
 | Type | Pattern | Example |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | Binary | `<name>-analysis.md` | `game-exe-analysis.md` |
 | Component | `<name>-<component>.md` | `d2client-ui-analysis.md` |
 | Overview | `<topic>-overview.md` | `architecture-overview.md` |
@@ -183,7 +188,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 ### Report Files
 
 | Type | Pattern | Example |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | Status | `<topic>-status.md` | `project-status.md` |
 | Summary | `<topic>-summary.md` | `cleanup-summary.md` |
 | Report | `<topic>-report.md` | `performance-report.md` |
@@ -192,7 +197,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 ### Configuration Files
 
 | Type | Pattern | Example |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | Standards | `<topic>-conventions.md` | `naming-conventions.md` |
 | Config Guide | `<tool>-guide.md` | `maven-guide.md` |
 | Setup | `<topic>-setup.md` | `environment-setup.md` |
@@ -219,6 +224,7 @@ Before creating a new markdown file:
 ### When to Use UPPERCASE
 
 **ONLY for these standard files**:
+
 - `README.md` - Primary documentation entry
 - `CHANGELOG.md` - Version history (Keep-a-Changelog standard)
 - `CONTRIBUTING.md` - Contribution guidelines (GitHub standard)
@@ -235,11 +241,13 @@ Exception: Generated files that must match tool conventions.
 ### When to Use Numbers
 
 **Prefix with zero** for ordering:
+
 - ✅ `01-introduction.md`
 - ✅ `02-installation.md`
 - ✅ `03-usage.md`
 
 **Date suffixes**:
+
 - ✅ `report-2025-11-06.md`
 - ❌ `report-11-6-2025.md`
 
@@ -268,7 +276,7 @@ Exception: Generated files that must match tool conventions.
 ### Migration Effort
 
 | Phase | Files Affected | Effort | Risk |
-|-------|----------------|--------|------|
+| ------- | ---------------- | -------- | ------ |
 | Phase 1 | 8 reports | 1-2 hours | Low |
 | Phase 2 | 6 core files | 2-3 hours | Medium |
 | Phase 3 | Link updates | 3-4 hours | Medium |
@@ -281,11 +289,13 @@ Exception: Generated files that must match tool conventions.
 ### Safe Renaming Process
 
 1. **Create branch**
+
    ```bash
    git checkout -b standardize-markdown-names
    ```
 
 2. **Rename files** (preserves history)
+
    ```bash
    git mv OLD_NAME.md new-name.md
    ```
@@ -301,6 +311,7 @@ Exception: Generated files that must match tool conventions.
    - Test local builds
 
 5. **Commit and PR**
+
    ```bash
    git commit -m "refactor: standardize markdown file naming conventions"
    ```

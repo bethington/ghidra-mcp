@@ -156,7 +156,7 @@ conformance snapshot. A source-level sweep for `Response.text` inside
 `@McpTool` bodies found **35 registered tools still returning text**, dominated
 by the datatype write surface:
 
-```
+```text
 create_enum (11)  create_struct (8)   resolve_duplicate_type (7)
 apply_data_type (6)  validate_data_type (5)  add_struct_field (4)
 get_enum_values (4)  get_struct_layout (4)   ... and 27 more

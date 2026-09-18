@@ -15,7 +15,7 @@ Before dispatching any subagents, verify Ghidra is running and the plugin is acc
 
 ## Dispatch Pattern
 
-```
+```text
 Task(
   subagent_type: "general-purpose",
   model: "sonnet",  // or "opus" for Public API / complex Init functions
@@ -54,6 +54,7 @@ Task(
 **Concurrency**: Max 3 subagents at once. MCP tools serialize at the Ghidra HTTP layer — more than 3 risks timeouts without speed benefit.
 
 **Model selection**: `sonnet` is the default for all functions. It produces A-grade documentation on 90%+ of CRT/game functions at ~5x lower cost than `opus`. Use `opus` only when:
+
 - Function has 40+ decompiled lines with deep algorithm analysis needed
 - First-pass Sonnet score is below 85% on a non-trivial function
 - Function is a Public API entry point requiring cross-binary context
@@ -61,20 +62,24 @@ Task(
 ## Target Selection
 
 ### By completeness score
+
 1. Run `analyze_function_completeness` on candidates
 2. Filter to score < 70%, sort ascending (worst first)
 3. Dispatch subagents for each
 
 ### By call graph (callees first)
+
 1. `get_function_call_graph` on the target
 2. Topological sort: leaves first, then callers
 3. Dispatch leaves in parallel, then next tier
 
 ### By undocumented functions
+
 1. `list_functions` filtered to `FUN_*` or `Ordinal_*` prefix, or `find_next_undefined_function` repeatedly (default finds both `FUN_*` and `Ordinal_*`)
 2. Dispatch in batches of 3
 
 ### By neighborhood (address-adjacent)
+
 1. Pick a documented function as anchor
 2. `list_functions` to find adjacent `FUN_*` / `Ordinal_*` entries
 3. Useful after orphaned code discovery — process newly created functions in the same region
@@ -108,7 +113,7 @@ These issues come up repeatedly when running V5 at scale:
 
 ## Output
 
-```
+```text
 BATCH COMPLETE: N functions documented
 Scores: FuncA=100%, FuncB=95%, FuncC=89% (unfixable: this void*)
 Skipped: FuncD (timeout), FuncE (45% - manual review)

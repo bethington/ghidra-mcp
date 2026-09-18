@@ -28,4 +28,3 @@ In production deployments, configure appropriate log levels and rotation policie
 ---
 
 **Note**: This directory may be empty in fresh installations until development or testing activities generate log files.
-
