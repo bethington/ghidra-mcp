@@ -68,6 +68,26 @@ jobs:
         fi
         echo "Version format valid: $VERSION"
 
+    - name: Verify recorded live-regression evidence
+      # Same gate as release.yml, same reason: the live Ghidra release
+      # regression needs a Windows self-hosted runner and ZERO are registered
+      # -- deliberately, because on a public repo labelling a fork PR would run
+      # a stranger's code on the maintainer's machine. Without this step,
+      # `needs...result == 'skipped'` above reads "nobody ran it" as permission
+      # to publish.
+      #
+      # Verified against the BASE version (7.0.0 for 7.0.0-rc.1): the evidence
+      # records the pom's version, which does not carry the pre-release suffix,
+      # and rc.1 vs rc.2 is not what this check is for. The source fingerprint
+      # is -- it fails the moment anything the regression exercises changes, so
+      # rc.2 needs its own run only if rc.2 actually differs.
+      #
+      # No fallback, no `|| true`. A gate that cannot read its input must fail.
+      if: needs.release-regression.result != 'success'
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        python3 -m tools.release_evidence verify --version "${VERSION%%-*}"
+
     - name: Download Ghidra
       run: |
         echo "Downloading Ghidra ${{ env.GHIDRA_VERSION }}..."

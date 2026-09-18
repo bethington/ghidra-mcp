@@ -6,6 +6,67 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — a release could publish with the live regression never having run
+
+`release.yml` and `pre-release.yml` gated publishing on:
+
+```text
+needs.release-regression.result == 'success' || needs.release-regression.result == 'skipped'
+```
+
+On a **tag push** that job is *always* skipped — its own `if` requires
+`workflow_dispatch`. So `skipped` was the only value a tagged release ever
+produced, and the gate that is supposed to stop a broken release from shipping
+had never once blocked one. It could not.
+
+It cannot be fixed by running the tier in CI, and that is a decision rather than
+an oversight. The regression needs a live Ghidra GUI on Windows, so it targets
+`runs-on: [self-hosted, Windows]`, and **zero self-hosted runners are
+registered** — on a public repository, labelling a fork PR would run a
+stranger's code on the maintainer's machine.
+
+So the gate is **recorded local evidence**. A passing
+`deploy --test release` writes `docs/releases/live-regression-evidence.json`,
+the maintainer commits it, and both publishing workflows refuse to publish
+without one that covers the release being cut.
+
+**It records a source fingerprint, not a timestamp.** A timestamp says a
+regression ran; it does not say it ran against the code being shipped. The
+fingerprint is a SHA-256 over the git blob id of every tracked file under
+`src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`,
+`tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml` and
+`build.gradle`. Change any of them after the tier ran and the release fails
+until it is re-run.
+
+Three details that decide whether this works in practice:
+
+- **Blob ids, not file bytes.** The maintainer's Windows checkout has
+  `core.autocrlf=true`; the release runner checks out LF. Hashing bytes would
+  compare a CRLF tree against an LF one and never match, on every single
+  release. `git hash-object` applies git's own normalisation. It also reads the
+  **working tree**, so an uncommitted edit moves the fingerprint — the evidence
+  describes the tree that was tested, not the last commit.
+- **The scope is deliberately narrow.** A CHANGELOG line written after the run —
+  including the entry describing the release itself — must not invalidate hours
+  of live testing. A gate people route around is not a gate.
+- **No fallback of any kind.** No `|| true`, no default, no
+  `continue-on-error`, and a test asserts their absence. `release.yml` published
+  "Headless Endpoints: 1" in v6.0.0 because a grep of a deleted file was
+  softened with `|| echo "0"` and a suppressed read error became a plausible
+  number.
+
+A real self-hosted run still counts as its own evidence: the step is
+conditioned on `needs.release-regression.result != 'success'`, so if a runner is
+ever registered nothing here gets in the way.
+
+`tests/unit/test_release_evidence.py` covers the fingerprint (stable, moves on
+source change, sees uncommitted edits, ignores docs, ignores the evidence file
+itself, refuses an empty source set, line-ending independent), the verifier
+(missing, wrong version, wrong tier, failed result, malformed JSON, a fingerprint
+recorded over a different path set), and both workflows — including that the
+verification step exists at all, which fails against the previous `release.yml`
+and `pre-release.yml` with the reason spelled out.
+
 ### Fixed — Scorecard ran on `dev`, where it can only fail
 
 `scorecard-action` refuses to run on anything but the repository's **default

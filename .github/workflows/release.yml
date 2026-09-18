@@ -44,6 +44,11 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     needs: [release-regression]
+    # `skipped` is still accepted HERE, but it no longer means "publish anyway":
+    # the "Verify recorded live-regression evidence" step below runs whenever
+    # this job did not get a real regression run, and fails the job without one.
+    # Keeping the job-level condition permissive is what lets that step produce
+    # a named, readable failure instead of a silently skipped job.
     if: always() && (needs.release-regression.result == 'success' || needs.release-regression.result == 'skipped')
     permissions:
       contents: write  # Required for creating releases and tags
@@ -119,6 +124,30 @@ jobs:
 
     - name: Set up Python (offline test gate)
       run: uv python install 3.12
+
+    - name: Verify recorded live-regression evidence
+      # The live Ghidra release regression did not run in this workflow: either
+      # it was not requested, or -- on a TAG PUSH -- it could not be, because
+      # the `release-regression` job's own `if` requires workflow_dispatch. So
+      # until now every tagged release published with that gate skipped, and
+      # `needs...result == 'skipped'` above read that as permission.
+      #
+      # It cannot simply be made to run: the tier needs a live Ghidra GUI on
+      # Windows and targets `[self-hosted, Windows]`, and ZERO self-hosted
+      # runners are registered -- deliberately, because on a public repo
+      # labelling a fork PR would run a stranger's code on the maintainer's
+      # machine. So the gate is recorded LOCAL evidence instead, and this step
+      # is what makes it a gate rather than a note.
+      #
+      # It verifies a source FINGERPRINT, not a timestamp: a timestamp says a
+      # regression ran, not that it ran against this code. Any change under the
+      # fingerprinted paths after the tier was run invalidates the evidence.
+      # No `|| true`, no default, no `continue-on-error` -- release.yml already
+      # shipped "Headless Endpoints: 1" twice because a missing input had a
+      # fallback.
+      if: needs.release-regression.result != 'success'
+      run: |
+        python3 -m tools.release_evidence verify --version "${{ steps.version.outputs.VERSION }}"
 
     - name: Offline test gate (block release on red tests)
       run: |
