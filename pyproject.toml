@@ -22,6 +22,10 @@ dependencies = [
     # `pip install ghidra-mcp-bridge` does. Widen it with the 2.x migration,
     # not before; test_mcp_requirement_excludes_the_2x_sdk holds the line.
     "mcp>=1.28.1,<2.0.0",
+    # registry.py annotates generated tool parameters with Annotated[T, Field(...)]
+    # directly -- mcp pulls this in transitively, but the bridge imports it by
+    # name now and should declare it rather than rely on a dependency's dependency.
+    "pydantic>=2.0.0",
 ]
 # NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
 # has no `requests` runtime dependency. `requests` is only needed by the repo's
