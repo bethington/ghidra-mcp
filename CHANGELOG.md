@@ -505,6 +505,13 @@ compatibility) plus five that are a genuine backlog — and a companion test tha
 fails when an allowlist entry is finally wired up, so the list cannot outlive
 its own justification.
 
+### Parameter coercion fixes
+
+- Omitted nullable `Boolean` parameters whose annotation uses `defaultValue = ""`
+  now resolve to `null` for both query-string and JSON-body inputs. Previously,
+  the empty string was coerced to `false`, silently activating tri-state filters
+  such as `has_custom_name`, `is_thunk`, and `is_external`.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was
@@ -5348,3 +5355,4 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ---
 
 For older release details, see the [docs/releases/](docs/releases/) directory.
+
