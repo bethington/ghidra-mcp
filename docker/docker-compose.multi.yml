@@ -1,5 +1,23 @@
 # GhidraMCP Headless Server - Multi-Instance Deployment with Load Balancer
 # Usage: docker-compose -f docker-compose.multi.yml up -d --scale ghidra-mcp=3
+#
+# There is deliberately NO MCP bridge service here. docker-compose.yml has one;
+# this file does not, and that is a decision rather than an omission:
+#
+#   * The bridge must share a Ghidra container's network namespace, because
+#     validate_server_url() refuses any non-loopback Ghidra URL. But
+#     `network_mode: "service:X"` names ONE container and cannot target a
+#     scaled service, so there is no "the" container to join here.
+#   * Pointing a bridge at nginx instead would technically satisfy the loopback
+#     rule, and would still be wrong: nginx.conf balances with `least_conn` and
+#     no session affinity, so consecutive MCP tool calls would land on
+#     different Ghidra instances holding different projects. A `decompile` and
+#     the `rename` that follows it would not be talking about the same program.
+#
+# Serving MCP from a scaled deployment needs a topology decision (a bridge
+# pinned per instance, or affinity in nginx), not a service block copied over
+# from the single-instance file. `tests/unit/test_docker_compose_bridge.py`
+# pins this absence so it cannot be undone by accident.
 
 version: '3.8'
 

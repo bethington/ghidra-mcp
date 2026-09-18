@@ -1,0 +1,35 @@
+# MCP bridge for GhidraMCP.
+#
+# Speaks MCP (streamable-http) to clients and plain HTTP to the Ghidra server.
+# This container MUST share the Ghidra container's network namespace
+# (`network_mode: "service:ghidra-mcp"`): validate_server_url() in
+# bridge_mcp_ghidra/validation.py refuses any Ghidra URL whose host is not
+# loopback, so `http://ghidra-mcp:8089` is rejected and only `127.0.0.1` works.
+FROM python:3.12-slim
+
+WORKDIR /src
+
+# pyproject's hatchling build reads README.md; copy it or the wheel build fails.
+COPY pyproject.toml README.md ./
+COPY python/ ./python/
+
+RUN pip install --no-cache-dir . \
+    && rm -rf /src /root/.cache
+
+WORKDIR /app
+
+# Drop root. The bridge holds the bearer token in its environment and needs no
+# filesystem access at all, so it runs as a plain unprivileged account. Any id
+# is fine here (unlike the server image, this container mounts no volumes).
+RUN useradd --create-home --uid 1001 --user-group bridge
+USER bridge
+
+EXPOSE 8081
+
+# The MCP endpoint has no unauthenticated liveness route, so probe the socket
+# rather than issuing a request that would need a session handshake.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(s.connect_ex(('127.0.0.1',8081)))"
+
+ENTRYPOINT ["bridge-mcp-ghidra"]
+CMD ["--transport", "streamable-http", "--mcp-host", "0.0.0.0", "--mcp-port", "8081"]
