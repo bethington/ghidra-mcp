@@ -4,7 +4,92 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
+## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
+
+**253 tools** — 239 served by the GUI plugin, 226 by the headless server, 212
+by both. The consolidation pass below took the advertised surface from 272 to
+251; `/list_shadowed_globals` and `/batch_get_comments` landed afterwards in
+the same cycle.
+
+> **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
+> removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
+> repository on 2026-08-11 and their history belongs there, not in this
+> project's changelog. Nothing was lost — it is in this file's git history —
+> and the entries that remain naming fun-doc are ones where its move-out is
+> the *cause* of a change here (`uv.lock`'s stale dependency group, the
+> release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Added — two endpoints, after the consolidation pass
+
+Both landed in the 7.0.0 cycle after the 272 → 251 consolidation, which is why
+the shipped catalog is 253 rather than 251.
+
+- **`/list_shadowed_globals`** (GET, `listing`) — named global DATA symbols
+  that have no type of their own because a larger unit starting earlier covers
+  them. It exists because **`/list_globals` structurally cannot show this
+  population**: it resolves the *containing* data unit, so a swallowed global
+  reports the eater's type and renders as perfectly typed in every panel.
+  Corpus-wide, 539 of 540 such globals were invisible to every dashboard read,
+  each hard-capped at 79 by the untyped ceiling and unable to band
+  COMPLETE_80. Each record names the container that swallowed it, so the
+  answer is not just "this is untyped" but "this is what ate it". Its symbol
+  gates are *shared* with `listGlobals`, not copied — two views of "the
+  globals in this binary" disagreeing on their denominator is the exact bug
+  class it was built to expose.
+- **`/batch_get_comments`** (GET, `comment`) — the read-side counterpart to
+  `batch_set_comments`: all five comment kinds at many addresses in one call,
+  same per-address shape as `get_comment`. `only_with_comments=true` omits
+  addresses with no comment at all, which is the common case for a corpus
+  sweep where most functions are undocumented and only the documented subset
+  is interesting.
+
+### Added — the MCP bridge ships as a container
+
+See "the MCP bridge is now part of the Docker stack" below
+([#522](https://github.com/bethington/ghidra-mcp/pull/522)): `docker compose
+up -d --build` now brings up `ghidra-mcp` on `:8089` **and** `ghidra-mcp-
+bridge` on `:8081` speaking MCP over streamable-http at `/mcp`.
+`docker/Dockerfile.bridge` existed and worked before this; nothing referenced
+it, so the stack came up with a REST server and no MCP endpoint at all. A
+Dockerfile nothing builds is a file, not a deployment.
+
+### Housekeeping
+
+- **One published tool count, derived from the catalog
+  ([#525](https://github.com/bethington/ghidra-mcp/pull/525)).** Six surfaces
+  disagreed with `tests/endpoints.json` and with each other — 272, 267, 251,
+  243, 225/175/183/196. All now derive from the catalog, and each says *which*
+  count it is (`extension.properties` and `@PluginInfo` describe the GUI
+  extension, so they say 239, not 253). `tests/unit/test_published_counts.py`
+  pins every one of them with no fallback: an unmatched marker fails rather
+  than passing quietly. It also caught a **control character shipping since
+  v5.17.0** — a bulk count bump had rewritten `Provides 256 MCP tools for` as
+  `Provides 267 for` in `extension.properties` and `AGENTS.md`, so Ghidra's
+  *Install Extensions* dialog rendered a SOH byte and a sentence with no noun.
+- **Gradle is the documented default
+  ([#528](https://github.com/bethington/ghidra-mcp/pull/528)).** Every runbook
+  led with Maven. Gradle now leads, with the three genuinely Maven-only
+  commands named as such: the `RegenerateEndpointsJson` catalog regenerator
+  (Gradle cannot pass `-Dregenerate` into the forked test JVM — it exits BUILD
+  SUCCESSFUL having regenerated nothing), the JaCoCo coverage gate, and the
+  `headless`/`docker` build profiles. CI still builds and gates with Maven, so
+  it is a peer, not a fallback.
+- **Every removed tool is proved to have a successor
+  ([#526](https://github.com/bethington/ghidra-mcp/pull/526)).**
+  `tests/unit/test_migration_guide_successors.py` reads
+  `MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` and checks all 23 removals against
+  the shipped catalog. 7.0.0 has no aliases, so that guide is the only
+  migration path there is.
+- **Dependency and action bumps** carried by Dependabot: `gradle-wrapper`
+  9.6.1 → 9.7.1, `actions/setup-java` 5.6.0 → 6.0.0, `astral-sh/setup-uv`
+  9.0.0 → 10.0.1, `github/codeql-action`, `DavidAnson/markdownlint-
+  cli2-action`, `maven-surefire-plugin`, `maven-compiler-plugin`, `docker-
+  maven-plugin`, and the `mcp` requirement. `.github/dependabot.yml` groups
+  the codeql-action bumps and drops the removed fun-doc ecosystem
+  ([#461](https://github.com/bethington/ghidra-mcp/pull/461)).
+- **JetBrains is credited** in the README for the Open Source development
+  licence ([#487](https://github.com/bethington/ghidra-mcp/issues/487)), and
+  two images nothing referenced were deleted.
 
 ### Fixed — a release could publish with the live regression never having run
 
@@ -488,14 +573,11 @@ name-quality rejection that `rename_data` applied.
 - `get_function_labels` accepts an address as well as a name, and reports a
   clear error when the parameter is missing.
 
-**Internal callers migrated.** fun-doc (workers, prompts, provider tool
-allowlists, benchmark harness), the Python bridge's per-endpoint timeout table,
+**Internal callers migrated.** The Python bridge's per-endpoint timeout table,
 the deploy smoke tests in `tools/setup`, the bundled `DocumentFunctionWithClaude`
 script, the integration/offline test suites, and the operator docs all now call
-the survivors. A latent bug was fixed on the way: fun-doc's plate writes passed
-`program` in the POST **body**, where it is ignored (`@Param` defaults to
-`ParamSource.QUERY`) — those writes were landing on whichever program was
-focused in the UI and bypassing fun-doc's scope guard.
+the survivors. Out-of-repo consumers of this server's HTTP API have to migrate
+themselves; there are no aliases.
 
 ### Response contract (breaking) — every tool returns JSON
 
@@ -522,8 +604,8 @@ List-shaped tools now return a named plural key plus `count`/`total`; errors are
 - An error is no longer distinguishable by "does the string look like a
   sentence" — check for the `error` key.
 
-Every in-repo caller (fun-doc, the bridge, `tools/setup`, the scripts, the
-deploy gate, the tests) is migrated. `tests/performance/test_response_contract_callers.py`
+Every in-repo caller (the bridge, `tools/setup`, the scripts, the deploy gate,
+the tests) is migrated. `tests/performance/test_response_contract_callers.py`
 guards against a caller that reads a reshaped endpoint without unwrapping it —
 added after two rounds of the sweep each missed sites the previous one had not.
 
@@ -695,8 +777,7 @@ it contains and needed no refresh.
   Decompilation & Disassembly, Renaming & Labels, Scripting) are gone and
   Malware & Anti-Analysis and Symbols, Labels & Globals appear.
 - `.gitignore`'s blanket `audit_*.py` one-off rule would have silently swallowed
-  the reproducer — the same trap that had already cost `fun-doc/scripts/` its
-  first-class audit tooling. `tools/` is now negated too.
+  the reproducer. `tools/` is now negated too.
 
 ### MCP-protocol conformance suite
 
@@ -1482,165 +1563,38 @@ documentation quality gate was decorative for its whole life.
   `build-status`. Each assertion was verified to fail when its condition is
   violated.
 
-### Documentation correctness: `doc_lint` + Function ID
+### `rename_function` refuses to bury a Function ID identification
 
 `analyze_function_completeness` measures whether documentation is *present*. It
-cannot measure whether it is *true* — measured: `DATATBLS_DecimalStringToDouble`
-and `CLIENT_IsAllZeros` both scored COMPLETE_90 while tagged `LIB_CRT`.
+cannot measure whether it is *true*: a function can score COMPLETE_90 under a
+subsystem name that is simply wrong, because it is statically-linked library
+code that a documentation pass renamed.
 
-`fun-doc/doc_lint.py` is the correctness axis. It keys on **callees** rather
-than names, and its tier 0 is Ghidra's Function ID analyzer, read from
-`Function ID Analyzer` bookmarks. Those bookmarks **survive a rename**, which
-makes an overwritten library name *recoverable*, not merely detectable.
+Ghidra's Function ID analyzer already knows better, and it records what it knew
+in a `Function ID Analyzer` **bookmark** — which survives a rename. So the
+identification is not merely detectable after the fact, it is *recoverable*, and
+the server can refuse to lose it in the first place.
 
-That mattered immediately: FID had identified 4,325 functions corpus-wide, and
-143 had a subsystem prefix layered over the top by a documentation pass
-(`_vsprintf` → `DATATBLS_PrintFormattedString`; `___acrt_locale_free_numeric` →
-`DATATBLS_FreeUnitResourceArray`). All 143 were restored through a journalled,
-dry-run-default script. Six more were identified by hand, since FID never
-matched them — among them `_atodbl`, `_cftoe`, and `_NMSG_WRITE`, which is
-certain because it builds "Runtime Error!" and shows a box captioned "Microsoft
-Visual C++ Runtime Library". Five of those six carried a plate comment claiming
-a fabricated source file; all corrected.
+`NamingConventions` gains `FID_BOOKMARK_CATEGORY`, a parser for the library name
+inside that bookmark comment, and `overridesFidName`, the predicate for whether a
+proposed name would bury an identification.
+`FunctionService.rename_function` gates on it and **rejects** the rename, naming
+the library function it would have hidden. `strict_mode=warn` is the deliberate
+override, for the case where a human has decided the FID match is wrong.
 
-`doc_lint` then reported **0 findings corpus-wide, down from 149**.
+Two abstentions keep it from being a blanket "FID names are frozen" rule. The
+gate fires only when the proposed name carries a **module prefix** — renaming
+within the library's own naming scheme is not an override — and never when the
+recorded FID name is **mangled** (`?`-prefixed), because demangling it is an
+improvement.
 
-Two calibration guards are load-bearing and should not be dropped:
-`RUNTIME_PREFIXES` and `EH_ONLY_CALLEES`. Pure corpus calibration flagged
-`CRT_Init` (the conservative detector saw only 10 of 79 `CRT_` functions, so
-`CRT_` read 87% "non-library"), and treating `_CxxThrowException` as library
-evidence misfiled hand-written `PD2_AllocItemExtraData` as CRT. Those two guards
-cut a 43-finding run to 14.
+The bookmark category string is `"Function ID Analyzer"`, not `"Function ID"`.
+A filter on the shorter string matches nothing, silently, which is why it is a
+named constant rather than a literal at the call site.
 
-### Function ID databases
-
-`scripts/fid/` gains tooling to build a FID database from any static-library
-directory, plus `CountFidMatches` / `ReportFidCoverage` so a database's value is
-**measured rather than assumed**.
-
-The VC6 database works: **12 → 87 matches on `Benchmark.dll`** (7×), 92% of
-library code identified with zero false claims against the 9 authored functions.
-
-It adds nothing to D2Common (175→176) or D2Client (216→216), and the reason is
-recorded because the first attempt got it wrong: **Diablo II's static CRT is
-VS2003 SP1, not VC6.** Diagnosed two independent ways — relocation-masked byte
-comparison scores known-CRT functions at 6–18% against VC6 LIBCMT while the same
-method scores `_strlen`/`_memset` at 100.0% on `Benchmark.dll` (so the method is
-sound and the answer is negative); and the Rich header of
-D2Common/D2Client/D2Game/Fog/Storm contains **zero** VC6-compiler objects, every
-entry being a 710-series product at build 6030 = VS .NET 2003 SP1. VC6 SP6 is
-build 8804.
-
-### fun-doc: live-prove ABI detection + shared-build failure attribution
-
-**Only 15% of `live_prove_failed` verdicts were about the function.** Measured
-2026-07-31 over 523 terminal rows:
-
-| n | share | cause |
-| --- | --- | --- |
-| 152 | 29% | `marshal_fault` / SEH — ABI |
-| 126 | 24% | unresolved symbol from **another** candidate — collateral |
-| 78 | 15% | genuine semantic mismatch |
-| 58 | 11% | compile error (own draft) |
-| 37 | 7% | unresolved symbol in own draft |
-| 24 | 5% | duplicate symbol — collateral |
-
-`live_prove_failed` is TERMINAL, so 150 functions were permanently retired for
-build failures that were not theirs, their reimpl never executed once.
-
-**Root cause: no locking.** Every `candidates/*.cpp` links into ONE provider
-DLL built in ONE CMake tree with a `CONFIGURE_DEPENDS` glob, and the dashboard
-routinely runs six port workers at once with nothing serializing them. Worker A
-configures, CMake sweeps in worker B's just-written candidate, A fails on code
-it never wrote — and A's heal loop then deletes B.cpp *while B is still proving
-it*, so both retire. `_provider_build_lock` now serializes the build (the
-drafting, which dominates wall-clock, stays parallel), and an in-flight
-registry stops any worker healing a candidate another live worker owns.
-
-**LNK2019 was unattributable.** `build_provider_attributed` heals compile
-errors naming `candidates\X.cpp` and LNK2005 duplicate symbols, but an
-unresolved-external names only the `.vcxproj` — so it matched no attributor and
-fell through to a blanket verdict. `_find_unresolved_symbol_offender` reads
-"referenced in function F", maps F to its candidate, and quarantines the real
-offender. 126 victims traced to 35 offending candidates (top 15 = 67%).
-Attributed-collateral stages are now non-terminal, so the function is re-queued
-rather than retired — the same principle as `bad_target`.
-
-**`cdecl` was never emitted.** `translate_layout_to_spec` took the calling
-convention from the LLM-drafted `param_layout`, which knows which registers
-hold inputs but not who cleans the stack, and defaulted every stack-argument
-function to `stdcall`. `D2Oracle_Call` casts to the declared convention, so a
-cdecl callee declared stdcall means *nobody* pops — ESP leaks 4×argc per call.
-Whether that faults depends on the enclosing epilogue, which is why it showed
-up as a tendency rather than a law: **79% of `marshal_fault` functions end in a
-bare RET against 41% of live-proven ones**. The oracle has accepted `cdecl`
-since it was written (`ParseCallConv`); the translator simply never emitted it.
-The convention is now read from the disassembly, and a `RET n` that contradicts
-the drafted arity is *refused* rather than called — a wrong slot count on a
-callee-cleans convention skews ESP and access-violates the game.
-
-Repair for the existing data:
-`fun-doc/scripts/requeue_collateral_build_failures.py` (dry-run default).
-
-### fun-doc: dependency health monitoring + unattended recovery
-
-**An oracle outage stopped a six-worker prove fleet for 70 minutes and nothing
-recovered it.** Measured 2026-07-30: `consecutive_down: 94`,
-`game_running: false`, `relaunch_stage: null` — *zero* recovery attempts. Three
-correct-in-isolation decisions deadlocked each other:
-
-1. `_maybe_auto_recover` was reachable only via `game_wedged`, which requires
-   `running and not reachable`. A game that fully **exited** had no unattended
-   path back at all.
-2. The need-predicate was "a port worker is running". A dead oracle makes port
-   workers drain into `oracle_unavailable` and exit, so once the last one went
-   the predicate went false and recovery refused with *"nothing needs the
-   oracle right now"*.
-3. Recovery gave up permanently after 3 attempts.
-
-The waste was measurable: `ce0c6ae1` burned 50 of 52 candidates against the
-dead oracle (96%), `9b7d7928` 78 of 100.
-
-**Recovery** (`oracle_health.py`) now triggers on a dead game as well as a
-wedged one, and the need-predicate widened to "a port worker is running **or**
-unresolved port candidates exist" — the durable fact rather than its transient
-consequence. The 3-attempt cap became a *burst*: past it the interval doubles
-to a 30-minute floor and retries continue indefinitely, so an overnight stall
-self-heals instead of waiting for a human, while a permanently broken launcher
-settles at ~2 attempts/hour rather than looping.
-
-**Ghidra** got a monitor at all (`ghidra_health.py`, new). It also emits the
-`ghidra_health` bus event that `audit/rules.yaml`'s `ghidra_offline_sustained`
-rule has been keyed on since Phase 1 — **no production code had ever emitted
-it**, so that rule had never fired in its life. Restore policy is narrower than
-the oracle's by design: launch only when no Ghidra process exists, never kill a
-running one (that risks unsaved programs and stranded shared-server checkouts).
-Two traps it avoids, both live on the dev box: process detection matches
-`ghidra.GhidraClassLoader` rather than a bare `*ghidra*` glob, which would
-false-match this repo's own VSCode Java language server; and install resolution
-prefers the root observed on the running process, because `GHIDRA_INSTALL_DIR`
-pointed at a nonexistent path and `try_launch_ghidra`'s fallback list then
-reached a *different version* that does exist.
-
-**Worker roster** now survives the stop that erases it. `save_priority_queue`
-was *stripping* `dashboard_active_workers` on every write — that, not the
-restore call site, is where auto-restore was really retired, and it is why the
-restart had nothing to offer. The roster is kept and surfaced as a one-click
-banner; auto-restore stays retired, so a crash-looping dashboard can never
-silently re-spawn the fleet.
-
-**PORT workers** stop burning candidates on a dead oracle
-(`PortOracleBackoff`): after 3 consecutive `oracle_unavailable` they wait for
-the oracle instead, heartbeating through `on_idle` so the watchdog does not
-stall-kill them. Capped, so static-harness work is never starved.
-
-**Dashboard** gained a 5-dot header strip (Dashboard · Ghidra · Oracle+Game ·
-Provider · Store) behind `/api/health/all`. The dot that was there before
-reported the *browser's socket.io link*, which stays green while every
-dependency is dead. Degradations also fire a native Windows toast
-(`notify.py`, edge-triggered and rate-limited), and
-`install-scheduled-task.ps1` registers the dashboard to start elevated at logon
-with **no UAC prompt** — which the self-elevating script cannot do.
+A corpus-scale documentation audit built on these bookmarks, and the linter that
+drove it, live in the `d2-game-exe` repository along with the rest of the
+Diablo II reconstruction work. Only the server-side gate is recorded here.
 
 ### `analyze_global_completeness`: an untyped global can never band COMPLETE_80
 
@@ -1648,7 +1602,7 @@ with **no UAC prompt** — which the self-elevating script cannot do.
 core axis budget is name(25) + comment(25) + type(20) + bytes(15) = 85, so an
 untyped global that was perfect on every *other* core axis landed on precisely
 the lowest band floor. It was then counted as documented by the `Complete`
-property map, by fun-doc's `effective_score >= Target` draft gate, and by every
+property map, by any downstream `effective_score >= Target` gate, and by every
 dashboard rollup — for a value whose width and interpretation are still unknown.
 The type is the one axis you cannot read around: a good name and a good plate
 comment describe what the bytes *mean*, not how many of them there are or how to
@@ -1663,136 +1617,12 @@ inflated. The response carries `score_ceiling` / `score_ceiling_reason` so a
 caller can see why it stopped at 79 instead of guessing.
 
 Clamping the score rather than only suppressing the band is deliberate: the band
-is not the only consumer. fun-doc's assess pass tallies `at_target` off
+is not the only consumer. Downstream passes tally `at_target` off
 `effective_score` directly, so a band-only fix would have left untyped globals
 counted at Target while showing no band.
 
 Covered by `com.xebyte.offline.GlobalCompletenessTypeGateTest`, which sweeps the
 whole 0-100 range and asserts no gated score bands.
-
-### fun-doc: pending vectors are namespaced by binary and their append is locked
-
-**Golden-vector staging files were keyed on the function name alone, so different
-binaries' same-named functions merged into one file.** Running Prove (PORT)
-workers on eleven binaries concurrently surfaced it immediately:
-`vectors/_pending/shutdown_stub_no_op.json` had accumulated **101 vectors from
-five DLLs** — D2Common, Bnclient, Fog, Storm and D2CMP — all filed under a single
-`fn: "ShutdownStubNoOp"` key. Those are five distinct compiled functions that
-merely share a stub name, and stub/CRT names (`StubReturnZero`, `strcoll`,
-`NoOp`, `UnwindExceptionFrame`) recur in nearly every D2 DLL. Merging their
-golden values is how false divergences get manufactured — the same failure shape
-as reading `MOVZX` as a 32-bit datum. Four staging files were polluted this way.
-
-`write_pending_vectors` now takes the source binary as its first argument and
-writes `<module>_<system>.json`, mirroring `write_draft`'s `{module}_{symbol}`
-convention, which had this right all along (`Fog_ShutdownStubNoOp.hpp` vs
-`Storm_ShutdownStubNoOp.hpp`). The argument is required, not optional: a default
-would let the bug return silently.
-
-**The append was also an unguarded read-modify-write.** Two workers staging the
-same binary's vectors concurrently lost one side's entries outright — measured at
-up to **23 of 24 concurrent appends dropped**. It is now wrapped in an
-`_interprocess_lock` mirroring `provider_pause`'s (msvcrt/fcntl, fail-open), which
-is required rather than a thread lock because the `--port` CLI runs in a different
-process from the dashboard's worker threads and both call this function. Lock
-files live in the system temp dir, never in `_pending/` — that directory is a
-human-review surface.
-
-`fun-doc/scripts/migrate_pending_vectors.py` re-splits legacy files by the source
-binary recorded in each vector's own `note`, normalizing the two program spellings
-(`/Mods/PD2-S12/D2Common.dll` and bare `D2Common.dll`) to one stem. Dry-run by
-default, archives originals to `_pending/_premigration/` rather than deleting, and
-never drops an unattributable vector. Applied: 148 files migrated, 3,605 vectors
-rewritten, 0 lost, 0 multi-binary files remaining, idempotent on re-run.
-
-### fun-doc: globals lose the DOC_ rung ladder; dashboard read layer un-broken
-
-**The dashboard's Globals and Functions inventories had both been returning zero
-rows against a live Ghidra.** `conformance_dashboard.py` still parsed
-`/list_globals`, `/list_segments` and `/list_functions` as newline text; 6.0.0
-reshaped all three into JSON envelopes, and the `isinstance(txt, str) else ""`
-fallbacks turned each dict into an empty string. Measured on
-`/Mods/PD2-S12/D2Common.dll`: globals `0 → 2,222`, functions `0 → 2,195`,
-`_image_range` `None → 0x6fd50000-0x6fdf9000`.
-
-The 6.0.0 caller sweep had a guard test for exactly this class of miss, and it
-was green — `tests/performance/test_response_contract_callers.py` blanket-exempted
-`conformance_dashboard.py` to keep its endpoint-name contract table quiet, which
-also blinded it to eight real call sites in the same file. The exemption is now
-per-line and shape-based (`("GET", "/path")` table rows), the file is checked,
-and `list_functions` was added to the reshaped-endpoint list. Verified failing on
-a reintroduced bug, not just passing.
-
-**Globals no longer carry DOC_DRAFT / DOC_REVIEWED / DOC_VERIFIED.** A survey of
-all 32 project binaries found 19,996 `Doc` property entries and every one was
-`DOC_DRAFT`: the other two rungs had no producer anywhere and read zero on every
-binary, forever — `DOC_VERIFIED` had no reachable definition at all, since
-there is no proof pipeline for a data address. `DOC_DRAFT` itself was a watermark
-rather than a quality signal (stamped on any global crossing Target, then used as
-the assess pass's skip condition), which is why D2Common read 96% "documented"
-against 51% typed and why 2,142 of its 2,231 globals could never be re-scored.
-4,848 of the entries (28%) also sat on the wrong program — D2CMP.dll held 4,049
-of which only 307 were its own — from `/set_property`'s query-sourced `program`
-parameter being passed in the body.
-
-Globals now have two independent signals:
-
-- **Completeness** — the `Complete` band map (`COMPLETE_80/90/95/100`), machine-scored,
-  live, demoting. This is the single Globals bar; the second "Globals · Documentation"
-  bar and its hatched typed-groundwork underlay are gone. The underlay's `_GLOB_PRIM`
-  regex also disagreed with the Java scorer about what "typed" means (it rejected
-  `int`/`dword`/`word`/`byte`; the scorer only rejects `undefined*`), which is the
-  rest of the 96%-vs-51% gap. One definition now, matching the scorer.
-- **Trust** — `Doc` reduced to the single value `REVIEWED`, meaning a *different*
-  provider re-checked the global against its real uses and left no blocking issues.
-  New `config.globals_audit_provider` (default `null`, separate from the per-function
-  `audit_provider`); it refuses loudly if set to the provider doing the documenting.
-  Manual Confirm/Clear per row via `POST /api/conformance/global_review`.
-
-`run_assess_globals_pass` now re-scores every in-scope global every pass with no
-cache. The scorer is ~15 ms/address measured, so a full 2,231-global sweep is ~32
-seconds — never enough saving to justify a cache that could go stale.
-
-`fun-doc/migrate_doc_map.py` retires the legacy entries: dry-run survey by default,
-always snapshots to `fun-doc/backups/doc_map_<stamp>.json` first, `--apply` to
-clear, `--strays-only` for the wrong-program subset, `--restore` to replay.
-
-`fun-doc/assess_globals_all.py` sweeps the re-score across every project binary and
-reports what moved. Needed because the retired cache had frozen bands project-wide,
-not just on one binary.
-
-### fun-doc: priority_queue.json config writes merge instead of clobbering
-
-`save_priority_queue()` wrote the whole file from the caller's in-memory snapshot,
-making every writer a last-writer-wins clobberer of every other writer. Observed
-live twice while verifying the globals work: `globals_audit_provider` was set
-through the dashboard, confirmed on disk, and then silently reverted to `null` by a
-concurrent process that had loaded the queue before the edit and saved it back
-after. No error, no log line — the setting simply vanished, and it was only caught
-because a worker started afterwards with the wrong policy.
-
-`load_priority_queue()` now stamps a baseline and `save_priority_queue()` does a
-3-way merge on `config`, inside the write lock: a key the caller never touched
-takes whatever is on disk now, a key the caller changed wins. Explicitly setting a
-value to `null` still counts as an opinion, so settings remain clearable. Scoped to
-`config` — `pinned` is a list with add/remove semantics that a blind merge would
-corrupt by resurrecting unpinned entries. Covered by
-`tests/performance/test_queue_config_merge.py`, which reproduces the exact
-production sequence and fails without the merge.
-
-### fun-doc: worker progress counters stop reporting successes as failures
-
-Both the globals and port lanes bucketed "anything that is not `completed` or a
-short list of skips" into `failed`. A globals pass with 2 documented and 1
-legitimately unchanged global reported `failed=1`; the port lane reported 66
-failures that were all ordinary classifications. Both lanes now use their real
-outcome vocabularies — globals: `improved`/`lateral_change` are successes and
-`no_change` is a skip; port: `shadow_leaf_pending` is a success and
-`unknown_skip`/`handle_abort_hazard_skip`/`oracle_unavailable` are skips, leaving
-`harness_failed`/`blocked`/`error` as the only failures. A counter that cries wolf
-trains you to ignore the number that is supposed to mean something.
-
----
 
 ## v6.0.0 - 2026-07-25 (major: security hardening with a breaking default, program storage tools, provider resilience)
 
