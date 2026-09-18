@@ -1,4 +1,4 @@
-package com.xebyte;
+package com.xebyte.offline;
 
 import com.xebyte.headless.HeadlessProgramProvider;
 import com.xebyte.headless.HeadlessProgramProvider.ArchiveResult;
@@ -17,11 +17,17 @@ import static org.junit.Assert.assertTrue;
  * PR #264 ({@code /archive_project}, {@code /restore_project}).
  *
  * <p>Every validation branch in {@code restoreProject} runs <em>before</em> any
- * project or {@link HeadlessArchiveBridge} call, so a fresh
+ * project or {@code HeadlessArchiveBridge} call, so a fresh
  * {@link HeadlessProgramProvider} (no project open) reaches all of them without
  * a live Ghidra project. These pin the path-safety and argument contract so a
  * caller cannot escape {@code parent_dir} or smuggle a traversal
  * {@code project_name}. JUnit 4 to match the sibling security tests.
+ *
+ * <p>Lives in {@code com.xebyte.offline} because that is the package CI's
+ * {@code -Dtest} glob selects. From #264 until issue #483 this class sat in
+ * {@code com.xebyte}, which no glob reaches, so its 9 assertions had never once
+ * executed in CI. {@code tests/unit/test_ci_java_test_globs.py} now fails if a
+ * test class lands outside a selected package again.
  */
 public class GarArchiveRestoreTest {
 
