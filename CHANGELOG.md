@@ -6,6 +6,70 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Added — the MCP bridge is now part of the Docker stack
+
+`docker/Dockerfile.bridge` existed and worked; nothing referenced it, so
+`docker compose up` brought up a Ghidra REST server and no MCP endpoint at all.
+A Dockerfile nothing builds is a file, not a deployment.
+
+`docker compose up -d --build` now starts two containers: `ghidra-mcp` on
+`:8089` (the plugin's plain HTTP API) and `ghidra-mcp-bridge` on `:8081`
+(MCP over streamable-http, at `/mcp`).
+
+Three constraints shape that wiring, and none of them is visible in the YAML:
+
+- **The bridge shares the Ghidra container's network namespace**
+  (`network_mode: "service:ghidra-mcp"`). `validate_server_url()` refuses any
+  Ghidra URL whose host is not loopback, so `http://ghidra-mcp:8089` — the
+  obvious Compose spelling — is rejected before a socket is opened. That rule
+  is not incidental: the bridge speaks plain HTTP with no TLS and forwards a
+  bearer token, so it is deliberately not allowed to send either across a
+  network. Sharing the namespace is what makes `127.0.0.1:8089` mean Ghidra.
+- **The bridge's port is published on the `ghidra-mcp` service.** A container
+  in another container's namespace has no network stack to publish from, and
+  `docker compose config` does not catch a `ports:` entry on such a service —
+  it validates cleanly and fails at `up`.
+- **`GHIDRA_MCP_AUTH_TOKEN` is required, not optional.** `entrypoint.sh` binds
+  `0.0.0.0` and `SecurityConfig.requireAuthForNonLoopbackBind` refuses that
+  bind without a token, so an unset token was never a weaker deployment — it
+  was a container that starts and dies. Both services now take it as
+  `${GHIDRA_MCP_AUTH_TOKEN:?...}`, which turns that into one line at the prompt.
+  The same token is what MCP clients must send as `Authorization: Bearer` once
+  [#438](https://github.com/bethington/ghidra-mcp/pull/438) lands: the bridge
+  binds `0.0.0.0` (a published port cannot reach a loopback bind) while holding
+  a credential for Ghidra, and an unauthenticated bridge in that position is a
+  confused deputy.
+
+`docker-compose.multi.yml` deliberately gets **no** bridge, and now says why:
+`network_mode: "service:X"` names one container and cannot target a scaled
+service, and `nginx.conf` balances with `least_conn` and no session affinity —
+so a bridge in front of it would hand consecutive MCP tool calls to different
+Ghidra instances holding different projects, with a `decompile` and the
+`rename` after it not talking about the same program. That needs a topology
+decision, not a copied service block.
+
+`tests/unit/test_docker_compose_bridge.py` pins every one of these, and asserts
+the configured `GHIDRA_MCP_URL` against the **real** `validate_server_url()`
+rather than a restatement of its rule. It needs no Docker daemon, which is the
+point — the daemon is exactly what CI does not have.
+
+**Verified, and what was not.** The bridge was driven end to end with the real
+MCP client SDK over the exact command line `Dockerfile.bridge`'s `CMD` runs
+(`--transport streamable-http --mcp-host 0.0.0.0 --mcp-port <port>`), against a
+Ghidra reached over loopback: a real `initialize` (protocol `2025-11-25`), a
+real `tools/list` (**117 tools**), and a real `tools/call list_functions`
+returning 464 functions — with the strict offline fake reporting **zero**
+contract violations. The Dockerfile's own build steps were reproduced from only
+the files it copies, producing a working `bridge-mcp-ghidra` console script.
+
+What is **not** verified: `docker compose up` itself. Docker Desktop on the
+machine this was written on cannot start — it dies in
+`initializing Ingest server` on an orphaned `sailor-ingest.sock` that cannot be
+renamed or deleted — so the image build, the shared namespace and the published
+port have not been exercised against a live engine. The compose file is
+validated by `docker compose config`, and the invariants are pinned by tests,
+but a first `docker compose up` on a working engine is still owed.
+
 ### Fixed — a typo in `GHIDRA_MCP_DEPLOY_TESTS` silently skipped every deploy test ([#484](https://github.com/bethington/ghidra-mcp/issues/484))
 
 `--test relase` was rejected by argparse. `GHIDRA_MCP_DEPLOY_TESTS=relase` in a

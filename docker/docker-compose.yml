@@ -1,7 +1,23 @@
-# GhidraMCP Headless Server - Single Instance Deployment
-# Usage: docker-compose up -d
-
-version: '3.8'
+# GhidraMCP - Single Instance Deployment
+#
+#   docker compose up -d --build
+#
+# Two containers:
+#   ghidra-mcp  the headless Ghidra server, plain HTTP on :8089
+#   bridge      the MCP bridge, streamable-http on :8081, for MCP clients
+#
+# Both ports are published on the ghidra-mcp service. See the `bridge` service
+# for why the bridge has no `ports:` of its own.
+#
+# GHIDRA_MCP_AUTH_TOKEN is REQUIRED, not optional. The headless server refuses
+# to bind a non-loopback address without it (SecurityConfig
+# .requireAuthForNonLoopbackBind), and entrypoint.sh binds 0.0.0.0 by default,
+# so the stack genuinely cannot start without one:
+#
+#   export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+#
+# `:?` below turns that into a one-line compose error instead of a container
+# that builds, starts and then dies in its own log.
 
 services:
   ghidra-mcp:
@@ -12,6 +28,14 @@ services:
     container_name: ghidra-mcp
     ports:
       - "8089:8089"
+      # The bridge's MCP port, published HERE rather than on the bridge
+      # service. The bridge shares this container's network namespace, so it
+      # has no network stack of its own to publish from: the engine refuses to
+      # create a container that both publishes a port and joins another
+      # container's namespace ("conflicting options: port publishing and the
+      # container type network mode"). Note that `docker compose config` does
+      # NOT catch this -- it validates fine and fails at `up`.
+      - "8081:8081"
     volumes:
       # Persistent data storage
       - ghidra-data:/data
@@ -22,6 +46,7 @@ services:
     environment:
       - GHIDRA_MCP_PORT=8089
       - JAVA_OPTS=-Xmx4g -XX:+UseG1GC
+      - GHIDRA_MCP_AUTH_TOKEN=${GHIDRA_MCP_AUTH_TOKEN:?set GHIDRA_MCP_AUTH_TOKEN before `docker compose up` - the headless server refuses a non-loopback bind without it}
       # Optional: Auto-load a program on startup
       # - PROGRAM_FILE=/binaries/target.exe
     restart: unless-stopped
@@ -37,6 +62,37 @@ services:
           memory: 6g
         reservations:
           memory: 2g
+
+  bridge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bridge
+    image: ghidra-mcp-bridge:latest
+    container_name: ghidra-mcp-bridge
+    # MUST share the Ghidra container's network namespace.
+    #
+    # validate_server_url() in python/bridge_mcp_ghidra/validation.py refuses
+    # any Ghidra URL whose host is not loopback, so `http://ghidra-mcp:8089`
+    # -- the obvious Compose spelling -- is rejected before a socket is opened.
+    # Sharing the namespace is what makes 127.0.0.1 mean the Ghidra server.
+    # That rule is not incidental: the bridge speaks plain HTTP with no TLS and
+    # forwards a bearer token, so it is deliberately not allowed to send either
+    # across a network.
+    network_mode: "service:ghidra-mcp"
+    depends_on:
+      ghidra-mcp:
+        condition: service_healthy
+    environment:
+      # Explicit rather than relying on config.DEFAULT_TCP_URL, because this is
+      # the line that documents the constraint above.
+      - GHIDRA_MCP_URL=http://127.0.0.1:8089
+      # One token, two directions. Outbound it is sent to the Ghidra server as
+      # `Authorization: Bearer <token>`. Inbound, once #438 lands, the bridge
+      # requires the SAME header from MCP clients, because it binds 0.0.0.0
+      # (a published port cannot reach a loopback bind) and an unauthenticated
+      # non-loopback bridge holding a token for Ghidra is a confused deputy.
+      - GHIDRA_MCP_AUTH_TOKEN=${GHIDRA_MCP_AUTH_TOKEN:?set GHIDRA_MCP_AUTH_TOKEN before `docker compose up`}
+    restart: unless-stopped
 
 volumes:
   ghidra-data:
