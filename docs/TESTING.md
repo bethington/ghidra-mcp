@@ -126,6 +126,8 @@ of it runs offline in the unit tier, with no Ghidra.
 > assertion. `release` is the release-regression workflow's default tier and
 > the gate the release checklist names.
 
+<!-- -->
+
 > **`debugger-live` is restored only in part.** The debuggee binary is back and
 > genuinely runnable, but the tier still needs a Ghidra GUI, a working dbgeng
 > backend and `ghidratrace` in the launcher's Python. Where those are missing it

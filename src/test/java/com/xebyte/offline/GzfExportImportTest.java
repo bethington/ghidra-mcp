@@ -1,4 +1,4 @@
-package com.xebyte;
+package com.xebyte.offline;
 
 import com.xebyte.headless.HeadlessProgramProvider;
 import com.xebyte.headless.HeadlessProgramProvider.ExportResult;
@@ -30,6 +30,12 @@ import static org.mockito.Mockito.when;
  *       tree, and an empty name bypasses validation (it is derived from the
  *       GZF basename downstream).</li>
  * </ul>
+ *
+ * <p>Lives in {@code com.xebyte.offline} because that is the package CI's
+ * {@code -Dtest} glob selects. From #264 until issue #483 this class sat in
+ * {@code com.xebyte}, which no glob reaches, so its 5 assertions had never once
+ * executed in CI. {@code tests/unit/test_ci_java_test_globs.py} now fails if a
+ * test class lands outside a selected package again.
  */
 public class GzfExportImportTest {
 

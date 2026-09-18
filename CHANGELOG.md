@@ -6,6 +6,57 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — 14 offline security tests had never run in CI ([#483](https://github.com/bethington/ghidra-mcp/issues/483))
+
+CI does not run `mvn test`. It runs a filtered build:
+
+```text
+mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+```
+
+Surefire's `*` does not cross the package separator, so `GarArchiveRestoreTest`
+(9 tests) and `GzfExportImportTest` (5 tests) — both in package `com.xebyte` —
+were never selected. They are the path-traversal and exact-name guards added in
+PR #264: the ones that pin that a caller cannot escape `parent_dir`, cannot
+smuggle a traversal `project_name`, and that `exportProgramToGzf` resolves a
+program by an **exact** name rather than a substring. They compiled, they were
+committed, and from #264 until now not one of their assertions had executed.
+
+Measured rather than assumed: the surefire reports published by CI run
+`35343488609` at `0cf545b1` name **59 executed classes**, and neither of those
+two is among them.
+
+Both classes moved to `com.xebyte.offline`, beside `HeadlessPathsTest`, which
+tests the same #264 surface from the package CI already selects. The offline
+Java tier goes from 535 to **549 tests across 56 classes**, all green.
+
+**The move is not the deliverable.** `tests/unit/test_ci_java_test_globs.py`
+is: it enumerates every Java class that declares tests, models Surefire's glob
+semantics over the fully-qualified name, and fails when a class is not selected
+by any `-Dtest` pattern in any workflow. An unselected test cannot fail, so this
+gap is invisible to CI by construction — it needs an offline check, not a
+convention. Exemptions are explicit and carry a reason (the three live-server
+integration classes, and the `RegenerateEndpointsJson` catalog tool), and the
+list is a ratchet in both directions: an entry naming a class that no longer
+exists fails too, so the exemption cannot outlive what it excuses.
+
+Two details the guard had to get right, both found by it failing:
+
+- **Detection is by content, not filename.** A class named `FooTests` is
+  selected by no glob in this repository, and a `*Test.java` scan would agree
+  with the glob rather than check it.
+- **It has to span two JUnit generations.** The first cut scanned for `@Test`
+  and reported that `AppTest`, `EndpointRegistrationTest` and
+  `GhidraMCPPluginTest` did not exist. All three are alive and are JUnit 3 —
+  `extends TestCase`, bare `testXxx()` methods, no annotations at all. A scan
+  that sees only annotations declares the older half of this suite to be
+  not-tests, which is the same blind spot it exists to catch.
+
+It also pins that the offline glob is character-identical in `tests.yml`,
+`release.yml` and `pre-release.yml`. Those three are copies of one command, and
+a release gate quietly running a narrower set than the PR gate is the same bug
+one level up.
+
 ### Fixed — `set_variable_storage` reported storage instead of setting it ([#446](https://github.com/bethington/ghidra-mcp/issues/446))
 
 `/set_variable_storage` was a no-op. It looked the variable up, read its
@@ -623,6 +674,7 @@ different things in different tools (`pattern` is a type name for
 `search_data_types` and a hex byte string for `search_byte_patterns`;
 `source_type` is a Ghidra `SourceType`, not a data type), and a synthesized
 address that is real but wrong for that particular tool.
+
 ### Offline HTTP tier — the integration suite without Ghidra (#112)
 
 `tests/offline/fake_ghidra.py` is a strict fake of the plugin's HTTP surface.
@@ -768,6 +820,7 @@ really returned when the snapshots were recorded. It proves nothing about
 whether Ghidra does the right thing today, and it never will — the payloads are
 frozen. An endpoint with no recording returns a body stamped
 `"_fake": "synthesized"` so an assertion against one cannot look like evidence.
+
 ### The GUI and headless servers do not serve the same routes, and now the catalog says so
 
 `tests/endpoints.json` records a `servers` array per endpoint — `["gui"]`,
@@ -827,15 +880,16 @@ helper's single call site), next to a tool count that was correct. Both now come
 from the catalog via `python -m tools.audit_server_scope --release-counts`, which
 raises rather than defaulting if the catalog is unreadable or unstamped — the
 fallback default is what made two releases publish a wrong number quietly.
+
 ### The real-Ghidra test tier now actually runs
 
 `src/test/java/com/xebyte/core/*GhidraTest.java` builds a real `ProgramDB` through
 `ghidra.program.database.ProgramBuilder` and exercises actual disassembly and
 flow-override repair. It had **never run anywhere**, in either direction:
 
-* with `GHIDRA_INSTALL_DIR` set, all 7 tests died in `@Before` with
+- with `GHIDRA_INSTALL_DIR` set, all 7 tests died in `@Before` with
   `NoClassDefFoundError: org/apache/logging/log4j/LogManager`;
-* with it unset, the `@BeforeClass` `assumeTrue` skipped every one of them — and
+- with it unset, the `@BeforeClass` `assumeTrue` skipped every one of them — and
   that is the branch CI took, so the suite was green while testing nothing.
 
 The cause is that the `ghidra:*` module jars are installed with
@@ -852,20 +906,20 @@ XML), and javahelp — plus `ghidra:Graph`, which every workflow already install
 but the pom never declared. Every one of those except failureaccess is
 load-bearing: removing it turns 7 passing tests into 7 errors.
 
-* **pom.xml** gains a `ghidra-runtime-tests` profile, activated by the presence of
+- **pom.xml** gains a `ghidra-runtime-tests` profile, activated by the presence of
   `GHIDRA_INSTALL_DIR` — exactly the condition the tier's own `assumeTrue` gates on
   — that adds those jars from the installation itself. This is the Maven equivalent
   of what `build.gradle` already did with `fileTree`, which is why the Gradle
   backend was green throughout and only Maven was broken.
-* **CI** now runs the tier in its own step with `GHIDRA_INSTALL_DIR` set. Ghidra is
+- **CI** now runs the tier in its own step with `GHIDRA_INSTALL_DIR` set. Ghidra is
   already downloaded and unzipped for the jar install, so the marginal cost is the
   test time alone (~34 s measured on Linux with Ghidra on local disk). The offline
   step deliberately keeps the variable unset so the coverage ratchet goes on
   measuring the same tier it always measured.
-* The CI step asserts on the **surefire skip counts**, not just on exit status. A
+- The CI step asserts on the **surefire skip counts**, not just on exit status. A
   green `mvn test` is not proof the tier ran — `assumeTrue` reports skips as
   success, which is precisely how this stayed dead.
-* `GhidraRuntimeClasspathGhidraTest` guards the classpath itself, reading the jar
+- `GhidraRuntimeClasspathGhidraTest` guards the classpath itself, reading the jar
   list out of pom.xml rather than restating it. The filenames are version-stamped,
   so a Ghidra upgrade renames them, and a missing classpath element is silently
   ignored by the JVM — it would otherwise resurface as an opaque
@@ -1026,6 +1080,7 @@ Issue forms (`.github/ISSUE_TEMPLATE/`) and a pull request template now ask up
 front for the four things that otherwise cost a round trip on every report:
 Ghidra version, plugin/bridge version, MCP client and transport, and the exact
 command with its exact output.
+
 ### The release gate works again: a benchmark fixture that lives here
 
 The deploy-regression gate was non-functional for three weeks. When `fun-doc/`
