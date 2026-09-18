@@ -115,38 +115,111 @@ Use this file for architecture, conventions, and implementation guidance; use th
 
 ## Build & Deploy
 
-Two backends are supported. Maven is the default used by `tools.setup`; Gradle is available through the wrapper when Maven is not installed or when testing the migration path. Switch with `TOOLS_SETUP_BACKEND=gradle`.
+Two backends are supported and both are maintained. **Gradle is the default for
+local work** — it reads Ghidra's jars straight out of the installation, needs no
+`install-file` step, and is the only backend that works on a machine with no
+Maven. **CI still builds and gates with Maven** (`tests.yml`'s *Java Build
+(Maven)* job, and the same steps in `release.yml`), so Maven is a peer and not a
+fallback: a change that is green under Gradle can still be red in CI for a
+Maven-only reason, and the JaCoCo coverage gate is exactly that reason.
 
-**Gradle fallback / migration path (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
+**Gradle (default):**
 
 ```text
-# Direct Gradle invocation — no tools.setup required
-./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
+./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
+./gradlew verifyVersion  -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
+./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
+./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
+```
 
-# Via tools.setup facade (same commands, Gradle backend)
+Registered tasks: `buildExtension`, `prepareGhidraClasspath`, `verifyVersion`,
+`preflight`, `deployExtension`, `installUserExtension`, `patchGhidraUserConfig`,
+`stopGhidra`, `deploy`, `startGhidra`, `cleanAll`, plus the standard `test`
+(pinned by `tests/unit/test_gradle_tasks.py`).
+
+**Git Bash: forward slashes in the path.** `-PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC`
+is mangled before Gradle sees it, the property resolves to nothing, and you get
+~100 `package ghidra.program.model.address does not exist` errors that read like
+a broken checkout rather than a broken argument. PowerShell takes the backslash
+form.
+
+**Via the `tools.setup` facade** (same commands, Gradle backend):
+
+```text
 $env:TOOLS_SETUP_BACKEND = "gradle"
 python -m tools.setup build
 python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.2_PUBLIC
 python -m tools.setup deploy    --ghidra-path F:\ghidra_12.1.2_PUBLIC
 ```
 
-**Maven (default — existing tooling unchanged):**
+**`deploy --test <tier>` is the one command that must NOT run under the Gradle
+backend.** `build.gradle`'s `deploy` is `stopGhidra` + `deployExtension` +
+`installUserExtension` + `patchGhidraUserConfig` and runs no post-deploy tier, so
+`cmd_deploy` **refuses** a tier there rather than accepting it and dropping it
+(#484). This is not a Maven-binary requirement: the default backend's
+`deploy_to_ghidra` never invokes `mvn` — `find_plugin_archive` takes the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it. So with no Maven installed the working combination is:
 
 ```text
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC   # Gradle builds
+python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC --test release
+```
+
+The two steps want different backends. Do not export
+`TOOLS_SETUP_BACKEND=gradle` for a whole session and then wonder why
+`--test release` refuses.
+
+**Maven (peer backend; what CI uses):**
+
+```text
+python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.2_PUBLIC
 python -m tools.setup build
 python -m tools.setup preflight      --ghidra-path F:\ghidra_12.1.2_PUBLIC
-python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.2_PUBLIC
 python -m tools.setup deploy         --ghidra-path F:\ghidra_12.1.2_PUBLIC
 ```
 
-- Maven: `C:\Users\benam\tools\apache-maven-3.9.6\bin\mvn.cmd`
 - Ghidra install: `F:\ghidra_12.1.2_PUBLIC`
-- `tools.setup` delegates to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route the same commands to Gradle
-- Deploy handles: build, extension install, FrontEndTool.xml patching, Ghidra restart
+- `ensure-prereqs` / `install-ghidra-deps` exist for Maven's benefit: they
+  `install-file` Ghidra's ~19 jars into the local repository. Gradle reads the
+  installation directly via `fileTree`, so the Gradle equivalent is
+  `prepareGhidraClasspath`, and usually nothing at all.
+- `tools.setup` still defaults to Maven (`TOOLS_SETUP_BACKEND` unset). That
+  default is what makes `deploy --test` work; for everything else set the
+  variable or call `./gradlew` directly.
+- Deploy handles: extension install, FrontEndTool.xml patching, Ghidra restart
 - Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
+
+### Maven-only today — no Gradle path exists
+
+Two commands still require Maven. Do not invent a Gradle form for them.
+
+1. **Regenerating the endpoint catalog** —
+   `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`.
+   Gradle *can* select the class (`--tests 'com.xebyte.offline.RegenerateEndpointsJson'`)
+   but **cannot pass the flag that arms it**. `-Dregenerate=true` sets a property
+   on the Gradle *daemon* JVM; `build.gradle`'s `test { }` block forwards only
+   `net.bytebuddy.experimental` and `project.basedir` into the forked test JVM.
+   Measured 2026-09-18: the `Gradle Test Executor` command line carries no
+   `-Dregenerate`, `System.getProperty("regenerate")` returns null, the test
+   returns early, `tests/endpoints.json` is untouched — and the run reports
+   **BUILD SUCCESSFUL**. That silent success is the failure mode to watch for,
+   and it is why this is written down rather than left to be rediscovered.
+2. **The Java coverage gate** — `mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`.
+   JaCoCo is configured in `pom.xml` only; `build.gradle` declares no JaCoCo
+   plugin. This is the concrete way a Gradle-green change goes red in CI.
+3. **The `headless` and `docker` build profiles** —
+   `mvn clean package -P headless -DskipTests` and `-P docker`. Both are
+   `pom.xml` profiles; `build.gradle` registers no equivalent task, and
+   `buildExtension` produces the GUI extension zip, not the headless assembly
+   or the container image.
+
+Everything else — build, offline tier, real-Ghidra tier, deploy, preflight,
+version verification, `cleanAll` — has a working Gradle form, named above.
+`EndpointsJsonParityTest` is **not** in this list: it is an ordinary offline
+test and `./gradlew test --tests 'com.xebyte.offline.*'` runs it. Only the
+*remedy* it prints when it fails is Maven-only.
 
 ## Releases
 
@@ -157,12 +230,17 @@ agent context.
 Release floor before tagging or publishing:
 
 ```text
-python -m tools.setup verify-version
-python -m tools.setup build
+python -m tools.setup verify-version                    # no backend, no Maven needed
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC
 pytest tests/unit/ -v --no-cov
 python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC --test release
 git add docs/releases/live-regression-evidence.json   # the tier writes it; commit it
 ```
+
+**That fourth command must run with `TOOLS_SETUP_BACKEND` unset or `maven`** —
+see "Build & Deploy": the Gradle backend's `deploy` runs no tier and refuses
+one. It does not need the `mvn` binary; it deploys whatever archive the third
+step produced.
 
 Run UI-touching deploy/regression only after confirming the current Ghidra UI
 state when modal dialogs may be present.
@@ -210,7 +288,7 @@ Ghidra HTTP endpoint: `http://127.0.0.1:8089`
 3. Regenerate `tests/endpoints.json`, then re-stamp and re-render what reads it:
 
    ```text
-   mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
+   mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only, no Gradle path
    python -m tools.audit_server_scope --write        # the `servers` field
    python -m tools.gen_readme_api_reference --write  # README API Reference
    ```
@@ -267,7 +345,7 @@ Four tiers by cost and prerequisites:
    speaks the protocol and that shapes match the recordings; it proves nothing about what
    Ghidra does today, and a test that implies otherwise is worse than no test.
 3. **Real-Ghidra** (`src/test/java/com/xebyte/core/*GhidraTest.java`) — builds an actual `ProgramDB` via `ProgramBuilder`. Needs a Ghidra **installation** (`GHIDRA_INSTALL_DIR`) but no running server and no project. ~30s.
-4. **Integration** (`pytest tests/` + `mvn test`) — requires live Ghidra on port 8089 with a binary open. Slow and stateful.
+4. **Integration** (`pytest tests/` + `./gradlew test`, or `mvn test`) — requires live Ghidra on port 8089 with a binary open. Slow and stateful.
 
 ### Match change → tests
 
@@ -287,7 +365,7 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | `src/main/java/com/xebyte/core/DataTypeService.java` — `auditGlobalAt`'s export gate (`is_export`) | Offline (Java) `NamingConventionsTest` for `isOrdinalExportName`; live `audit_global` on a named data export. **A NAMED export's name is the ABI contract and must never be audited into `g_` form** — the consuming loader resolves that exact string. Measured 2026-08-04 on PD2_EXT.dll, which is a `version.dll` PROXY: all 12 named exports are forwarder strings (`"version.VerFindFileW"`) and it has no real code exports at all. A globals pass renamed every one — `GetFileVersionInfoA` → `g_szImportNameGetFileVersionInfoA`, and `GetFileVersionInfoW` → `g_szVerFileVersionApi`, which does not even name the right export — plus mis-typed three of them (`char *` and `dword` on 24-byte strings). `list_exports` then showed both `Ordinal_1` and the invented global at one address. The model that first refused ("would destroy the canonical exported API identity") was RIGHT; nothing in the tool layer backed it, so a later pass did it anyway. **The exemption is name-only** — type and plate checks still fire, so a forwarder still needs its exact `char[N]`. **It must NOT be a blanket "exports are untouchable" rule**: D2's DLLs export almost everything by ORDINAL, Ghidra names those `Ordinal_10001`, and renaming them is the core workflow — `isOrdinalExportName` is the discriminator. Blast radius measured corpus-wide: 7,172 named *code* exports (unaffected, code-address guard) and 28 named *data* exports, of which 16 already had good `g_` names, so the rule's real effect is exactly the 12 forwarders — plus correctly protecting `g_dwNvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance`, which drivers look up BY NAME. |
 | `src/main/java/com/xebyte/core/DataTypeService.java` — `auditGlobalAt`'s interior detection | Offline (Java) + live `audit_global` on a known interior address. `audit_global` must keep distinguishing "no data here" from "swallowed by a unit that starts earlier" (`interior_to_data` + the `container` block). The difference is not cosmetic: **`/list_globals` resolves the CONTAINING data unit**, so it reports the EATER's type at a dead address and the dashboard renders a destroyed global as perfectly typed. On PD2_EXT.dll the types bar counted 1 untyped while `audit_global` counted 3; corpus-wide 540 of 541 damaged globals were invisible to every dashboard read. Severity is deliberately **soft** — `untyped` (hard) already fires for every interior global, and a second blocking issue would send the worker chasing a fix that needs a human judgement call (either the container's length is wrong or the interior symbol shouldn't exist). |
 | `src/main/java/com/xebyte/core/SymbolLabelService.java` — `rename_symbol` / `rename_symbol` validator hook | Offline (Java) `NamingConventionsTest` for the rule; `tests/integration/test_global_endpoints.py` for the structured-rejection round-trip. |
-| Add/modify `@McpTool` / `@Param` annotation | Offline (Java) first — `EndpointsJsonParityTest` will fail if `tests/endpoints.json` is stale. Regenerate: `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`, **then** `python -m tools.gen_readme_api_reference --write` (regenerating the catalog red-lines `tests/unit/test_project_consistency.py` otherwise). Then Integration (Java). |
+| Add/modify `@McpTool` / `@Param` annotation | Offline (Java) first — `EndpointsJsonParityTest` will fail if `tests/endpoints.json` is stale. Regenerate: `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` (**Maven only** — Gradle cannot pass `-Dregenerate` into the forked test JVM and exits BUILD SUCCESSFUL having regenerated nothing), **then** `python -m tools.gen_readme_api_reference --write` (regenerating the catalog red-lines `tests/unit/test_project_consistency.py` otherwise). Then Integration (Java). |
 | `@McpTool(category=)` / `@McpToolGroup` / `ManualToolDescriptors` category | Offline (Java) `EndpointsJsonParityTest` (3 category guards) + `pytest tests/unit/test_audit_endpoint_categories.py`. **`category` is the tool GROUP the bridge lazy-loads by** — `list_tool_groups`/`load_tool_group`/`check_tools` and `CORE_GROUPS = {listing, function, program}` all key on it, read from `/mcp/schema`, never from the catalog. Because nothing compared the two, 63 of 219 catalog entries drifted onto a dead pre-tool-group verb taxonomy (`getter`/`rename`/`decompile`/`search`/`script`) naming groups no `load_tool_group` call can resolve, and understated 27 tools — `decompile_function`, `rename_function`, `search_functions`, `run_ghidra_script` among them — as outside the default groups. `RegenerateEndpointsJson` no longer preserves the catalog's category (preserving it copied the stale value forward on every regeneration); to move a tool between groups edit the annotation and regenerate. Reproduce the drift without Maven or Ghidra: `python -m tools.audit_endpoint_categories`. |
 | `src/main/java/com/xebyte/GhidraMCPPlugin.java` (HTTP routes) | Offline (Java) + `EndpointRegistrationTest` (integration) + `tests/performance/test_http_concurrency.py`. For UDS/TCP defaults + TCP port-range fallback (#175): manual verification with port 8089 occupied, expect bind on 8090; `/mcp/instance_info → tcp_port` should report the actual bound port. |
 | `src/main/java/com/xebyte/headless/*` | Offline (Java) + `tests/unit/test_setup_ghidra.py` + Integration (Java) headless run |
@@ -297,7 +375,7 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | `tools/upgrade_project_language.py` | `tests/unit/test_upgrade_project_language.py` (offline) + a live dry run, then `--apply` on ONE folder before the corpus. **Ghidra records the SLEIGH language version a Program was built against, and a bump makes every older program open READ-ONLY** — measured 2026-08-09, the whole `diablo2` repo sat at `x86:LE:32:default` **4.6** against 12.1.2's **4.7**, and the symptom was "binaries open read-only and edits vanish". This is NOT the Ghidra DB schema version (`ProgramDB.DB_VERSION` was 32 on both sides, and `UPGRADE_REQUIRED_BEFORE_VERSION = 19` only gates *read-only* opens); the line that bites is `openMode == UPDATE && storedVersion < DB_VERSION`, and the language check is the parallel one in `LanguageVersionException`. A *minor* bump (4.6→4.7) returns a null `languageUpgradeTranslator` — no re-disassembly, no re-analysis, documentation safe; a *major* bump is a different operation this tool reports rather than performs. **`-commit` is load-bearing, not cosmetic**: `HeadlessAnalyzer` does `domFile.checkout(options.commit, ...)`, so without it the checkout is NON-exclusive, the upgrade cannot happen, and the run completes cleanly having upgraded nothing. `-noanalysis` is unconditional — auto-analysis over curated programs is the one irreversible mistake here. **The MCP server can never fix this itself**: every GUI-side open passes `okToUpgrade=false` (`FrontEndProgramProvider:452`, `ProgramScriptService:1815`), so it can only report `Minor language change 4.6 -> 4.7`; only `HeadlessProgramProvider` passes `true`. Three traps that each produced a silent no-op: a `ghidra://` URL sees **only versioned files** (9 private programs are unreachable and must not be counted as covered); Git Bash rewrites `--folder /Vanilla/1.01` into `C:\Program Files\Git\...`; and a check-in comment containing **parentheses** kills `analyzeHeadless.bat` with `"" was unexpected at this time` before the JVM starts. Files already checked out by the GUI project are skipped — headless is a separate project instance and cannot take an exclusive checkout on them. Credentials come from `<ghidra_dir>/.env` (`GHIDRA_SERVER_PASSWORD`), the same file `GhidraMCPAuthInitializer` reads; name outranks source, because an ambient `GHIDRA_PASS` holding a credential the server rejects otherwise beats it and presents as an auth outage. **It is NOT idempotent and `--apply` must not be used as its own verification** — `HeadlessAnalyzer` runs `if (canSave()) save()` then `commitProgram()` unconditionally, and `canSave()` is true for any checked-out file regardless of changes, so every pass writes a new server version for every file it touches; Ghidra logs *nothing* on a language upgrade, so the log cannot tell "upgraded" from "re-committed unchanged" (measured: a second full pass moved all 517 files up another version having upgraded none). A whole-project `--apply` therefore refuses within 24h of a previous one unless `--force`. **`--verify` is the verification step and leaks an exclusive checkout per probed program**: forcing a read-WRITE open needs a checkout, and `open_program` registers a `DomainObject` consumer nothing releases, so `undo_checkout` then fails `"<name> is in use"` forever — `close_program` reports `closed_count: 0, released_cache: false` and cannot help. Measured: a 152-program probe stranded 140 checkouts. Keep `--verify-sample` at 1-2; clear leftovers with a Ghidra restart then `--release-checkouts` (which only ever releases paths the tool recorded creating — undoing an arbitrary checkout discards whatever local work it held). Paths must be parsed with `(.+?)` and never `\S+`: `Diablo II.exe` (present in all 25 Vanilla folders) contains a space, which made the skip lines fail to match entirely and silently dropped the file from the tally. |
 | `python/bridge_mcp_ghidra/debugger.py` (the 22 proxy tools) | `tests/unit/test_bridge_utils.py::TestDebuggerEnabled` + `::TestDebuggerToolRegistration`. The debugger SERVER moved to `d2-game-exe` on 2026-08-11 along with its 7 unit tests; these gate whether the proxies register at all, so they are what stops the bridge advertising 22 tools that point at nothing. |
 | **Adding any Java test class** under `src/test/java/` | `pytest tests/unit/test_ci_java_test_globs.py --no-cov` + Offline (Java). **CI never runs `mvn test`** -- it runs `-Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`, and Surefire's `*` does not cross the package separator. A class in any other package is compiled, committed and NEVER SELECTED, and an unselected test cannot fail, so nothing reports it: `GarArchiveRestoreTest` + `GzfExportImportTest` (#264's 14 path-traversal / exact-name security guards) sat in `com.xebyte` and had never executed in CI until #483. Put the class in `com.xebyte.offline` (offline tier) or `com.xebyte.core` (Mockito + real-Ghidra tier); `com.xebyte.*Test` is NOT the fix -- it sweeps in the three live-server integration classes. The guard detects tests by **content across two JUnit generations**, not by a `*Test.java` filename: a filename scan agrees with the glob instead of checking it, and an `@Test`-only scan calls `AppTest`/`EndpointRegistrationTest`/`GhidraMCPPluginTest` (JUnit 3, `extends TestCase`, no annotations) not-tests. `UNSELECTED_BY_DESIGN` is a ratchet in both directions -- a stale entry fails too. It also pins the offline glob identical across `tests.yml`/`release.yml`/`pre-release.yml`. |
-| pom.xml `ghidra-runtime-tests` profile / `src/test/java/com/xebyte/core/*GhidraTest.java` | Real-Ghidra tier under **both** backends -- `mvn test -Dtest='com.xebyte.core.*GhidraTest' -Djacoco.skip=true` and `./gradlew test --tests 'com.xebyte.core.*GhidraTest' -PGHIDRA_INSTALL_DIR=...`. **Check the skip count, not the exit status.** `assumeTrue` reports a skipped tier as SUCCESS, which is how this tier managed to never run anywhere until 2026-08-31: with `GHIDRA_INSTALL_DIR` set it died in `@Before` with `NoClassDefFoundError: org/apache/logging/log4j/LogManager`, and with it unset every test self-skipped -- and CI took the second branch. `install-file` records **no transitive dependencies**, so none of the dozen libraries Ghidra bundles for loading a SLEIGH language were on Maven's test classpath; the profile adds them from the installation, which is what `build.gradle`'s `fileTree` already did (Gradle was green throughout -- only Maven was broken). `setInitializeLogging(false)` does NOT avoid the log4j requirement: `DefaultLanguageService`'s static initializer resolves `LogManager` before any flag is read. The jar filenames are **version-stamped**, so a Ghidra upgrade renames them and the JVM silently ignores the missing element -- `GhidraRuntimeClasspathGhidraTest` exists to turn that into a named failure, and it reads the list out of pom.xml rather than restating it. Both silent-skip routes are closed: CI asserts on surefire's `skipped` attribute, and `build.gradle` forwards `-PGHIDRA_INSTALL_DIR` into the test task's environment (without that, the documented Gradle command reported BUILD SUCCESSFUL while skipping all 9). |
+| pom.xml `ghidra-runtime-tests` profile / `src/test/java/com/xebyte/core/*GhidraTest.java` | Real-Ghidra tier under **both** backends -- `./gradlew test --tests 'com.xebyte.core.*GhidraTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"` and `mvn test -Dtest='com.xebyte.core.*GhidraTest' -Djacoco.skip=true`. **Check the skip count, not the exit status.** `assumeTrue` reports a skipped tier as SUCCESS, which is how this tier managed to never run anywhere until 2026-08-31: with `GHIDRA_INSTALL_DIR` set it died in `@Before` with `NoClassDefFoundError: org/apache/logging/log4j/LogManager`, and with it unset every test self-skipped -- and CI took the second branch. `install-file` records **no transitive dependencies**, so none of the dozen libraries Ghidra bundles for loading a SLEIGH language were on Maven's test classpath; the profile adds them from the installation, which is what `build.gradle`'s `fileTree` already did (Gradle was green throughout -- only Maven was broken). `setInitializeLogging(false)` does NOT avoid the log4j requirement: `DefaultLanguageService`'s static initializer resolves `LogManager` before any flag is read. The jar filenames are **version-stamped**, so a Ghidra upgrade renames them and the JVM silently ignores the missing element -- `GhidraRuntimeClasspathGhidraTest` exists to turn that into a named failure, and it reads the list out of pom.xml rather than restating it. Both silent-skip routes are closed: CI asserts on surefire's `skipped` attribute, and `build.gradle` forwards `-PGHIDRA_INSTALL_DIR` into the test task's environment (without that, the documented Gradle command reported BUILD SUCCESSFUL while skipping all 9). |
 | `.github/workflows/release.yml` / `pre-release.yml` publish gate, `tools/release_evidence.py` | `pytest tests/unit/test_release_evidence.py --no-cov`. **`needs.release-regression.result == 'skipped'` was accepted, and a TAG PUSH always skips it** -- that job's `if` requires `workflow_dispatch` -- so the live-regression gate had never blocked a tagged release and structurally could not. It cannot be fixed by running the tier in CI: it needs a live Ghidra GUI on Windows, targets `[self-hosted, Windows]`, and **0 self-hosted runners are registered** by choice (on a public repo, labelling a fork PR runs a stranger's code on Ben's machine). The gate is therefore RECORDED LOCAL EVIDENCE: a passing `--test release` writes `docs/releases/live-regression-evidence.json` and both workflows verify it. It pins a **source fingerprint, never a timestamp** -- a timestamp says a regression ran, not that it ran against this code. **Line endings are normalised in `release_evidence.py`, NOT delegated to `git hash-object`**: the maintainer's Windows tree really is CRLF (`pom.xml`, `build.gradle`, `tests/endpoints.json`) and the release runner's is LF, and `git hash-object` normalises them only *usually* -- measured, it cleans CRLF to the stored blob in this checkout and does NOT in a fresh clone with identical `core.autocrlf=true`. Files with a NUL byte (the fixture's PE images) are hashed raw; everything else has CRLF collapsed. Scope is deliberately narrow (`src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`, `tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`, `build.gradle`) so writing the release notes does not invalidate hours of live testing -- a gate people route around is not a gate. **Never give these checks a fallback**: `release.yml`'s `\|\| echo "0"` on a deleted `EndpointRegistry.java` published `Headless Endpoints: 1` in v6.0.0. |
 | `tools/setup/*`, `build.gradle`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_gradle_tasks.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
 | Deploy test tiers — `DEPLOY_TEST_MODES`, `resolve_deploy_test_modes`, `run_deploy_tests`' dispatch chain | `tests/unit/test_setup_ghidra.py` + `tests/unit/test_setup_cli.py`. **`DEPLOY_TEST_MODES` in `ghidra.py` is the ONLY tier list** — `--test`'s argparse `choices` reads from it and the `.env` value is validated against it, because the two routes disagreed silently: `--test relase` was rejected, but `GHIDRA_MCP_DEPLOY_TESTS=relase` resolved to `['relase']`, the dispatch `elif` chain had no `else`, and deploy **exited 0 having run only the smoke test** (#484) — with `deploy --test release` being this file's fourth release-floor command. Both directions are closed: an unknown tier is refused (never ignored), and a tier listed in `DEPLOY_TEST_MODES` with no dispatch branch raises `UnknownDeployTestMode` instead of reporting a pass for an implementation that does not exist. The **Gradle backend refuses tier requests** rather than accepting them: `build.gradle`'s `deploy` is `stopGhidra` + `deployExtension` + `installUserExtension` + `patchGhidraUserConfig` and runs no tier, so `TOOLS_SETUP_BACKEND=gradle deploy --test release` used to exit 0 having run nothing — the same silence through a different door. Resolution happens FIRST in `cmd_deploy`, before anything is built, copied or restarted. |
@@ -318,26 +396,44 @@ pytest tests/unit/ --no-cov
 **Offline Java (scanner + endpoints.json parity, ~11 tests, <1s):**
 
 ```text
-# Gradle
-./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-# Maven
+# Gradle (default) — Git Bash needs the forward-slash path
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+# Maven (peer)
 mvn test -Dtest='com.xebyte.offline.*Test'
+```
+
+The two select a slightly different set on purpose: Maven's `*Test` filter
+excludes the `RegenerateEndpointsJson` helper class, Gradle's
+`com.xebyte.offline.*` includes it. It is inert either way — see "Maven-only
+today" for why Gradle cannot arm it.
+
+**Whole Java suite (what a pre-push check should run):**
+
+```text
+./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
 ```
 
 **Real-Ghidra (a Ghidra INSTALL, not a running server — 9 tests, ~30s):**
 
 ```text
-# Gradle — build.gradle already puts the whole installation on the classpath via fileTree
-./gradlew test --tests 'com.xebyte.core.*GhidraTest' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC
-# Maven — the ghidra-runtime-tests profile activates off GHIDRA_INSTALL_DIR being set
+# Gradle (default) — build.gradle puts the whole installation on the classpath via fileTree
+./gradlew test --tests 'com.xebyte.core.*GhidraTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+# Maven (peer) — the ghidra-runtime-tests profile activates off GHIDRA_INSTALL_DIR being set
 mvn test -Dtest='com.xebyte.core.*GhidraTest' -Djacoco.skip=true
+```
+
+**Java coverage gate — Maven only** (no JaCoCo in `build.gradle`; this is what
+CI runs, so a Gradle-green change can still be red here):
+
+```text
+mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
 ```
 
 **Integration (Ghidra running on 8089 with a binary open):**
 
 ```text
 # Java
-./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC   # or: mvn test
+./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"   # or: mvn test
 # Python — subset by marker
 pytest tests/ -m readonly          # safe, no writes
 pytest tests/ -m safe_write        # identity writes only
@@ -346,11 +442,27 @@ pytest tests/                      # full suite, includes mutating tests
 
 ### Catalog drift
 
-If `EndpointsJsonParityTest` fails after `@McpTool` edits, regenerate `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes; `category` always comes from the annotation):
+If `EndpointsJsonParityTest` fails after `@McpTool` edits, regenerate
+`tests/endpoints.json` from the scanner (preserves hand-authored descriptions and
+hand-registered routes; `category` always comes from the annotation).
+
+**This step needs Maven and there is no Gradle path** — Gradle can select the
+class but cannot pass `-Dregenerate=true` into the forked test JVM, so it exits
+BUILD SUCCESSFUL having regenerated nothing. See "Maven-only today".
 
 ```text
-mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
+python -m tools.audit_server_scope --write         # stamp `servers` on new entries
 python -m tools.gen_readme_api_reference --write   # else test_project_consistency red-lines
+```
+
+Detecting the drift needs neither backend:
+
+```text
+./gradlew test --tests 'com.xebyte.offline.EndpointsJsonParityTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+python -m tools.audit_endpoint_categories          # category drift, no Maven, no Ghidra
+python -m tools.audit_server_scope --check         # `servers` drift
+pytest tests/unit/test_published_counts.py         # any published count vs the catalog
 ```
 
 ## Key Gotchas

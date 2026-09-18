@@ -63,13 +63,18 @@ rg -n "OLD_VERSION|NEW_VERSION|MCP Tools|GUI Endpoints|Headless Endpoints|total_
 Run the cheap gates before any live Ghidra work:
 
 ```text
-python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
-python -m tools.setup build
+./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
 uv build                                  # build the ghidra-mcp-bridge wheel (-> dist/)
 uv run pytest tests/unit/ -v --no-cov
 git diff --check
 git diff --cached --check
 ```
+
+Gradle is the default backend. The Maven equivalents
+(`python -m tools.setup preflight --ghidra-path ...` /
+`python -m tools.setup build`) still work and are what CI runs, but they need
+Maven on PATH and Ghidra's jars installed into the local repository first.
 
 `bump-version` keeps `pyproject.toml` (the wheel version) and the
 `python/bridge_mcp_ghidra/__init__.py` `__version__` fallback in lockstep with
@@ -84,9 +89,14 @@ For setup/version/catalog changes, also run:
 pytest tests/unit/test_version_bump.py tests/unit/test_endpoint_catalog.py tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py -v --no-cov
 ```
 
-For Java endpoint/catalog changes, run the offline Java scanner/parity tests.
-On a clean machine the Ghidra JARs must be in the local Maven repository first,
-or dependency resolution fails before any test runs:
+For Java endpoint/catalog changes, run the offline Java scanner/parity tests:
+
+```text
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+```
+
+Under Maven the Ghidra JARs must be in the local repository first, or dependency
+resolution fails before any test runs. Gradle needs no such step:
 
 ```text
 python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
@@ -94,10 +104,18 @@ mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
 If `EndpointsJsonParityTest` fails, `tests/endpoints.json` is stale. Regenerate
-it, then refresh the generated README API section it feeds:
+it, re-stamp the `servers` field, then refresh the generated README API section
+it feeds.
+
+**The regenerator needs Maven and has no Gradle form** — Gradle can select the
+class but cannot pass `-Dregenerate=true` into the forked test JVM, so it exits
+BUILD SUCCESSFUL having regenerated nothing. If Maven is not available, the
+catalog cannot be regenerated on this machine; get Maven, or regenerate
+elsewhere.
 
 ```text
-mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
+python -m tools.audit_server_scope --write
 python -m tools.gen_readme_api_reference --write
 ```
 

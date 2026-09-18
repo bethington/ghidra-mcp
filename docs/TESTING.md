@@ -47,8 +47,14 @@ the smoke test (#484). Set it to `off` to run no tiers.
 The Gradle backend (`TOOLS_SETUP_BACKEND=gradle`) also **refuses** a tier
 request rather than accepting it: `build.gradle`'s `deploy` task is
 `stopGhidra` + `deployExtension` + `installUserExtension` +
-`patchGhidraUserConfig` and runs no post-deploy tier at all. Use the Maven
-backend for tiered deploys.
+`patchGhidraUserConfig` and runs no post-deploy tier at all. Use the **default
+(Maven) backend** for tiered deploys — leave `TOOLS_SETUP_BACKEND` unset. That
+is a backend *selector*, not a requirement for the `mvn` binary:
+`deploy_to_ghidra` never invokes Maven, it deploys the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it. So `./gradlew buildExtension` followed by
+`python -m tools.setup deploy --test release` is the working combination on a
+machine with no Maven installed.
 
 ## What Runs by Default
 
@@ -166,7 +172,10 @@ Python executable Ghidra should use for debugger launches.
 `.github/workflows/tests.yml` runs on pull requests and pushes to `main` and
 `develop`. It runs the merge-gating checks that work on GitHub-hosted runners:
 
-- Maven build and offline Java tests.
+- Maven build and offline Java tests, under the JaCoCo coverage gate. **CI
+  builds with Maven, not Gradle** — Gradle is the default for local work, but
+  it declares no JaCoCo plugin, so the coverage gate is the one check that a
+  Gradle-only contributor cannot reproduce locally.
 - Python unit tests across supported Python versions.
 - Pester setup tests on Windows.
 - Documentation linting.

@@ -72,8 +72,8 @@ gates on.
 | Java | 21 LTS | Any Java build or test |
 | Python | 3.10–3.13 | Bridge, `tools.setup`, Python tests |
 | [uv](https://docs.astral.sh/uv/) | current | Dependency resolution from `uv.lock` |
-| Maven | 3.9+ | Default Java backend |
-| Gradle | bundled wrapper (`./gradlew`) | Alternative Java backend |
+| Gradle | bundled wrapper (`./gradlew`) | Default Java backend — nothing to install |
+| Maven | 3.9+ | Peer Java backend; what CI builds and gates with |
 | Ghidra | 12.1.2 | Compiling against Ghidra's jars; all live tiers |
 
 Python-only changes need Java and Ghidra for nothing at all.
@@ -100,23 +100,77 @@ No Ghidra path configured; skipped Ghidra-specific preflight checks.
 Add `--ghidra-path <dir>` to also validate the install and that its version
 matches `pom.xml`.
 
+**If you do not have Maven, that command exits 1** with a single line,
+`Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools
+path.`, and reports nothing else — it locates Maven before it checks anything,
+even though Gradle is now the default backend and a Python-only contributor
+needs neither. Use the Gradle backend instead, which reports the same things and
+more:
+
+```text
+TOOLS_SETUP_BACKEND=gradle python -m tools.setup preflight --ghidra-path <dir>
+# or, equivalently
+./gradlew preflight -PGHIDRA_INSTALL_DIR=<dir>
+```
+
+```text
+> Task :verifyVersion
+Project version         : 7.0.0
+Ghidra version (pom.xml): 12.1.2
+Ghidra install dir      : ...
+Ghidra version (install): 12.1.2
+Version check passed.
+
+> Task :preflight
+Java: available
+Ghidra jars: all 18 present
+Write access: Ghidra install extensions dir OK
+Write access: user extensions dir OK
+Preflight passed.
+```
+
+The Maven-first ordering in the default backend's `preflight` is a known rough
+edge, not a requirement.
+
 ## Build
 
-Two Java backends are supported and both are maintained. Maven is the default;
-Gradle exists as the migration path
-([checklist](docs/project-management/GRADLE_MIGRATION_CHECKLIST.md)). Pick
-either — CI builds with Maven.
+Two Java backends are supported and both are maintained. **Gradle is the
+default** and needs nothing installed beyond a JDK. **Maven is a peer, not a
+fallback** — CI builds and gates with it
+([migration checklist](docs/project-management/GRADLE_MIGRATION_CHECKLIST.md)),
+so a change that is green under Gradle can still be red in CI for a Maven-only
+reason. The JaCoCo coverage gate is that reason; see "Coverage" below.
 
-### Maven (default)
+### Gradle (default)
+
+Gradle reads the jars straight out of the Ghidra installation, so there is no
+`install-file` step and no local repository to warm:
+
+```text
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<your-ghidra-install>
+```
+
+This produces `build/distributions/GhidraMCP-<version>.zip` (the Ghidra
+extension archive).
+
+To route the `tools.setup` commands through Gradle, set
+`TOOLS_SETUP_BACKEND=gradle`. One exception:
+`python -m tools.setup deploy --test <tier>` must run with that variable
+**unset**, because `build.gradle`'s `deploy` task runs no post-deploy test tier
+and the CLI refuses the flag rather than accepting it and silently skipping it.
+Deploy does not need Maven either way — it takes the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it.
+
+### Maven (peer backend; what CI uses)
 
 ```text
 python -m tools.setup build
 ```
 
 This wraps `mvn clean package assembly:single` and produces
-`target/GhidraMCP-<version>.jar` and `target/GhidraMCP-<version>.zip` (the
-Ghidra extension archive). Verified: `BUILD SUCCESS`, about 10 seconds on a warm
-local repository.
+`target/GhidraMCP-<version>.jar` and `target/GhidraMCP-<version>.zip`. Verified:
+`BUILD SUCCESS`, about 10 seconds on a warm local repository.
 
 The first Maven build needs Ghidra's jars installed into your local repository:
 
@@ -124,17 +178,8 @@ The first Maven build needs Ghidra's jars installed into your local repository:
 python -m tools.setup ensure-prereqs --ghidra-path <your-ghidra-install>
 ```
 
-### Gradle
-
-Gradle reads the jars straight out of the Ghidra installation, so there is no
-`install-file` step:
-
-```text
-./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<your-ghidra-install>
-```
-
-To route the `tools.setup` commands through Gradle instead of Maven, set
-`TOOLS_SETUP_BACKEND=gradle`.
+Gradle needs no equivalent step; its `prepareGhidraClasspath` task exists for
+symmetry.
 
 **Git Bash users: use forward slashes in the Ghidra path.** A Windows-style
 backslash path is mangled before Gradle sees it, `GHIDRA_INSTALL_DIR` resolves
@@ -182,21 +227,33 @@ pass.
 ### Offline Java tests — needs the Ghidra jars, no running Ghidra
 
 ```text
-# Maven
-mvn test -Dtest='com.xebyte.offline.*Test'
-
-# Gradle
+# Gradle (default)
 ./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=<path>"
+
+# Maven (peer)
+mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
 Verified: 444 tests via Maven (44 suites) and 445 via Gradle (45 suites), 0
 failures either way. The one-test difference is not a discrepancy: Maven's
 `*Test` filter excludes the `RegenerateEndpointsJson` helper class, while
 Gradle's `com.xebyte.offline.*` matches it. It is inert unless you pass
-`-Dregenerate=true`.
+`-Dregenerate=true`, **which Gradle cannot do** — see the catalog-regeneration
+gotcha below.
+
+To run the whole Java suite the way a pre-push check should:
+
+```text
+./gradlew test "-PGHIDRA_INSTALL_DIR=<path>"
+```
+
+### Coverage — Maven only
 
 CI additionally runs `com.xebyte.core.*Test` in the same command — those are
-Mockito/ProgramBuilder tests that need no server either. To match CI exactly:
+Mockito/ProgramBuilder tests that need no server either — under the JaCoCo
+coverage gate. **There is no Gradle equivalent**: JaCoCo is configured in
+`pom.xml` and `build.gradle` declares no JaCoCo plugin, so this is the one way a
+Gradle-green change comes back red from CI. To match CI exactly:
 
 ```text
 mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
@@ -311,9 +368,19 @@ catches — in a *different* test tier, so fixing the first failure hands you a
 second one in the other language. Run both:
 
 ```text
-mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
 python -m tools.gen_readme_api_reference --write
 ```
+
+**The first command needs Maven and has no Gradle form.** Gradle can select the
+class, but `-Dregenerate=true` sets a property on the Gradle *daemon* JVM and
+`build.gradle`'s `test { }` block forwards only `net.bytebuddy.experimental` and
+`project.basedir` into the forked test JVM. Measured: the test executor's
+command line carries no `-Dregenerate`, the regenerator's
+`System.getProperty("regenerate")` gate returns early, `tests/endpoints.json` is
+not rewritten — and the run reports **BUILD SUCCESSFUL**. If you do not have
+Maven, say so in the pull request and leave the catalog alone; a maintainer will
+regenerate it.
 
 Both are idempotent. Verified against a clean tree: the Maven step exits 0 and
 leaves `tests/endpoints.json` unchanged, and the Python step prints `README API

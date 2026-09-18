@@ -25,12 +25,13 @@ Tick what you ran and paste the result. **"Could not run — no Ghidra project s
 up" is a completely acceptable answer.** Saying nothing is not.
 
 - [ ] `uv run pytest tests/unit/` — Python unit tier, no Ghidra needed
-- [ ] `mvn test -Dtest='com.xebyte.offline.*Test'` — offline Java tier, needs the
-      Ghidra jars but no running server
+- [ ] `./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=<dir>"`
+      — offline Java tier, needs a Ghidra install but no running server and no
+      Maven (`mvn test -Dtest='com.xebyte.offline.*Test'` is the Maven equivalent)
 - [ ] `powershell -File tests\pester\Run-Tests.ps1` — only if you touched
       `ghidra-mcp-setup.ps1`
-- [ ] Live tier (`pytest tests/ -m readonly`, `mvn test`) — needs Ghidra running
-      on port 8089 with a program loaded
+- [ ] Live tier (`pytest tests/ -m readonly`, `./gradlew test`) — needs Ghidra
+      running on port 8089 with a program loaded
 - [ ] Could not run the live tier
 
 ```text
@@ -42,7 +43,11 @@ paste the output here
 Both generated artifacts have to be refreshed, or CI fails in two different
 tiers:
 
-- [ ] `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`
+- [ ] `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` — **Maven
+      only**; Gradle cannot pass the `-Dregenerate` flag into the forked test
+      JVM and exits BUILD SUCCESSFUL having regenerated nothing. No Maven? Say
+      so here and leave the catalog alone — a maintainer will regenerate it.
+- [ ] `python -m tools.audit_server_scope --write`
 - [ ] `python -m tools.gen_readme_api_reference --write`
 - [ ] Not applicable
 
