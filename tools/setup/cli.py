@@ -19,7 +19,14 @@ from .ghidra import (
     start_ghidra,
 )
 from .python_env import detect_repo_root, find_repo_python
-from .maven import ensure_maven_java_supported, find_maven_command, run_gradle, run_maven
+from .maven import (
+    REQUIRED_JAVA_MAJOR,
+    MavenNotFoundError,
+    detect_maven_java_major,
+    locate_maven_command,
+    run_gradle,
+    run_maven,
+)
 from .requirements import (
     ensure_uv_available,
     execute_install_plan,
@@ -362,6 +369,43 @@ def cmd_verify_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_maven(maven_command: Path | None) -> None:
+    """Print Maven's status as a preflight report line. Never fails preflight.
+
+    ``preflight`` does not invoke Maven, and Gradle -- the backend the docs lead
+    with -- needs it for nothing, so a contributor who has no Maven must still
+    get the full report. Before this, ``find_maven_command()`` ran first and its
+    ``FileNotFoundError`` aborted the command after one line, which hard-failed
+    the "check what you have" step CONTRIBUTING.md hands a Python-only
+    contributor for a reason that does not apply to them.
+
+    The hard failure still lives where Maven is actually needed: ``run_maven``
+    (``build`` / ``clean`` / ``run-tests`` under the Maven backend) and
+    ``install_ghidra_dependencies`` (``ensure-prereqs`` /
+    ``install-ghidra-deps``) both call ``find_maven_command()``.
+    """
+    if maven_command is None:
+        print("Maven: not found (the Gradle backend does not need it)")
+        print(
+            "  Maven is required only by `tools.setup build|clean|run-tests` under the "
+            "Maven backend\n"
+            "  and by `ensure-prereqs`/`install-ghidra-deps`. To build without it: "
+            "`./gradlew buildExtension`\n"
+            "  or TOOLS_SETUP_BACKEND=gradle."
+        )
+        return
+
+    print(f"Maven: {maven_command}")
+    java_major = detect_maven_java_major(maven_command)
+    if java_major is not None and java_major < REQUIRED_JAVA_MAJOR:
+        print(
+            f"  WARNING: this Maven runs on Java {java_major}; Java "
+            f"{REQUIRED_JAVA_MAJOR}+ is required to build with it.\n"
+            f"  Set JAVA_HOME to a JDK {REQUIRED_JAVA_MAJOR} install, or build with "
+            "`./gradlew buildExtension`."
+        )
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     env_values = _load_repo_env(repo_root)
@@ -379,15 +423,8 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
         return run_gradle(repo_root, ["preflight"], ghidra_path=ghidra_path)
 
-    try:
-        maven_command = find_maven_command()
-    except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
     print(f"Python: {python_executable}")
-    print(f"Maven: {maven_command}")
-    if not ensure_maven_java_supported(maven_command):
-        return 1
+    _report_maven(locate_maven_command())
     try:
         ensure_uv_available()
     except FileNotFoundError as exc:
@@ -578,4 +615,17 @@ def cmd_bump_version(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except MavenNotFoundError as exc:
+        # A refusal, not a crash. `preflight` now tells the reader which
+        # commands need Maven; those commands should answer in the same voice
+        # rather than with a traceback.
+        print(str(exc), file=sys.stderr)
+        print(
+            f"`tools.setup {args.command}` runs Maven directly, so it cannot proceed "
+            "without it.\nFor the Java build, use `./gradlew buildExtension "
+            "-PGHIDRA_INSTALL_DIR=<dir>` or set TOOLS_SETUP_BACKEND=gradle.",
+            file=sys.stderr,
+        )
+        return 1

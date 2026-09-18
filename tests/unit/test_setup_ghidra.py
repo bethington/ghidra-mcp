@@ -566,6 +566,67 @@ def test_collect_preflight_issues_passes_with_required_files(
     assert issues == []
 
 
+def test_collect_preflight_issues_needs_no_maven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The deep preflight body must stay Maven-free.
+
+    ``cmd_preflight`` reports Maven's absence instead of aborting on it, which
+    is only honest if nothing further down reintroduces the requirement. This
+    unresolves Maven for real -- no candidate on disk -- rather than stubbing a
+    locator, so a future ``find_maven_command()`` call added anywhere inside
+    ``collect_preflight_issues`` raises here instead of shipping.
+    """
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    (ghidra_path / "Extensions" / "Ghidra").mkdir(parents=True)
+    (ghidra_path / "ghidraRun.bat").write_text("echo off\n", encoding="utf-8")
+    for _artifact_id, relative_path in REQUIRED_GHIDRA_JARS:
+        jar_path = ghidra_path / relative_path
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        jar_path.write_text("jar", encoding="utf-8")
+
+    user_base = tmp_path / "user-ghidra"
+    (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)
+    monkeypatch.setattr(
+        "tools.setup.ghidra.shutil.which",
+        lambda name: "java" if name == "java" else None,
+    )
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    issues = collect_preflight_issues(
+        tmp_path,
+        ghidra_path,
+        Path(sys.executable),
+        install_debugger=False,
+        strict=False,
+        user_base_dir=user_base,
+    )
+
+    assert issues == []
+
+
+def test_install_ghidra_dependencies_still_hard_fails_without_maven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`ensure-prereqs` / `install-ghidra-deps` genuinely cannot proceed.
+
+    Relaxing preflight must not relax the commands that actually shell out to
+    ``mvn install:install-file``.
+    """
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        install_ghidra_dependencies(tmp_path, tmp_path / "ghidra_12.1_PUBLIC")
+
+    assert "Unable to locate Maven" in str(excinfo.value)
+
+
 def test_resolve_mcp_url_uses_env_url(tmp_path: Path):
     (tmp_path / ".env").write_text(
         "GHIDRA_MCP_URL=http://127.0.0.1:9999\n", encoding="utf-8"

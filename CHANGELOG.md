@@ -91,6 +91,59 @@ Dockerfile nothing builds is a file, not a deployment.
   licence ([#487](https://github.com/bethington/ghidra-mcp/issues/487)), and
   two images nothing referenced were deleted.
 
+### Fixed — `preflight` aborted on a missing Maven it never uses
+
+`python -m tools.setup preflight` — the command CONTRIBUTING.md hands a
+**Python-only** contributor to "check what you have", in a section that says
+"Python-only changes need Java and Ghidra for nothing at all" — exited 1 on a
+machine with no Maven, printing one line and checking nothing else:
+
+```text
+$ python -m tools.setup preflight
+Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path.
+$ echo $?
+1
+```
+
+`cmd_preflight` resolved Maven via `find_maven_command()` before anything else,
+whichever backend was selected. Nothing downstream needed it: `preflight` never
+invokes `mvn`, `collect_preflight_issues` is Maven-free, and Gradle — the
+backend the docs lead with since
+[#528](https://github.com/bethington/ghidra-mcp/pull/528) — needs it for
+nothing. So the first command a new contributor runs hard-failed for a reason
+that did not apply to them, and the fix in #528 was to document the rough edge
+rather than remove it.
+
+Maven is now a **report line**, not a gate. Absent, it prints
+`Maven: not found (the Gradle backend does not need it)` plus the list of
+commands that do need it, and preflight continues through uv, the MCP spawn
+check, Java, the versions and the full Ghidra sweep. Present but running Java
+below 21 — the same class of problem — is likewise a warning, not an abort.
+
+**The hard failure stays where Maven is genuinely required**: `run_maven`
+(`build`, `clean`, `run-tests` under the Maven backend) and
+`install_ghidra_dependencies` (`ensure-prereqs`, `install-ghidra-deps`) both
+still call `find_maven_command()` and still refuse to start without it, with
+the same message. `find_maven_command()` keeps raising; the new
+`locate_maven_command()` is its non-raising counterpart, for callers that only
+report.
+
+Those refusals now read as refusals. Preflight names `build` as a command that
+needs Maven, and running it produced a Python **traceback** ending in
+`FileNotFoundError` — the message was there, but it looked like a crash in the
+tool rather than a "you need Maven for this". `find_maven_command()` raises
+`MavenNotFoundError` (a `FileNotFoundError` subclass, so every existing handler
+still catches it) and `tools.setup`'s entry point turns it into two lines and
+exit 1, naming the subcommand and the Gradle route.
+
+Pinned by `tests/unit/test_setup_cli.py` (preflight exits 0 with Maven
+unresolvable, names what actually needs Maven, writes nothing to stderr, and
+warns without failing on an old-Java Maven; plus the resolver's own raising and
+non-raising paths) and `tests/unit/test_setup_ghidra.py`
+(`collect_preflight_issues` stays Maven-free with no Maven on disk;
+`install_ghidra_dependencies` still raises). CONTRIBUTING.md's "known rough
+edge" paragraph is replaced by what the command now does.
+
 ### Fixed — a release could publish with the live regression never having run
 
 `release.yml` and `pre-release.yml` gated publishing on:

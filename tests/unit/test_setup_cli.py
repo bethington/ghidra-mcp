@@ -780,25 +780,229 @@ def test_should_install_debugger_toggle_off():
 
 
 # ===========================================================================
+# tools.setup.maven — resolution, raising and non-raising
+# ===========================================================================
+
+
+def test_locate_maven_command_returns_none_when_absent(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [Path("/nope/mvn")])
+    assert maven.locate_maven_command() is None
+
+
+def test_locate_maven_command_returns_first_existing_candidate(tmp_path, monkeypatch):
+    from tools.setup import maven
+
+    missing = tmp_path / "missing" / "mvn"
+    present = tmp_path / "mvn"
+    present.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [missing, present])
+    assert maven.locate_maven_command() == present
+
+
+def test_find_maven_command_still_raises_with_the_documented_message(monkeypatch):
+    """The hard failure has to survive: build/ensure-prereqs depend on it."""
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [Path("/nope/mvn")])
+    with pytest.raises(FileNotFoundError) as excinfo:
+        maven.find_maven_command()
+
+    assert "Unable to locate Maven" in str(excinfo.value)
+    assert str(excinfo.value) == maven.MAVEN_NOT_FOUND_MESSAGE
+
+
+def test_detect_maven_java_major_reads_the_version_banner(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0,
+            stdout="Apache Maven 3.9.6\nJava version: 17.0.11, vendor: Eclipse\n",
+            stderr="",
+        ),
+    )
+    assert maven.detect_maven_java_major(Path("mvn")) == 17
+
+
+def test_detect_maven_java_major_is_none_when_maven_cannot_start(monkeypatch):
+    """A candidate that exists but will not execute must not raise out of preflight."""
+    from tools.setup import maven
+
+    def boom(*a, **kw):
+        raise OSError("not executable")
+
+    monkeypatch.setattr(maven.subprocess, "run", boom)
+    assert maven.detect_maven_java_major(Path("mvn")) is None
+
+
+def test_detect_maven_java_major_is_none_without_a_java_version_line(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0, stdout="Apache Maven 3.9.6\n", stderr=""
+        ),
+    )
+    assert maven.detect_maven_java_major(Path("mvn")) is None
+
+
+def test_ensure_maven_java_supported_rejects_old_java(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "detect_maven_java_major", lambda command: 17)
+    assert maven.ensure_maven_java_supported(Path("mvn")) is False
+
+
+def test_ensure_maven_java_supported_accepts_unreadable_version(monkeypatch):
+    """Unknown is not "too old" -- refusing here would block a working build."""
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "detect_maven_java_major", lambda command: None)
+    assert maven.ensure_maven_java_supported(Path("mvn")) is True
+
+
+def test_ensure_maven_java_supported_accepts_current_java(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven, "detect_maven_java_major", lambda command: maven.REQUIRED_JAVA_MAJOR
+    )
+    assert maven.ensure_maven_java_supported(Path("mvn")) is True
+
+
+# ===========================================================================
 # cmd_preflight — Maven backend
 # ===========================================================================
 
 
-def test_cmd_preflight_maven_missing_maven_returns_1(tmp_path, monkeypatch):
-    from tools.setup import cli
+def _stub_preflight_environment(cli, monkeypatch, tmp_path, *, java: bool = True):
+    """Wire the non-Maven halves of preflight so a test can vary Maven alone."""
+    from tools.setup.versioning import VersionInfo
 
     monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(
+            which=lambda name: "/usr/bin/java" if java and name == "java" else None
+        ),
+    )
 
-    def raise_not_found():
-        raise FileNotFoundError("Maven not found on PATH")
 
-    monkeypatch.setattr(cli, "find_maven_command", raise_not_found)
+def test_cmd_preflight_maven_absent_reports_and_still_exits_0(
+    tmp_path, monkeypatch, capsys
+):
+    """Maven's absence is a REPORT LINE, never an abort.
 
-    result = cli.cmd_preflight(_args())
-    assert result == 1
+    ``preflight`` never invokes Maven, and Gradle -- the backend the docs lead
+    with -- needs it for nothing, so the command CONTRIBUTING.md hands a
+    Python-only contributor to "check what you have" must still check
+    everything. It used to resolve Maven before anything else and exit 1 after
+    a single line, checking nothing.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Maven: not found" in out
+    # The report continued past Maven rather than stopping at it.
+    assert "uv: available" in out
+    assert "Java: available on PATH" in out
+    assert "Project version: 7.0.0" in out
+    assert "No Ghidra path configured" in out
+
+
+def test_cmd_preflight_maven_absent_names_what_actually_needs_maven(
+    tmp_path, monkeypatch, capsys
+):
+    """A "not found" that names nothing sends the reader to install Maven anyway."""
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Gradle backend does not need it" in out
+    assert "ensure-prereqs" in out
+    assert "gradlew buildExtension" in out
+
+
+def test_cmd_preflight_maven_absence_does_not_reach_stderr(
+    tmp_path, monkeypatch, capsys
+):
+    """Not a failure, so it must not be written where failures are written.
+
+    CI steps and wrapper scripts that gate on stderr would otherwise still
+    treat a Maven-free machine as broken even though the exit code says 0.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+    assert "Maven" not in capsys.readouterr().err
+
+
+def test_cmd_preflight_maven_on_old_java_warns_but_passes(
+    tmp_path, monkeypatch, capsys
+):
+    """A Maven that cannot build is the same class of problem as no Maven.
+
+    `tools.setup build` still refuses it via ``run_maven`` ->
+    ``ensure_maven_java_supported``; preflight only reports.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: 17)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Maven: /usr/bin/mvn" in out or "Maven: \\usr\\bin\\mvn" in out
+    assert "Java 17" in out
+    assert "JAVA_HOME" in out
+    assert "Project version: 7.0.0" in out
+
+
+def test_cmd_preflight_maven_on_supported_java_prints_no_warning(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: 21)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    assert "JAVA_HOME" not in out
 
 
 def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
@@ -808,7 +1012,7 @@ def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
@@ -826,7 +1030,7 @@ def test_cmd_preflight_maven_passes_without_ghidra_path(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
@@ -986,6 +1190,56 @@ def test_main_build_maven(monkeypatch):
     monkeypatch.setattr(cli, "run_maven", lambda root, goals, dry_run=False: 0)
 
     assert cli.main(["build"]) == 0
+
+
+def test_main_build_without_maven_refuses_cleanly(tmp_path, monkeypatch, capsys):
+    """The commands that DO need Maven still fail — as a refusal, not a crash.
+
+    `preflight` now names `build` as one of the commands that needs Maven, so
+    `build` has to answer in the same voice. It used to let
+    ``find_maven_command()``'s exception escape as a traceback.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    assert cli.main(["build"]) == 1
+
+    err = capsys.readouterr().err
+    assert "Unable to locate Maven" in err
+    assert "tools.setup build" in err
+    assert "gradlew buildExtension" in err
+    assert "Traceback" not in err
+
+
+def test_main_install_ghidra_deps_without_maven_refuses_cleanly(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    assert (
+        cli.main(["install-ghidra-deps", "--ghidra-path", str(tmp_path / "ghidra")]) == 1
+    )
+    assert "tools.setup install-ghidra-deps" in capsys.readouterr().err
+
+
+def test_maven_not_found_error_is_a_file_not_found_error():
+    """Existing `except FileNotFoundError` handlers must keep catching it."""
+    from tools.setup import maven
+
+    assert issubclass(maven.MavenNotFoundError, FileNotFoundError)
 
 
 def test_main_clean_gradle(monkeypatch):
@@ -1186,7 +1440,7 @@ def test_cmd_preflight_maven_reports_spawn_commands(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
     )
@@ -1223,7 +1477,7 @@ def test_cmd_preflight_does_not_fail_when_launchers_are_missing(
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
     )
