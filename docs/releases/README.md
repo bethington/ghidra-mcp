@@ -11,11 +11,13 @@ For the release preparation runbook, see
 
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite
 
-**Major release, breaking.** The advertised surface consolidates **272 → 251
-tools**: five rename tools collapse into `rename_symbol`, four variable-type
-setters into `set_variable_type`, six `batch_*` tools into their one-or-many
-survivors, and the comment family into `set_comment` / `get_comment` with an
-explicit kind. No capability is removed — every operation the deleted tools
+**Major release, breaking.** The consolidation pass took the advertised surface
+from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
+variable-type setters into `set_variable_type`, six `batch_*` tools into their
+one-or-many survivors, and the comment family into `set_comment` / `get_comment`
+with an explicit kind. Two endpoints were added later in the same cycle
+(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 253 tools**
+— 239 served by the GUI plugin, 226 by the headless server, 212 by both. No capability is removed — every operation the deleted tools
 performed is reachable through the survivor — and there are no
 backward-compatibility aliases.
 
