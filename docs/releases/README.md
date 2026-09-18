@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite
+### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The consolidation pass took the advertised surface
 from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
@@ -17,9 +17,12 @@ variable-type setters into `set_variable_type`, six `batch_*` tools into their
 one-or-many survivors, and the comment family into `set_comment` / `get_comment`
 with an explicit kind. Two endpoints were added later in the same cycle
 (`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 253 tools**
-— 239 served by the GUI plugin, 226 by the headless server, 212 by both. No capability is removed — every operation the deleted tools
-performed is reachable through the survivor — and there are no
-backward-compatibility aliases.
+— 239 served by the GUI plugin, 226 by the headless server, 212 by both. No
+capability is removed — every operation the deleted tools performed is
+reachable through the survivor — and there are no backward-compatibility
+aliases. `tests/unit/test_migration_guide_successors.py` proves that: all 23
+removals are named in the migration guide and all 23 successors are in the
+shipped catalog.
 
 Every endpoint that answered in prose now answers **JSON**. List-shaped tools
 return a named plural key plus `count`/`total`; errors are `{"error": ...}`.
@@ -31,9 +34,28 @@ A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
 
-Also: `doc_lint.py`, a documentation *correctness* linter backed by Ghidra's
-Function ID analyzer, and a `rename_function` gate that refuses to overwrite an
-FID-produced name.
+**Lazy tool loading is the default.** Advertising all 253 endpoints in one
+`tools/list` is over a hard limit for at least one major provider — Gemini
+rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
+called. The bridge now loads `listing,function,program` (84 endpoints plus 8
+static tools) on connect and registers the rest on demand; `--no-lazy` restores
+the old behaviour for clients that ignore `tools/list_changed`.
+
+**An offline test tier** runs the read-only integration suite against a strict
+fake of the plugin's HTTP surface, with no Ghidra installed at all. Alongside
+it, the real-Ghidra Java tier now actually executes (it had been self-skipping
+as a pass everywhere), and the live-regression release gate can now block a
+tagged release — it previously could not, because the job it depended on is
+always skipped on a tag push.
+
+**The MCP bridge ships as a container.** `docker compose up -d --build` brings
+up the Ghidra REST server on `:8089` and the bridge on `:8081`, speaking MCP
+over streamable-http at `/mcp`.
+
+Also: a `rename_function` gate that refuses to bury a name Ghidra's Function ID
+analyzer produced, unless `strict_mode=warn`.
+
+**Targets Ghidra 12.1.2**, as pinned in `pom.xml` and the three CI workflows.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 
