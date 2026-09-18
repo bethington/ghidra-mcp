@@ -827,6 +827,49 @@ helper's single call site), next to a tool count that was correct. Both now come
 from the catalog via `python -m tools.audit_server_scope --release-counts`, which
 raises rather than defaulting if the catalog is unreadable or unstamped — the
 fallback default is what made two releases publish a wrong number quietly.
+### The real-Ghidra test tier now actually runs
+
+`src/test/java/com/xebyte/core/*GhidraTest.java` builds a real `ProgramDB` through
+`ghidra.program.database.ProgramBuilder` and exercises actual disassembly and
+flow-override repair. It had **never run anywhere**, in either direction:
+
+* with `GHIDRA_INSTALL_DIR` set, all 7 tests died in `@Before` with
+  `NoClassDefFoundError: org/apache/logging/log4j/LogManager`;
+* with it unset, the `@BeforeClass` `assumeTrue` skipped every one of them — and
+  that is the branch CI took, so the suite was green while testing nothing.
+
+The cause is that the `ghidra:*` module jars are installed with
+`mvn install:install-file`, which records **no transitive dependencies at all**.
+Ghidra bundles the libraries that loading a SLEIGH language needs, but nothing
+put them on Maven's test classpath. `ApplicationConfiguration.setInitializeLogging(false)`
+does not help: `DefaultLanguageService`'s static initializer resolves `LogManager`
+before any configuration flag is consulted.
+
+The chain is 12 jars deep and was measured by leave-one-out — log4j-api/core,
+guava (+failureaccess), commons-lang3, commons-collections4, antlr-runtime,
+isorelax/msv/relaxngDatatype/xsdlib (RELAX NG validation of the language-definition
+XML), and javahelp — plus `ghidra:Graph`, which every workflow already installed
+but the pom never declared. Every one of those except failureaccess is
+load-bearing: removing it turns 7 passing tests into 7 errors.
+
+* **pom.xml** gains a `ghidra-runtime-tests` profile, activated by the presence of
+  `GHIDRA_INSTALL_DIR` — exactly the condition the tier's own `assumeTrue` gates on
+  — that adds those jars from the installation itself. This is the Maven equivalent
+  of what `build.gradle` already did with `fileTree`, which is why the Gradle
+  backend was green throughout and only Maven was broken.
+* **CI** now runs the tier in its own step with `GHIDRA_INSTALL_DIR` set. Ghidra is
+  already downloaded and unzipped for the jar install, so the marginal cost is the
+  test time alone (~34 s measured on Linux with Ghidra on local disk). The offline
+  step deliberately keeps the variable unset so the coverage ratchet goes on
+  measuring the same tier it always measured.
+* The CI step asserts on the **surefire skip counts**, not just on exit status. A
+  green `mvn test` is not proof the tier ran — `assumeTrue` reports skips as
+  success, which is precisely how this stayed dead.
+* `GhidraRuntimeClasspathGhidraTest` guards the classpath itself, reading the jar
+  list out of pom.xml rather than restating it. The filenames are version-stamped,
+  so a Ghidra upgrade renames them, and a missing classpath element is silently
+  ignored by the JVM — it would otherwise resurface as an opaque
+  `NoClassDefFoundError` in whichever test builds a `Program` first.
 
 ### Fixed
 
