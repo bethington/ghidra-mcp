@@ -1636,6 +1636,11 @@ whole 0-100 range and asserts no gated score bands.
 
 ### Security (pre-release hardening)
 
+- **Authenticated non-loopback MCP bridge.** When the bridge has
+  `GHIDRA_MCP_AUTH_TOKEN` and exposes its HTTP/SSE transport beyond loopback,
+  clients must present the same bearer token. This prevents the bridge from
+  acting as an unauthenticated confused deputy for its protected Ghidra server.
+
 - **Anti-CSRF / DNS-rebinding guard on the HTTP servers.** Loopback binding
   does not stop a web page the operator visits from issuing a cross-origin
   `fetch()` to `127.0.0.1` (responses are `text/plain` and bodies parse as JSON
