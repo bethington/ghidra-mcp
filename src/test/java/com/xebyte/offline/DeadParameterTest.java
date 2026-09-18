@@ -3,10 +3,8 @@ package com.xebyte.offline;
 import junit.framework.TestCase;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -48,7 +46,11 @@ import java.util.stream.Stream;
 public class DeadParameterTest extends TestCase {
 
     /** Root of the annotated service sources. */
-    private static final Path SRC = Paths.get("src", "main", "java", "com", "xebyte");
+    // Through ProjectSource, never a repo-relative path handed to the file system
+    // directly: that anchors on the JVM working directory and breaks under any
+    // runner that does not set it to the project dir. ProjectSourceTest enforces
+    // it repo-wide.
+    private static final Path SRC = ProjectSource.mainSourceRoot();
 
     /**
      * Files scanned for {@code @McpTool} methods but exempt from the body
@@ -153,7 +155,7 @@ public class DeadParameterTest extends TestCase {
         }
 
         for (Path file : files) {
-            String src = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            String src = ProjectSource.read(file);
             Matcher tools = MCP_TOOL.matcher(src);
             while (tools.find()) {
                 int annClose = matchClose(src, tools.end() - 1, '(', ')');
@@ -286,8 +288,7 @@ public class DeadParameterTest extends TestCase {
      * @throws IOException if the source cannot be read
      */
     public void testAddToVersionControlHonorsKeepCheckedOut() throws IOException {
-        String src = new String(
-            Files.readAllBytes(SRC.resolve("GhidraMCPPlugin.java")), StandardCharsets.UTF_8);
+        String src = ProjectSource.readMainSource("GhidraMCPPlugin.java");
 
         assertTrue(
             "The /server/version_control/add handler must read the keepCheckedOut parameter it "
@@ -331,7 +332,7 @@ public class DeadParameterTest extends TestCase {
 
         List<String> found = new ArrayList<>();
         for (Path file : files) {
-            String src = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            String src = ProjectSource.read(file);
             for (Map.Entry<String, String> e : banned.entrySet()) {
                 if (src.contains("@Param(value = \"" + e.getKey() + "\"")) {
                     found.add(file.getFileName() + ": " + e.getKey() + " -- " + e.getValue());
@@ -367,8 +368,7 @@ public class DeadParameterTest extends TestCase {
      * @throws IOException if the catalog cannot be read
      */
     public void testRemovedParametersAreGoneFromTheCatalog() throws IOException {
-        Path catalog = Paths.get("tests", "endpoints.json");
-        String json = new String(Files.readAllBytes(catalog), StandardCharsets.UTF_8);
+        String json = ProjectSource.readProjectFile("tests/endpoints.json");
 
         Map<String, String> banned = new LinkedHashMap<>();
         banned.put("include_assembly_patterns", "/analyze_data_region");
@@ -400,9 +400,7 @@ public class DeadParameterTest extends TestCase {
      * @throws IOException if a source file cannot be read
      */
     public void testServerConnectAdvertisesNoHostOrPort() throws IOException {
-        String src = new String(
-            Files.readAllBytes(SRC.resolve("core").resolve("ManualToolDescriptors.java")),
-            StandardCharsets.UTF_8);
+        String src = ProjectSource.readMainSource("core", "ManualToolDescriptors.java");
 
         int idx = src.indexOf("\"/server/connect\"");
         assertTrue("/server/connect descriptor not found in ManualToolDescriptors", idx >= 0);
