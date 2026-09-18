@@ -1601,13 +1601,72 @@ class DebuggerLiveTestSkipped(Exception):
 #                                     prior instance; means dbgeng never
 #                                     launched anything in the first place
 #   * "Could not load dbgeng"       — WDK not installed
+#   * "timed out ... waiting for a Trace RMI connection"
+#                                   — the back-end died before connecting.
+#
+# That last one is the important one, and it was MISSING until 2026-09-18.
+# Every hint above it can only match a failure that NAMES its cause, and the
+# dominant real-world failure names nothing: the launcher is a separate
+# process, so when `local-dbgeng.py` dies on an import (no ghidratrace, no
+# pybag, or pybag unable to load dbgeng.dll) its traceback goes to the
+# launcher terminal and Ghidra sees only silence, then reports
+# "Debugger launch timed out after 90s waiting for a Trace RMI connection.
+# Check the launcher terminal, Python debugger dependencies, and dbgeng/WinDbg
+# installation." — a message that helpfully lists the three causes and matches
+# none of the hints meant to catch them.
+#
+# So the tier this classifier exists to keep green failed HARD on a machine
+# with no debugger backend, which is exactly the environmental case it was
+# written to tolerate. Measured: the 2026-09-18 release run passed five of six
+# steps and then raised, so `record_release_regression_evidence` never ran and
+# nothing was recorded for a deploy that was otherwise fine.
 _DEBUGGER_LAUNCH_SKIP_HINTS = (
     "dbgeng (.bat)': null",
     "ghidratrace",
     "could not load dbgeng",
     "dbgeng.dll",
     "no debugger backend",
+    "waiting for a trace rmi connection",
 )
+
+
+#: Where Windows itself keeps a usable dbgeng.dll. pybag looks under Windows
+#: Kits instead, which only exists when the Debugging Tools for Windows feature
+#: is installed -- a separate SDK component most machines do not have.
+_SYSTEM_DBGENG_DIR = Path(r"C:\Windows\System32")
+
+
+def _resolve_windbg_dir(env_values: dict[str, str]) -> Path | None:
+    """Find a directory holding dbgeng.dll for the dbgeng launcher.
+
+      1. ``WINDBG_DIR`` from the environment, if set
+      2. ``WINDBG_DIR`` from ``<repo>/.env``, if set
+      3. ``C:\\Windows\\System32``, but ONLY if dbgeng.dll is really there
+
+    Step 3 is the one that matters. `pybag.__init__` does
+    ``ctypes.windll.LoadLibrary(os.path.join(dbgdir, 'dbgeng.dll'))`` against a
+    hard-coded Windows Kits path; when the Debugging Tools for Windows feature
+    is not installed that raises FileNotFoundError, the back-end dies on import
+    before it can connect, and the whole thing surfaces as a bare Trace RMI
+    timeout. Measured 2026-09-18: that machine's Kits Debuggers\\x64 held only
+    dbgcore/dbghelp/srcsrv/symsrv and had no windbg.exe or cdb.exe, yet
+    System32's dbgeng.dll loaded pybag + ghidradbg + ghidratrace fine.
+
+    Returns None when no candidate actually contains the DLL, so a machine with
+    a genuinely absent backend is left to the skip classifier rather than being
+    handed a directory that will fail the same way one layer down.
+    """
+    for candidate in (
+        os.environ.get("WINDBG_DIR", "").strip(),
+        env_values.get("WINDBG_DIR", "").strip(),
+    ):
+        if candidate:
+            path = Path(candidate)
+            if (path / "dbgeng.dll").is_file():
+                return path
+    if (_SYSTEM_DBGENG_DIR / "dbgeng.dll").is_file():
+        return _SYSTEM_DBGENG_DIR
+    return None
 
 
 def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
@@ -1638,6 +1697,9 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
     }
     if python_executable:
         launch_data["python_executable"] = python_executable
+    windbg_dir = _resolve_windbg_dir(env_values)
+    if windbg_dir:
+        launch_data["windbg_dir"] = str(windbg_dir)
 
     try:
         _status, launch = _mcp_request(

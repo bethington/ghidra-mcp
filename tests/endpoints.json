@@ -909,7 +909,8 @@
         "timeout_seconds",
         "program",
         "offer",
-        "python_executable"
+        "python_executable",
+        "windbg_dir"
       ],
       "servers": [
         "gui"

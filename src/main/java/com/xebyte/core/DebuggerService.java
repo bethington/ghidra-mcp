@@ -435,7 +435,12 @@ public class DebuggerService {
             @Param(value = "offer", source = ParamSource.BODY, defaultValue = "",
                     description = "Optional launcher title or config name, e.g. dbgeng") String preferredOffer,
             @Param(value = "python_executable", source = ParamSource.BODY, defaultValue = "",
-                    description = "Optional Python executable for Python-backed debugger launchers") String pythonExecutable) {
+                    description = "Optional Python executable for Python-backed debugger launchers") String pythonExecutable,
+            @Param(value = "windbg_dir", source = ParamSource.BODY, defaultValue = "",
+                    description = "Directory containing dbgeng.dll, for the dbgeng launcher. Set this when "
+                            + "the Windows Debugger Toolkit is not installed: pybag hard-codes the Windows "
+                            + "Kits path and fails to load without it, while Windows itself ships a usable "
+                            + "dbgeng.dll in System32.") String windbgDir) {
         PluginTool tool;
         try {
             // Cold-start of the Debugger tool template takes longer than 20s
@@ -503,6 +508,21 @@ public class DebuggerService {
                             if (pythonExecutable != null && !pythonExecutable.isBlank()) {
                                 setLaunchArgument(configured, launchOffer.getParameters(),
                                         "env:OPT_PYTHON_EXE", pythonExecutable);
+                            }
+                            // local-dbgeng.bat declares `::@env WINDBG_DIR:dir=""` precisely
+                            // because dbgeng.dll is not always under Windows Kits. pybag's
+                            // __init__ does ctypes.windll.LoadLibrary(os.path.join(dbgdir,
+                            // 'dbgeng.dll')) against that hard-coded Kits path and raises
+                            // FileNotFoundError when the Debugging Tools for Windows feature
+                            // is absent -- which it is on a stock machine, even though
+                            // C:\Windows\System32\dbgeng.dll is right there and works. The
+                            // import then kills the back-end BEFORE it can connect, so the
+                            // failure surfaces only as "launch timed out waiting for a Trace
+                            // RMI connection", naming none of its causes. Without this
+                            // parameter there was no way to supply the override over HTTP.
+                            if (windbgDir != null && !windbgDir.isBlank()) {
+                                setLaunchArgument(configured, launchOffer.getParameters(),
+                                        "env:WINDBG_DIR", windbgDir);
                             }
                             return configured;
                         }

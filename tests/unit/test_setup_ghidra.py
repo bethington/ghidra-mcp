@@ -1268,6 +1268,137 @@ def test_debugger_live_skipped_on_environmental_launch_failure(
         ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
 
 
+def test_debugger_live_skipped_on_bare_trace_rmi_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The failure shape that actually happens, and used to fail the gate.
+
+    The launcher is a SEPARATE process, so when `local-dbgeng.py` dies on an
+    import -- no ghidratrace, no pybag, or pybag unable to load dbgeng.dll --
+    its traceback goes to the launcher terminal and Ghidra sees only silence.
+    It then reports a bare timeout that lists the three possible causes and
+    matches none of the hints written to catch them.
+
+    Measured 2026-09-18: a machine whose Windows Kits Debuggers directory held
+    no dbgeng.dll at all failed the release tier hard, five of six steps having
+    passed, so no release evidence was recorded for an otherwise-fine deploy.
+    """
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    benchmark_path = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_path.write_bytes(b"")
+
+    def fake_mcp_request(repo_root, mcp_url, path, **kwargs):
+        return 200, {
+            "error": (
+                "Debugger launch timed out after 90s waiting for a Trace RMI "
+                "connection. Check the launcher terminal, Python debugger "
+                "dependencies, and dbgeng/WinDbg installation."
+            )
+        }
+
+    monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
+    monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+    monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
+    monkeypatch.setattr(ghidra, "_terminate_dbgeng_launcher_processes", lambda: None)
+
+    with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="Debugger backend unavailable"):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+class TestResolveWindbgDir:
+    """`WINDBG_DIR` picks the directory pybag loads dbgeng.dll from.
+
+    pybag hard-codes the Windows Kits path, which only exists when the
+    Debugging Tools for Windows SDK feature is installed. Windows itself ships
+    a usable dbgeng.dll in System32, and `local-dbgeng.bat` declares
+    `::@env WINDBG_DIR:dir=""` precisely so it can be pointed there.
+    """
+
+    def test_env_var_wins_when_it_really_holds_the_dll(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from tools.setup import ghidra
+
+        (tmp_path / "dbgeng.dll").write_bytes(b"")
+        monkeypatch.setenv("WINDBG_DIR", str(tmp_path))
+        assert ghidra._resolve_windbg_dir({}) == tmp_path
+
+    def test_dotenv_is_consulted_after_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from tools.setup import ghidra
+
+        (tmp_path / "dbgeng.dll").write_bytes(b"")
+        monkeypatch.delenv("WINDBG_DIR", raising=False)
+        assert ghidra._resolve_windbg_dir({"WINDBG_DIR": str(tmp_path)}) == tmp_path
+
+    def test_a_candidate_without_the_dll_is_not_returned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Handing back a directory that will fail one layer down is worse
+        than returning None: the skip classifier can act on None."""
+        from tools.setup import ghidra
+
+        monkeypatch.setenv("WINDBG_DIR", str(tmp_path))  # empty dir
+        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", tmp_path / "nope")
+        assert ghidra._resolve_windbg_dir({}) is None
+
+    def test_falls_back_to_system32_only_when_the_dll_is_there(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from tools.setup import ghidra
+
+        monkeypatch.delenv("WINDBG_DIR", raising=False)
+        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", tmp_path)
+        assert ghidra._resolve_windbg_dir({}) is None, "no DLL yet"
+
+        (tmp_path / "dbgeng.dll").write_bytes(b"")
+        assert ghidra._resolve_windbg_dir({}) == tmp_path
+
+
+def test_debugger_live_sends_windbg_dir_to_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Resolving the directory is useless unless it reaches /debugger/launch.
+
+    DebuggerService wires only a fixed set of env keys into the launcher
+    (OPT_TARGET_ARGS, CWD/OPT_CWD/OPT_TARGET_DIR, OPT_PYTHON_EXE), so before
+    `windbg_dir` was added there was no way to supply the override over HTTP
+    at all.
+    """
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    benchmark_path = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_path.write_bytes(b"")
+
+    dll_dir = tmp_path / "kits"
+    dll_dir.mkdir()
+    (dll_dir / "dbgeng.dll").write_bytes(b"")
+    monkeypatch.setenv("WINDBG_DIR", str(dll_dir))
+
+    sent: dict = {}
+
+    def fake_mcp_request(repo_root, mcp_url, path, **kwargs):
+        if path == "/debugger/launch":
+            sent.update(kwargs.get("data") or {})
+        return 200, {"error": "Could not load dbgeng"}
+
+    monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
+    monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+    monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
+    monkeypatch.setattr(ghidra, "_terminate_dbgeng_launcher_processes", lambda: None)
+
+    with pytest.raises(ghidra.DebuggerLiveTestSkipped):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+    assert sent.get("windbg_dir") == str(dll_dir)
+
+
 def test_debugger_live_raises_runtime_error_on_real_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

@@ -2012,6 +2012,14 @@
           "required": false,
           "source": "body",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Directory containing dbgeng.dll, for the dbgeng launcher. Set this when the Windows Debugger Toolkit is not installed: pybag hard-codes the Windows Kits path and fails to load without it, while Windows itself ships a usable dbgeng.dll in System32.",
+          "name": "windbg_dir",
+          "required": false,
+          "source": "body",
+          "type": "string"
         }
       ],
       "path": "/debugger/launch"
