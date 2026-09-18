@@ -7,9 +7,10 @@ workflows for GhidraMCP.
 
 | Workflow | Trigger | Runner | Purpose |
 |----------|---------|--------|---------|
-| `tests.yml` | Push and pull request to `main`/`develop` | GitHub-hosted Ubuntu/Windows | Merge-gating build, unit, offline Java, Pester, and docs checks. |
-| `build.yml` | Project build triggers | GitHub-hosted | Build-focused CI path. |
-| `release-regression.yml` | Manual, reusable workflow call, PR label | Self-hosted Windows | Live Ghidra deploy and benchmark regression. |
+| `tests.yml` | Push and pull request to `main`/`dev`/`develop` | GitHub-hosted Ubuntu/Windows | Merge-gating build, unit, offline Java, Pester, and docs checks. |
+| `codeql.yml` | Push/PR to `main`/`dev`, weekly schedule | GitHub-hosted | CodeQL security analysis. |
+| `scorecard.yml` | Push to `dev`, weekly schedule, manual | GitHub-hosted | OSSF Scorecard supply-chain score. |
+| `release-regression.yml` | Manual, reusable workflow call, PR label | Self-hosted Windows | Live Ghidra deploy regression. |
 | `release.yml` | Version tags or manual dispatch | GitHub-hosted, optional self-hosted regression | Stable release artifact creation. |
 | `pre-release.yml` | Manual dispatch | GitHub-hosted, optional self-hosted regression | Pre-release artifact creation. |
 
@@ -28,12 +29,21 @@ When the label is present, `release-regression.yml` runs on a self-hosted
 Windows runner and executes:
 
 ```text
-python -m tools.setup deploy --ghidra-path <path> --test release
+python -m tools.setup deploy --ghidra-path <path> --test <tier>
 ```
 
 This is not enabled for every PR by default because public GitHub-hosted runners
 do not have the required active Ghidra project, and external PRs should not hang
 waiting for a private self-hosted runner.
+
+> **The `release` tier cannot run from this repository.** `fun-doc/` moved to
+> the `d2-game-exe` repository on 2026-08-10 and took the `Benchmark.dll`
+> fixture with it. Every tier that resets that fixture — `release`,
+> `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live` and
+> `negative-contract` — now fails in `reset_benchmark_fixture()`. Only
+> `endpoint-catalog` and `selected-contract` still run here. The workflow
+> fails fast with this explanation rather than discovering it after a deploy.
+> Choosing the replacement release gate is an open maintainer decision.
 
 ## Release Gates
 
