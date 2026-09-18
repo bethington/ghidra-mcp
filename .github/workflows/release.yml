@@ -190,8 +190,11 @@ jobs:
         cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
 
         # Create installation instructions
-        # Use endpoints.json as authoritative tool count (maintained by tests)
-        MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "193")
+        # Use endpoints.json as authoritative tool count (maintained by tests).
+        # No `|| echo "<n>"` fallback here either: the old default was 193, a count
+        # from three major versions ago, and a suppressed read error would have
+        # published it as fact. Failing the job is the correct outcome.
+        MCP_TOOLS=$(python3 -m tools.audit_server_scope --release-counts | cut -d' ' -f1)
         cat > release/INSTALLATION.md << INSTEOF
         # GhidraMCP Installation Instructions
 
@@ -242,15 +245,23 @@ jobs:
       id: release_notes
       run: |
         VERSION="${{ steps.version.outputs.VERSION }}"
-        # Use endpoints.json as authoritative tool count (maintained by tests)
-        MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "193")
-        # Count GUI endpoints: direct createContext + shared EndpointRegistry entries
-        GUI_DIRECT=$(grep -cP '(?:server|httpServer)\.createContext\(' src/main/java/com/xebyte/GhidraMCPPlugin.java 2>/dev/null || echo "0")
-        REGISTRY=$(grep -cP '(?:get|post)\(\s*"/' src/main/java/com/xebyte/core/EndpointRegistry.java 2>/dev/null || echo "0")
-        GUI_EPS=$((GUI_DIRECT + REGISTRY))
-        # Count headless endpoints: direct createContext + shared EndpointRegistry entries
-        HEADLESS_DIRECT=$(grep -cP '(?:server|httpServer)\.createContext\(' src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java 2>/dev/null || echo "0")
-        HEADLESS_EPS=$((HEADLESS_DIRECT + REGISTRY))
+        # All three counts come from tests/endpoints.json, whose `servers` field
+        # records which of the two HTTP servers registers each route. That field
+        # is derived from the servers' own wiring by tools/audit_server_scope.py
+        # and guarded by tests/unit/test_audit_server_scope.py, so it cannot
+        # drift silently.
+        #
+        # The previous version derived the GUI/headless counts by grepping
+        # src/main/java/com/xebyte/core/EndpointRegistry.java -- a file deleted
+        # on 2026-07-25. The `|| echo "0"` made the missing file look like a
+        # legitimate zero, so v6.0.0's notes published "GUI Endpoints: 35"
+        # (a createContext line count, two of which were comments) and
+        # "Headless Endpoints: 1" (the safeContext helper's single call site).
+        # No default is used here on purpose: if the catalog cannot be read or
+        # lacks the field, the release notes must fail rather than invent a number.
+        COUNTS=$(python3 -m tools.audit_server_scope --release-counts)
+        read -r MCP_TOOLS GUI_EPS HEADLESS_EPS <<< "$COUNTS"
+        echo "MCP tools: ${MCP_TOOLS}, GUI: ${GUI_EPS}, headless: ${HEADLESS_EPS}"
 
         cat > release_notes.md << GENEOF
         # GhidraMCP Release ${VERSION}
@@ -360,7 +371,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
         echo "- **Plugin:** GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" >> $GITHUB_STEP_SUMMARY
-        MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "193")
+        MCP_TOOLS=$(python3 -m tools.audit_server_scope --release-counts | cut -d' ' -f1)
         echo "- **MCP Server:** ghidra_mcp_bridge-${{ steps.version.outputs.VERSION }}-py3-none-any.whl (${MCP_TOOLS} tools)" >> $GITHUB_STEP_SUMMARY
         echo "- **Documentation:** README.md, INSTALLATION.md" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
