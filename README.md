@@ -420,7 +420,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 #### Lazy tool loading is the default (issue #440)
 
-Advertising all ~250 endpoints in a single `tools/list` is over a hard limit for
+Advertising all 253 endpoints in a single `tools/list` is over a hard limit for
 at least one major provider. Gemini compiles function declarations into a
 constrained-decoding state machine and rejects the whole request before any tool
 is ever called:
@@ -432,7 +432,7 @@ The specified schema produces a constraint that has too many states for serving
 
 That is not a degradation, it is an outright break, and no client-side setting
 could work around a server that only ever offered the full set. So the bridge
-now loads `listing,function,program` (57 endpoints plus the 8 static tools) on
+now loads `listing,function,program` (84 endpoints plus the 8 static tools) on
 connect and registers the rest on demand.
 
 **If your client ignores `tools/list_changed`** it will not notice tools that
@@ -830,7 +830,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 272 tools fully implemented
+- **MCP Tools**: 253 tools fully implemented (the whole catalog; the GUI plugin serves 239 of them and the headless server 226)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -1188,9 +1188,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (225 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (253 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (239 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 226 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -1270,12 +1270,12 @@ python -m tools.setup --help
 ```text
 ghidra-mcp/
 ├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 225 catalog entries)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 253 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (196 endpoints)
-│       ├── headless/                    # Headless server (183 endpoints)
-│       └── core/                        # Shared service layer (12 services)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (239 endpoints)
+│       ├── headless/                    # Headless server (226 endpoints)
+│       └── core/                        # Shared service layer (14 services)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests

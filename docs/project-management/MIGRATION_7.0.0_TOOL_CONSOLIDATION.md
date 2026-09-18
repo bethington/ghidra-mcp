@@ -1,9 +1,17 @@
 # 7.0.0 Tool Consolidation — Migration Contract
 
 Clean break (no aliases): old tools/routes are **deleted**; every internal caller
-(fun-doc, bridge, scripts, skills, docs/prompts, tests) is migrated to the survivor.
-Net advertised surface: **272 → 251**. Survivors are chosen to be clear one-or-many
-tools; removed tools' capabilities are fully preserved by the survivor.
+(bridge, scripts, skills, docs/prompts, tests) is migrated to the survivor.
+Net advertised surface for this pass: **272 → 251**. Survivors are chosen to be
+clear one-or-many tools; removed tools' capabilities are fully preserved by the
+survivor.
+
+> **Where it landed.** This table describes the consolidation pass only. Two
+> endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
+> `/batch_get_comments` — so the shipped catalog is **253**, not 251. The
+> authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
+> `tests/unit/test_published_counts.py` fails if any published figure disagrees
+> with it.
 
 Legend: **SURVIVOR** = kept (possibly extended). **REMOVE** = deleted. Transform = how a
 call site is rewritten.
@@ -97,7 +105,7 @@ fails on a descriptor with no registered route, which is what caught the leftove
    (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`), README API reference
    regenerated (`python -m tools.gen_readme_api_reference --write`) → 251 tools.
 4. **Verification:** offline Java (390 tests), `tests/unit/`, and the offline
-   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 251
+   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 253
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
 
 ## Call-shape changes worth knowing

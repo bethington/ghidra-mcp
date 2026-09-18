@@ -4,6 +4,14 @@
 **Version**: 5.14.1  
 **Analysis tools**: [tools/context_analysis/](https://github.com/bethington/ghidra-mcp/tree/main/tools/context_analysis)
 
+> **This is a dated measurement, not a live figure.** Every count and token
+> total below was measured against the 251-endpoint catalog this document was
+> generated from. The catalog stands at **253** today — see
+> [`tests/endpoints.json`](../tests/endpoints.json), which is authoritative.
+> The figures here have deliberately not been re-labelled: the token totals
+> were measured against that catalog, and re-running the measurement is what
+> would change them.
+
 ---
 
 ## Executive Summary

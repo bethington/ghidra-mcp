@@ -31,12 +31,12 @@ SECURITY.md                  — Security guidelines and reporting (future)
 Organized reference documentation also uses **UPPERCASE**:
 
 ```text
-docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (243 tools)
-docs/ERROR_CODES.md              — Error catalog and troubleshooting guide
-docs/PERFORMANCE_BASELINES.md    — Performance metrics and optimization
-docs/ARCHITECTURE.md             — System architecture and design
-docs/API.md                      — API overview and integration guide
-docs/EXAMPLES.md                 — Example workflows and use cases
+docs/TESTING.md                  — Test tiers and what each one needs
+docs/HUNGARIAN_NOTATION.md       — Struct-field prefix reference
+docs/NAMING_CONVENTIONS.md       — This file
+docs/PROJECT_STRUCTURE.md        — Repository layout
+docs/STRUCT_RESIZE_WORKFLOW.md   — Struct resize procedure
+docs/THIS_POINTER_TYPING.md      — `this` pointer typing guide
 ```
 
 **Rationale**:
