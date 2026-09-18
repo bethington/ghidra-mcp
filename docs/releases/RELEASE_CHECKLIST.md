@@ -131,6 +131,33 @@ python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test rele
 - [ ] If the run required manual dialog intervention, document the popup and
   decide whether the deploy/prompt-policy automation needs another fix before
   release.
+- [ ] **Commit the evidence file the run wrote.** A passing `--test release`
+  writes `docs/releases/live-regression-evidence.json`, and `release.yml` /
+  `pre-release.yml` refuse to publish without it:
+
+```text
+git add docs/releases/live-regression-evidence.json
+python -m tools.release_evidence verify --version <the version being released>
+```
+
+> **Why the publish gate reads a committed file rather than running the tier.**
+> Until now `release.yml` accepted
+> `needs.release-regression.result == 'skipped'`, and on a **tag push** that job
+> is *always* skipped — its own `if` requires `workflow_dispatch`. So the gate
+> had never blocked a tagged release and could not. It cannot simply be made to
+> run either: the tier needs a live Ghidra GUI on Windows and targets
+> `[self-hosted, Windows]`, and **no self-hosted runner is registered** — a
+> deliberate choice, because on a public repo labelling a fork PR would run a
+> stranger's code on the maintainer's machine.
+>
+> The evidence file records a **source fingerprint**, not a timestamp: the git
+> blob ids of everything under `src/main/java`, `python/bridge_mcp_ghidra`,
+> `tools/setup`, `tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`
+> and `build.gradle`. Change any of them after the run and the release fails
+> until the tier is re-run. Change the CHANGELOG or a doc and it does not — the
+> gate has to survive writing the release notes, or people route around it.
+
+<!-- -->
 
 > **This gate was dead from 2026-08-10 to 2026-08-31.** `fun-doc/` moved to
 > `d2-game-exe` and took the `Benchmark.dll` fixture with it, so `release` and
@@ -181,8 +208,10 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-- [ ] Enable `run_live_regression` in the release workflow when the self-hosted
-  Windows runner is available. It calls `release-regression.yml` with
+- [ ] Enable `run_live_regression` in the release workflow **only** if a
+  self-hosted Windows runner is available — today none is registered, so the
+  committed evidence file from section 4 is the gate. It calls
+  `release-regression.yml` with
   `test_tier: release`, which works again as of 2026-08-31.
 - [ ] Verify release assets include `GhidraMCP-X.Y.Z.zip`.
 - [ ] Download the release ZIP and sanity-check that it installs or at least

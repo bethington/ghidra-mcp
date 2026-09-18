@@ -16,6 +16,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from tools.release_evidence import GATING_TIER
 from .envfile import load_env_file
 from .maven import find_maven_command
 from .versioning import (
@@ -87,6 +88,10 @@ BENCHMARK_ANALYSIS_TIMEOUT_S = 240
 #
 # Keep alphabetical: this tuple is what the operator sees in `--test --help` and
 # in the error message for a bad tier.
+#
+# GATING_TIER is imported from tools.release_evidence rather than restated, for
+# the same reason DEPLOY_TEST_MODES is a single list: two spellings of "the
+# release gate" is how the gate stops being one.
 DEPLOY_TEST_MODES = (
     "benchmark-read",
     "benchmark-write",
@@ -2638,8 +2643,54 @@ def deploy_to_ghidra(
     wait_for_mcp(repo_root, mcp_url, timeout_seconds=DEFAULT_MCP_WAIT_SECONDS)
     wait_for_project(repo_root, mcp_url, timeout_seconds=DEFAULT_MCP_WAIT_SECONDS)
     run_deploy_tests(repo_root, mcp_url, test_modes)
+    record_release_regression_evidence(repo_root, ghidra_path, test_modes)
 
     return 0
+
+
+def record_release_regression_evidence(
+    repo_root: Path, ghidra_path: Path, test_modes: list[str]
+) -> Path | None:
+    """After a PASSING `release` tier, record what it proved.
+
+    The live regression cannot run in CI -- it needs a Windows self-hosted
+    runner and none is registered, deliberately -- so `release.yml` and
+    `pre-release.yml` gate publishing on this recorded evidence instead. See
+    tools/release_evidence.py.
+
+    Called only after run_deploy_tests returns, which it does not do on a
+    failure: a record of a failed run reads exactly like a record of a passing
+    one, which is worse than no record at all.
+    """
+    if GATING_TIER not in test_modes:
+        return None
+
+    from tools import release_evidence
+
+    version = read_pom_versions(repo_root).project_version
+    path = release_evidence.record(
+        repo_root,
+        version=version,
+        tier=GATING_TIER,
+        ghidra_version=_ghidra_version_from_path(ghidra_path),
+        tiers_run=list(test_modes),
+    )
+    print(
+        f"Recorded live-regression evidence for {version} at "
+        f"{path.relative_to(repo_root).as_posix()}. Commit it: release.yml "
+        f"refuses to publish without it."
+    )
+    return path
+
+
+def _ghidra_version_from_path(ghidra_path: Path) -> str | None:
+    """Best-effort `12.1.3` from `.../ghidra_12.1.3_PUBLIC`.
+
+    Recorded for the reader, never compared -- so `None` is fine and a guessed
+    value would not be.
+    """
+    match = re.search(r"ghidra[_-]([0-9]+(?:\.[0-9]+)+)", ghidra_path.name, re.IGNORECASE)
+    return match.group(1) if match else None
 
 
 def start_ghidra(ghidra_path: Path, *, repo_root: Path | None = None, dry_run: bool = False) -> int:
