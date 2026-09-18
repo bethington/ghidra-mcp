@@ -6,6 +6,32 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — Scorecard ran on `dev`, where it can only fail
+
+`scorecard-action` refuses to run on anything but the repository's **default
+branch**. It validates that itself and exits with
+`validating options: only the default branch main is supported` — not a
+warning, not skippable.
+
+`scorecard.yml`'s push trigger said `dev`. The default branch is `main`. So
+every push to `dev` started a run that could only fail, in about 13 seconds:
+all 8 of the most recent Scorecard runs were that, including every commit of
+the v7.0.0 merge queue.
+
+What made it durable is that the **scheduled** runs follow the default branch
+automatically and kept passing, so the badge stayed green and the push failures
+read as noise rather than as a misconfiguration.
+
+This line has now been wrong in both directions — it said `main` while the
+default was `dev` (3 failures, 2026-08), then `dev` after the default moved
+back. So it is asserted rather than commented:
+`tests/unit/test_ci_workflow_triggers.py` pins the trigger against a
+`DEFAULT_BRANCH` constant, and cross-checks that constant against git's own
+`origin/HEAD` wherever it resolves — so the constant cannot quietly go stale
+either. That file previously excluded Scorecard on the reasoning that it is
+"intentionally main-only"; the intent was right and the mechanism was
+misunderstood — it is a constraint the action enforces, not a preference.
+
 ### Added — the MCP bridge is now part of the Docker stack
 
 `docker/Dockerfile.bridge` existed and worked; nothing referenced it, so
