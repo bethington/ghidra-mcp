@@ -92,28 +92,45 @@ file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 ## Benchmark Fixture
 
-> **Not available in this repository.** `fun-doc/` moved to `d2-game-exe` on
-> 2026-08-10 (commit `10960f76`), so nothing below can be built or reset from
-> here. Every deploy tier that touches this fixture — `release`,
-> `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live`,
-> `negative-contract` — raises in `reset_benchmark_fixture()`. Only
-> `endpoint-catalog` and `selected-contract` still run. The rest of this
-> section documents how the fixture behaves where it now lives.
+The fixture lives at `tests/fixtures/benchmark/` and is **generated, not
+compiled** — `make_fixture.py` emits both PE32 images directly, with no
+toolchain of any kind. Both binaries are committed, so a checkout is enough.
+See `tests/fixtures/benchmark/README.md` for what is in them and why they are
+built this way.
 
-The benchmark binary is built from `fun-doc/benchmark` and imported into the
-active Ghidra project at:
+```text
+tests/fixtures/benchmark/Benchmark.dll         committed; image base 0x10000000
+tests/fixtures/benchmark/BenchmarkDebug.exe    committed; image base 0x00400000
+tests/fixtures/benchmark/build_manifest.json   provenance + sha256 digests
+tests/fixtures/benchmark/regression/*.yaml     the value assertions the release tier runs
+```
+
+They are imported into the active Ghidra project at:
 
 ```text
 /testing/benchmark/Benchmark.dll
 /testing/benchmark/BenchmarkDebug.exe
 ```
 
-The filesystem build artifacts stay at:
+`tests/unit/test_benchmark_fixture.py` regenerates both images and compares them
+byte-for-byte with what is committed, checks the regression baselines still
+agree with the binaries about every function address, and on Windows executes
+the debuggee and compares its exit code against a CRC computed in Python. That
+last check also proves `Benchmark.dll` loads and resolves an export by name. All
+of it runs offline in the unit tier, with no Ghidra.
 
-```text
-fun-doc/benchmark/build/Benchmark.dll
-fun-doc/benchmark/build/BenchmarkDebug.exe
-```
+> **Between 2026-08-10 and 2026-08-31 this fixture did not exist here.**
+> `fun-doc/` moved to `d2-game-exe` and took it along, and every tier that
+> resets it — `release`, `benchmark-read`, `benchmark-write`, `multi-program`,
+> `debugger-live`, `negative-contract` — raised before running a single
+> assertion. `release` is the release-regression workflow's default tier and
+> the gate the release checklist names.
+
+> **`debugger-live` is restored only in part.** The debuggee binary is back and
+> genuinely runnable, but the tier still needs a Ghidra GUI, a working dbgeng
+> backend and `ghidratrace` in the launcher's Python. Where those are missing it
+> raises `DebuggerLiveTestSkipped`, which `release` catches and names in its
+> pass line. Nothing here has verified that tier end to end.
 
 Before benchmark tiers run, the deploy harness deletes any existing benchmark
 project file at the legacy and current benchmark paths, recreates the
