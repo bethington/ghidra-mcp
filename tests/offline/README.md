@@ -35,14 +35,18 @@ Both run in CI on every pull request (`Offline HTTP Tier (no Ghidra)` in
 
 2. **Callers obey the endpoint contract.** The fake routes from
    `tests/endpoints.json` (253 endpoints) and checks parameters against the
-   recorded `/mcp/schema` (235 tools, each parameter carrying its declared
-   `source`). The 18 catalogued endpoints the recording does not cover get
-   routing and **no parameter check at all** — correct and permanent for the
-   14 headless-only ones, since the snapshot is a recording of the *GUI*
-   server, but **staleness for the other 4**, which are GUI-served endpoints
-   the recording predates. `test_fake_ghidra.py`'s
-   `SCHEMA_RECORDING_PREDATES` names them and fails if the set grows; the fix
-   is to re-record the snapshot against a deployed server, which needs a live
+   recorded `/mcp/schema` (239 tools, each parameter carrying its declared
+   `source`). The 14 catalogued endpoints the recording does not cover get
+   routing and **no parameter check at all** — correct and permanent, because
+   all 14 are the headless-only project-management surface and the snapshot is
+   a recording of the *GUI* server. `test_fake_ghidra.py`'s
+   `SCHEMA_RECORDING_PREDATES` is the ratchet on that: it is **empty**, and a
+   GUI-served endpoint the recording does not cover fails there. Four were in
+   that state until the snapshot was re-recorded at the 2026-09-18 deploy
+   (235 → 239 tools): `/move_file` and `/move_folder`, headless-only when the
+   snapshot was taken and made GUI-served by 7.0.0, plus
+   `/list_shadowed_globals` and `/batch_get_comments`, added after it. The fix
+   is always to re-record against a deployed server, which needs a live
    Ghidra. It refuses an endpoint that is not catalogued, a method the
    catalog does not declare, a parameter the schema does not declare, and — the
    one it exists for — a `source: query` parameter that arrived in the JSON

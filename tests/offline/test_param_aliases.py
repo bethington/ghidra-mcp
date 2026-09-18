@@ -173,3 +173,51 @@ def test_scan_source_defaults_to_get():
     public Response thing(@Param(value = "x") String x) { return null; }
     """
     assert ("/thing", "GET") in _scan_source(source)
+
+
+def test_published_schema_aliases_match_the_annotation_parser():
+    """The two sources of "which spellings does this route accept" must agree.
+
+    This assertion was impossible until 2026-09-18. ``ParamDescriptor.toJson``
+    did not emit ``aliases``, so ``/mcp/schema`` advertised only canonical
+    names -- which is the entire reason ``param_aliases.py`` exists, parsing
+    the Java annotations directly to reconstruct what the schema withheld.
+    #470 made the scanner publish them, and the re-recorded snapshot is the
+    first one that carries them.
+
+    That turns a one-sided gap into a two-writers-of-one-field problem, which
+    this repo has paid for repeatedly: whichever source a consumer happens to
+    read wins, and a divergence is invisible until something calls a valid
+    alias and is told it is a breach. Asserting equality makes the divergence
+    loud instead.
+
+    When ``param_aliases.py`` is finally retired in favour of the published
+    schema (the fix its own README names), this test is what proves the
+    replacement is not losing aliases on the way out.
+    """
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))["tools"]
+
+    published: dict[tuple[str, str], dict[str, str]] = {}
+    for tool in schema:
+        route = (tool["path"], tool["method"].upper())
+        for param in tool.get("params", []):
+            for alias in param.get("aliases") or []:
+                published.setdefault(route, {})[alias] = param["name"]
+
+    assert published, (
+        "the recorded /mcp/schema publishes no aliases at all. Either the "
+        "snapshot predates #470 and needs re-recording against a deployed "
+        "server, or ParamDescriptor stopped emitting them."
+    )
+
+    parsed = {route: dict(mapping)
+              for route, mapping in load_param_aliases().items() if mapping}
+
+    assert published == parsed, (
+        "the published schema and the annotation parser disagree about which "
+        "aliases exist.\n"
+        f"  only in schema: { {k: v for k, v in published.items() if parsed.get(k) != v} }\n"
+        f"  only in parser: { {k: v for k, v in parsed.items() if published.get(k) != v} }\n"
+        "Fewer in the parser turns valid calls into breaches; more in the "
+        "parser excuses a real one."
+    )

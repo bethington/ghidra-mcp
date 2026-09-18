@@ -23,6 +23,20 @@ from bridge_mcp_ghidra import discovery, dispatch, registry, state, transport
 from bridge_mcp_ghidra.schema import _parse_schema
 from bridge_mcp_ghidra.server import mcp
 
+from .fake_ghidra import SCHEMA_SNAPSHOT
+
+#: How many tools the recorded ``/mcp/schema`` advertises. Derived, never
+#: typed: this number was hardcoded as 235 and went stale the moment the
+#: snapshot was re-recorded at 239, which is one more place the count had to be
+#: edited by hand for a change that had nothing to do with it. What the
+#: assertions below actually mean is "the bridge parsed EVERY tool the server
+#: served" and "lazy mode parsed fewer than all of them" -- both are properties
+#: relative to the served schema, not claims about a specific integer. The
+#: absolute size of the tool surface is pinned by
+#: ``tools.audit_server_scope --release-counts`` and the catalog parity tests,
+#: which is where a change to it should be reviewed.
+SCHEMA_TOOL_COUNT = len(json.loads(SCHEMA_SNAPSHOT.read_text(encoding="utf-8"))["tools"])
+
 
 # ---------------------------------------------------------------------------
 # Wiring
@@ -94,7 +108,7 @@ def _handler_for(defs: dict, endpoint: str):
 class TestSchemaRegistration:
     def test_schema_is_fetched_and_parsed_over_http(self, connected):
         defs = _tool_defs(connected)
-        assert len(defs) == 235
+        assert len(defs) == SCHEMA_TOOL_COUNT
         assert "/decompile_function" in defs
         assert defs["/add_function_tag"]["http_method"] == "POST"
 
@@ -110,7 +124,7 @@ class TestSchemaRegistration:
         state._lazy_mode = True
         count = registry._fetch_and_register_schema()
         assert state._loaded_groups <= state._default_groups
-        assert count < 235, "lazy mode must not load everything"
+        assert count < SCHEMA_TOOL_COUNT, "lazy mode must not load everything"
 
         # And a group loads on demand from the cached schema.
         groups = {d.get("category") for d in state._full_schema}

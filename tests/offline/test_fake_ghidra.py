@@ -24,26 +24,25 @@ from .fake_ghidra import (
 )
 
 #: GUI-served endpoints that `tests/conformance/snapshots/mcp_schema.snap` does
-#: not cover, because the recording predates them. The fake routes calls to
-#: these and validates **no parameter** of them.
+#: not cover. The fake routes calls to these and validates **no parameter** of
+#: them, so an entry here is a hole in the offline tier's contract checking.
 #:
-#: This is staleness, not design. The real fix is to re-record the snapshot
-#: against a deployed GUI server, which needs a live Ghidra and so happens at a
-#: deploy, not in CI. Until then the list is pinned so the exemption cannot grow
-#: silently -- which is exactly how these four got here.
+#: **IT IS EMPTY, AND MUST STAY EMPTY.** This is a ratchet asserted in both
+#: directions: a new entry fails CI, and so does a stale one.
 #:
-#: `/move_file` and `/move_folder` were headless-only when the snapshot was
-#: taken; 7.0.0 fixed them being "unreachable outside one mode", which made them
-#: GUI-served. `/batch_get_comments` and `/list_shadowed_globals` were added
-#: after the recording.
-SCHEMA_RECORDING_PREDATES = frozenset(
-    {
-        "/batch_get_comments",
-        "/list_shadowed_globals",
-        "/move_file",
-        "/move_folder",
-    }
-)
+#: History: #532 found four GUI-served endpoints in this state and pinned them
+#: so the exemption could not grow silently -- `/move_file` and `/move_folder`
+#: (headless-only when the snapshot was taken; 7.0.0 made them GUI-served),
+#: `/batch_get_comments` and `/list_shadowed_globals` (added after the
+#: recording). It could not fix them: re-recording needs a live Ghidra with the
+#: current JAR deployed, and teaching the fake to synthesise a contract would be
+#: the fake asserting on itself. The snapshot was re-recorded at the 2026-09-18
+#: deploy (235 -> 239 tools) and all four now carry a real parameter contract.
+#:
+#: Adding a path back is a decision to ship an endpoint the offline tier cannot
+#: check. Re-record the snapshot instead; do NOT make the fake invent a
+#: contract.
+SCHEMA_RECORDING_PREDATES: frozenset[str] = frozenset()
 
 
 def _get(url: str, timeout: float = 10):
@@ -123,18 +122,18 @@ class TestFixtureIntegrity:
         ``/mcp/schema``, which never advertises those routes.
 
         For a GUI-served endpoint it is not correct, it is staleness -- the
-        recording simply predates it, so the fake routes the call and validates
-        no parameter of it, silently. Four endpoints are in that state today
-        and the previous version of this assertion could not see them: it
-        compared ``len(unchecked)`` against ``len(contract) - len(schema)``,
-        which is true by construction whenever the schema is a subset of the
-        catalog, and so could not fail for this.
+        recording predates it, so the fake routes the call and validates no
+        parameter of it, silently. Four endpoints were in that state until the
+        2026-09-18 re-record, and the version of this assertion before #532
+        could not see them: it compared ``len(unchecked)`` against
+        ``len(contract) - len(schema)``, which is true by construction whenever
+        the schema is a subset of the catalog, and so could not fail for this.
 
-        Pinning the exact set makes the exemption a decision instead of an
-        accident. Adding a GUI endpoint now fails here until the snapshot is
-        re-recorded against a deployed server -- which is the real fix, and
-        needs a live Ghidra. Teaching the fake to synthesise a contract for the
-        missing routes would be the fake asserting on itself.
+        ``SCHEMA_RECORDING_PREDATES`` is now empty, and the assertion is exact
+        in both directions: a newly added GUI endpoint fails here until the
+        snapshot is re-recorded against a deployed server -- which is the real
+        fix, and needs a live Ghidra. Teaching the fake to synthesise a
+        contract for the missing routes would be the fake asserting on itself.
         """
         catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["endpoints"]
         servers = {e["path"]: e["servers"] for e in catalog}

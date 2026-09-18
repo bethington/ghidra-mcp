@@ -197,11 +197,26 @@ class StreamableHttpTransport:
 
 def bridge_transport(repo_root: str, ghidra_url: str = "http://127.0.0.1:8089",
                      debugger_url: str = "http://127.0.0.1:8099") -> StdioTransport:
-    """The Python bridge, configured exactly as Claude Code launches it."""
+    """The Python bridge, launched with every tool group advertised up front.
+
+    `--no-lazy` is load-bearing, not tidiness. #440 made lazy loading the
+    DEFAULT (`state._lazy_mode = True`), so a bridge started without it
+    registers only CORE_GROUPS -- 118 of 239 tools. Every corpus case for a
+    tool outside those groups then fails with `Unknown tool: <name>`, including
+    `mcp_schema` itself, so the suite cannot even re-record its own contract
+    snapshot. Measured 2026-09-18: `--only mcp_schema` reported
+    `unexpected MCP-level error: Unknown tool: mcp_schema`.
+
+    This does mean the transport is no longer "configured exactly as Claude
+    Code launches it" -- deliberately. The conformance corpus is a statement
+    about the SERVER's surface, and scoping it to whichever groups a client
+    happens to load would make the corpus a statement about the client's
+    default instead.
+    """
     return StdioTransport(
         command=[
             "uv", "run", "--no-sync", "--directory", repo_root,
-            "bridge-mcp-ghidra", "--transport", "stdio",
+            "bridge-mcp-ghidra", "--transport", "stdio", "--no-lazy",
         ],
         env={
             "GHIDRA_MCP_URL": ghidra_url,

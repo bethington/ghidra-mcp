@@ -210,6 +210,73 @@ MCP endpoint: http://0.0.0.0:8081/mcp
 Host ports were remapped to 18089/18081 for that run only, because a live Ghidra
 already owned 8089 on the machine; container-side ports, and therefore
 everything above, are exactly as shipped.
+### Fixed — four GUI endpoints were exempt from the offline tier's parameter checking
+
+The recorded `/mcp/schema` snapshot held **235** tools; the GUI server serves
+**239**. `tests/offline/fake_ghidra.py` sets `EndpointSpec.params = None` for an
+endpoint the recording does not cover and skips parameter validation entirely,
+so the offline tier routed calls to `/move_file`, `/move_folder`,
+`/list_shadowed_globals` and `/batch_get_comments` and validated **no
+parameter** of them — the exact blind spot [#112]'s tier was built to close,
+since `AnnotationScanner` silently uses the default for an unknown parameter
+name and returns 200.
+
+[#532](https://github.com/bethington/ghidra-mcp/pull/532) pinned the set as
+`SCHEMA_RECORDING_PREDATES` so it could not grow silently, but could not fix
+it: re-recording needs a live Ghidra with the current JAR deployed, and
+teaching the fake to synthesise a contract would be the fake asserting on
+itself. Re-recorded at the 2026-09-18 deploy — 239 tools, all four present,
+`SCHEMA_RECORDING_PREDATES` now **empty** and asserted in both directions. The
+14 endpoints still uncovered are the headless-only project-management surface,
+which a GUI recording legitimately never advertises.
+
+No contract breach surfaced: `expected_contract_violations.json` and
+`known_integration_call_breaches.json` both stay empty. That is a weaker result
+than it reads — only `/list_shadowed_globals` is called by any test today, so
+the other three gained a contract nothing yet exercises. What changed is that a
+future call to any of them is checked.
+
+Re-recording turned up two bugs that had to be fixed first, both of which made
+the snapshot unrecordable rather than merely stale:
+
+- **The conformance runner would record an MCP-level error as a golden.**
+  [#440](https://github.com/bethington/ghidra-mcp/issues/440) made lazy tool
+  loading the default, so the bridge advertised CORE_GROUPS only — 118 of 239
+  tools — and `mcp_schema` was not among them. `--update-snapshots` overwrote
+  the committed 7,119-line `mcp_schema.snap` with the single line
+  `Unknown tool: mcp_schema` and reported `new=1`, as if it had recorded a
+  response. The existing guard could not see it: that one tests for a JSON
+  `{"error": ...}` body, and a transport error is not JSON. `_handle_snapshot`
+  now refuses any `isError` result outright — `expect_error_payload` opts into
+  a refusal *body*, not a call that never reached the tool.
+- **`bridge_transport` now passes `--no-lazy`.** The corpus is a statement
+  about the *server's* surface; scoping it to whichever groups a client happens
+  to load by default makes it a statement about the client instead. Without the
+  flag, every case for a tool outside CORE_GROUPS dies on `Unknown tool`.
+
+Also here:
+
+- **`--only PATTERN` on the conformance runner.** `--update-snapshots` was
+  all-or-nothing, so re-recording one golden meant accepting whatever the other
+  118 returned in the same pass — 118 unreviewed rewrites to fix 1, which is
+  why the schema snapshot simply went stale instead. A pattern matching nothing
+  is fatal, never a quiet zero-case run: `--only mcp_scheme --update-snapshots`
+  would otherwise exit 0 having recorded nothing.
+- **The offline tier's tool count is derived, not typed.** `235` was hardcoded
+  in two assertions in `test_bridge_end_to_end.py` and went stale the moment
+  the snapshot was re-recorded. Both now read the count from the snapshot,
+  which is what they actually mean — "the bridge parsed every tool the server
+  served", and "lazy mode parsed fewer". The absolute size of the surface is
+  pinned by `tools.audit_server_scope --release-counts` and the catalog parity
+  tests, which is where a change to it should be reviewed.
+- **Published aliases and the annotation parser are pinned to agree.**
+  [#470](https://github.com/bethington/ghidra-mcp/pull/470) made
+  `ParamDescriptor` emit `aliases`, and this is the first recording that
+  carries them — 6 routes, identical to what `tests/offline/param_aliases.py`
+  reconstructs from the Java source. Two sources of one fact is how this repo
+  has been bitten repeatedly, so the agreement is now asserted rather than
+  assumed; it is also what will prove the parser can be retired without losing
+  aliases on the way out.
 
 ### Fixed — a release could publish with the live regression never having run
 
