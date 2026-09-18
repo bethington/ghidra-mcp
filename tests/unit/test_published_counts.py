@@ -240,6 +240,7 @@ PRESENT_TENSE_SURFACES = [
 NON_CATALOG_COUNTS: list[tuple[str, int, str]] = [
     ("README.md", 4, "the minimum viable read-only tool allowlist, not a catalog size"),
     ("README.md", 84, "endpoints in the three default tool groups loaded under --lazy"),
+    ("ROADMAP.md", 84, "endpoints in the three default tool groups loaded under --lazy"),
     ("CLAUDE.md", 5, "REST endpoints on the optional external re-kb archive service"),
     ("CLAUDE.md", 22, "debugger proxy tools in the bridge, not catalog endpoints"),
     ("ROADMAP.md", 272, "the pre-consolidation surface; a statement about the past"),

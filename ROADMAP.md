@@ -10,7 +10,8 @@ slips, and this project has one maintainer. What it does carry is a status per
 theme, and a section for work that is explicitly **not planned**, which is the
 part that lets someone stop waiting.
 
-_Last updated: 2026-08-30. For the tool inventory see
+_Last updated: 2026-09-18, against `dev` during the 7.0.0 release
+preparation. For the tool inventory see
 [`tests/endpoints.json`](tests/endpoints.json); for architecture see
 [`CLAUDE.md`](CLAUDE.md); for how to build and test see
 [`CONTRIBUTING.md`](CONTRIBUTING.md)._
@@ -46,9 +47,14 @@ removing any capability. The catalog stands at 253 today. See `CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.
 
-**In flight.** Making lazy loading the default (#440, PR #452), so a client that
-cannot take the full set works out of the box rather than after reading the
-docs. The core groups loaded on connect are `listing`, `function`, `program`.
+**Also done, in 7.0.0.** Lazy loading is now the **default** (#440, PR #452), so
+a client that cannot take the full set works out of the box rather than after
+reading the docs. The core groups loaded on connect are `listing`, `function`
+and `program` — 84 endpoints plus the 8 static bridge tools. `--no-lazy`
+restores eager registration for clients that ignore `tools/list_changed`.
+
+Issue #440 is still open: the fix is on `dev` and has not shipped in a tagged
+release yet.
 
 **Next.** Auditing for tools that overlap enough to merge now that
 `search_tools` makes discovery cheap. This is a judgement pass, not a mechanical
@@ -64,16 +70,26 @@ answers.
 **Done.** `streamable-http` transport, recommended for HTTP clients. `sse`
 retained for backward compatibility only.
 
-**In flight.** `OPTIONS` preflight returning 405 and breaking Open WebUI (#399,
-PR #455) — the fix makes CORS and the DNS-rebinding host policy agree on one
-host policy instead of two. A community PR (#438) on unauthenticated non-loopback
-binding overlaps this area and has to be reconciled with it.
+**Also done, in 7.0.0.** The `OPTIONS` preflight returning 405 and breaking Open
+WebUI (#399, PR #455). The root cause was that **two** gates read the `Origin`
+header — `CORSMiddleware` answers the preflight, the SDK's
+`TransportSecurityMiddleware` re-checks Host and Origin on the actual request —
+and their allowlists were maintained side by side in different syntaxes and had
+drifted. Both now derive from one `_policy_hosts()` set, so they cannot
+disagree.
 
-**Also in flight.** Service-launched MCP clients cannot spawn a bare `uv`,
-because the client's `PATH` does not include `~/.local/bin` and the failure
-surfaces only as `spawn ENOENT` (#441, PR #456). This is a documentation and
-preflight problem more than a code one, and it has been reported by more than
-one person.
+Also done: service-launched MCP clients could not spawn a bare `uv`, because the
+client's `PATH` does not include `~/.local/bin` and the failure surfaced only as
+`spawn ENOENT` (#441, PR #456). `preflight` now resolves and prints the absolute
+launcher path to put in a client config.
+
+Issues #399 and #441 are still open; both fixes are on `dev` and unreleased.
+
+**In flight.** Community PR #438 on unauthenticated non-loopback binding
+overlaps this area and has to be reconciled with the above. It matters more now
+that the bridge ships as a container: a published port cannot reach a loopback
+bind, so the containerised bridge binds `0.0.0.0` while holding a credential for
+Ghidra, and an unauthenticated bridge in that position is a confused deputy.
 
 **Not started.** A written support matrix stating which clients are tested
 against and which are best-effort. Right now that distinction exists only in the
@@ -90,14 +106,18 @@ tools return a named plural key plus `count`/`total`, and errors are
 done: parameter-name consistency across endpoints — `address` versus
 `function_address`, `new_name` versus `newName` (#210, closed 2026-06-27).
 
-**In flight.** Propagating `@Param` descriptions into the MCP `inputSchema`
-(community PR #425), and filling in every advertised parameter that had no
-description (PR #454, 294 undocumented parameters to 0). #425 lands first; #454
-builds on it.
+**Also done, in 7.0.0.** Every advertised parameter now has a description
+(PR #454, 294 undocumented to 0). Nine advertised-but-unread parameters were
+wired up or removed — a switch the schema offers and the handler never reads is
+worse than no switch. `@Param` aliases are published in `/mcp/schema`, so a
+valid spelling is no longer one the schema declines to mention.
 
-**Next.** Nothing queued beyond finishing the two in-flight PRs. Report a
-parameter whose description is wrong or missing and it gets fixed; there is no
-larger schema project waiting behind them.
+**In flight.** Community PR #425, propagating `@Param` descriptions into the MCP
+`inputSchema`.
+
+**Next.** Nothing queued beyond that PR. Report a parameter whose description is
+wrong or missing and it gets fixed; there is no larger schema project waiting
+behind it.
 
 ### 4. Test infrastructure that does not need a live Ghidra
 
@@ -107,18 +127,37 @@ contributor who does not keep a Ghidra project full of binaries. The visible
 cost: two separate contributors reported the test suite as broken when it was
 not — they had run a live tier without a server.
 
-**Done.** The Python unit tier (568 tests, no Ghidra), the offline Java tier
-(444 tests, needs the jars but no server), the Pester tier, a Windows CI leg so
-both sides of every platform branch execute, and an MCP-protocol conformance
-suite that drives a real MCP client instead of raw HTTP.
+**Done.** The Python unit tier (1,048 tests, no Ghidra), the offline Java tier
+(549 tests across 56 classes, needs a Ghidra install but no server), the Pester
+tier, a Windows CI leg so both sides of every platform branch execute, and an
+MCP-protocol conformance suite that drives a real MCP client instead of raw
+HTTP.
 
-**In flight.** Nothing structural. The recent work here has been paying off
-coverage debt (PR #453) rather than extending the offline surface.
+**Done in 7.0.0 — the long-pole closed.** Offline test fixtures for CI (#112).
+`tests/offline/` is a strict fake of the plugin's HTTP surface: it routes from
+`tests/endpoints.json`, validates parameters against the recorded `/mcp/schema`,
+and replays conformance snapshots, so the real bridge runs end to end over a
+real socket with **no Ghidra installed**. The read-only integration file runs
+against it (61 pass, 11 documented gaps). Its limits are written down in
+`tests/offline/README.md` and matter: it proves the bridge speaks the protocol
+and that shapes match the recordings, and it proves nothing about what Ghidra
+does today. The issue is still open pending a tagged release.
 
-**Open long-pole.** Offline test fixtures for CI (#112) — recorded or
-synthesized program state so that endpoint behaviour, not just registration, can
-be asserted without Ghidra. This is the single change that would most improve
-outside contribution, and it is not scheduled.
+That tier immediately earned itself. An AST check of every integration HTTP
+call against the catalog and schema found **ten** wrong parameter names in the
+read-only suite that were invisible at runtime — `AnnotationScanner` does not
+find an unknown name, uses the default, and returns 200, so those assertions had
+been passing while asserting nothing.
+
+Two other tiers stopped silently not running. The **real-Ghidra tier** had never
+executed anywhere: with `GHIDRA_INSTALL_DIR` set it died in `@Before` on a
+missing log4j class, and with it unset every test self-skipped — and
+`assumeTrue` reports a skipped tier as SUCCESS. And **14 offline security tests**
+sat in a package CI's Surefire glob could not select, so they were compiled,
+committed and never run. Both routes are now asserted rather than commented.
+
+**In flight.** Nothing structural. Recent work has been paying off coverage debt
+(PR #453) rather than extending the offline surface.
 
 ### 5. Docker and headless deployment
 
@@ -127,6 +166,17 @@ sharp edges that only show up on someone else's machine.
 
 **Done.** `HeadlessManagementService` for program and project lifecycle; a
 headless server that runs without the GUI; Docker files under `docker/`.
+
+**Done in 7.0.0.** The MCP bridge is part of the Compose stack.
+`docker/Dockerfile.bridge` existed and worked, but nothing referenced it, so
+`docker compose up` brought up a Ghidra REST server and no MCP endpoint at all.
+`docker compose up -d --build` now starts both. `docker-compose.multi.yml`
+deliberately gets no bridge, and now says why: `network_mode: "service:X"` names
+one container and cannot target a scaled service, so a bridge in front of the
+load balancer would hand consecutive tool calls to different Ghidra instances
+holding different projects. **Not yet verified against a live engine** — the
+invariants are pinned by tests that need no daemon, but a first
+`docker compose up` is still owed.
 
 **In flight.** The image fails to build when GID 1000 is already taken (#416,
 community PR #449 addresses the fixed container UIDs). `ensure-prereqs`
@@ -147,6 +197,22 @@ now states what CI runs, what gates, and that an empty check list means the
 maintainer has not clicked approve. Issue and PR templates ask for the four
 things that otherwise cost a round trip every time.
 
+**Done in 7.0.0 — gates that can actually fail.** Several could not, which is a
+worse state than not having them. The publish gate accepted
+`release-regression.result == 'skipped'`, and on a tag push that job is _always_
+skipped, so it had never once blocked a release; it now verifies recorded local
+evidence carrying a **source fingerprint**, not a timestamp. The Markdown lint
+job had been aborting before it read a file because of a filename
+`markdownlint-cli2` rejects — 2,598 violations were hidden behind it. Scorecard's
+push trigger named a branch the action refuses to run on, so every push started
+a run that could only fail. A `.env` typo made `--test release` exit 0 having run
+only the smoke test. Each of those is now asserted by a unit test rather than
+left to a comment.
+
+Gradle is also now the documented default for local work, because the
+Maven-first runbooks could not run on a machine without Maven. CI still builds
+and gates with Maven, so it remains a maintained peer.
+
 **Not done.** There is no automated check that an open PR is sitting with zero
 checks. Until there is, the reliable signal is a contributor saying so in the
 thread, and that is an explicitly welcome thing to do.
@@ -166,7 +232,9 @@ happens in one deliberate push or not at all.
   entire language runtime, and the `spawn ENOENT` class of problem from the
   install path. It is an architectural change, not a quick fix, and it is not
   started.
-- **Offline test fixtures for CI (#112).** See theme 4.
+- **Offline test fixtures for CI (#112).** Landed in 7.0.0 — see theme 4. Kept
+  here until the issue is closed, so this list and the issue tracker do not
+  disagree.
 
 ## Not planned
 
@@ -185,13 +253,16 @@ ignored — it has been decided.
 - **Backward-compatibility aliases for the 7.0.0 tool consolidation.** 7.0.0 is
   the breaking boundary and is a clean break by design. The old-to-new mapping
   is in `CHANGELOG.md` and in
-  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`; the aliases
-  are not coming back.
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`, and
+  `tests/unit/test_migration_guide_successors.py` fails if any of the 23
+  removals loses its successor. The aliases are not coming back.
 - **Prose responses from any endpoint.** Everything returns JSON as of 7.0.0.
   Tooling that parsed stdout as English needs to read the envelope.
 - **Supporting multiple Ghidra versions at once.** The project targets one
-  Ghidra release at a time (currently 12.1.2, tracked in `pom.xml` and pinned in
-  CI). A new Ghidra release is a retarget, not a compatibility matrix.
+  Ghidra release at a time (currently **12.1.2**, tracked in `pom.xml` and
+  pinned in the three CI workflows). A new Ghidra release is a retarget, not a
+  compatibility matrix. A 12.1.3 retarget is proposed in community PR #447 and
+  has not landed; until it does, 12.1.2 is what this project supports.
 - **A GUI, web dashboard, or IDE plugin shipped from this repository.** The
   product is an MCP server. Clients are other people's software.
 - **Game-specific or corpus-specific tooling.** Anything that only makes sense
