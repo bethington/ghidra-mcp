@@ -15,8 +15,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    # Core MCP server framework
-    "mcp>=1.28.1,<3.0.0",
+    # Core MCP server framework. The upper bound is load-bearing, not caution:
+    # the bridge imports `mcp.server.fastmcp`, which 2.x removed when FastMCP
+    # became MCPServer, so an installed wheel that resolves 2.x dies at import.
+    # uv.lock pins 1.28.1, so nothing in this repo exercises the range -- only
+    # `pip install ghidra-mcp-bridge` does. Widen it with the 2.x migration,
+    # not before; test_mcp_requirement_excludes_the_2x_sdk holds the line.
+    "mcp>=1.28.1,<2.0.0",
 ]
 # NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
 # has no `requests` runtime dependency. `requests` is only needed by the repo's

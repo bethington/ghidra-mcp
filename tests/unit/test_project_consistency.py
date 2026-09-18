@@ -171,6 +171,44 @@ class TestBridgeConfiguration(unittest.TestCase):
         # The thin bridge uses stdlib http.client, not requests
         self.assertNotIn("import requests", content)
 
+    def test_mcp_requirement_excludes_the_2x_sdk(self):
+        """The declared `mcp` range must not admit an SDK without FastMCP.
+
+        The bridge imports `mcp.server.fastmcp`, which 2.x removed when FastMCP
+        became MCPServer. `uv.lock` pins 1.28.1, so CI and every developer
+        checkout keep running a working SDK no matter what the range says --
+        but the published wheel is resolved fresh, so `pip install
+        ghidra-mcp-bridge` under a range like `<3.0.0` installs mcp 2.x and the
+        bridge dies at import with ModuleNotFoundError. Nothing else in this
+        repo can see that: it is the one dependency whose range is exercised
+        only by users.
+        """
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        deps = re.search(
+            r"(?ms)^dependencies = \[(.*?)^\]", PYPROJECT_TOML.read_text(encoding="utf-8")
+        )
+        self.assertIsNotNone(deps, "pyproject.toml has no [project] dependencies array")
+        requirement = re.search(r'"mcp([^"]*)"', deps.group(1))
+        self.assertIsNotNone(requirement, "pyproject.toml declares no `mcp` requirement")
+
+        spec = SpecifierSet(requirement.group(1))
+        for rejected in ("2.0.0", "2.2.0", "3.0.0"):
+            self.assertNotIn(
+                Version(rejected),
+                spec,
+                f"mcp{requirement.group(1)} admits {rejected}, which has no "
+                "mcp.server.fastmcp -- the installed bridge would fail at import",
+            )
+
+        self.assertIn(
+            "mcp.server.fastmcp",
+            bridge_source_text(),
+            "bridge no longer imports mcp.server.fastmcp: if it migrated to the "
+            "2.x MCPServer API, widen the range and rewrite this test",
+        )
+
 
 class TestJavaArchitecture(unittest.TestCase):
     """Verify Java architectural invariants."""
