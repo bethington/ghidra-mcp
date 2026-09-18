@@ -5411,4 +5411,3 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ---
 
 For older release details, see the [docs/releases/](docs/releases/) directory.
-
