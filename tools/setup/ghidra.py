@@ -74,6 +74,30 @@ DEFAULT_BENCHMARK_FUNCTION = "calc_crc16"
 # YAML regression asserts. Sized for a cold install (freshly-created Ghidra
 # user-config dir), where the first analysis pass runs well past a minute.
 BENCHMARK_ANALYSIS_TIMEOUT_S = 240
+# The deploy test tiers, and the ONLY list of them. `--test` reads its argparse
+# `choices` from here and `resolve_deploy_test_modes` validates the `.env` value
+# against it, so the two routes into run_deploy_tests cannot disagree.
+#
+# They did disagree, and silently (#484). `--test relase` was rejected by
+# argparse, but `GHIDRA_MCP_DEPLOY_TESTS=relase` in a local .env resolved to
+# ['relase'], and run_deploy_tests' dispatching `elif` chain had no `else` -- so
+# the loop matched nothing, deploy ran the smoke test alone and exited 0. A
+# release cut would report the release regression as passed having never run it,
+# and `deploy --test release` is CLAUDE.md's fourth release-floor command.
+#
+# Keep alphabetical: this tuple is what the operator sees in `--test --help` and
+# in the error message for a bad tier.
+DEPLOY_TEST_MODES = (
+    "benchmark-read",
+    "benchmark-write",
+    "debugger-live",
+    "endpoint-catalog",
+    "multi-program",
+    "negative-contract",
+    "release",
+    "selected-contract",
+)
+
 BENCHMARK_DEPLOY_TEST_MODES = {
     "benchmark-read",
     "benchmark-write",
@@ -518,16 +542,54 @@ def resolve_mcp_url(repo_root: Path) -> str:
     return f"http://{bind}:{port}".rstrip("/")
 
 
+class UnknownDeployTestMode(ValueError):
+    """A deploy test tier that no dispatch branch in run_deploy_tests handles.
+
+    Its own class so a caller can tell an operator typo from a genuine failure
+    of the tier it asked for.
+    """
+
+
+def _reject_unknown_deploy_test_modes(modes: list[str], *, source: str) -> None:
+    """Fail loudly on any tier `run_deploy_tests` would silently skip.
+
+    ``--test`` gets this for free from argparse ``choices``. The ``.env`` route
+    had no validation at all, and the dispatch chain it feeds has no ``else``,
+    so an unknown tier was not an error: the loop simply matched nothing and
+    deploy exited 0 having run only the smoke test (#484). A gate that reports
+    success for work it did not do is worse than one that fails.
+    """
+    unknown = [mode for mode in modes if mode not in DEPLOY_TEST_MODES]
+    if not unknown:
+        return
+    raise UnknownDeployTestMode(
+        f"unknown deploy test tier(s) {unknown} from {source}.\n"
+        f"Valid tiers: {', '.join(DEPLOY_TEST_MODES)}.\n"
+        f"This is refused rather than ignored because run_deploy_tests would "
+        f"match no branch for it and deploy would exit 0 having run only the "
+        f"smoke test -- a release gate reporting a pass for a tier that never "
+        f"ran. To run no tiers at all, set GHIDRA_MCP_DEPLOY_TESTS=off."
+    )
+
+
 def resolve_deploy_test_modes(repo_root: Path, cli_modes: list[str] | None) -> list[str]:
     modes = list(cli_modes or [])
+    # argparse `choices` already vetted these, but this function is also called
+    # directly (tests, tooling), so do not take that on trust.
+    _reject_unknown_deploy_test_modes(modes, source="--test")
+
     env_values = load_env_file(repo_root / ".env")
     raw_modes = env_values.get("GHIDRA_MCP_DEPLOY_TESTS", "").strip()
     if raw_modes and raw_modes.lower() not in {"0", "false", "no", "none", "off"}:
-        modes.extend(
+        env_modes = [
             mode.strip()
             for mode in re.split(r"[,;\s]+", raw_modes)
             if mode.strip()
+        ]
+        _reject_unknown_deploy_test_modes(
+            env_modes, source=f"GHIDRA_MCP_DEPLOY_TESTS in {repo_root / '.env'}"
         )
+        modes.extend(env_modes)
     return list(dict.fromkeys(modes))
 
 
@@ -2179,6 +2241,19 @@ def run_deploy_tests(repo_root: Path, mcp_url: str, test_modes: list[str]) -> No
                 print(f"SKIPPED debugger live test: {skip}")
         elif mode == "release":
             run_release_regression_tests(repo_root, mcp_url)
+        else:
+            # Unreachable via the CLI or .env -- both validate against
+            # DEPLOY_TEST_MODES before getting here. This catches the other
+            # direction: a tier ADDED to DEPLOY_TEST_MODES and never wired up.
+            # Without it that tier passes validation, matches no branch, and
+            # reports a pass for a tier with no implementation -- the same
+            # silence #484 was, one step later.
+            raise UnknownDeployTestMode(
+                f"deploy test tier '{mode}' is listed in DEPLOY_TEST_MODES but "
+                f"run_deploy_tests has no branch for it. Wire it up or remove "
+                f"it; silently skipping it would report a pass for a tier that "
+                f"does not exist."
+            )
 
 
 def _resolve_debugger_python(repo_root: Path) -> Path | None:

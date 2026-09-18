@@ -267,6 +267,86 @@ def test_deploy_parser_accepts_release_test_tier():
     assert args.test == ["release"]
 
 
+def test_cmd_deploy_refuses_an_unknown_env_tier_before_touching_ghidra(
+    tmp_path, monkeypatch, capsys
+):
+    """#484: the .env route reached run_deploy_tests unvalidated.
+
+    Resolution happens first in cmd_deploy so the refusal costs a second,
+    rather than arriving after a build, a Ghidra restart and a deploy -- or,
+    before this, not arriving at all.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(
+        cli,
+        "deploy_to_ghidra",
+        lambda *a, **k: pytest.fail("deploy must not start with an unknown tier"),
+    )
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=relase\n", encoding="utf-8"
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    result = cli.cmd_deploy(_args(ghidra_path=ghidra_path))
+
+    assert result == 2
+    assert "relase" in capsys.readouterr().err
+
+
+def test_cmd_deploy_gradle_backend_refuses_tiers_it_cannot_run(
+    tmp_path, monkeypatch, capsys
+):
+    """build.gradle's `deploy` task has no post-deploy tier and no way to add one.
+
+    It accepted `--test release` and dropped it, exiting 0 -- the same silence
+    #484 was, through a different door, on a documented supported backend.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(
+        cli,
+        "run_gradle",
+        lambda *a, **k: pytest.fail("gradle deploy must not run when a tier was asked for"),
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    result = cli.cmd_deploy(_args(ghidra_path=ghidra_path, test=["release"]))
+
+    assert result == 2
+    err = capsys.readouterr().err
+    assert "release" in err
+    assert "Maven" in err
+
+
+def test_cmd_deploy_gradle_backend_still_deploys_without_tiers(tmp_path, monkeypatch):
+    """The refusal must be scoped to a tier request, not to the backend."""
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    recorded: dict = {}
+    monkeypatch.setattr(
+        cli,
+        "run_gradle",
+        lambda root, tasks, **kw: recorded.update({"tasks": tasks}) or 0,
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    assert cli.cmd_deploy(_args(ghidra_path=ghidra_path)) == 0
+    assert recorded["tasks"] == ["deploy"]
+
+
 def test_cmd_deploy_raises_when_no_ghidra_path(tmp_path, monkeypatch):
     from tools.setup import cli
 

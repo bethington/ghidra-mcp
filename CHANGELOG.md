@@ -6,6 +6,58 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Fixed — a typo in `GHIDRA_MCP_DEPLOY_TESTS` silently skipped every deploy test ([#484](https://github.com/bethington/ghidra-mcp/issues/484))
+
+`--test relase` was rejected by argparse. `GHIDRA_MCP_DEPLOY_TESTS=relase` in a
+local `.env` was not: it resolved to `['relase']`, the dispatching `elif` chain
+in `run_deploy_tests` had no `else`, so the loop matched nothing and deploy
+exited **0** having run only the smoke test. Two routes into one function, and
+the silent one is the route a release cut reads from — `deploy --test release`
+is CLAUDE.md's fourth release-floor command.
+
+Reproduced at `0cf545b1` before changing anything:
+
+```text
+resolve_deploy_test_modes -> ['relase']
+run_deploy_tests(['relase']) completed, steps actually run: ['smoke']
+```
+
+and after:
+
+```text
+resolve_deploy_test_modes RAISED UnknownDeployTestMode:
+unknown deploy test tier(s) ['relase'] from GHIDRA_MCP_DEPLOY_TESTS in ...\.env.
+Valid tiers: benchmark-read, benchmark-write, debugger-live, endpoint-catalog,
+multi-program, negative-contract, release, selected-contract.
+```
+
+`tools/setup/ghidra.py` now holds `DEPLOY_TEST_MODES`, the **only** tier list.
+`--test` takes its argparse `choices` from it and the `.env` value is validated
+against it, so the two routes cannot drift again. A second copy is what drifted
+in the first place, so the fix is one list rather than two validations.
+
+Both directions are closed:
+
+- An unknown tier is **refused, not ignored**, naming the bad value, where it
+  came from, the valid tiers, and `off` for "run none".
+- A tier listed in `DEPLOY_TEST_MODES` with no dispatch branch raises too. That
+  is the same silence one step later — a tier that passes validation, matches
+  nothing, and reports a pass for an implementation that does not exist.
+
+Resolution happens first in `cmd_deploy`, before anything is built, copied or
+restarted, so a typo costs a second instead of surfacing after a build, a Ghidra
+restart and a deploy.
+
+**The Gradle backend had the same hole through a different door.** `cmd_deploy`
+passed `--test` straight to `run_gradle(["deploy"])`, and `build.gradle`'s
+`deploy` task is `stopGhidra` + `deployExtension` + `installUserExtension` +
+`patchGhidraUserConfig` — it runs no post-deploy tier and has no way to. So
+`TOOLS_SETUP_BACKEND=gradle python -m tools.setup deploy --test release`
+accepted the tier, ran none of it, and exited 0, on a backend CLAUDE.md
+documents as supported. It now refuses and names the Maven backend. Naming a
+tier and not running it is the failure mode; the message is not the fix, the
+refusal is.
+
 ### Fixed — 14 offline security tests had never run in CI ([#483](https://github.com/bethington/ghidra-mcp/issues/483))
 
 CI does not run `mvn test`. It runs a filtered build:
