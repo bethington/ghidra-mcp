@@ -33,6 +33,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -180,6 +181,12 @@ PINNED: list[tuple[str, str, int, str]] = [
         "GUI plugin",
     ),
     (
+        "src/main/resources/META-INF/MANIFEST.MF",
+        r"HTTP server plugin with (\d+) MCP endpoints",
+        GUI,
+        "GUI plugin",
+    ),
+    (
         "src/main/java/com/xebyte/GhidraMCPPlugin.java",
         r"Provides (\d+) endpoints for reverse engineering automation",
         GUI,
@@ -230,6 +237,7 @@ PRESENT_TENSE_SURFACES = [
     "CONTRIBUTING.md",
     "ROADMAP.md",
     "src/main/resources/extension.properties",
+    "src/main/resources/META-INF/MANIFEST.MF",
     ".github/ISSUE_TEMPLATE/feature_request.yml",
 ]
 
@@ -356,33 +364,77 @@ class TestPublishedCountsMatchTheCatalog(unittest.TestCase):
 
 
 class TestPublishedTextIsNotCorrupted(unittest.TestCase):
-    """No control characters in text that ships to a user.
+    """No tracked text file contains a control character.
 
-    On 2026-07-21 a bulk count bump replaced ``256 MCP tools`` with
-    ``267\\x01`` in both ``extension.properties`` and ``AGENTS.md`` -- the word
-    "tools" was eaten and a literal SOH byte left in its place. That shipped in
-    every release from v5.17.0 onward: Ghidra's *Install Extensions* dialog
-    rendered a control character and a sentence with no noun, and no gate saw
-    it because nothing read those strings.
+    On 2026-07-21 a bulk count bump replaced ``256 MCP tools`` with ``267``
+    followed by a literal SOH byte -- the word "tools" was eaten and the
+    control character left in its place. It shipped in every release from
+    v5.17.0 onward: Ghidra's *Install Extensions* dialog rendered a control
+    character and a sentence with no noun, and no gate saw it because nothing
+    read those strings.
+
+    The first fix listed the files to scan, and that list missed
+    ``META-INF/MANIFEST.MF`` -- a **third** copy of the same corrupted string,
+    inside the jar, describing the plugin to the same dialog. An allowlist
+    cannot see the file nobody thought to add, which is precisely the shape of
+    the bug it was written to catch. So this sweeps every tracked text file
+    instead: a control character is never correct in one, and a file that
+    genuinely needs an exemption is one worth arguing about in review.
     """
 
-    FILES = PRESENT_TENSE_SURFACES + [
-        "src/main/java/com/xebyte/GhidraMCPPlugin.java",
-        "docs/releases/README.md",
-    ]
+    #: Extensions whose contents are binary. Anything else is scanned, and a
+    #: file holding a NUL is treated as binary by content -- so a new binary
+    #: format needs no entry here to avoid a false positive.
+    BINARY_SUFFIXES = frozenset(
+        """
+        .png .jpg .jpeg .gif .ico .svgz .pdf .zip .gar .gzf .jar .dll .exe
+        .bin .so .dylib .class .woff .woff2 .ttf .otf .eot .gz .xz .7z
+        """.split()
+    )
+
+    def _tracked_files(self):
+        out = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            check=True,
+        )
+        return [f for f in out.stdout.decode("utf-8").split("\0") if f]
 
     def test_no_control_characters(self):
-        bad = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+        bad = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
         problems = []
-        for rel in self.FILES:
-            for lineno, line in enumerate(_read(rel).splitlines(), 1):
-                hit = bad.search(line)
-                if hit:
-                    problems.append(
-                        f"{rel}:{lineno}: control character "
-                        f"{hex(ord(hit.group(0)))} in published text: "
-                        f"{line.strip()[:100]!r}"
-                    )
+        scanned = 0
+
+        for rel in self._tracked_files():
+            path = PROJECT_ROOT / rel
+            if path.suffix.lower() in self.BINARY_SUFFIXES:
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue  # submodule, or a link pointing outside the tree
+            if b"\x00" in raw:
+                continue  # binary by content, whatever it is called
+            scanned += 1
+            hit = bad.search(raw)
+            if not hit:
+                continue
+            offset = hit.start()
+            lineno = raw.count(b"\n", 0, offset) + 1
+            context = raw[max(0, offset - 60):offset + 30]
+            problems.append(
+                f"{rel}:{lineno}: control character "
+                f"{hex(raw[offset])} in tracked text: {context!r}"
+            )
+
+        # Rule 2 again: a sweep that scans nothing is a test that cannot fail.
+        self.assertGreater(
+            scanned,
+            200,
+            f"only {scanned} tracked text files scanned -- the enumeration "
+            f"broke, so this assertion proves nothing",
+        )
         self.assertEqual(problems, [], "\n".join(problems))
 
 

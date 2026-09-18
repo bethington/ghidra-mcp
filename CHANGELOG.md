@@ -64,7 +64,7 @@ Dockerfile nothing builds is a file, not a deployment.
   pins every one of them with no fallback: an unmatched marker fails rather
   than passing quietly. It also caught a **control character shipping since
   v5.17.0** — a bulk count bump had rewritten `Provides 256 MCP tools for` as
-  `Provides 267 for` in `extension.properties` and `AGENTS.md`, so Ghidra's
+  `Provides 267<SOH> for` in `extension.properties` and `AGENTS.md`, so Ghidra's
   *Install Extensions* dialog rendered a SOH byte and a sentence with no noun.
 - **Gradle is the documented default
   ([#528](https://github.com/bethington/ghidra-mcp/pull/528)).** Every runbook
