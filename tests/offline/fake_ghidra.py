@@ -134,8 +134,14 @@ class EndpointSpec:
     method: str
     category: str
     # None when the endpoint is in the catalog but not in the recorded schema
-    # snapshot (the 18 headless-only project-management endpoints). Routing
-    # still works; parameter contract checking is skipped and said so.
+    # snapshot. Routing still works; parameter contract checking is skipped.
+    #
+    # Mostly that is the headless-only project-management surface, which a GUI
+    # recording legitimately never advertises. But it is NOT only that: four
+    # GUI-served endpoints are in the set because the recording predates them,
+    # and they are therefore exempt from parameter validation by accident
+    # rather than by design. `test_fake_ghidra.py` pins exactly which, so the
+    # exemption cannot grow silently the next time an endpoint is added.
     params: dict[str, ParamSpec] | None
     # {alias: canonical} back-compat spellings the runtime resolver accepts.
     # /mcp/schema does not advertise these (see tests/offline/param_aliases),
@@ -479,9 +485,10 @@ class FakeGhidraServer:
         self, spec: EndpointSpec, query: dict, body: dict | None
     ) -> list[Violation]:
         if spec.params is None:
-            # Headless-only endpoint, absent from the recorded schema snapshot.
-            # Routing works; there is nothing to check parameters against, and
-            # inventing a check would be a guess.
+            # Absent from the recorded schema snapshot -- headless-only, or a
+            # GUI endpoint the recording predates. Routing works; there is
+            # nothing to check parameters against, and inventing a check would
+            # be a guess. See SCHEMA_RECORDING_PREDATES in test_fake_ghidra.py.
             return []
 
         found: list[Violation] = []

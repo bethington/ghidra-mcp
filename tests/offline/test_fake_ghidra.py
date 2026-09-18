@@ -23,6 +23,28 @@ from .fake_ghidra import (
     rehydrate,
 )
 
+#: GUI-served endpoints that `tests/conformance/snapshots/mcp_schema.snap` does
+#: not cover, because the recording predates them. The fake routes calls to
+#: these and validates **no parameter** of them.
+#:
+#: This is staleness, not design. The real fix is to re-record the snapshot
+#: against a deployed GUI server, which needs a live Ghidra and so happens at a
+#: deploy, not in CI. Until then the list is pinned so the exemption cannot grow
+#: silently -- which is exactly how these four got here.
+#:
+#: `/move_file` and `/move_folder` were headless-only when the snapshot was
+#: taken; 7.0.0 fixed them being "unreachable outside one mode", which made them
+#: GUI-served. `/batch_get_comments` and `/list_shadowed_globals` were added
+#: after the recording.
+SCHEMA_RECORDING_PREDATES = frozenset(
+    {
+        "/batch_get_comments",
+        "/list_shadowed_globals",
+        "/move_file",
+        "/move_folder",
+    }
+)
+
 
 def _get(url: str, timeout: float = 10):
     try:
@@ -83,13 +105,7 @@ class TestFixtureIntegrity:
         assert len(contract) == len(catalog)
 
     def test_schema_is_a_subset_of_the_catalog(self):
-        """Every advertised tool must be a catalogued endpoint.
-
-        The reverse does not hold: the catalog also carries headless-only
-        project-management endpoints the GUI schema never advertises. Those get
-        routing but no parameter contract, and EndpointSpec.params is None to
-        say so out loud rather than silently checking nothing.
-        """
+        """Every advertised tool must be a catalogued endpoint."""
         contract = load_contract()
         schema = json.loads(SCHEMA_SNAPSHOT.read_text(encoding="utf-8"))["tools"]
         missing = [
@@ -99,10 +115,54 @@ class TestFixtureIntegrity:
         ]
         assert not missing, f"schema advertises endpoints absent from the catalog: {missing}"
 
-        unchecked = sorted(spec.path for spec in contract.values() if spec.params is None)
-        # Pinned as a count, not a list, so adding a headless endpoint does not
-        # need this test edited -- but a sudden jump does get noticed.
-        assert len(unchecked) == len(contract) - len(schema)
+    def test_only_headless_endpoints_escape_parameter_checking(self):
+        """An endpoint the recording does not cover is checked against nothing.
+
+        For the headless-only project-management surface that is correct and
+        permanent: the snapshot is a recording of the **GUI** server's
+        ``/mcp/schema``, which never advertises those routes.
+
+        For a GUI-served endpoint it is not correct, it is staleness -- the
+        recording simply predates it, so the fake routes the call and validates
+        no parameter of it, silently. Four endpoints are in that state today
+        and the previous version of this assertion could not see them: it
+        compared ``len(unchecked)`` against ``len(contract) - len(schema)``,
+        which is true by construction whenever the schema is a subset of the
+        catalog, and so could not fail for this.
+
+        Pinning the exact set makes the exemption a decision instead of an
+        accident. Adding a GUI endpoint now fails here until the snapshot is
+        re-recorded against a deployed server -- which is the real fix, and
+        needs a live Ghidra. Teaching the fake to synthesise a contract for the
+        missing routes would be the fake asserting on itself.
+        """
+        catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["endpoints"]
+        servers = {e["path"]: e["servers"] for e in catalog}
+
+        contract = load_contract()
+        unchecked = {spec.path for spec in contract.values() if spec.params is None}
+
+        gui_unchecked = sorted(p for p in unchecked if "gui" in servers.get(p, []))
+        assert gui_unchecked == sorted(SCHEMA_RECORDING_PREDATES), (
+            "GUI-served endpoints with no parameter contract in the offline "
+            "tier changed.\n"
+            f"  expected: {sorted(SCHEMA_RECORDING_PREDATES)}\n"
+            f"  actual:   {gui_unchecked}\n"
+            "If you added an endpoint, the recorded /mcp/schema no longer "
+            "covers it and the fake validates nothing it sends. Re-record "
+            "tests/conformance/snapshots/mcp_schema.snap against a deployed "
+            "server, or add the path here with the reason it must stay "
+            "unvalidated. Do NOT make the fake invent a contract."
+        )
+
+        headless_unchecked = {p for p in unchecked if "gui" not in servers.get(p, [])}
+        headless_only = {p for p, s in servers.items() if "gui" not in s}
+        assert headless_unchecked == headless_only, (
+            "The headless-only set and the unchecked set disagree; one of them "
+            "moved without the other.\n"
+            f"  only in unchecked:     {sorted(headless_unchecked - headless_only)}\n"
+            f"  only in headless-only: {sorted(headless_only - headless_unchecked)}"
+        )
 
 
 # ---------------------------------------------------------------------------
