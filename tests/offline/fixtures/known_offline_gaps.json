@@ -19,7 +19,14 @@
     "                 existing conformance corpus, surfaced here.",
     "",
     "  missing_route  The test calls an endpoint that is not in the catalog at",
-    "                 all, and the fake has nothing to serve.",
+    "                 all, and the fake has nothing to serve. NO ENTRY MAY",
+    "                 CARRY THIS CAUSE AGAIN: a test calling a route that does",
+    "                 not exist is a broken test, not an offline limitation,",
+    "                 and tests/unit/test_integration_call_contract.py now",
+    "                 fails CI on one instead of letting it be quarantined",
+    "                 here. The single entry that had it -- calling",
+    "                 /search_functions_by_name -- was fixed on 2026-08-30 to",
+    "                 call /search_functions, and is now a bad_fixture.",
     "",
     "A node id listed here that no longer exists is a hard ERROR (see",
     "replay_plugin.pytest_collection_modifyitems), so this list cannot rot",
@@ -38,8 +45,8 @@
     },
     {
       "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_by_name",
-      "cause": "missing_route",
-      "reason": "calls /search_functions_by_name, which is not among the 253 endpoints in tests/endpoints.json. The catalogued endpoint is /search_functions (params: name_pattern, offset, limit, program). See expected_contract_violations.json."
+      "cause": "bad_fixture",
+      "reason": "tests/conformance/snapshots/search_functions.snap is a recorded ERROR ('Search term is required'), not a successful response, so there is no `functions` list to assert on -- measured: AssertionError: assert 'functions' in {'error': 'Search term is required'}. The TEST is now correct: it called /search_functions_by_name, which is not an endpoint, and now calls /search_functions with the declared `name_pattern`. Re-record the snapshot with a real search term to unblock it."
     },
     {
       "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_response_shape_for_mnemonic_search",

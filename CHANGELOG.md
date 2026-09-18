@@ -665,11 +665,102 @@ declared name is `name_pattern`; `/analyze_function_completeness` and
 `/get_disassembly` and `/list_ghidra_scripts` are not endpoints at all; and
 `/disassemble_bytes` was called with GET where the catalog declares POST. They
 are recorded in `tests/offline/fixtures/expected_contract_violations.json` as a
-ratchet asserted exactly in both directions, rather than fixed here — changing
-what a test asserts is a maintainer call, and two of them want deleting.
+ratchet asserted exactly in both directions.
 
 Also surfaced: `tests/conformance/snapshots/search_instructions.snap` is a
 recorded *error* response, not a successful one.
+
+### Read-only suite contract breaches — all ten fixed, and made unrepeatable
+
+The ten breaches above are fixed and the violation baseline is now **empty**.
+Nine were broken tests; one was never a breach at all.
+
+Parameter names corrected to the declared spelling
+(`search_functions_enhanced` → `name_pattern`,
+`analyze_function_completeness` → `function_address`), and the corrected tests
+gained the assertion the wrong name had made impossible — that the filter
+actually filters and the limit actually bounds. Pagination moved to the
+endpoint that has it: `/list_functions` declares only `program`, so the two
+"pagination" tests now exercise `/list_functions_enhanced`, and four other
+calls simply stopped sending a `limit` the server drops.
+`/search_functions_by_name` → `/search_functions`;
+`/list_ghidra_scripts` → `/list_scripts`, rewritten to cover its `filter`
+parameter, since the unfiltered call was already covered.
+`/get_decompiled_code` and `/get_disassembly` were deleted: they are aliases
+for `/decompile_function` and `/disassemble_function`, which the tests
+immediately above them already cover, so the tests were duplicates that could
+only ever 404.
+
+**`/disassemble_bytes` left the read-only tier rather than being corrected in
+place.** Calling it properly is a POST that creates instructions inside a
+transaction, so "fixing" the call would have turned a permanent no-op into a
+listing mutation in the suite whose whole contract is that it never writes.
+
+**`/get_function_labels` sending `address` was NOT a breach.** `@Param(value =
+"name")` there declares `aliases = {"function", "address", "function_address"}`
+and `AnnotationScanner` honours every one at dispatch — but
+`ParamDescriptor.toJson` never emits them, so `/mcp/schema` advertises only the
+canonical name and any consumer reasoning from the schema calls a valid alias
+unknown. `tests/offline/param_aliases.py` reads the annotations directly to
+close that gap for the offline tier; the test still moved to the canonical
+`name`, which is what the annotation itself says new callers should prefer.
+
+**The guard.** `tests/unit/test_integration_call_contract.py` AST-scans every
+file in `tests/integration/` and checks each HTTP call's path, method and
+parameter names against `tests/endpoints.json` and the recorded `/mcp/schema`.
+It needs no server, no fixtures and no Ghidra, so it runs in the unit tier CI
+always executes — across all 15 integration files, not just the one the
+offline tier replays. Verified to go red on each breach shape: a nonexistent
+endpoint, a wrong parameter name, and a GET on a POST route.
+`tests/unit/fixtures/known_integration_call_breaches.json` recorded the 29
+breaches that already existed in the *other* integration files, ratcheted in
+both directions, and the read-only suite is asserted to hold zero.
+
+### The other nine files — 29 breaches to zero, and the check's own blind spots
+
+The baseline is now **empty across the whole tier** and must stay empty.
+
+Of the 29, **26 were real**. The shapes were the same as the read-only ten:
+parameters that do not exist (`/set_function_prototype` sent `address` where
+the selector is `function_address`; `/batch_set_comments` the reverse;
+`/rename_function` sent `address`, which is not among `old_name`'s aliases;
+`/apply_function_documentation` sent `address` + `documentation` when it
+declares only `json_body`), and routes that do not exist
+(`/batch_rename_variables`, renamed to `/rename_variables` before 5.0;
+`/run_script`, which is `/run_ghidra_script`). Every corrected assertion was
+mutation-tested: 19 flip PASS → FAIL when their expectation is changed, and 20
+are red against the offline fake for a stated fixture reason.
+
+**`/build_function_hash_index` and `/lookup_function_by_hash` were deleted.**
+They describe a persistent hash index and a reverse hash → function lookup this
+server does not have, and both tests accepted 404. What exists is
+`/get_function_hash` + `/get_bulk_function_hashes`, so the replacements ask the
+surviving surface the same questions: that bulk hashing works, and that a
+function's own hash is the one the bulk listing reports for it.
+
+**The `method_not_allowed` shape is not a 404.** `GhidraMCPPlugin` registers
+one HTTP context per path and never checks the method, so a GET on a
+POST-declared endpoint reaches the handler with an *empty* body and every
+`ParamSource.BODY` parameter silently takes its default. That is why fourteen
+GET calls on five POST endpoints all returned 200 while doing nothing. Each of
+those five (`/analyze_data_region`, `/detect_array_bounds`,
+`/get_assembly_context`, `/analyze_struct_field_usage`,
+`/get_field_access_context`) opens no transaction — they are POST because their
+payloads are structured, not because they write — so correcting the calls did
+not move any test into a mutating tier.
+
+**Three of the 29 were the check's own false positives**, and three more
+breaches were invisible to it. `by_path.get("/set_global")` is a dict lookup
+over the endpoint catalog, not a GET; it was reported as `method_not_allowed`
+against POST endpoints no test ever called with GET. Meanwhile `_PARAM_KWARGS`
+omitted `json_data=`, which is the keyword `http_client.post` actually takes,
+so every JSON body in the tier was unexamined; the `f"{server_url}/path"` call
+form was not parsed at all; and `tests/conftest.py` was outside the scanned
+directory even though it supplies the tier's shared fixtures — two of which
+(`sample_address`, `sample_function`) made the same bad `/list_functions` call,
+inherited by every test that asks for them. All are fixed, and an unclassified
+receiver or base URL now fails `test_every_receiver_is_classified` by name
+rather than being silently dropped.
 
 **Boundary, stated in the code and in `tests/offline/README.md`:** this proves
 the bridge speaks the protocol and that response shapes match what Ghidra

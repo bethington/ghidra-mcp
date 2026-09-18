@@ -125,13 +125,29 @@ a stale one, so a fix has to be recorded.
 * **`fixtures/expected_contract_violations.json`** — calls the read-only suite
   makes that the catalog does not support. Against a live Ghidra each still
   returns 200 (the plugin ignores parameters it does not declare), so the test
-  passes while asserting nothing about the thing its name claims. Ten are
-  recorded today, found the first time this tier ran.
+  passes while asserting nothing about the thing its name claims. **It is
+  empty**: the ten found on this tier's first run were fixed, and it should
+  stay empty. A line here is a decision to ship a test that cannot fail.
 * **`fixtures/known_offline_gaps.json`** — integration tests that structurally
   cannot run here, each with its cause: `recording_gap` (the variant response
-  was never recorded), `bad_fixture` (the snapshot is a captured error), or
-  `missing_route` (the endpoint is not in the catalog). A listed node id that
-  no longer exists is a hard ERROR, so the list cannot rot into an excuse.
+  was never recorded) or `bad_fixture` (the snapshot is a captured error). The
+  third cause, `missing_route`, is retired — a test calling a route that does
+  not exist is a broken test, and `tests/unit/test_integration_call_contract.py`
+  now fails CI on one rather than letting it be quarantined. A listed node id
+  that no longer exists is a hard ERROR, so the list cannot rot into an excuse.
+
+## The declared-alias seam
+
+`@Param` carries an `aliases` array that `AnnotationScanner` honours at
+dispatch, but `ParamDescriptor.toJson` never emits — so `/mcp/schema` advertises
+only the canonical name, and anything checking calls against the schema alone
+calls a valid back-compat spelling an unknown parameter.
+`param_aliases.py` reads the annotations directly to close that gap, and both
+the fake and the static contract check use it. It fails safe: a broken parse
+finds *fewer* aliases, which turns valid calls back into breaches and reddens
+the ratchet, and `test_param_aliases.py` pins the known alias sets exactly so it
+cannot fail the other way. The real fix is upstream — emit `aliases` in the
+schema, and this module goes away.
 
 ## Extending this
 

@@ -27,25 +27,31 @@ class TestBatchComments:
     @pytest.mark.write
     def test_batch_set_comments_plate(self, http_client, sample_address):
         """Test setting plate comment via batch endpoint."""
+        # CommentService declares `address`, not `function_address`, so the
+        # selector was dropped and the endpoint fell back to its default.
         response = http_client.post("/batch_set_comments", data={
-            "function_address": sample_address,
+            "address": sample_address,
             "plate_comment": "Test plate comment from Phase 2 tests"
         })
         assert response.status_code == 200
-        # Should return JSON with success status
-        text = response.text
-        assert "success" in text.lower() or "error" in text.lower()
+        body = response.json()
+        assert body.get("success") is True, response.text
+        assert body.get("plate_comment_set") is True, response.text
 
     @pytest.mark.requires_program
     def test_batch_set_comments_invalid_address(self, http_client):
         """Test batch comments with invalid address."""
         response = http_client.post("/batch_set_comments", data={
-            "function_address": "invalid",
+            "address": "invalid",
             "plate_comment": "Test"
         })
-        # Accept 200 (with error or no-op success), 400, or 500
-        assert response.status_code in [200, 400, 500]
-        # May return success with 0 comments set (no-op) or error
+        assert response.status_code == 200
+        # With `function_address` the bad value never reached the endpoint:
+        # `address` defaulted to empty, the plate write was skipped, and the
+        # response was {"success": true, "plate_comment_set": false} -- which
+        # "accept 200, 400 or 500" happily accepted. Named correctly, the bad
+        # address has to be refused.
+        assert "error" in response.json(), response.text
 
 
 class TestBatchLabels:
@@ -290,28 +296,34 @@ class TestForceDecompile:
     @pytest.mark.requires_program
     def test_force_decompile_by_address(self, http_client, sample_address):
         """Test force decompiling by address."""
-        # GUI plugin uses function_address param, headless uses address
+        # There is one declared selector, `address`, in both GUI and headless
+        # builds -- FunctionService declares it once, with no alias. Sent as
+        # `function_address` it was dropped, the endpoint answered
+        # {"error": "Function address is required"} with status 200, and
+        # `len(text) > 0` was satisfied by that error. The "alternate param
+        # name for headless" retry never ran, because the failure was never a
+        # 400. This test has never decompiled anything.
         response = http_client.get("/force_decompile", params={
-            "function_address": sample_address
+            "address": sample_address
         })
-        if response.status_code == 400:
-            # Try alternate param name for headless
-            response = http_client.get("/force_decompile", params={
-                "address": sample_address
-            })
         assert response.status_code == 200
-        # Should return decompiled code
-        text = response.text
-        assert len(text) > 0
+        body = response.json()
+        assert body["address"].lstrip("0x").lower() == sample_address.lstrip(
+            "0x"
+        ).lower(), response.text
+        assert body["decompiled"].strip(), response.text
 
     @pytest.mark.requires_program
     def test_force_decompile_invalid_address(self, http_client):
         """Test force decompile with invalid address."""
         response = http_client.get("/force_decompile", params={
-            "function_address": "0xDEADBEEF"
+            "address": "0xDEADBEEF"
         })
-        # Accept 200 with error, 400, 404, or 500
-        assert response.status_code in [200, 400, 404, 500]
+        assert response.status_code == 200
+        # The old call could not tell a bad address from a missing one: both
+        # produced a 200 with an error body, and the four-way status
+        # assertion accepted 200 unconditionally.
+        assert "error" in response.json(), response.text
 
 
 class TestEntryPoints:
