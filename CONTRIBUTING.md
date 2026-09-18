@@ -91,6 +91,8 @@ checks were skipped, which is the correct state for a Python-only contributor:
 Python: .../.venv/Scripts/python.exe
 Maven: .../mvn.cmd
 uv: available
+MCP client spawn commands:
+  ...                        (advisory; how your MCP client would spawn the bridge)
 Java: available on PATH
 Project version: 7.0.0
 Ghidra version from pom.xml: 12.1.2
@@ -100,12 +102,36 @@ No Ghidra path configured; skipped Ghidra-specific preflight checks.
 Add `--ghidra-path <dir>` to also validate the install and that its version
 matches `pom.xml`.
 
-**If you do not have Maven, that command exits 1** with a single line,
-`Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools
-path.`, and reports nothing else — it locates Maven before it checks anything,
-even though Gradle is now the default backend and a Python-only contributor
-needs neither. Use the Gradle backend instead, which reports the same things and
-more:
+**If you do not have Maven, that command still exits 0.** Maven is a report
+line, not a gate: `preflight` never invokes it, and Gradle — the default
+backend — needs it for nothing, so a Python-only contributor gets the whole
+report anyway.
+
+```text
+Python: .../.venv/Scripts/python.exe
+Maven: not found (the Gradle backend does not need it)
+  Maven is required only by `tools.setup build|clean|run-tests` under the Maven backend
+  and by `ensure-prereqs`/`install-ghidra-deps`. To build without it: `./gradlew buildExtension`
+  or TOOLS_SETUP_BACKEND=gradle.
+uv: available
+...
+```
+
+A Maven that *is* installed but runs on Java below 21 is reported the same
+way — warned about, not fatal. The hard failure lives where Maven is actually
+needed: `tools.setup build`, `clean` and `run-tests` under the Maven backend,
+and `ensure-prereqs` / `install-ghidra-deps`, all of which shell out to `mvn`.
+Those exit 1 with a refusal naming the Gradle route:
+
+```text
+$ python -m tools.setup build
+Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path.
+`tools.setup build` runs Maven directly, so it cannot proceed without it.
+For the Java build, use `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<dir>` or set TOOLS_SETUP_BACKEND=gradle.
+```
+
+Preflight also runs through the Gradle backend, which covers the same ground
+from Gradle's own side and requires a Ghidra path:
 
 ```text
 TOOLS_SETUP_BACKEND=gradle python -m tools.setup preflight --ghidra-path <dir>
@@ -128,9 +154,6 @@ Write access: Ghidra install extensions dir OK
 Write access: user extensions dir OK
 Preflight passed.
 ```
-
-The Maven-first ordering in the default backend's `preflight` is a known rough
-edge, not a requirement.
 
 ## Build
 
