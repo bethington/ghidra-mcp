@@ -393,20 +393,31 @@ jobs:
       run: uvx black --check python/bridge_mcp_ghidra/ 2>/dev/null || echo "black check skipped"
 
   markdown-lint:
-    # ADVISORY BUT REAL. This job is deliberately NOT in build-status's `needs`,
-    # so a Markdown violation reports red here and blocks nothing. It also no
-    # longer carries `continue-on-error`, and that is the whole point:
+    # GATING as of 2026-09-18. `build-status` lists this job in `needs:` and
+    # compares its result, so a Markdown violation fails the build.
     #
-    # Until 2026-08-30 this job passed `config: '.markdownlintrc'`, a filename
+    # It was advisory until then, and advisory did not work. Being outside
+    # `build-status.needs` blocked nothing, but the job carries no
+    # `continue-on-error`, so a violation still made the WORKFLOW's own
+    # conclusion `failure` while every blocking job was green. The result was a
+    # status that was red without meaning anything: dev's last four runs before
+    # #520 were red on 12 accumulated findings, #520 cleared them, and three
+    # community merges put it back within the hour (a CHANGELOG append left two
+    # blank lines at EOF -- #537). A permanently red check is one people stop
+    # reading, which costs more than the violations do.
+    #
+    # So the choice was made the other way: it blocks, and the tree is kept
+    # clean. Verified clean at the time of the switch -- 97 tracked .md files,
+    # 0 issues.
+    #
+    # Before 2026-08-30 this job passed `config: '.markdownlintrc'`, a filename
     # markdownlint-cli2 rejects. Every run aborted before reading a file, and
     # `continue-on-error: true` reported the abort as success. Run 33332052889
     # logged `##[error]Unable to use configuration file ... .markdownlintrc` and
-    # still concluded `success`. The gate had never linted anything.
-    #
-    # `continue-on-error` is what made a broken gate indistinguishable from a
-    # clean one. Leaving this job out of build-status is enough to keep it
-    # non-blocking; do not re-add continue-on-error to soften a real finding.
-    name: Documentation Quality (advisory, non-blocking)
+    # still concluded `success`. The gate had never linted anything. Do NOT
+    # re-add `continue-on-error`: it is what made a broken gate indistinguishable
+    # from a clean one.
+    name: Documentation Quality
     runs-on: ubuntu-latest
 
     steps:
@@ -443,13 +454,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests ]
+    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

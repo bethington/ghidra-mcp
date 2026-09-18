@@ -453,11 +453,24 @@ class TestMarkdownLintConfig(unittest.TestCase):
                 "%s is disabled with no comment explaining why" % rule,
             )
 
-    def test_lint_job_does_not_swallow_its_own_failure(self):
-        """`continue-on-error` is what made the broken gate look green.
+    def test_lint_job_gates_the_build_and_can_still_fail(self):
+        """markdown-lint is a real gate, and reports its own result.
 
-        The job stays advisory by being absent from build-status's `needs`,
-        not by discarding its own result.
+        It was advisory until 2026-09-18, and advisory did not work. Sitting
+        outside `build-status.needs` blocked nothing, but the job carries no
+        `continue-on-error`, so a violation still made the WORKFLOW's own
+        conclusion `failure` while every blocking job was green. A check that
+        is red without consequence is one people stop reading: dev sat red for
+        four commits on 12 accumulated findings, and three community merges
+        reproduced it within the hour of #520 clearing them.
+
+        Both halves are asserted, because either one alone recreates a failure
+        mode this repo has already shipped:
+
+        - it must be in `build-status.needs` and compared there, or a
+          violation blocks nothing again;
+        - it must not carry `continue-on-error`, which is what made the
+          2026-08-30 gate report success while linting zero files.
         """
         workflow = self.workflow_text()
         job = workflow.split("markdown-lint:", 1)[1].split("\n  pester-tests:", 1)[0]
@@ -470,10 +483,21 @@ class TestMarkdownLintConfig(unittest.TestCase):
         )
         needs = re.search(r"^    needs: \[([^\]]*)\]", workflow, re.M)
         self.assertIsNotNone(needs, "build-status needs: list not found")
-        self.assertNotIn(
+        self.assertIn(
             "markdown-lint",
             needs.group(1),
-            "markdown-lint is advisory and must not gate build-status",
+            "markdown-lint must gate build-status: outside `needs` it turns "
+            "the run red without failing the build, which is the state that "
+            "trained people to stop reading the status",
+        )
+        # `needs` alone only makes build-status WAIT for it. The reported
+        # status comes from the explicit result comparison in the script, so a
+        # job listed but never compared is waited on and then ignored.
+        self.assertIn(
+            "needs.markdown-lint.result",
+            workflow,
+            "build-status waits for markdown-lint but never compares its "
+            "result, so its failures do not affect the reported status",
         )
 
     def test_no_stale_markdownlintrc(self):
