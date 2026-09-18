@@ -218,9 +218,55 @@ It needs no server, no fixtures and no Ghidra, so it runs in the unit tier CI
 always executes — across all 15 integration files, not just the one the
 offline tier replays. Verified to go red on each breach shape: a nonexistent
 endpoint, a wrong parameter name, and a GET on a POST route.
-`tests/unit/fixtures/known_integration_call_breaches.json` records the 29
+`tests/unit/fixtures/known_integration_call_breaches.json` recorded the 29
 breaches that already existed in the *other* integration files, ratcheted in
 both directions, and the read-only suite is asserted to hold zero.
+
+### The other nine files — 29 breaches to zero, and the check's own blind spots
+
+The baseline is now **empty across the whole tier** and must stay empty.
+
+Of the 29, **26 were real**. The shapes were the same as the read-only ten:
+parameters that do not exist (`/set_function_prototype` sent `address` where
+the selector is `function_address`; `/batch_set_comments` the reverse;
+`/rename_function` sent `address`, which is not among `old_name`'s aliases;
+`/apply_function_documentation` sent `address` + `documentation` when it
+declares only `json_body`), and routes that do not exist
+(`/batch_rename_variables`, renamed to `/rename_variables` before 5.0;
+`/run_script`, which is `/run_ghidra_script`). Every corrected assertion was
+mutation-tested: 19 flip PASS → FAIL when their expectation is changed, and 20
+are red against the offline fake for a stated fixture reason.
+
+**`/build_function_hash_index` and `/lookup_function_by_hash` were deleted.**
+They describe a persistent hash index and a reverse hash → function lookup this
+server does not have, and both tests accepted 404. What exists is
+`/get_function_hash` + `/get_bulk_function_hashes`, so the replacements ask the
+surviving surface the same questions: that bulk hashing works, and that a
+function's own hash is the one the bulk listing reports for it.
+
+**The `method_not_allowed` shape is not a 404.** `GhidraMCPPlugin` registers
+one HTTP context per path and never checks the method, so a GET on a
+POST-declared endpoint reaches the handler with an *empty* body and every
+`ParamSource.BODY` parameter silently takes its default. That is why fourteen
+GET calls on five POST endpoints all returned 200 while doing nothing. Each of
+those five (`/analyze_data_region`, `/detect_array_bounds`,
+`/get_assembly_context`, `/analyze_struct_field_usage`,
+`/get_field_access_context`) opens no transaction — they are POST because their
+payloads are structured, not because they write — so correcting the calls did
+not move any test into a mutating tier.
+
+**Three of the 29 were the check's own false positives**, and three more
+breaches were invisible to it. `by_path.get("/set_global")` is a dict lookup
+over the endpoint catalog, not a GET; it was reported as `method_not_allowed`
+against POST endpoints no test ever called with GET. Meanwhile `_PARAM_KWARGS`
+omitted `json_data=`, which is the keyword `http_client.post` actually takes,
+so every JSON body in the tier was unexamined; the `f"{server_url}/path"` call
+form was not parsed at all; and `tests/conftest.py` was outside the scanned
+directory even though it supplies the tier's shared fixtures — two of which
+(`sample_address`, `sample_function`) made the same bad `/list_functions` call,
+inherited by every test that asks for them. All are fixed, and an unclassified
+receiver or base URL now fails `test_every_receiver_is_classified` by name
+rather than being silently dropped.
 
 **Boundary, stated in the code and in `tests/offline/README.md`:** this proves
 the bridge speaks the protocol and that response shapes match what Ghidra
