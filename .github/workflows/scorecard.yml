@@ -12,15 +12,25 @@
 # config change (CODEOWNERS, branch protection, workflow hardening)
 # reflects in the badge within minutes instead of waiting a week.
 #
-# The push branch MUST be this repo's DEFAULT branch, currently `dev`.
+# The push branch MUST be this repo's DEFAULT branch, currently `main`.
 # scorecard-action validates this itself and hard-fails with
-# "validating options: only default branch is supported" on anything
-# else -- it is not a warning and not skippable. The default moved from
-# `main` to `dev` between 2026-08-03 and 2026-08-10, and this trigger
-# was left on `main`, so from that moment every push to main started a
-# run that could only fail: 3 consecutive failures, while the scheduled
-# runs (which follow the default branch automatically) kept passing.
-# If the default branch ever moves again, this line moves with it.
+# "validating options: only the default branch main is supported" on
+# anything else -- it is not a warning and not skippable.
+#
+# This line has now been wrong in both directions. The default moved
+# `main` -> `dev` between 2026-08-03 and 2026-08-10 while this trigger
+# still said `main`: 3 consecutive failures on pushes to main. It was
+# changed to `dev`, the default later moved back to `main`, and every
+# push to `dev` then started a run that could only fail -- 13 seconds
+# each, and every one of the 8 most recent scorecard runs was one.
+# Meanwhile the scheduled runs, which follow the default branch
+# automatically, passed throughout, so the badge stayed green and the
+# failures looked like noise.
+#
+# `tests/unit/test_ci_workflow_triggers.py` now pins this against
+# DEFAULT_BRANCH, and cross-checks that constant against git's own
+# `origin/HEAD` wherever that is resolvable. If the default branch moves
+# again, that test is what says so.
 name: Scorecard supply-chain security
 
 on:
@@ -28,7 +38,7 @@ on:
   schedule:
     - cron: '17 8 * * 1'   # Mondays 08:17 UTC
   push:
-    branches: [dev]
+    branches: [main]
   # Manual trigger so the score can be refreshed without forcing a
   # dummy commit (useful after enabling repo Settings toggles like
   # Dependabot security alerts or branch protection rulesets, which
