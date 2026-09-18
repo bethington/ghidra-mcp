@@ -144,6 +144,73 @@ non-raising paths) and `tests/unit/test_setup_ghidra.py`
 `install_ghidra_dependencies` still raises). CONTRIBUTING.md's "known rough
 edge" paragraph is replaced by what the command now does.
 
+### Fixed — `docker/Dockerfile` could not build, and no gate could see it
+
+The documented Docker deployment did not work. `docker compose up --build` died
+in the server image:
+
+```text
+[ERROR] Failed to execute goal on project GhidraMCP: Could not resolve dependencies
+[ERROR] dependency: ghidra:Graph:jar:12.1.2 (test)
+[ERROR]     Could not find artifact ghidra:Graph:jar:12.1.2 in central
+```
+
+Ghidra is not on Maven Central, so four files hand-maintain a list of
+`mvn install:install-file` calls that stamp jars out of a Ghidra installation:
+`tests.yml`, `release.yml`, `pre-release.yml` and `docker/Dockerfile`. Four
+copies of one list, none derived from `pom.xml`, which is what actually decides
+what the build needs.
+
+`ghidra:Graph` was added as a dependency and three of the four were updated.
+`docker/Dockerfile` installed 15 jars against the pom's 16.
+
+**CI stayed green throughout, because nothing in CI builds the Docker image.**
+The only possible signal was a person running the documented command — which is
+the worst place to find out, and exactly why the check added here is offline and
+costs nothing.
+
+`tests/unit/test_ghidra_jar_install_lists.py` asserts every installer list
+*covers* `pom.xml`'s `ghidra:*` dependencies. Coverage rather than equality on
+purpose: the CI workflows also install `PDB` and `FunctionID`, which the pom
+does not declare, and an extra jar is harmless while a missing one is a build
+that cannot resolve.
+
+With the one missing line added, `docker compose up -d --build` was run for real
+and both containers reported healthy. Recorded because the previous entry could
+only promise it:
+
+```text
+Container ghidra-mcp          Healthy
+Container ghidra-mcp-bridge   Started
+
+ghidra-mcp-bridge   Up (healthy)
+ghidra-mcp          Up (healthy)   0.0.0.0:18089->8089/tcp, 0.0.0.0:18081->8081/tcp
+```
+
+The topology behaved as designed, and the container's own logs say why it works:
+
+```text
+Auto-connected via TCP to http://127.0.0.1:8089, registered 83 tools
+MCP endpoint: http://0.0.0.0:8081/mcp
+```
+
+- the bridge's `NetworkMode` is `container:38e338c76504…`, which is the
+  `ghidra-mcp` container's id — the namespace really is shared, which is what
+  makes `127.0.0.1:8089` mean Ghidra;
+- the bridge's own published ports are `map[]` — it publishes nothing, and both
+  host ports are on the `ghidra-mcp` service;
+- a real MCP client over the published port got `initialize` (protocol
+  `2025-11-25`), `tools/list` with **91 tools** (83 registered from the headless
+  server's schema plus the 8 static bridge tools), and
+  `tools/call list_open_programs` → `{"programs":[],"count":0}` — a true answer
+  for a container with nothing imported yet, not an error;
+- `GHIDRA_MCP_AUTH_TOKEN` is enforced end to end: **401** with no token, **200**
+  with the compose token, **401** with a wrong one.
+
+Host ports were remapped to 18089/18081 for that run only, because a live Ghidra
+already owned 8089 on the machine; container-side ports, and therefore
+everything above, are exactly as shipped.
+
 ### Fixed — a release could publish with the live regression never having run
 
 `release.yml` and `pre-release.yml` gated publishing on:
