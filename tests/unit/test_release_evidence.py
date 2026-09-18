@@ -121,18 +121,49 @@ def test_fingerprint_refuses_an_empty_source_set(tmp_path: Path):
 
 
 def test_fingerprint_is_line_ending_independent(repo: Path):
-    """CRLF locally, LF in CI -- the same content must hash the same.
+    """A CRLF working tree and an LF one must agree on identical content.
 
-    `core.autocrlf=true` on the maintainer's Windows machine and an LF checkout
-    on the ubuntu runner is not a corner case, it is every single release. Blob
-    ids are used precisely so git's own normalisation applies.
+    This is every single release, not a corner case. The maintainer records the
+    evidence on Windows with ``core.autocrlf=true`` -- `pom.xml`, `build.gradle`
+    and `tests/endpoints.json` really do sit on disk as CRLF there -- and the
+    release workflow verifies it on an ubuntu runner with an LF checkout. If
+    those disagreed the gate would fail on every release and be switched off
+    within a week.
+
+    The first version of this delegated the normalisation to ``git
+    hash-object``. Measured: in the ghidra-mcp checkout a CRLF working-tree file
+    hashes to its stored LF blob, but in a fresh clone with the same
+    ``core.autocrlf=true`` it hashes the CRLF bytes -- so the property held here
+    and not in general. It is done explicitly now, which is why this test can
+    assert it on any platform.
     """
     target = repo / "pom.xml"
     target.write_bytes(b"<project>\n  <version>1</version>\n</project>\n")
     lf = source_fingerprint(repo)
     target.write_bytes(b"<project>\r\n  <version>1</version>\r\n</project>\r\n")
-    crlf = source_fingerprint(repo)
-    assert lf == crlf
+    assert source_fingerprint(repo) == lf
+
+
+def test_fingerprint_hashes_binaries_exactly(repo: Path):
+    """The benchmark fixture is PE images; CRLF collapsing must not touch them.
+
+    A `0d 0a` pair inside a binary is data, not a line ending. Collapsing it
+    would make two different images fingerprint the same.
+    """
+    binary = repo / "tests" / "fixtures" / "benchmark" / "image.dll"
+    binary.write_bytes(b"MZ\x00\x90\r\n\x00rest")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    before = source_fingerprint(repo)
+
+    binary.write_bytes(b"MZ\x00\x90\n\x00rest")
+    assert source_fingerprint(repo) != before
+
+
+def test_fingerprint_notices_a_deleted_file(repo: Path):
+    """A tracked file that vanishes is a change, not something to skip over."""
+    before = source_fingerprint(repo)
+    (repo / "pom.xml").unlink()
+    assert source_fingerprint(repo) != before
 
 
 # ---------------------------------------------------------------------------

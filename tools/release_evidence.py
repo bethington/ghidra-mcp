@@ -30,12 +30,29 @@ it at the released commit and requires an exact match, so any edit under
 release fails until it is re-run. Edits that cannot change behaviour — docs, the
 CHANGELOG, the evidence file itself — do not.
 
-Blob ids rather than raw file bytes, because ``git hash-object`` applies the
-same normalisation git would: this repo has ``core.autocrlf=true`` on the
-maintainer's Windows machine and CI checks out LF on Linux, so hashing bytes
-directly would compare a CRLF tree against an LF one and never match. It also
-means an **uncommitted** edit changes the fingerprint, which is the behaviour
-wanted — the evidence describes the tree that was tested, not the last commit.
+Line endings are normalised before hashing, and that is not a detail. The
+maintainer records the evidence on Windows with ``core.autocrlf=true`` — the
+working tree there really is CRLF, checked — and the release workflow verifies
+it on an ubuntu runner with an LF checkout. Hash the bytes as they sit on disk
+and the two never match, on every single release, and the gate gets switched
+off within a week.
+
+The first version of this delegated that to ``git hash-object``, on the
+reasoning that git applies whatever normalisation it would apply on commit. It
+does — **usually**. Measured: in this repository a CRLF working-tree file hashes
+to its stored LF blob, but in a freshly cloned repo with the same
+``core.autocrlf=true`` it hashes the CRLF bytes instead. "Works on this machine
+today" is not a property to hang a release gate on, so the normalisation is done
+here, explicitly: a file containing a NUL byte is hashed raw (binary — the
+benchmark fixture's PE images), everything else has ``\\r\\n`` collapsed to
+``\\n`` first. Deterministic on every platform, and it needs no git filter
+semantics to be true.
+
+Content is read from the **working tree**, not from HEAD, so an uncommitted edit
+changes the fingerprint. That is the behaviour wanted: the evidence describes
+the tree that was tested, not the last commit. ``git ls-files`` still supplies
+the file *list*, so untracked build output and ``__pycache__`` cannot perturb
+it.
 
 Never give any of this a fallback default. ``release.yml`` used to grep a
 deleted ``EndpointRegistry.java`` with ``|| echo "0"`` and published
@@ -112,37 +129,43 @@ def _tracked_files(repo_root: Path) -> list[str]:
     return files
 
 
+def _normalised_content(path: Path) -> tuple[str, bytes]:
+    """``(kind, bytes)`` for hashing, with line endings made platform-neutral.
+
+    A NUL byte means binary (the benchmark fixture's PE images) and is hashed
+    exactly. Everything else has ``\\r\\n`` collapsed to ``\\n``, so a CRLF
+    working tree on Windows and an LF one on Linux agree. The kind is part of
+    the hash so a file changing category is itself a change.
+    """
+    raw = path.read_bytes()
+    if b"\0" in raw:
+        return "binary", raw
+    return "text", raw.replace(b"\r\n", b"\n")
+
+
 def source_fingerprint(repo_root: Path) -> str:
     """A stable id for the tree the regression would exercise.
 
-    SHA-256 over ``<path> <git-blob-id>`` lines, one per tracked file under
-    :data:`SOURCE_PATHS`, sorted. Blob ids come from ``git hash-object`` on the
-    WORKING TREE, so an uncommitted edit moves the fingerprint and git's own
-    line-ending normalisation is applied (see the module docstring).
+    SHA-256 over ``<path> <kind> <sha256-of-normalised-content>`` lines, one per
+    tracked file under :data:`SOURCE_PATHS`, sorted. Read from the WORKING TREE,
+    so an uncommitted edit moves it. See the module docstring for why the
+    normalisation is done here rather than left to git.
     """
     import hashlib
 
     files = _tracked_files(repo_root)
-    # `--stdin-paths` reads newline-separated paths; feed them all in one call
-    # rather than spawning a git process per file.
-    result = subprocess.run(
-        ["git", "hash-object", "--stdin-paths"],
-        cwd=repo_root,
-        input="\n".join(files) + "\n",
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    blobs = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if len(blobs) != len(files):
-        raise EvidenceError(
-            f"git hash-object returned {len(blobs)} ids for {len(files)} files. "
-            f"Refusing to fingerprint a partial read."
-        )
-
     digest = hashlib.sha256()
-    for path, blob in zip(files, blobs):
-        digest.update(f"{path} {blob}\n".encode("utf-8"))
+    for rel in files:
+        target = repo_root / rel
+        if not target.is_file():
+            # Tracked but absent: a deletion is a change, and must not be
+            # silently skipped into an unchanged fingerprint.
+            digest.update(f"{rel} missing\n".encode("utf-8"))
+            continue
+        kind, content = _normalised_content(target)
+        digest.update(
+            f"{rel} {kind} {hashlib.sha256(content).hexdigest()}\n".encode("utf-8")
+        )
     return digest.hexdigest()
 
 

@@ -40,12 +40,20 @@ until it is re-run.
 
 Three details that decide whether this works in practice:
 
-- **Blob ids, not file bytes.** The maintainer's Windows checkout has
-  `core.autocrlf=true`; the release runner checks out LF. Hashing bytes would
-  compare a CRLF tree against an LF one and never match, on every single
-  release. `git hash-object` applies git's own normalisation. It also reads the
-  **working tree**, so an uncommitted edit moves the fingerprint — the evidence
-  describes the tree that was tested, not the last commit.
+- **Line endings are normalised here, not delegated to git.** The maintainer's
+  Windows checkout has `core.autocrlf=true` — `pom.xml`, `build.gradle` and
+  `tests/endpoints.json` really do sit on disk as CRLF there — and the release
+  runner checks out LF. Hash the bytes as they sit and the two never match, on
+  every single release, and the gate gets switched off within a week. The first
+  cut delegated this to `git hash-object`, which applies git's own
+  normalisation — usually. **Measured:** in this repository a CRLF working-tree
+  file hashes to its stored LF blob, but in a fresh clone with the same
+  `core.autocrlf=true` it hashes the CRLF bytes instead. "Works on this machine
+  today" is not a property to hang a release gate on, so files containing a NUL
+  byte (the fixture's PE images) are hashed raw and everything else has its
+  CRLF pairs collapsed first. Content comes from the **working tree**, so an
+  uncommitted edit moves the fingerprint, describing the tree that was tested,
+  not the last commit.
 - **The scope is deliberately narrow.** A CHANGELOG line written after the run —
   including the entry describing the release itself — must not invalidate hours
   of live testing. A gate people route around is not a gate.
