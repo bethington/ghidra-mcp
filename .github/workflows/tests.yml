@@ -256,12 +256,29 @@ jobs:
         #     test_upgrade_project_language_main.py; no module was added to
         #     [tool.coverage.run] omit.
         #
-        # Floor 67 against a measured 69.22% — a ~2pt margin, not the ~0.5pt
-        # knife-edge that caused the outage above. That is ~98 statements of
-        # headroom for platform skew between this ubuntu matrix and the
-        # Windows leg where the baseline was measured.
+        #   72.5% (2026-09-18) — the 7.0.0 queue landed and tests/unit/ went
+        #     from 568 to 1048. Measured 72.50% on this ubuntu matrix and
+        #     73.05% on Windows, so the platform skew is ~0.5pt, as assumed.
+        #
+        # A SECOND failure mode showed up on 2026-09-18, and it is not the
+        # denominator trap. GitHub tests a `pull_request` against a merge commit
+        # built when the run was CREATED, and re-running an old run REPLAYS that
+        # commit rather than rebuilding it. #448 and #451 were therefore still
+        # being measured against the dev of 2026-09-11 and 2026-08-30, when this
+        # floor line itself read 58 and coverage sat at 57%. Both showed five red
+        # checks whose only content was `Coverage failure: total of 57 is less
+        # than fail-under=58`, with no failing test in either — #448 changes no
+        # Python at all. A stale base cannot be re-measured by re-running; only a
+        # rebase, or a merge verified locally, settles it. If a PR is red on
+        # coverage alone, check the run's DATE before believing the number.
+        #
+        # Floor 70 against a measured 72.50% — the same ~2pt margin the entry
+        # above chose, now against a baseline 3pt higher. Raising it with the
+        # baseline is the point of a ratchet; a floor left far below actual
+        # coverage does not make the gate safer, it widens the band in which a
+        # stale-base run reports a number nobody should act on.
         uv run --python ${{ matrix.python-version }} --group test \
-          pytest tests/unit/ -v --tb=short --cov-fail-under=67
+          pytest tests/unit/ -v --tb=short --cov-fail-under=70
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
