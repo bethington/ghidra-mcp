@@ -150,9 +150,11 @@ public final class ManualToolDescriptors {
             "password", "Server password. Required — the call is refused without it.");
         add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts",
             "path", "Folder to list checkouts under. Defaults to / — everything.");
-        add(m, "/server/connect", "POST", "server", "Connect to a Ghidra server",
-            "host", "Accepted but not read: the headless server connects using its configured host (GHIDRA_SERVER_* environment), and the GUI plugin uses the already-open project.",
-            "port", "Accepted but not read, for the same reason as host.");
+        // No parameters: GUI mode reports the already-open project, and headless
+        // mode connects with the host/port GhidraServerManager read from
+        // GHIDRA_SERVER_HOST/GHIDRA_SERVER_PORT at construction. Neither handler
+        // has ever read a per-request host/port.
+        add(m, "/server/connect", "POST", "server", "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.");
         add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server");
         add(m, "/server/repositories", "GET", "server", "List repositories on the connected server");
         add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server",

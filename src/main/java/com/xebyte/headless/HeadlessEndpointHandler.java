@@ -1539,9 +1539,9 @@ public class HeadlessEndpointHandler {
      * Analyze a data region comprehensively
      */
     public String analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
+                                    boolean includeXrefMap,
                                     boolean includeBoundaryDetection, String programName) {
-        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, programName).toJson();
+        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, programName).toJson();
     }
 
     /**
@@ -1561,16 +1561,15 @@ public class HeadlessEndpointHandler {
     /**
      * Detect array bounds based on xref analysis
      */
-    public String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange, String programName) {
-        return analysisService.detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, programName).toJson();
+    public String detectArrayBounds(String addressStr, int maxScanRange, String programName) {
+        return analysisService.detectArrayBounds(addressStr, maxScanRange, programName).toJson();
     }
 
     /**
      * Get assembly context around xref sources
      */
-    public String getAssemblyContext(String xrefSourcesStr, int contextInstructions, String includePatterns, String programName) {
-        return xrefCallGraphService.getAssemblyContext(xrefSourcesStr, contextInstructions, includePatterns, programName).toJson();
+    public String getAssemblyContext(String xrefSourcesStr, int contextInstructions, String programName) {
+        return xrefCallGraphService.getAssemblyContext(xrefSourcesStr, contextInstructions, programName).toJson();
     }
 
     /**

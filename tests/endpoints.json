@@ -107,7 +107,6 @@
         "address",
         "max_scan_bytes",
         "include_xref_map",
-        "include_assembly_patterns",
         "include_boundary_detection",
         "program"
       ],
@@ -905,8 +904,6 @@
       "category": "analysis",
       "params": [
         "address",
-        "analyze_loop_bounds",
-        "analyze_indexing",
         "max_scan_range",
         "program"
       ],
@@ -1141,7 +1138,6 @@
       "params": [
         "xref_sources",
         "context_instructions",
-        "include_patterns",
         "program"
       ],
       "description": "Get assembly context"
@@ -2410,11 +2406,8 @@
       "path": "/server/connect",
       "method": "POST",
       "category": "server",
-      "params": [
-        "host",
-        "port"
-      ],
-      "description": "Connect to a Ghidra server"
+      "params": [],
+      "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables."
     },
     {
       "path": "/server/disconnect",

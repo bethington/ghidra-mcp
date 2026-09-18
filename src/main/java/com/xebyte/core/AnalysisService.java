@@ -264,9 +264,9 @@ public class AnalysisService {
     }
 
     public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
+                                    boolean includeXrefMap,
                                     boolean includeBoundaryDetection) {
-        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
+        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
     }
 
     @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
@@ -277,21 +277,19 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String startAddressStr,
-            @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024",
+@Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024",
                    description = "How many BYTES forward from `address` to walk while collecting "
                                + "references and hunting the next named symbol (default 1024). String "
                                + "detection only ever reads the first 256 bytes of whatever the scan "
                                + "covered.") int maxScanBytes,
-            @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true",
+            
+@Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) adds xref_map: a per-byte map from address to the "
                                + "sources referencing it, for every byte in the scanned range that has at "
                                + "least one. False keeps the aggregate counts and drops the map, which is "
                                + "most of the payload on a heavily referenced region.") boolean includeXrefMap,
-            @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true",
-                   description = "Accepted but currently not read: nothing in this endpoint branches on it "
-                               + "and no assembly-pattern block is produced either way. Setting it changes "
-                               + "nothing today.") boolean includeAssemblyPatterns,
-            @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true",
+            
+@Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) stops the forward scan at the first named symbol that "
                                + "is not a DAT_ autogen, so the region ends where the next documented global "
                                + "begins. False scans the full max_scan_bytes whatever symbols it "
@@ -452,9 +450,8 @@ public class AnalysisService {
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public Response detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange) {
-        return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
+    public Response detectArrayBounds(String addressStr, int maxScanRange) {
+        return detectArrayBounds(addressStr, maxScanRange, null);
     }
 
     @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
@@ -465,14 +462,7 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true",
-                   description = "Accepted but currently not read: the size estimate comes from "
-                               + "cross-references only and no loop-bound analysis runs either "
-                               + "way.") boolean analyzeLoopBounds,
-            @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true",
-                   description = "Accepted but currently not read: no indexing analysis runs either "
-                               + "way.") boolean analyzeIndexing,
-            @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
+@Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
                    description = "How many BYTES forward from `address` to scan for references while "
                                + "estimating the array's extent (default 2048).") int maxScanRange,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
