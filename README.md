@@ -301,6 +301,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`) — use the **absolute
    path** to `uv` (`which uv`), not the bare name; GUI-launched clients do not
    inherit your shell's PATH ([#441](https://github.com/bethington/ghidra-mcp/issues/441)):
+
    ```json
    {
      "mcpServers": {

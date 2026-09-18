@@ -109,6 +109,7 @@ the same way.
 
 Covered by `AnnotationScannerParamSourceTest`, which fails against the previous
 behaviour (`expected:<D2Common.dll> but was:<null>`).
+
 ### Dead parameters: nine advertised switches that did nothing (breaking, schema)
 
 A parameter-documentation sweep found nine parameters the server published in
@@ -309,6 +310,7 @@ One existing description was wrong rather than missing and is corrected:
 `search_strings.encoding` claimed to be a "String encoding filter (omit for all
 encodings)". It never filtered — the value is echoed into each match's
 `encoding` field, substituting the literal `ascii` when blank.
+
 ### `create_memory_block` accepts byte contents (#404)
 
 The tool could only ever produce an *empty* block, so laying down a known region
@@ -361,6 +363,7 @@ The behavior that matters:
 
 The response gained `initialized`, `overlay`, `address_space`, `bytes_written`,
 `padded_bytes` and `fill_byte`.
+
 ### Tool catalog: `category` is the tool group, and 63 entries named the wrong one
 
 `tests/endpoints.json` records a `category` per endpoint and CLAUDE.md points at
@@ -489,6 +492,7 @@ verifying its ARTIFACT because `analyzeHeadless` exits 0 when a script throws.
 margin, deliberately not the ~0.5 point knife-edge that caused the outage. The
 comment block in `.github/workflows/tests.yml` now records the whole history so
 the number is not re-derived from scratch next time.
+
 ### Parameter aliases: published, and reachable — `/mcp/schema`, `/rename_symbol`
 
 Two defects in what the server told clients about itself. Neither changed
@@ -539,6 +543,7 @@ declares an alias that collides with another parameter's canonical name.
 
 Note for consumers: `tests/conformance/snapshots/mcp_schema.snap` predates this
 and will need refreshing against a deployed build before it reflects the aliases.
+
 ### Setup: `preflight` resolves the launcher your MCP client has to spawn (#441)
 
 A client started from a **systemd user service** or a GUI/desktop launcher
@@ -577,6 +582,7 @@ The section also notes that tool **groups** come from the `category` on the
 Java `@McpTool` annotation as published at `/mcp/schema` — not the `category`
 column in `tests/endpoints.json`, which is separately maintained and disagrees
 for 63 of the 201 annotated endpoints.
+
 #### A refusal is not a golden
 
 That class was wider than one case. **20 of 124 committed goldens were bodies
@@ -699,6 +705,7 @@ dependencies (`capstone`, `pywin32`, `win32more`) now carry
 `debugger` group. Nothing in `mcp`, `pytest`, `coverage` or the `test` group
 moved, so the coverage gate and the 3.10–3.13 matrix resolve exactly as before
 — verified by locking on each of the four interpreters.
+
 ### Fixed: the offline test suite failed for anyone who cloned with Git for Windows' defaults
 
 `HardeningWiringTest` and `RunGhidraScriptProgramPropagationTest` failed on a
@@ -740,6 +747,7 @@ Note for maintainers: 93 of the repo's 197 Java files are stored **CRLF in the
 index** and there is no `.gitattributes`, so a file's on-disk line ending is
 not something a test may assume. Normalising the index would touch ~300 files
 and is deliberately left as a separate, coordinated change.
+
 ### Contributor-facing process documentation
 
 `CONTRIBUTING.md` rewritten from the repository rather than from open-source
@@ -771,6 +779,7 @@ Issue forms (`.github/ISSUE_TEMPLATE/`) and a pull request template now ask up
 front for the four things that otherwise cost a round trip on every report:
 Ghidra version, plugin/bridge version, MCP client and transport, and the exact
 command with its exact output.
+
 ### Release workflows: stale references left by the `fun-doc` move-out
 
 Auditing every workflow that runs on a tag or a release event, ahead of cutting
@@ -803,6 +812,7 @@ v7.0.0, found references to files that left the repository weeks earlier.
   2026-06-08 when build was consolidated into `tests.yml`. Replaced with the
   workflows that actually exist.
 - **`pre-release.yml` reported installing 15 Ghidra JARs while installing 18.**
+
 ### `disassemble_function`: a degenerate body is not a one-instruction function
 
 Ghidra's boundary analysis records `body_end == body_start` on a measured
@@ -844,6 +854,7 @@ be meaningless.
 An empty stored body also used to reach the listing loop as a null `end` and
 fail the call with `Error disassembling function: null`; it now takes the same
 re-bounded path.
+
 ### CI: the Markdown lint gate had never linted anything
 
 `.github/workflows/tests.yml` passed `config: '.markdownlintrc'` to

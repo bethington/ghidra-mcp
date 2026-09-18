@@ -6,7 +6,7 @@ workflows for GhidraMCP.
 ## Workflows
 
 | Workflow | Trigger | Runner | Purpose |
-|----------|---------|--------|---------|
+| ---------- | --------- | -------- | --------- |
 | `tests.yml` | Push and pull request to `main`/`dev`/`develop` | GitHub-hosted Ubuntu/Windows | Merge-gating build, unit, offline Java, Pester, and docs checks. |
 | `codeql.yml` | Push/PR to `main`/`dev`, weekly schedule | GitHub-hosted | CodeQL security analysis. |
 | `scorecard.yml` | Push to `dev`, weekly schedule, manual | GitHub-hosted | OSSF Scorecard supply-chain score. |
