@@ -28,6 +28,7 @@ from . import schema  # noqa: F401
 from . import dispatch  # noqa: F401
 from . import registry  # noqa: F401
 from . import static_tools  # noqa: F401
+from . import facade  # noqa: F401 (5-tool surface; registers ghidra_* on import)
 from . import debugger  # noqa: F401
 from . import oracle  # noqa: F401
 from . import cli  # noqa: F401
@@ -100,6 +101,15 @@ from .registry import (  # noqa: F401
     _register_tool_def,
     _unload_group,
     register_tools_from_schema,
+)
+from .facade import (  # noqa: F401
+    FACADE_TOOL_NAMES,
+    apply_expose_mode,
+    ghidra_call,
+    ghidra_connect,
+    ghidra_describe,
+    ghidra_search,
+    ghidra_status,
 )
 from .static_tools import (  # noqa: F401
     _auto_connect,

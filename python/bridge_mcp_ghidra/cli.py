@@ -135,11 +135,29 @@ def main():
         default=None,
         help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
     )
+    parser.add_argument(
+        "--expose",
+        type=str,
+        default=None,
+        help="MCP surface: full (legacy dynamic tools, default), facade (5 stable "
+        "ghidra_* tools for Copilot-style clients), hybrid (both). "
+        "Env GHIDRA_MCP_EXPOSE overrides when the flag is absent.",
+    )
     args = parser.parse_args()
 
     state._lazy_mode = args.lazy
     if args.default_groups is not None:
         state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
+
+    from . import facade as _facade
+
+    expose = args.expose or os.environ.get("GHIDRA_MCP_EXPOSE", "full")
+    _facade.apply_expose_mode(expose)
+    if state._expose_mode == "facade":
+        # Facade keeps the whole /mcp/schema in memory and dispatches by
+        # name, so group pre-loading is meaningless — force lazy so connect
+        # paths only fetch+cache the schema instead of registering tools.
+        state._lazy_mode = True
 
     if not state._lazy_mode:
         logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")

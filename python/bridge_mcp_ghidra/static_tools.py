@@ -615,7 +615,14 @@ def _auto_connect() -> bool:
                         active_tcp=None,
                         connected_project=inst.get("project"),
                     )
-                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                if state._expose_mode == "facade":
+                    logger.info(
+                        f"Auto-cached {len(state._full_schema)} catalog actions from "
+                        f"{inst.get('project') or 'unknown'} "
+                        f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
+                    )
+                else:
+                    logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
                 return True
             except Exception as e:
                 logger.warning(f"UDS auto-connect schema fetch failed: {e}")
@@ -644,7 +651,14 @@ def _auto_connect() -> bool:
                         active_tcp=inst["url"],
                         connected_project=inst.get("project"),
                     )
-                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                if state._expose_mode == "facade":
+                    logger.info(
+                        f"Auto-cached {len(state._full_schema)} catalog actions from "
+                        f"{inst.get('project') or 'unknown'} "
+                        f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
+                    )
+                else:
+                    logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
                 return True
             except Exception as e:
                 logger.warning(f"TCP auto-connect schema fetch failed: {e}")
@@ -677,7 +691,14 @@ def _auto_connect() -> bool:
                 active_tcp=tcp_url,
                 connected_project=None,
             )
-        logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+        if state._expose_mode == "facade":
+            logger.info(
+                f"Auto-connected via TCP to {tcp_url}, "
+                f"cached {len(state._full_schema)} catalog actions "
+                f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
+            )
+        else:
+            logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
         return True
     except Exception:
         if not instances:
