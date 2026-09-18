@@ -200,6 +200,10 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
         groups: If provided, only register tools in these groups. None = register all.
 
     Returns: count of registered tools.
+
+    In facade expose mode the schema is cached but nothing is registered:
+    dispatch goes through ghidra_call by name, so dynamic registration (and
+    the tools/list_changed round-trip Copilot ignores) is skipped entirely.
     """
     with state._tool_registry_lock:
         # Remove previously registered dynamic tools
@@ -220,6 +224,15 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
 
         # Store full schema for lazy loading
         state._full_schema = _normalize_tool_def_names(schema)
+
+        if state._expose_mode == "facade":
+            # Facade dispatches by name through ghidra_call; registering 250+
+            # dynamic tools would defeat the 5-tool surface AND reintroduce
+            # the tools/list_changed round-trip Copilot ignores. Cache only.
+            # _loaded_groups marks every category "available" so any legacy
+            # caller inspecting it sees the full catalog, not an empty set.
+            state._loaded_groups.update(td.get("category", "unknown") for td in state._full_schema)
+            return 0
 
         count = 0
         failures: list[str] = []

@@ -392,3 +392,8 @@ _loaded_groups: set[str] = set()
 # CLI-configurable: --lazy keeps only default groups, otherwise load all
 _lazy_mode = False  # default: eager (load all groups on connect)
 _default_groups: set[str] = set(CORE_GROUPS)
+
+# MCP surface mode: "full" (legacy dynamic tools), "facade" (5 stable
+# ghidra_* tools for Copilot-style clients), "hybrid" (both). Set by
+# cli.main via facade.apply_expose_mode; read through this module.
+_expose_mode = "full"
