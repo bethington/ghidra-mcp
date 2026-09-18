@@ -9,10 +9,13 @@ from pathlib import Path
 
 from .envfile import get_env_flag, load_env_file
 from .ghidra import (
+    DEPLOY_TEST_MODES,
+    UnknownDeployTestMode,
     clean_all,
     collect_preflight_issues,
     deploy_to_ghidra,
     install_ghidra_dependencies,
+    resolve_deploy_test_modes,
     start_ghidra,
 )
 from .python_env import detect_repo_root, find_repo_python
@@ -171,21 +174,17 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--test",
         action="append",
-        choices=[
-            "benchmark-read",
-            "benchmark-write",
-            "debugger-live",
-            "endpoint-catalog",
-            "multi-program",
-            "negative-contract",
-            "release",
-            "selected-contract",
-        ],
+        # Read from ghidra.DEPLOY_TEST_MODES rather than restated here. A copy
+        # drifts: the .env route had no validation at all, so a typo there
+        # resolved to a tier nothing dispatches and deploy exited 0 having run
+        # only the smoke test (#484). One list, both routes.
+        choices=list(DEPLOY_TEST_MODES),
         default=[],
         help=(
             "Run an optional post-deploy test tier. May be passed multiple times. "
             "A plain deploy only runs MCP health/schema checks and does not import Benchmark.dll. "
-            "Use --test release before cutting releases, or set GHIDRA_MCP_DEPLOY_TESTS in local .env."
+            "Use --test release before cutting releases, or set GHIDRA_MCP_DEPLOY_TESTS in local .env "
+            "(validated against the same list; an unknown tier is refused, not ignored)."
         ),
     )
     deploy_parser.set_defaults(func=cmd_deploy)
@@ -483,12 +482,41 @@ def cmd_install_ghidra_deps(args: argparse.Namespace) -> int:
 def cmd_deploy(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
+
+    # Resolve (and therefore validate) the tiers BEFORE anything is built,
+    # copied or restarted. An unknown tier costs a second here instead of
+    # surfacing after a build, a Ghidra restart and a deploy -- or, before
+    # #484, not surfacing at all.
+    try:
+        test_modes = resolve_deploy_test_modes(repo_root, args.test)
+    except UnknownDeployTestMode as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     if _get_backend() == "gradle":
+        if test_modes:
+            # build.gradle's `deploy` task is stopGhidra + deployExtension +
+            # installUserExtension + patchGhidraUserConfig. It runs no
+            # post-deploy tier and has no way to. Until #484 this branch
+            # accepted `--test release` and dropped it on the floor, exiting 0
+            # -- the same silence the .env typo produced, through a different
+            # door. Refuse instead: naming the tier and not running it is the
+            # failure mode, not the message length.
+            print(
+                "ERROR: the Gradle backend's `deploy` task runs no post-deploy "
+                f"test tiers, so {test_modes} would be accepted and silently "
+                "skipped.\n"
+                "Use the Maven backend for tiered deploys (unset "
+                "TOOLS_SETUP_BACKEND, or set it to 'maven'), or drop --test / "
+                "set GHIDRA_MCP_DEPLOY_TESTS=off to deploy without them.",
+                file=sys.stderr,
+            )
+            return 2
         return run_gradle(
             repo_root, ["deploy"], ghidra_path=ghidra_path, dry_run=args.dry_run
         )
     return deploy_to_ghidra(
-        repo_root, ghidra_path, dry_run=args.dry_run, test_modes=args.test
+        repo_root, ghidra_path, dry_run=args.dry_run, test_modes=test_modes
     )
 
 

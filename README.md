@@ -1242,8 +1242,9 @@ Deploy test tiers are opt-in because benchmark tiers can import/reset
 `Benchmark.dll` and `BenchmarkDebug.exe` in the active Ghidra project. Use
 `--test release` before cutting releases, or set
 `GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env` when you want every deploy
-on your machine to run the live benchmark regression. See
-[Testing and Release Regression](docs/TESTING.md).
+on your machine to run the live benchmark regression. The value is validated
+against the same tier list `--test` accepts, and an unknown tier is refused
+rather than skipped. See [Testing and Release Regression](docs/TESTING.md).
 
 ```text
 # Standard first-time setup and deploy

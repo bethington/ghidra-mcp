@@ -38,7 +38,17 @@ GHIDRA_MCP_DEPLOY_TESTS=release
 ```
 
 `GHIDRA_MCP_DEPLOY_TESTS` belongs in a local `.env`; it is not intended as the
-repository default.
+repository default. Its value is validated against the same tier list `--test`
+uses (`tools/setup/ghidra.py`'s `DEPLOY_TEST_MODES`) and an unknown tier is
+**refused, not ignored** — `GHIDRA_MCP_DEPLOY_TESTS=relase` used to resolve to
+`['relase']`, match no dispatch branch, and let deploy exit 0 having run only
+the smoke test (#484). Set it to `off` to run no tiers.
+
+The Gradle backend (`TOOLS_SETUP_BACKEND=gradle`) also **refuses** a tier
+request rather than accepting it: `build.gradle`'s `deploy` task is
+`stopGhidra` + `deployExtension` + `installUserExtension` +
+`patchGhidraUserConfig` and runs no post-deploy tier at all. Use the Maven
+backend for tiered deploys.
 
 ## What Runs by Default
 

@@ -10,8 +10,10 @@ import tools.setup.ghidra as ghidra_setup
 
 from tools.setup.ghidra import (
     DEFAULT_MCP_URL,
+    DEPLOY_TEST_MODES,
     PLUGIN_CLASS,
     REQUIRED_GHIDRA_JARS,
+    UnknownDeployTestMode,
     _file_sha256,
     _has_dependency_group,
     collect_preflight_issues,
@@ -603,6 +605,127 @@ def test_resolve_deploy_test_modes_can_disable_local_env(tmp_path: Path):
     (tmp_path / ".env").write_text("GHIDRA_MCP_DEPLOY_TESTS=off\n", encoding="utf-8")
 
     assert resolve_deploy_test_modes(tmp_path, []) == []
+
+
+# ---------------------------------------------------------------------------
+# Deploy test tier validation (#484)
+#
+# `GHIDRA_MCP_DEPLOY_TESTS=relase` used to resolve to ['relase']. The dispatch
+# chain in run_deploy_tests had no `else`, so the loop matched nothing and
+# deploy exited 0 having run only the smoke test. `--test` was fine -- argparse
+# `choices` rejected it -- so the two routes into the same function disagreed,
+# and the one that stayed silent is the one a release cut reads from a local
+# .env. `deploy --test release` is CLAUDE.md's fourth release-floor command.
+# ---------------------------------------------------------------------------
+
+
+def test_env_typo_is_refused_not_silently_skipped(tmp_path: Path):
+    """The exact value from #484: one transposition away from a real tier."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=relase\n", encoding="utf-8"
+    )
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        resolve_deploy_test_modes(tmp_path, [])
+
+    message = str(excinfo.value)
+    assert "relase" in message
+    # The operator must be able to act on it without reading the source.
+    assert "release" in message
+    assert "GHIDRA_MCP_DEPLOY_TESTS" in message
+    assert "off" in message
+
+
+def test_env_typo_is_refused_even_beside_valid_tiers(tmp_path: Path):
+    """A good tier in the same line must not launder a bad one."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=release,endpoint-catlog\n", encoding="utf-8"
+    )
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        resolve_deploy_test_modes(tmp_path, [])
+
+    assert "endpoint-catlog" in str(excinfo.value)
+
+
+def test_unknown_cli_tier_is_refused(tmp_path: Path):
+    """argparse guards the CLI, but this function is also called directly."""
+    with pytest.raises(UnknownDeployTestMode):
+        resolve_deploy_test_modes(tmp_path, ["relase"])
+
+
+def test_every_valid_tier_resolves_from_env(tmp_path: Path):
+    """No tier in the canonical list may be rejected by its own validator."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=" + ",".join(DEPLOY_TEST_MODES) + "\n",
+        encoding="utf-8",
+    )
+
+    assert resolve_deploy_test_modes(tmp_path, []) == list(DEPLOY_TEST_MODES)
+
+
+def test_off_still_disables_without_tripping_validation(tmp_path: Path):
+    """`off` is not a tier, and must not be validated as one."""
+    for value in ("off", "0", "false", "no", "none", "OFF"):
+        (tmp_path / ".env").write_text(
+            f"GHIDRA_MCP_DEPLOY_TESTS={value}\n", encoding="utf-8"
+        )
+        assert resolve_deploy_test_modes(tmp_path, []) == []
+
+
+def test_cli_choices_come_from_the_canonical_tier_list():
+    """One list, both routes -- a second copy is what drifted in the first place."""
+    from tools.setup import cli
+
+    parser = cli.build_parser()
+    deploy_action = next(
+        action
+        for action in parser._subparsers._group_actions[0]
+        .choices["deploy"]
+        ._actions
+        if action.dest == "test"
+    )
+    assert list(deploy_action.choices) == list(DEPLOY_TEST_MODES)
+
+
+def test_benchmark_tier_set_is_a_subset_of_the_canonical_list():
+    """A benchmark tier missing from DEPLOY_TEST_MODES could never be requested."""
+    unknown = sorted(
+        set(ghidra_setup.BENCHMARK_DEPLOY_TEST_MODES) - set(DEPLOY_TEST_MODES)
+    )
+    assert not unknown, (
+        f"BENCHMARK_DEPLOY_TEST_MODES names tiers no caller can select: {unknown}"
+    )
+
+
+def test_every_canonical_tier_has_a_dispatch_branch(tmp_path: Path, monkeypatch):
+    """The other direction: a tier listed but never wired up.
+
+    Such a tier passes validation, matches no branch, and reports a pass for an
+    implementation that does not exist -- #484's silence one step later. The
+    `else` in run_deploy_tests turns it into a named failure.
+    """
+    monkeypatch.setattr(ghidra_setup, "run_default_smoke_test", lambda *a, **k: None)
+    monkeypatch.setattr(ghidra_setup, "_mcp_request", lambda *a, **k: (200, {}))
+    for name in (
+        "run_endpoint_catalog_test",
+        "reset_benchmark_fixture",
+        "run_benchmark_extended_read_test",
+        "run_benchmark_write_test",
+        "run_negative_contract_test",
+        "run_multi_program_targeting_test",
+        "run_selected_endpoint_contract_test",
+        "run_debugger_live_test",
+        "run_release_regression_tests",
+    ):
+        monkeypatch.setattr(ghidra_setup, name, lambda *a, **k: None)
+
+    for mode in DEPLOY_TEST_MODES:
+        run_deploy_tests(tmp_path, "http://127.0.0.1:8089", [mode])
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        run_deploy_tests(tmp_path, "http://127.0.0.1:8089", ["listed-but-unwired"])
+    assert "no branch for it" in str(excinfo.value)
 
 
 def test_run_default_smoke_test_requires_key_tools(tmp_path: Path, monkeypatch):
