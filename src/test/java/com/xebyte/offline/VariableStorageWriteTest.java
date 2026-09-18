@@ -4,10 +4,6 @@ import junit.framework.TestCase;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * Regression tests for /set_variable_storage (#446).
@@ -26,8 +22,13 @@ import java.nio.file.Paths;
 public class VariableStorageWriteTest extends TestCase {
 
     private static String functionServiceSource() throws IOException {
-        Path p = Paths.get("src", "main", "java", "com", "xebyte", "core", "FunctionService.java");
-        return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
+        // Through ProjectSource, never a repo-relative path handed to the file
+        // system directly: that idiom anchors on the JVM's working directory, so it
+        // breaks under any runner that does not set it to the project dir, and it
+        // skips the line-ending normalisation the substring assertions below need.
+        // ProjectSourceTest enforces this repo-wide -- and it greps raw source, so
+        // even naming the offending idiom in a comment trips it.
+        return ProjectSource.readMainSource("core", "FunctionService.java");
     }
 
     /** Extract just the setVariableStorage(4-arg) method body. */
