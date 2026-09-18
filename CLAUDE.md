@@ -14,15 +14,28 @@ The marginal cost of completeness is near zero with AI. Do the whole thing. Do i
 
 ## Community interaction (read-only by default)
 
-This is a public repo with real external contributors. Their issues, PRs, and commits are theirs, not yours to dispose of. Reading is always fine; every write below is the human maintainer's to do, and you may only *draft* text for Ben to review and post himself.
+This is a public repo with real external contributors. Their issues, PRs, and commits are theirs, not yours to dispose of. Reading is always fine; every write below requires Ben's explicit, per-action approval. There are exactly two ways that approval exists: Ben posts the text himself, or Ben clicks an approval in the `/triage` flow (see "Approved-via-triage posting" below). Absent one of those, you may only *draft*.
 
 - **Never edit, close, comment on, merge, or reopen another person's issue or PR** without Ben's explicit, per-action go-ahead. Never edit anyone's issue/PR/comment *text* — that reads as tampering and is never acceptable.
 - **Draft / WIP / "do not merge" means hands off.** Never cherry-pick, merge, or otherwise pull in a draft PR's work. Draft is the contributor's signal that it isn't ready; respect it.
 - **To use a contributor's work, merge their PR through the normal flow** (which credits them) — never extract the commit around them or push it to `main` directly.
 - **Never post AI-generated text as if it were Ben's own analysis**, and never post a claim about someone else's work without verifying it against the code first.
-- When Ben asks for a reply to a contributor, produce a short draft *for him to send in his own words* — do not post it, and do not make it sound machine-generated.
+- When Ben asks for a reply to a contributor, produce a short draft *in his voice* — plain, concrete, never machine-sounding. It is posted only via the two approval paths above.
 - **Exception: `dependabot[bot]` PRs.** These are the repo's own configured automation, not community contributions — no person's work is at stake. The agent may comment (e.g. `@dependabot rebase`/`recreate`) and merge these autonomously once CI is green, without per-action go-ahead. This exception is scoped to PRs whose author is literally `dependabot[bot]`; it does not extend to any human contributor, even one proposing a similar dependency bump.
-- A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands (checking PR authorship to carve out the dependabot exception above); treat that as a backstop, not the boundary. The boundary is this section.
+- **Exception: Ben's own PRs and issues** (added 2026-09-18, approved by Ben). This section protects *another person's* work; Ben's own is his, and the agent lands it on his instruction. `gh pr merge|close|comment|review|ready|reopen` and `gh issue close|comment|reopen` need no per-action approval when the target's author resolves to `bethington`. **`edit` is excluded from both**, along with delete/transfer/lock/unlock/pin/unpin: rewriting issue or PR text is never the agent's to do, on anyone's item, and none of those verbs lands work. The author is resolved live and fails closed — an unresolvable author means the normal block stands.
+- A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands (resolving the target's author live to carve out the dependabot and own-work exceptions above, and honoring single-use triage approval records — see below); treat that as a backstop, not the boundary. The boundary is this section. Its behaviour is pinned by `.claude/triage/proposed-hook/test_hook_behaviour.py` (21 cases, run it after any change); the agent never installs the hook itself, because an agent must not rewrite its own guardrail.
+
+### Approved-via-triage posting (added 2026-08-18, approved by Ben)
+
+Ben decided (2026-08-18) to offload public interfacing to the agent **with himself as the per-action decision maker**. The mechanism:
+
+- In a `/triage` session, each pending community item is presented to Ben via `AskUserQuestion` with a recommended response and alternates. **Ben's click on a specific option for a specific item IS the explicit per-action go-ahead** for that exact text and that exact action — nothing more.
+- On approval the agent writes a single-use approval record to `.claude/triage/approved/` (target + action kind + SHA-256 of the exact body), then performs the write with `gh` using `--body-file` so the hook can verify the hash. The hook consumes the record; records expire after 60 minutes.
+- **The approved text is immutable.** Any edit after the click — even a typo fix — requires re-approval. A hash mismatch means the post does not happen.
+- **Scope of a click is one action.** Approval to comment on an issue is not approval to close it; approval on one issue transfers to no other issue. Batch approvals don't exist.
+- **Never fabricate, pre-write, or backfill approval records** outside an `AskUserQuestion` answer Ben actually gave in the current session. The record is an audit artifact of a real click, not a mechanism to satisfy the hook.
+- Every decision (approve/alt/skip/custom) is appended to `.claude/triage/decision-log.jsonl` for audit.
+- Standing exclusions survive this flow: never edit anyone's issue/PR/comment text, never touch draft PRs, never merge around a contributor, and security reports / hostile threads / anything reputational default to "Ben posts personally" unless he explicitly chooses agent-posts for that item.
 
 ## Repository scope — what belongs here
 
