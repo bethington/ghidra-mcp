@@ -211,6 +211,127 @@ Host ports were remapped to 18089/18081 for that run only, because a live Ghidra
 already owned 8089 on the machine; container-side ports, and therefore
 everything above, are exactly as shipped.
 
+### Fixed — the release gate failed on a missing `dbgeng.dll` it could have worked around
+
+The `release` deploy tier passed five of its six steps and then raised:
+
+```text
+RuntimeError: /debugger/launch failed: Debugger launch timed out after 90s
+waiting for a Trace RMI connection.
+```
+
+`run_release_regression_tests` catches `DebuggerLiveTestSkipped` but not a hard
+`RuntimeError`, so the deploy exited non-zero and
+`record_release_regression_evidence` never ran — for a deploy that was otherwise
+fine. Two independent defects, both fixed here.
+
+**`windbg_dir` on `/debugger/launch` (new parameter).** `pybag.__init__` does
+`ctypes.windll.LoadLibrary(os.path.join(dbgdir, 'dbgeng.dll'))` against a
+hard-coded Windows Kits path. That path only exists when the Debugging Tools
+for Windows SDK feature is installed — on a stock machine
+`Windows Kits\10\Debuggers\x64` holds `dbgcore`/`dbghelp`/`srcsrv`/`symsrv`
+and no `windbg.exe` or `cdb.exe` — so the import raises `FileNotFoundError`,
+the back-end dies before it can connect, and Ghidra reports only a Trace RMI
+timeout. Windows itself ships a perfectly usable `dbgeng.dll` in `System32`,
+and `local-dbgeng.bat` declares `::@env WINDBG_DIR:dir=""` precisely so it can
+be pointed there — but `DebuggerService.configureLauncher` wired only
+`OPT_TARGET_ARGS`, `CWD`/`OPT_CWD`/`OPT_TARGET_DIR` and `OPT_PYTHON_EXE`, so
+there was **no way to supply the override over HTTP at all**.
+`_resolve_windbg_dir` now resolves `WINDBG_DIR` from the environment, then
+`.env`, then `C:\Windows\System32` — and only returns a directory that
+actually contains the DLL, so a machine with a genuinely absent backend falls
+through to the skip classifier instead of being handed a path that fails one
+layer down. Measured: with the override the live test **runs** rather than
+skipping — `Debugger live test passed: launched BenchmarkDebug.exe and read
+trace state.`
+
+**The skip classifier could not see its own commonest case.** Every entry in
+`_DEBUGGER_LAUNCH_SKIP_HINTS` matches a failure that *names* its cause
+(`"ghidratrace"`, `"could not load dbgeng"`, `"dbgeng.dll"`). The dominant
+real-world failure names nothing: the launcher is a separate process, so an
+import error in `local-dbgeng.py` goes to the launcher terminal and Ghidra sees
+silence, then emits a timeout that helpfully lists the three possible causes
+and matches none of the hints written to catch them. A machine with no debugger
+backend therefore failed the release gate hard — the exact environmental case
+the classifier exists to tolerate. `"waiting for a trace rmi connection"` is
+now a hint.
+
+Operator note: the launcher Python is resolved by `_resolve_debugger_python`,
+which falls back to `shutil.which("python")`. On Windows that is frequently the
+Microsoft Store build, which has neither `ghidratrace` nor `pybag` — set
+`GHIDRA_DEBUGGER_PYTHON` in `.env` to an interpreter provisioned from Ghidra's
+own shipped wheels (`Ghidra/Debug/Debugger-agent-dbgeng/pypkg/dist` and
+`Ghidra/Debug/Debugger-rmi-trace/pypkg/dist`), so the versions match the
+install exactly.
+
+### Fixed — four GUI endpoints were exempt from the offline tier's parameter checking
+
+The recorded `/mcp/schema` snapshot held **235** tools; the GUI server serves
+**239**. `tests/offline/fake_ghidra.py` sets `EndpointSpec.params = None` for an
+endpoint the recording does not cover and skips parameter validation entirely,
+so the offline tier routed calls to `/move_file`, `/move_folder`,
+`/list_shadowed_globals` and `/batch_get_comments` and validated **no
+parameter** of them — the exact blind spot [#112]'s tier was built to close,
+since `AnnotationScanner` silently uses the default for an unknown parameter
+name and returns 200.
+
+[#532](https://github.com/bethington/ghidra-mcp/pull/532) pinned the set as
+`SCHEMA_RECORDING_PREDATES` so it could not grow silently, but could not fix
+it: re-recording needs a live Ghidra with the current JAR deployed, and
+teaching the fake to synthesise a contract would be the fake asserting on
+itself. Re-recorded at the 2026-09-18 deploy — 239 tools, all four present,
+`SCHEMA_RECORDING_PREDATES` now **empty** and asserted in both directions. The
+14 endpoints still uncovered are the headless-only project-management surface,
+which a GUI recording legitimately never advertises.
+
+No contract breach surfaced: `expected_contract_violations.json` and
+`known_integration_call_breaches.json` both stay empty. That is a weaker result
+than it reads — only `/list_shadowed_globals` is called by any test today, so
+the other three gained a contract nothing yet exercises. What changed is that a
+future call to any of them is checked.
+
+Re-recording turned up two bugs that had to be fixed first, both of which made
+the snapshot unrecordable rather than merely stale:
+
+- **The conformance runner would record an MCP-level error as a golden.**
+  [#440](https://github.com/bethington/ghidra-mcp/issues/440) made lazy tool
+  loading the default, so the bridge advertised CORE_GROUPS only — 118 of 239
+  tools — and `mcp_schema` was not among them. `--update-snapshots` overwrote
+  the committed 7,119-line `mcp_schema.snap` with the single line
+  `Unknown tool: mcp_schema` and reported `new=1`, as if it had recorded a
+  response. The existing guard could not see it: that one tests for a JSON
+  `{"error": ...}` body, and a transport error is not JSON. `_handle_snapshot`
+  now refuses any `isError` result outright — `expect_error_payload` opts into
+  a refusal *body*, not a call that never reached the tool.
+- **`bridge_transport` now passes `--no-lazy`.** The corpus is a statement
+  about the *server's* surface; scoping it to whichever groups a client happens
+  to load by default makes it a statement about the client instead. Without the
+  flag, every case for a tool outside CORE_GROUPS dies on `Unknown tool`.
+
+Also here:
+
+- **`--only PATTERN` on the conformance runner.** `--update-snapshots` was
+  all-or-nothing, so re-recording one golden meant accepting whatever the other
+  118 returned in the same pass — 118 unreviewed rewrites to fix 1, which is
+  why the schema snapshot simply went stale instead. A pattern matching nothing
+  is fatal, never a quiet zero-case run: `--only mcp_scheme --update-snapshots`
+  would otherwise exit 0 having recorded nothing.
+- **The offline tier's tool count is derived, not typed.** `235` was hardcoded
+  in two assertions in `test_bridge_end_to_end.py` and went stale the moment
+  the snapshot was re-recorded. Both now read the count from the snapshot,
+  which is what they actually mean — "the bridge parsed every tool the server
+  served", and "lazy mode parsed fewer". The absolute size of the surface is
+  pinned by `tools.audit_server_scope --release-counts` and the catalog parity
+  tests, which is where a change to it should be reviewed.
+- **Published aliases and the annotation parser are pinned to agree.**
+  [#470](https://github.com/bethington/ghidra-mcp/pull/470) made
+  `ParamDescriptor` emit `aliases`, and this is the first recording that
+  carries them — 6 routes, identical to what `tests/offline/param_aliases.py`
+  reconstructs from the Java source. Two sources of one fact is how this repo
+  has been bitten repeatedly, so the agreement is now asserted rather than
+  assumed; it is also what will prove the parser can be retired without losing
+  aliases on the way out.
+
 ### Fixed — a release could publish with the live regression never having run
 
 `release.yml` and `pre-release.yml` gated publishing on:

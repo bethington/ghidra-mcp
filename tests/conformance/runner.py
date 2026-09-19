@@ -253,6 +253,23 @@ class ConformanceRunner:
             return "n/a", ""
         path = self._snapshot_path(case)
         current = normalize(result.text, case.normalize_extra)
+        # An MCP-LEVEL error is never a golden, full stop -- not even for a
+        # case that opted into recording a refusal, because `isError` means the
+        # call did not reach the tool at all. The body is a transport string
+        # like "Unknown tool: mcp_schema", not a response.
+        #
+        # Measured 2026-09-18: #440 made the bridge lazy by default, so
+        # `mcp_schema` stopped being registered; `--update-snapshots` then
+        # overwrote the committed 7,119-line mcp_schema.snap with the single
+        # line `Unknown tool: mcp_schema` and exited having reported `new=1`.
+        # The guard below could not see it -- that one tests for a JSON
+        # `{"error": ...}` BODY, and a transport error is not JSON.
+        if (self.record or self.update) and result.is_error:
+            return "refused", (
+                "refusing to record an MCP-level error as a golden -- the call "
+                "never reached the tool, so there is no response to record. "
+                f"Body: {current[:200]}"
+            )
         # A refusal is never a golden unless the case says its point IS the
         # refusal. Recording one silently converts a wrong CASE into a
         # permanent claim about the SERVER.

@@ -12,6 +12,9 @@
     # read-only tier only (safe to run while fun-doc workers are active)
     python -m tests.conformance.run_conformance --tier read
 
+    # re-record ONE golden (e.g. after a deploy that changed /mcp/schema)
+    python -m tests.conformance.run_conformance --only mcp_schema --update-snapshots
+
 Its real purpose is differential: run the same corpus against the Python bridge
 today and the Java-native MCP endpoint later, then diff. Snapshot drift between
 the two *is* the list of behavioral differences the port introduced.
@@ -19,6 +22,7 @@ the two *is* the list of behavioral differences the port introduced.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import sys
 from pathlib import Path
@@ -85,6 +89,51 @@ def probe_facts(transport, program: str, second: str) -> ProgramFacts:
     )
 
 
+class NoCasesSelected(Exception):
+    """Selection left nothing to run.
+
+    Fatal on purpose. A zero-case run exits 0 and prints a clean summary, so
+    `--only mcp_scheme --update-snapshots` (one typo) would report success
+    having recorded nothing and the operator would believe the snapshot was
+    refreshed. Silence that looks like a pass is the failure mode this repo
+    keeps paying for; refuse instead.
+    """
+
+
+def select_cases(cases: list, *, only: list[str], tier: str) -> list:
+    """Narrow the corpus to what this invocation should run.
+
+    `--only` is applied BEFORE the tier filter so "no such case" and "that
+    case exists but is in a tier you did not ask for" are distinguishable
+    messages rather than one undifferentiated empty set.
+    """
+    if only:
+        selected = [c for c in cases
+                    if any(fnmatch.fnmatch(c.case_id, p) for p in only)]
+        if not selected:
+            raise NoCasesSelected(
+                f"--only {only} matched none of the {len(cases)} corpus cases")
+        cases = selected
+
+    if tier != "all":
+        cases = [c for c in cases if c.tier == tier]
+    else:
+        cases = [c for c in cases if c.tier not in ("destructive", "debugger")]
+        # Corpus files interleave read and write cases in file order, not
+        # tier order -- generated_baseline.yaml's write-tier smoke cases
+        # (e.g. clear_function_comments) would otherwise run before
+        # read_assertions*.yaml's read-tier assertions and leave their
+        # target address mutated out from under them. Stable sort keeps
+        # each tier's relative order, just read-before-write.
+        cases.sort(key=lambda c: _TIER_ORDER.get(c.tier, 99))
+
+    if only and not cases:
+        raise NoCasesSelected(
+            f"--only {only} matched cases, but --tier {tier} excludes all of "
+            f"them")
+    return cases
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Ghidra MCP conformance suite")
     ap.add_argument("--generate", action="store_true",
@@ -95,6 +144,13 @@ def main() -> int:
                     help="overwrite existing snapshots (accept current behavior as correct)")
     ap.add_argument("--tier", choices=["read", "write", "destructive", "debugger", "all"], default="all",
                     help="which tier to run (default: all non-destructive, non-debugger)")
+    ap.add_argument("--only", action="append", default=[], metavar="PATTERN",
+                    help="run only cases whose id matches this fnmatch pattern "
+                         "(repeatable; e.g. --only mcp_schema). Exists so ONE "
+                         "golden can be re-recorded without rewriting the rest: "
+                         "--update-snapshots is otherwise all-or-nothing, and "
+                         "accepting 118 unrelated rewrites to fix 1 is how "
+                         "unreviewed drift gets committed.")
     ap.add_argument("--program", default=DEFAULT_PROGRAM)
     ap.add_argument("--second-program", default=DEFAULT_SECOND_PROGRAM)
     ap.add_argument("--ghidra-url", default="http://127.0.0.1:8089")
@@ -156,17 +212,11 @@ def main() -> int:
             for k, v in list(c.args.items()):
                 if isinstance(v, str) and "{REPO_ROOT}" in v:
                     c.args[k] = v.replace("{REPO_ROOT}", str(REPO_ROOT))
-        if args.tier != "all":
-            cases = [c for c in cases if c.tier == args.tier]
-        else:
-            cases = [c for c in cases if c.tier not in ("destructive", "debugger")]
-            # Corpus files interleave read and write cases in file order, not
-            # tier order -- generated_baseline.yaml's write-tier smoke cases
-            # (e.g. clear_function_comments) would otherwise run before
-            # read_assertions*.yaml's read-tier assertions and leave their
-            # target address mutated out from under them. Stable sort keeps
-            # each tier's relative order, just read-before-write.
-            cases.sort(key=lambda c: _TIER_ORDER.get(c.tier, 99))
+        try:
+            cases = select_cases(cases, only=args.only, tier=args.tier)
+        except NoCasesSelected as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         print(f"  {len(cases)} cases loaded from {len(files)} file(s)\n")
 
         runner = ConformanceRunner(
