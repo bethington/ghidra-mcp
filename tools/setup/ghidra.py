@@ -1633,10 +1633,17 @@ _DEBUGGER_LAUNCH_SKIP_HINTS = (
 #: Where Windows itself keeps a usable dbgeng.dll. pybag looks under Windows
 #: Kits instead, which only exists when the Debugging Tools for Windows feature
 #: is installed -- a separate SDK component most machines do not have.
-_SYSTEM_DBGENG_DIR = Path(r"C:\Windows\System32")
+#:
+#: A plain str, and the resolver below uses os.path rather than pathlib, for a
+#: non-obvious reason: the debugger tests patch ``os.name`` to "nt" to reach
+#: this Windows-only code path, and ``os.name`` IS what pathlib consults to
+#: pick its flavour. Constructing a Path after that patch raises
+#: ``UnsupportedOperation: cannot instantiate 'WindowsPath' on your system`` on
+#: Linux -- so the resolver would work on Windows and blow up in CI.
+_SYSTEM_DBGENG_DIR = r"C:\Windows\System32"
 
 
-def _resolve_windbg_dir(env_values: dict[str, str]) -> Path | None:
+def _resolve_windbg_dir(env_values: dict[str, str]) -> str | None:
     """Find a directory holding dbgeng.dll for the dbgeng launcher.
 
       1. ``WINDBG_DIR`` from the environment, if set
@@ -1659,13 +1666,10 @@ def _resolve_windbg_dir(env_values: dict[str, str]) -> Path | None:
     for candidate in (
         os.environ.get("WINDBG_DIR", "").strip(),
         env_values.get("WINDBG_DIR", "").strip(),
+        _SYSTEM_DBGENG_DIR,
     ):
-        if candidate:
-            path = Path(candidate)
-            if (path / "dbgeng.dll").is_file():
-                return path
-    if (_SYSTEM_DBGENG_DIR / "dbgeng.dll").is_file():
-        return _SYSTEM_DBGENG_DIR
+        if candidate and os.path.isfile(os.path.join(candidate, "dbgeng.dll")):
+            return candidate
     return None
 
 
@@ -1699,7 +1703,7 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
         launch_data["python_executable"] = python_executable
     windbg_dir = _resolve_windbg_dir(env_values)
     if windbg_dir:
-        launch_data["windbg_dir"] = str(windbg_dir)
+        launch_data["windbg_dir"] = windbg_dir
 
     try:
         _status, launch = _mcp_request(

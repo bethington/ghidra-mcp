@@ -1324,7 +1324,7 @@ class TestResolveWindbgDir:
 
         (tmp_path / "dbgeng.dll").write_bytes(b"")
         monkeypatch.setenv("WINDBG_DIR", str(tmp_path))
-        assert ghidra._resolve_windbg_dir({}) == tmp_path
+        assert ghidra._resolve_windbg_dir({}) == str(tmp_path)
 
     def test_dotenv_is_consulted_after_the_environment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1333,7 +1333,7 @@ class TestResolveWindbgDir:
 
         (tmp_path / "dbgeng.dll").write_bytes(b"")
         monkeypatch.delenv("WINDBG_DIR", raising=False)
-        assert ghidra._resolve_windbg_dir({"WINDBG_DIR": str(tmp_path)}) == tmp_path
+        assert ghidra._resolve_windbg_dir({"WINDBG_DIR": str(tmp_path)}) == str(tmp_path)
 
     def test_a_candidate_without_the_dll_is_not_returned(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1343,7 +1343,7 @@ class TestResolveWindbgDir:
         from tools.setup import ghidra
 
         monkeypatch.setenv("WINDBG_DIR", str(tmp_path))  # empty dir
-        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", tmp_path / "nope")
+        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", str(tmp_path / "nope"))
         assert ghidra._resolve_windbg_dir({}) is None
 
     def test_falls_back_to_system32_only_when_the_dll_is_there(
@@ -1352,11 +1352,44 @@ class TestResolveWindbgDir:
         from tools.setup import ghidra
 
         monkeypatch.delenv("WINDBG_DIR", raising=False)
-        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", tmp_path)
+        monkeypatch.setattr(ghidra, "_SYSTEM_DBGENG_DIR", str(tmp_path))
         assert ghidra._resolve_windbg_dir({}) is None, "no DLL yet"
 
         (tmp_path / "dbgeng.dll").write_bytes(b"")
-        assert ghidra._resolve_windbg_dir({}) == tmp_path
+        assert ghidra._resolve_windbg_dir({}) == str(tmp_path)
+
+
+    def test_resolver_does_not_construct_a_pathlib_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Reproduces a Linux-only break, on every platform.
+
+        The debugger tests reach this Windows-only code by patching
+        ``os.name`` to "nt" -- and ``os.name`` is exactly what pathlib consults
+        to choose its flavour. An earlier version of the resolver built
+        ``Path(candidate)``, which on Linux then raised
+        ``UnsupportedOperation: cannot instantiate 'WindowsPath' on your
+        system``. It passed on a Windows laptop and failed on all four Linux
+        pytest jobs in CI.
+
+        Patching pathlib.Path to explode makes that failure reproducible
+        anywhere, so the resolver is pinned to os.path rather than trusting
+        whichever platform the author happened to run.
+        """
+        from tools.setup import ghidra
+
+        class _Exploding:
+            def __init__(self, *a, **kw):
+                raise AssertionError(
+                    "_resolve_windbg_dir must not construct a pathlib.Path: "
+                    "os.name is patched to 'nt' on this path, which makes "
+                    "pathlib pick WindowsPath and fail on Linux"
+                )
+
+        (tmp_path / "dbgeng.dll").write_bytes(b"")
+        monkeypatch.setenv("WINDBG_DIR", str(tmp_path))
+        monkeypatch.setattr(ghidra, "Path", _Exploding)
+        assert ghidra._resolve_windbg_dir({}) == str(tmp_path)
 
 
 def test_debugger_live_sends_windbg_dir_to_the_launcher(
