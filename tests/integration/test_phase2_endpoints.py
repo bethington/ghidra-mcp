@@ -294,7 +294,7 @@ class TestForceDecompile:
     """Test force decompilation endpoint."""
 
     @pytest.mark.requires_program
-    def test_force_decompile_by_address(self, http_client, sample_address):
+    def test_force_decompile_by_address(self, http_client, sample_address, program_variant):
         """Test force decompiling by address."""
         # There is one declared selector, `address`, in both GUI and headless
         # builds -- FunctionService declares it once, with no alias. Sent as
@@ -303,11 +303,17 @@ class TestForceDecompile:
         # `len(text) > 0` was satisfied by that error. The "alternate param
         # name for headless" retry never ran, because the failure was never a
         # 400. This test has never decompiled anything.
+        #
+        # variant= is likewise mandatory on a multi-variant processor: without
+        # it the endpoint answers 200 carrying a `variant_required` refusal,
+        # which is the same shape of vacuous pass this test already had once.
         response = http_client.get("/force_decompile", params={
-            "address": sample_address
+            "address": sample_address,
+            "variant": program_variant,
         })
         assert response.status_code == 200
         body = response.json()
+        assert body.get("error") != "variant_required", response.text
         assert body["address"].lstrip("0x").lower() == sample_address.lstrip(
             "0x"
         ).lower(), response.text

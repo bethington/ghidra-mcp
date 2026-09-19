@@ -953,12 +953,12 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `clear_instruction_flow_override` - Clear flow override
 - `create_function` - Create function at address
 - `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `decompile_function` - Decompile function
+- `decompile_function` - Decompile function (variant= required when the processor has multiple SLEIGH variants)
 - `delete_function` - Delete function at address
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation
+- `force_decompile` - Force fresh decompilation (variant= required when the processor has multiple SLEIGH variants)
 - `get_function_by_address` - Get function at address
 - `get_function_tags` - List all tags assigned to a specific function
 - `get_function_variables` - List all variables in a function
