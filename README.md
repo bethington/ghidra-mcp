@@ -406,6 +406,20 @@ the `mcp-session-id` / `mcp-protocol-version` headers to scripts. Allowed origin
 Host-header policy — loopback on any port is always permitted, plus the bind host and any
 hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
 
+`GHIDRA_MCP_ALLOWED_HOSTS` also supports clients that route a loopback-bound
+bridge through another network namespace. For example, a container can address
+the host as `host.containers.internal` without exposing the bridge on a LAN
+interface:
+
+```bash
+GHIDRA_MCP_ALLOWED_HOSTS=host.containers.internal \
+  uv run bridge-mcp-ghidra --transport streamable-http \
+  --mcp-host 127.0.0.1 --mcp-port 8081
+```
+
+The setting extends DNS-rebinding Host/Origin validation only; it does not
+change the bind address or make the listener reachable on additional interfaces.
+
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 
 ```bash
