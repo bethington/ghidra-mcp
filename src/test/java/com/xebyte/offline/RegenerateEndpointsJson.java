@@ -33,15 +33,22 @@ import java.util.TreeMap;
  * <p>Merge rules:
  * <ul>
  *   <li>For every {@code @McpTool}-scanned endpoint: write/overwrite the entry
- *       with scanner data (path, method). Description and category are
+ *       with scanner data (path, method, category). The description is
  *       preserved from the existing catalog if non-empty; otherwise taken from
- *       the scanner. Params are an ordered-set union: scanner names in
+ *       the scanner. The category is NOT preserved — it names the tool group the
+ *       bridge lazy-loads by, and only the annotation scan can say what that is.
+ *       Params are an ordered-set union: scanner names in
  *       declaration order, then catalog-only names in their existing order,
  *       each emitted once (case-sensitive comparison). Catalog-only names may
  *       be hand-registered route extras (e.g. {@code /open_project}'s
  *       {@code headless}/{@code program}) or stale annotation names — they
  *       linger until removed by hand, and the run summary lists them per path
- *       for manual review. Silent loss is the failure mode this prevents.</li>
+ *       for manual review. Silent loss is the failure mode this prevents. The
+ *       {@code servers} field (which of the two HTTP servers registers the route) is
+ *       preserved verbatim -- this regenerator scans the union of both servers'
+ *       services and structurally cannot re-derive it; see
+ *       {@code tools/audit_server_scope.py}, and re-run it after adding an
+ *       endpoint so the new entry gets stamped.</li>
  *   <li>For every existing catalog entry that is NOT annotation-scanned
  *       (e.g. hand-registered routes like {@code /check_connection} or
  *       {@code /server/checkouts}): kept verbatim.</li>
@@ -74,14 +81,15 @@ public class RegenerateEndpointsJson extends TestCase {
         next.addProperty("path", tool.path());
         next.addProperty("method", tool.method());
 
-        String category;
-        if (existing != null && existing.has("category")
-                && !existing.get("category").getAsString().isEmpty()) {
-            category = existing.get("category").getAsString();
-        } else {
-            category = tool.category() != null ? tool.category() : "";
-        }
-        next.addProperty("category", category);
+        // Category comes from the scanner, ALWAYS — never preserved from the catalog.
+        // The category is not editorial metadata like the description: it is the tool
+        // GROUP the bridge lazy-loads by, and the bridge reads it from /mcp/schema,
+        // which the annotation scan produces. Preserving the catalog's value here is
+        // what let 63 of 219 entries drift into a dead pre-tool-group vocabulary
+        // (getter/rename/decompile/search/script) that no `load_tool_group` call can
+        // ever name. To change a tool's group, change its @McpTool/@McpToolGroup
+        // annotation; the catalog follows.
+        next.addProperty("category", tool.category() != null ? tool.category() : "");
 
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (AnnotationScanner.ParamDescriptor p : tool.params()) {
@@ -101,6 +109,19 @@ public class RegenerateEndpointsJson extends TestCase {
             params.add(name);
         }
         next.add("params", params);
+
+        // `servers` records which of the two HTTP servers actually registers this
+        // route (see tools/audit_server_scope.py). It is carried through verbatim
+        // rather than recomputed: the scanner this regenerator runs has no idea
+        // which server would have constructed the service it just reflected over
+        // -- it scans the union of both. Dropping it here would silently unstamp
+        // 253 entries on every regeneration, so the field is preserved and
+        // `tests/unit/test_audit_server_scope.py` fails if it goes stale. A newly
+        // added endpoint arrives here with no `servers` at all; re-run
+        // `python -m tools.audit_server_scope --write` after regenerating.
+        if (existing != null && existing.has("servers")) {
+            next.add("servers", existing.get("servers"));
+        }
 
         String description;
         if (existing != null && existing.has("description")

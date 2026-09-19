@@ -17,21 +17,37 @@ What is deliberately NOT asserted
 ---------------------------------
 * The exact branch list. Branches come and go; requiring an exact set makes this
   test a chore that gets edited to match reality instead of checking it.
-* Scorecard. It scores the repo's *published* posture and is intentionally
-  ``main``-only -- a working branch is not that. Asserting otherwise would
-  pressure a future reader into widening it for symmetry.
 * Release workflows, which trigger on tags rather than branches.
+
+Scorecard used to be excluded here too, on the reasoning that it scores the
+repo's *published* posture and is "intentionally main-only". That reasoning was
+right about the intent and wrong about the mechanism: ``scorecard-action``
+refuses to run on anything but the repository's **default branch**, hard-failing
+with ``validating options: only the default branch main is supported``. So its
+push trigger is not a preference, it is a constraint -- and the constraint has
+now been violated in both directions. The default moved ``main`` -> ``dev``
+while the trigger said ``main`` (3 failures), and later moved back to ``main``
+while the trigger said ``dev``: every one of the 8 most recent scorecard runs
+failed in 13 seconds. The scheduled runs follow the default branch
+automatically and passed throughout, so the badge stayed green and the failures
+read as noise. It is asserted now.
 """
 
 from __future__ import annotations
 
 import pathlib
+import subprocess
 
 import pytest
 import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+
+# The repository's default branch. scorecard-action accepts no other push
+# trigger. Cross-checked against git's own `origin/HEAD` below wherever that
+# is resolvable, so this constant cannot quietly go stale on a dev machine.
+DEFAULT_BRANCH = "main"
 
 # Branches that must be covered by the test + code-scanning workflows. `main` is
 # the release branch; `dev` is where the work happens and is the default branch,
@@ -84,6 +100,55 @@ def test_gating_workflow_triggers_on_working_branches(workflow, event, branch):
         f"{branches}). Work pushed to `{branch}` would run no {workflow} checks "
         f"at all, and the gap is invisible: a workflow that never runs never "
         f"reports a failure."
+    )
+
+
+def test_scorecard_pushes_only_on_the_default_branch():
+    """scorecard-action hard-fails on any other branch.
+
+    Not a style rule. The action validates this itself and exits with
+    ``validating options: only the default branch main is supported``. A push
+    trigger on anything else is a run that cannot succeed -- and because the
+    *scheduled* runs follow the default branch automatically and keep passing,
+    the badge stays green while every push run goes red, which reads as noise
+    rather than as a misconfiguration.
+    """
+    on = _triggers(_load("scorecard.yml"))
+    branches = (on.get("push") or {}).get("branches")
+    assert branches == [DEFAULT_BRANCH], (
+        f"scorecard.yml pushes on {branches}, but scorecard-action only runs "
+        f"on the default branch ({DEFAULT_BRANCH!r}). Every run on any other "
+        f"branch fails in seconds with 'only the default branch "
+        f"{DEFAULT_BRANCH} is supported'."
+    )
+
+
+def test_default_branch_constant_matches_git():
+    """Keep DEFAULT_BRANCH honest wherever git can answer.
+
+    The constant above is the one thing in this file not derived from the thing
+    it checks, and it has been wrong before -- twice, in opposite directions.
+    `origin/HEAD` is not always populated (a fresh CI checkout usually has no
+    remote HEAD ref), so this skips rather than fails when git cannot say; a
+    test that fails on an environment detail teaches people to ignore it.
+    """
+    try:
+        resolved = subprocess.run(
+            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("origin/HEAD is not resolvable in this checkout")
+
+    actual = resolved.rsplit("/", 1)[-1]
+    assert actual == DEFAULT_BRANCH, (
+        f"git says this repository's default branch is {actual!r}, but "
+        f"DEFAULT_BRANCH here is {DEFAULT_BRANCH!r}. Move both, and move "
+        f"scorecard.yml's push trigger with them -- scorecard-action fails on "
+        f"anything but the default branch."
     )
 
 

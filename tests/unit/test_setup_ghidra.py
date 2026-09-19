@@ -10,8 +10,10 @@ import tools.setup.ghidra as ghidra_setup
 
 from tools.setup.ghidra import (
     DEFAULT_MCP_URL,
+    DEPLOY_TEST_MODES,
     PLUGIN_CLASS,
     REQUIRED_GHIDRA_JARS,
+    UnknownDeployTestMode,
     _file_sha256,
     _has_dependency_group,
     collect_preflight_issues,
@@ -564,6 +566,67 @@ def test_collect_preflight_issues_passes_with_required_files(
     assert issues == []
 
 
+def test_collect_preflight_issues_needs_no_maven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The deep preflight body must stay Maven-free.
+
+    ``cmd_preflight`` reports Maven's absence instead of aborting on it, which
+    is only honest if nothing further down reintroduces the requirement. This
+    unresolves Maven for real -- no candidate on disk -- rather than stubbing a
+    locator, so a future ``find_maven_command()`` call added anywhere inside
+    ``collect_preflight_issues`` raises here instead of shipping.
+    """
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    (ghidra_path / "Extensions" / "Ghidra").mkdir(parents=True)
+    (ghidra_path / "ghidraRun.bat").write_text("echo off\n", encoding="utf-8")
+    for _artifact_id, relative_path in REQUIRED_GHIDRA_JARS:
+        jar_path = ghidra_path / relative_path
+        jar_path.parent.mkdir(parents=True, exist_ok=True)
+        jar_path.write_text("jar", encoding="utf-8")
+
+    user_base = tmp_path / "user-ghidra"
+    (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)
+    monkeypatch.setattr(
+        "tools.setup.ghidra.shutil.which",
+        lambda name: "java" if name == "java" else None,
+    )
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    issues = collect_preflight_issues(
+        tmp_path,
+        ghidra_path,
+        Path(sys.executable),
+        install_debugger=False,
+        strict=False,
+        user_base_dir=user_base,
+    )
+
+    assert issues == []
+
+
+def test_install_ghidra_dependencies_still_hard_fails_without_maven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`ensure-prereqs` / `install-ghidra-deps` genuinely cannot proceed.
+
+    Relaxing preflight must not relax the commands that actually shell out to
+    ``mvn install:install-file``.
+    """
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        install_ghidra_dependencies(tmp_path, tmp_path / "ghidra_12.1_PUBLIC")
+
+    assert "Unable to locate Maven" in str(excinfo.value)
+
+
 def test_resolve_mcp_url_uses_env_url(tmp_path: Path):
     (tmp_path / ".env").write_text(
         "GHIDRA_MCP_URL=http://127.0.0.1:9999\n", encoding="utf-8"
@@ -603,6 +666,127 @@ def test_resolve_deploy_test_modes_can_disable_local_env(tmp_path: Path):
     (tmp_path / ".env").write_text("GHIDRA_MCP_DEPLOY_TESTS=off\n", encoding="utf-8")
 
     assert resolve_deploy_test_modes(tmp_path, []) == []
+
+
+# ---------------------------------------------------------------------------
+# Deploy test tier validation (#484)
+#
+# `GHIDRA_MCP_DEPLOY_TESTS=relase` used to resolve to ['relase']. The dispatch
+# chain in run_deploy_tests had no `else`, so the loop matched nothing and
+# deploy exited 0 having run only the smoke test. `--test` was fine -- argparse
+# `choices` rejected it -- so the two routes into the same function disagreed,
+# and the one that stayed silent is the one a release cut reads from a local
+# .env. `deploy --test release` is CLAUDE.md's fourth release-floor command.
+# ---------------------------------------------------------------------------
+
+
+def test_env_typo_is_refused_not_silently_skipped(tmp_path: Path):
+    """The exact value from #484: one transposition away from a real tier."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=relase\n", encoding="utf-8"
+    )
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        resolve_deploy_test_modes(tmp_path, [])
+
+    message = str(excinfo.value)
+    assert "relase" in message
+    # The operator must be able to act on it without reading the source.
+    assert "release" in message
+    assert "GHIDRA_MCP_DEPLOY_TESTS" in message
+    assert "off" in message
+
+
+def test_env_typo_is_refused_even_beside_valid_tiers(tmp_path: Path):
+    """A good tier in the same line must not launder a bad one."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=release,endpoint-catlog\n", encoding="utf-8"
+    )
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        resolve_deploy_test_modes(tmp_path, [])
+
+    assert "endpoint-catlog" in str(excinfo.value)
+
+
+def test_unknown_cli_tier_is_refused(tmp_path: Path):
+    """argparse guards the CLI, but this function is also called directly."""
+    with pytest.raises(UnknownDeployTestMode):
+        resolve_deploy_test_modes(tmp_path, ["relase"])
+
+
+def test_every_valid_tier_resolves_from_env(tmp_path: Path):
+    """No tier in the canonical list may be rejected by its own validator."""
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=" + ",".join(DEPLOY_TEST_MODES) + "\n",
+        encoding="utf-8",
+    )
+
+    assert resolve_deploy_test_modes(tmp_path, []) == list(DEPLOY_TEST_MODES)
+
+
+def test_off_still_disables_without_tripping_validation(tmp_path: Path):
+    """`off` is not a tier, and must not be validated as one."""
+    for value in ("off", "0", "false", "no", "none", "OFF"):
+        (tmp_path / ".env").write_text(
+            f"GHIDRA_MCP_DEPLOY_TESTS={value}\n", encoding="utf-8"
+        )
+        assert resolve_deploy_test_modes(tmp_path, []) == []
+
+
+def test_cli_choices_come_from_the_canonical_tier_list():
+    """One list, both routes -- a second copy is what drifted in the first place."""
+    from tools.setup import cli
+
+    parser = cli.build_parser()
+    deploy_action = next(
+        action
+        for action in parser._subparsers._group_actions[0]
+        .choices["deploy"]
+        ._actions
+        if action.dest == "test"
+    )
+    assert list(deploy_action.choices) == list(DEPLOY_TEST_MODES)
+
+
+def test_benchmark_tier_set_is_a_subset_of_the_canonical_list():
+    """A benchmark tier missing from DEPLOY_TEST_MODES could never be requested."""
+    unknown = sorted(
+        set(ghidra_setup.BENCHMARK_DEPLOY_TEST_MODES) - set(DEPLOY_TEST_MODES)
+    )
+    assert not unknown, (
+        f"BENCHMARK_DEPLOY_TEST_MODES names tiers no caller can select: {unknown}"
+    )
+
+
+def test_every_canonical_tier_has_a_dispatch_branch(tmp_path: Path, monkeypatch):
+    """The other direction: a tier listed but never wired up.
+
+    Such a tier passes validation, matches no branch, and reports a pass for an
+    implementation that does not exist -- #484's silence one step later. The
+    `else` in run_deploy_tests turns it into a named failure.
+    """
+    monkeypatch.setattr(ghidra_setup, "run_default_smoke_test", lambda *a, **k: None)
+    monkeypatch.setattr(ghidra_setup, "_mcp_request", lambda *a, **k: (200, {}))
+    for name in (
+        "run_endpoint_catalog_test",
+        "reset_benchmark_fixture",
+        "run_benchmark_extended_read_test",
+        "run_benchmark_write_test",
+        "run_negative_contract_test",
+        "run_multi_program_targeting_test",
+        "run_selected_endpoint_contract_test",
+        "run_debugger_live_test",
+        "run_release_regression_tests",
+    ):
+        monkeypatch.setattr(ghidra_setup, name, lambda *a, **k: None)
+
+    for mode in DEPLOY_TEST_MODES:
+        run_deploy_tests(tmp_path, "http://127.0.0.1:8089", [mode])
+
+    with pytest.raises(UnknownDeployTestMode) as excinfo:
+        run_deploy_tests(tmp_path, "http://127.0.0.1:8089", ["listed-but-unwired"])
+    assert "no branch for it" in str(excinfo.value)
 
 
 def test_run_default_smoke_test_requires_key_tools(tmp_path: Path, monkeypatch):
@@ -1300,7 +1484,7 @@ def test_install_ghidratrace_skips_when_no_wheel(
     assert "No ghidratrace wheel found" in capsys.readouterr().out
 
 
-def test_install_ghidratrace_dry_run_does_not_invoke_pip(
+def test_install_ghidratrace_dry_run_does_not_invoke_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ):
     from tools.setup import ghidra
@@ -1328,7 +1512,7 @@ def test_install_ghidratrace_dry_run_does_not_invoke_pip(
     assert "ghidratrace-12.1" in out
 
 
-def test_install_ghidratrace_invokes_pip_with_force_reinstall(
+def test_install_ghidratrace_invokes_uv_for_target_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     from tools.setup import ghidra
@@ -1340,6 +1524,7 @@ def test_install_ghidratrace_invokes_pip_with_force_reinstall(
     fake_py = tmp_path / "debugger-python.exe"
     fake_py.write_text("", encoding="utf-8")
     monkeypatch.setenv("GHIDRA_DEBUGGER_PYTHON", str(fake_py))
+    monkeypatch.setattr(ghidra, "uv_executable", lambda: "uv-test")
 
     invocations: list[list[str]] = []
 
@@ -1357,14 +1542,19 @@ def test_install_ghidratrace_invokes_pip_with_force_reinstall(
     )
     assert rc == 0
     assert len(invocations) == 2, (
-        "expected 2 pip invocations (protobuf + ghidratrace)"
+        "expected 2 uv invocations (protobuf + ghidratrace)"
     )
     # First: protobuf upgrade
-    assert invocations[0][0] == str(fake_py)
-    assert invocations[0][1:5] == ["-m", "pip", "install", "--upgrade"]
+    assert invocations[0][:5] == [
+        "uv-test", "pip", "install", "--python", str(fake_py)
+    ]
+    assert "--upgrade" in invocations[0]
     assert any("protobuf" in arg for arg in invocations[0])
-    # Second: ghidratrace --force-reinstall pointing at the bundled wheel
-    assert invocations[1][1:5] == ["-m", "pip", "install", "--force-reinstall"]
+    # Second: ghidratrace reinstall pointing at the bundled wheel
+    assert invocations[1][:5] == [
+        "uv-test", "pip", "install", "--python", str(fake_py)
+    ]
+    assert "--reinstall" in invocations[1]
     assert str(wheel) in invocations[1]
 
 

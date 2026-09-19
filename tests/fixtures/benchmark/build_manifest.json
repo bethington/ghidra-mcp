@@ -1,0 +1,77 @@
+{
+  "producer": "tests/fixtures/benchmark/make_fixture.py",
+  "generator_version": "1.0.0",
+  "toolchain": "none - the image is emitted directly by the generator",
+  "deterministic": true,
+  "note": "Regenerate with `python tests/fixtures/benchmark/make_fixture.py`. The output is a pure function of the generator source, so a changed digest means the generator changed. Function addresses are chosen by the generator, not observed from a build, and tests/unit/test_benchmark_fixture.py fails if regression/*.yaml disagrees with them.",
+  "images": {
+    "Benchmark.dll": {
+      "image_base": "0x10000000",
+      "subsystem": "windows_gui",
+      "size_bytes": 6144,
+      "sha256": "75ff79e1ae797785c9e000138ac18cc8a64fc28ad587cd821068d6d000a8d0d8",
+      "entry_point": "0x10001303",
+      "functions": {
+        "calc_crc16": "0x10001000",
+        "compute_gcd": "0x10001092",
+        "compute_str_len": "0x100010b6",
+        "advance_parser_state": "0x100010d5",
+        "stat_list_add": "0x100011c5",
+        "get_stat_list_flags": "0x10001203",
+        "get_stat_list_layer": "0x10001227",
+        "get_stat_list_owner_guid": "0x1000124e",
+        "get_stat_list_prev_link": "0x1000126c",
+        "benchmark_self_test": "0x1000128a",
+        "benchmark_describe": "0x100012f5",
+        "DllMain": "0x10001303"
+      }
+    },
+    "BenchmarkDebug.exe": {
+      "image_base": "0x00400000",
+      "subsystem": "windows_console",
+      "size_bytes": 6656,
+      "sha256": "82f08fe128c49b4699f1a57033ef2620d0c1bc28c059bef801deb36738b73b75",
+      "entry_point": "0x00401303",
+      "functions": {
+        "calc_crc16": "0x00401000",
+        "compute_gcd": "0x00401092",
+        "compute_str_len": "0x004010b6",
+        "advance_parser_state": "0x004010d5",
+        "stat_list_add": "0x004011c5",
+        "get_stat_list_flags": "0x00401203",
+        "get_stat_list_layer": "0x00401227",
+        "get_stat_list_owner_guid": "0x0040124e",
+        "get_stat_list_prev_link": "0x0040126c",
+        "benchmark_self_test": "0x0040128a",
+        "benchmark_describe": "0x004012f5",
+        "exe_entry": "0x00401303"
+      }
+    }
+  },
+  "banner": "GhidraMCP benchmark fixture",
+  "banner_crc16": 23991,
+  "exports": [
+    "advance_parser_state",
+    "benchmark_describe",
+    "benchmark_self_test",
+    "calc_crc16",
+    "compute_gcd",
+    "compute_str_len",
+    "get_stat_list_flags",
+    "get_stat_list_layer",
+    "get_stat_list_owner_guid",
+    "get_stat_list_prev_link",
+    "stat_list_add"
+  ],
+  "imports": {
+    "KERNEL32.dll": [
+      "ExitProcess",
+      "GetCommandLineA",
+      "GetProcAddress",
+      "GetTickCount",
+      "LoadLibraryA",
+      "Sleep"
+    ]
+  },
+  "string_count": 66
+}

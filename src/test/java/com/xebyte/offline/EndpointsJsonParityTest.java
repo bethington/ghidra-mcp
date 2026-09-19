@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.ManualToolDescriptors;
 import com.xebyte.core.ProgramProvider;
 import junit.framework.TestCase;
 
@@ -123,12 +124,114 @@ public class EndpointsJsonParityTest extends TestCase {
     }
 
     /**
+     * The catalog's {@code category} must match the category the scanner resolves.
+     *
+     * <p>This is the tool GROUP the bridge lazy-loads by. The bridge never reads
+     * {@code tests/endpoints.json} — it groups on the {@code category} field of
+     * {@code /mcp/schema}, which the annotation scan produces. Nothing compared the
+     * two until this test, and 63 of 219 scanned entries had drifted: the catalog
+     * still carried a pre-tool-group verb taxonomy ({@code getter}, {@code rename},
+     * {@code decompile}, {@code search}, {@code script}, {@code utility}) whose names
+     * no {@code load_tool_group} call can resolve, so the catalog implied that
+     * {@code decompile_function}, {@code rename_function}, {@code search_functions}
+     * and 24 other tools sit outside the default groups when they do not.
+     *
+     * <p>The annotation is authoritative by construction: it is the only side the
+     * runtime reads. To move a tool between groups, change {@code @McpTool.category}
+     * or the class's {@code @McpToolGroup}, then regenerate the catalog.
+     */
+    public void testCatalogCategoryMatchesScannedCategory() {
+        List<String> mismatches = new ArrayList<>();
+        for (AnnotationScanner.ToolDescriptor tool : scanner.getDescriptors()) {
+            CatalogEntry entry = catalog.get(tool.path());
+            if (entry == null) continue;  // reported by testEveryScannedEndpointIsInCatalog
+            String scanned = tool.category() == null ? "" : tool.category();
+            if (!entry.category.equals(scanned)) {
+                mismatches.add("  " + tool.path()
+                    + " — catalog: '" + entry.category + "', annotation: '" + scanned + "'");
+            }
+        }
+        if (!mismatches.isEmpty()) {
+            java.util.Collections.sort(mismatches);
+            fail(mismatches.size() + " endpoint(s) whose " + CATALOG_PATH
+                + " category disagrees with the @McpTool/@McpToolGroup annotation.\n"
+                + "The annotation wins: it is what /mcp/schema publishes and what the "
+                + "bridge lazy-loads tool groups by.\n"
+                + "Fix with: mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true\n"
+                + "(then: python -m tools.gen_readme_api_reference --write)\n"
+                + String.join("\n", mismatches));
+        }
+    }
+
+    /**
+     * Hand-registered routes get their schema entry from {@link ManualToolDescriptors},
+     * not from an annotation — so that registry, not the catalog, is their runtime
+     * group. The two are seeded from each other and must not diverge.
+     */
+    public void testCatalogCategoryMatchesManualDescriptorCategory() {
+        List<String> mismatches = new ArrayList<>();
+        for (Map.Entry<String, AnnotationScanner.ToolDescriptor> e
+                : ManualToolDescriptors.descriptors().entrySet()) {
+            CatalogEntry entry = catalog.get(e.getKey());
+            if (entry == null) continue;
+            String manual = e.getValue().category() == null ? "" : e.getValue().category();
+            if (!entry.category.equals(manual)) {
+                mismatches.add("  " + e.getKey()
+                    + " — catalog: '" + entry.category + "', ManualToolDescriptors: '" + manual + "'");
+            }
+        }
+        if (!mismatches.isEmpty()) {
+            java.util.Collections.sort(mismatches);
+            fail(mismatches.size() + " hand-registered route(s) whose " + CATALOG_PATH
+                + " category disagrees with ManualToolDescriptors:\n"
+                + String.join("\n", mismatches));
+        }
+    }
+
+    /**
+     * The catalog's top-level {@code categories} map must describe exactly the
+     * categories its endpoints actually use — no undescribed category, and no
+     * described category with nothing in it.
+     *
+     * <p>The map was the last place the dead verb taxonomy was still documented as
+     * though it were real: it listed {@code decompile}/{@code rename}/{@code search}/
+     * {@code script} (no runtime group has those names) while omitting
+     * {@code malware}, {@code symbol}, {@code function}, {@code xref},
+     * {@code documentation}, {@code headless} and {@code debugger}, which are
+     * loadable groups holding most of the server's tools.
+     */
+    public void testCategoriesMapMatchesCategoriesInUse() throws IOException {
+        String raw = Files.readString(Paths.get(CATALOG_PATH));
+        JsonObject root = new Gson().fromJson(raw, JsonObject.class);
+        Set<String> described = root.has("categories")
+            ? root.getAsJsonObject("categories").keySet()
+            : Set.of();
+
+        Set<String> used = new java.util.TreeSet<>();
+        for (CatalogEntry e : catalog.values()) {
+            if (!e.category.isEmpty()) used.add(e.category);
+        }
+
+        Set<String> undescribed = new java.util.TreeSet<>(used);
+        undescribed.removeAll(described);
+        Set<String> unused = new java.util.TreeSet<>(described);
+        unused.removeAll(used);
+
+        assertTrue("Categories used by endpoints but missing from the top-level"
+            + " 'categories' map in " + CATALOG_PATH + ": " + undescribed,
+            undescribed.isEmpty());
+        assertTrue("Categories described in the top-level 'categories' map of "
+            + CATALOG_PATH + " that no endpoint uses (stale taxonomy): " + unused,
+            unused.isEmpty());
+    }
+
+    /**
      * The catalog's {@code total_endpoints} field must match the actual length
      * of its {@code endpoints} array. Drift here usually means a hand-edit
      * added or removed an entry without updating the count.
      */
     public void testCatalogTotalEndpointsIsConsistent() throws IOException {
-        String raw = Files.readString(Paths.get(CATALOG_PATH));
+        String raw = ProjectSource.readProjectFile(CATALOG_PATH);
         JsonObject root = new Gson().fromJson(raw, JsonObject.class);
         int declared = root.get("total_endpoints").getAsInt();
         int actual = root.getAsJsonArray("endpoints").size();
@@ -150,7 +253,7 @@ public class EndpointsJsonParityTest extends TestCase {
      * present in no source file is a genuine orphan.
      */
     public void testNoOrphanCatalogEntries() throws IOException {
-        String allSrc = readAllJavaSources(Paths.get("src", "main", "java", "com", "xebyte"));
+        String allSrc = readAllJavaSources(ProjectSource.mainSourceRoot());
         List<String> orphans = new ArrayList<>();
         for (String path : catalog.keySet()) {
             if (!allSrc.contains("\"" + path + "\"")) {
@@ -175,7 +278,7 @@ public class EndpointsJsonParityTest extends TestCase {
         StringBuilder sb = new StringBuilder();
         try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
             for (Path p : (Iterable<Path>) paths.filter(f -> f.toString().endsWith(".java"))::iterator) {
-                sb.append(Files.readString(p)).append('\n');
+                sb.append(ProjectSource.read(p)).append('\n');
             }
         }
         return sb.toString();
@@ -200,14 +303,15 @@ public class EndpointsJsonParityTest extends TestCase {
     }
 
     private static Map<String, CatalogEntry> loadCatalog() throws IOException {
-        Path p = Paths.get(CATALOG_PATH);
+        Path p = ProjectSource.path(CATALOG_PATH);
         if (!Files.exists(p)) {
             throw new IOException(
-                "Expected catalog file " + CATALOG_PATH + " relative to project root. "
-              + "mvn test runs with working dir = project root; if you're running from "
-              + "a different dir, cd to the project root first.");
+                "Expected catalog file " + CATALOG_PATH + " under the project root, "
+              + "resolved to " + p + ". The root is found from the compiled test "
+              + "classes, not the working directory; pass -Dproject.basedir=<repo "
+              + "root> if it is wrong.");
         }
-        String raw = Files.readString(p);
+        String raw = ProjectSource.read(p);
         JsonObject root = new Gson().fromJson(raw, JsonObject.class);
         JsonArray arr = root.getAsJsonArray("endpoints");
 

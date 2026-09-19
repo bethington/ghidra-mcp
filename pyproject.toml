@@ -15,8 +15,17 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    # Core MCP server framework
+    # Core MCP server framework. The upper bound is load-bearing, not caution:
+    # the bridge imports `mcp.server.fastmcp`, which 2.x removed when FastMCP
+    # became MCPServer, so an installed wheel that resolves 2.x dies at import.
+    # uv.lock pins 1.28.1, so nothing in this repo exercises the range -- only
+    # `pip install ghidra-mcp-bridge` does. Widen it with the 2.x migration,
+    # not before; test_mcp_requirement_excludes_the_2x_sdk holds the line.
     "mcp>=1.28.1,<2.0.0",
+    # registry.py annotates generated tool parameters with Annotated[T, Field(...)]
+    # directly -- mcp pulls this in transitively, but the bridge imports it by
+    # name now and should declare it rather than rely on a dependency's dependency.
+    "pydantic>=2.0.0",
 ]
 # NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
 # has no `requests` runtime dependency. `requests` is only needed by the repo's
@@ -106,6 +115,12 @@ addopts = """
 --junit-xml=tests/junit.xml
 """
 testpaths = ["tests"]
+# Repo root on sys.path before plugins load. `-p tests.offline.replay_plugin`
+# (the no-Ghidra replay of the integration tier, #112) is imported during
+# pre-parse, well before pytest's rootdir insertion, so without this it works
+# under `python -m pytest` -- which puts cwd on the path itself -- and fails
+# under a plain `uv run pytest` with "No module named 'tests'".
+pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

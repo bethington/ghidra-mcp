@@ -98,6 +98,12 @@ jobs:
 
         echo "✅ Installed Ghidra JARs to Maven local repository"
 
+        # Publish the resolved path for the real-Ghidra test step below. Deliberately
+        # NOT named GHIDRA_INSTALL_DIR: that variable activates the pom's
+        # `ghidra-runtime-tests` profile and un-skips the real-Ghidra tier, and the
+        # offline step immediately after this one must stay offline.
+        echo "GHIDRA_DIR=$GHIDRA_DIR" >> "$GITHUB_ENV"
+
     - name: Build with Maven
       run: mvn clean package assembly:single -q -DskipTests
 
@@ -109,12 +115,60 @@ jobs:
         # EndpointRegistrationTest, AppTest) require a running Ghidra instance and are
         # excluded from this run.
         #
-        # com.xebyte.core is included too: those are Mockito/ProgramBuilder tests
-        # that need no server either, and they cover the no-return + flow-repair
-        # behavior (#384/#385). Matching only com.xebyte.offline meant they never
-        # ran in CI at all. The one ProgramBuilder suite self-skips via assumeTrue
-        # when GHIDRA_INSTALL_DIR is unset, which is the case here.
+        # com.xebyte.core is included too: those are Mockito tests that need no
+        # server either, and they cover the no-return + flow-repair behavior
+        # (#384/#385). Matching only com.xebyte.offline meant they never ran in CI
+        # at all.
+        #
+        # GHIDRA_INSTALL_DIR is deliberately NOT set for THIS step, so the
+        # *GhidraTest classes self-skip via assumeTrue and the coverage ratchet keeps
+        # measuring the same offline tier it has always measured. The real-Ghidra
+        # tier runs in its own step below.
         mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+
+    - name: Run real-Ghidra Java tests
+      # src/test/java/com/xebyte/core/*GhidraTest.java builds a REAL ProgramDB through
+      # ghidra.program.database.ProgramBuilder and exercises actual disassembly and
+      # flow-override repair -- behavior no mock reproduces.
+      #
+      # Until 2026-08-31 this tier had never run anywhere. With GHIDRA_INSTALL_DIR set it
+      # died in @Before with NoClassDefFoundError, because Ghidra bundles a dozen libraries
+      # that the `install-file`d module jars record no dependency on; with it unset every
+      # test self-skipped through assumeTrue. CI took the second branch, so the suite was
+      # green while testing nothing. The pom's `ghidra-runtime-tests` profile -- which this
+      # variable activates -- supplies the missing jars.
+      #
+      # Ghidra is already downloaded and unzipped above, so the marginal cost here is the
+      # test time alone. Verified headless on Linux with no DISPLAY before being enabled.
+      env:
+        GHIDRA_INSTALL_DIR: ${{ env.GHIDRA_DIR }}
+      run: |
+        # jacoco is skipped so this run does not overwrite the offline-tier coverage report
+        # that the upload step publishes, and so the ratchet keeps its original meaning.
+        mvn -q test -Djacoco.skip=true -Dtest='com.xebyte.core.*GhidraTest'
+
+        # A green `mvn test` is NOT proof the tier ran: assumeTrue reports skips as success,
+        # which is precisely how this tier stayed dead for so long. Assert on the counts.
+        shopt -s nullglob
+        reports=(target/surefire-reports/TEST-com.xebyte.core.*GhidraTest.xml)
+        if [ ${#reports[@]} -eq 0 ]; then
+          echo "::error::No real-Ghidra surefire report was produced - the tier did not run."
+          exit 1
+        fi
+        total=0
+        skipped=0
+        for report in "${reports[@]}"; do
+          header=$(grep -m1 '<testsuite' "$report")
+          count=$(sed -n 's/.* tests="\([0-9]*\)".*/\1/p' <<<"$header")
+          missed=$(sed -n 's/.* skipped="\([0-9]*\)".*/\1/p' <<<"$header")
+          total=$(( total + ${count:-0} ))
+          skipped=$(( skipped + ${missed:-0} ))
+        done
+        echo "real-Ghidra tier: ${total} test(s) run, ${skipped} skipped"
+        if [ "$total" -eq 0 ] || [ "$skipped" -ne 0 ]; then
+          echo "::error::The real-Ghidra tier skipped ${skipped} of ${total} tests. GHIDRA_INSTALL_DIR is set for this step on purpose; a skip here means it is testing nothing."
+          exit 1
+        fi
 
     - name: Verify build artifacts
       run: |
@@ -161,7 +215,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       with:
         enable-cache: true
 
@@ -174,12 +228,57 @@ jobs:
         # uv installs the bridge package (editable) + test group from the lock.
         # Coverage sources (bridge_mcp_ghidra, tools) come from the addopts in
         # pyproject.toml. The fail-under floor is a RATCHET: it sits a few
-        # points below the measured baseline (63.6% on 2026-08-11, measured
-        # after the debugger package moved to d2-game-exe and left the
-        # denominator) to absorb platform/version skew — raise it as coverage
-        # improves, never lower it.
+        # points below the measured baseline to absorb platform/version skew;
+        # raise it as coverage improves, never lower it.
+        #
+        # History, so the next person does not re-derive it:
+        #   63.6% (2026-08-11) — baseline after the debugger package moved to
+        #     d2-game-exe and left the denominator. Floor 58.
+        #   57-58% (2026-08-12) — commit 6f7e7e8 dissolved scripts/ into
+        #     tools/, and tools/ is a coverage source while scripts/ was not.
+        #     That moved 533 uncovered statements into the DENOMINATOR in one
+        #     commit: upgrade_project_language.py (530 stmts / 343 missed),
+        #     build_reference_index.py (147/147) and
+        #     ghidra_server_health_check.py (43/43). Nothing got less tested;
+        #     the measured scope grew. With the floor still at 58 the gate sat
+        #     exactly on the knife-edge and failed PRs that touch no Python at
+        #     all — #442 is two .md files and reported Build Status=FAILURE,
+        #     and 6 of 8 open dependabot PRs were red for the same reason. The
+        #     floor was dropped to 55 to unblock the queue. That was a
+        #     stopgap, not a fix.
+        #   69.2% (2026-08-30) — the debt is paid: those three operator
+        #     scripts are now COVERED, not scoped out. They reach 99%, 99% and
+        #     98% respectively (the only missed line in each is the
+        #     `sys.exit(main())` under `if __name__ == "__main__"`, which
+        #     cannot execute under import). tests/unit/ gained
+        #     test_ghidra_server_health_check.py,
+        #     test_build_reference_index.py and
+        #     test_upgrade_project_language_main.py; no module was added to
+        #     [tool.coverage.run] omit.
+        #
+        #   72.5% (2026-09-18) — the 7.0.0 queue landed and tests/unit/ went
+        #     from 568 to 1048. Measured 72.50% on this ubuntu matrix and
+        #     73.05% on Windows, so the platform skew is ~0.5pt, as assumed.
+        #
+        # A SECOND failure mode showed up on 2026-09-18, and it is not the
+        # denominator trap. GitHub tests a `pull_request` against a merge commit
+        # built when the run was CREATED, and re-running an old run REPLAYS that
+        # commit rather than rebuilding it. #448 and #451 were therefore still
+        # being measured against the dev of 2026-09-11 and 2026-08-30, when this
+        # floor line itself read 58 and coverage sat at 57%. Both showed five red
+        # checks whose only content was `Coverage failure: total of 57 is less
+        # than fail-under=58`, with no failing test in either — #448 changes no
+        # Python at all. A stale base cannot be re-measured by re-running; only a
+        # rebase, or a merge verified locally, settles it. If a PR is red on
+        # coverage alone, check the run's DATE before believing the number.
+        #
+        # Floor 70 against a measured 72.50% — the same ~2pt margin the entry
+        # above chose, now against a baseline 3pt higher. Raising it with the
+        # baseline is the point of a ratchet; a floor left far below actual
+        # coverage does not make the gate safer, it widens the band in which a
+        # stale-base run reports a number nobody should act on.
         uv run --python ${{ matrix.python-version }} --group test \
-          pytest tests/unit/ -v --tb=short --cov-fail-under=58
+          pytest tests/unit/ -v --tb=short --cov-fail-under=70
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
@@ -201,7 +300,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       with:
         enable-cache: true
 
@@ -223,6 +322,54 @@ jobs:
       run: |
         uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
+  offline-http-tier:
+    # Issue #112. The integration tier needs a live Ghidra on :8089 with a
+    # binary open, so CI could only ever run the thin offline checks and an
+    # outside contributor could not self-verify anything that touches the wire.
+    # Five fork PRs sat three weeks unreviewable and two contributors shipped
+    # changes while reporting the suite as broken.
+    #
+    # This job closes that. tests/offline/fake_ghidra.py is a strict fake of
+    # the plugin's HTTP surface: it routes from tests/endpoints.json, checks
+    # parameters against the recorded /mcp/schema, and REFUSES anything the
+    # catalog does not describe. No Ghidra download, no JDK, no Maven -- it
+    # runs in well under a minute and in parallel with java-build, which
+    # downloads and unpacks Ghidra and dominates the critical path, so the
+    # wall-clock cost of the workflow is unchanged.
+    #
+    # Read tests/offline/README.md for what this does and does NOT prove.
+    name: Offline HTTP Tier (no Ghidra)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Fake server + bridge end-to-end
+      # --no-cov: the ubuntu python-tests job owns the coverage ratchet and
+      # measures tests/unit/ only. Folding this tier into that measurement
+      # would move the baseline under PR #453's feet; it can be merged in
+      # deliberately later (it would raise the number, not lower it).
+      run: uv run --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
+
+    - name: Replay the read-only integration tier against the fake
+      # The same file that needs a live Ghidra on :8089, run with no Ghidra at
+      # all. The plugin boots the fake on an ephemeral port, points
+      # GHIDRA_MCP_URL at it, skips the documented gaps, and fails the run if
+      # the observed contract violations differ from the committed baseline in
+      # EITHER direction.
+      run: |
+        uv run --python 3.12 --group test pytest \
+          tests/integration/test_readonly_endpoints.py \
+          -p tests.offline.replay_plugin -v --no-cov --tb=short
+
   code-quality:
     # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
     # fallback), so this job surfaces lint/format drift without ever failing CI.
@@ -235,7 +382,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
       with:
         enable-cache: true
 
@@ -246,9 +393,31 @@ jobs:
       run: uvx black --check python/bridge_mcp_ghidra/ 2>/dev/null || echo "black check skipped"
 
   markdown-lint:
-    # ADVISORY / non-blocking: continue-on-error means findings never fail CI, and
-    # build-status does not depend on this job. Informational doc-lint only.
-    name: Documentation Quality (advisory, non-blocking)
+    # GATING as of 2026-09-18. `build-status` lists this job in `needs:` and
+    # compares its result, so a Markdown violation fails the build.
+    #
+    # It was advisory until then, and advisory did not work. Being outside
+    # `build-status.needs` blocked nothing, but the job carries no
+    # `continue-on-error`, so a violation still made the WORKFLOW's own
+    # conclusion `failure` while every blocking job was green. The result was a
+    # status that was red without meaning anything: dev's last four runs before
+    # #520 were red on 12 accumulated findings, #520 cleared them, and three
+    # community merges put it back within the hour (a CHANGELOG append left two
+    # blank lines at EOF -- #537). A permanently red check is one people stop
+    # reading, which costs more than the violations do.
+    #
+    # So the choice was made the other way: it blocks, and the tree is kept
+    # clean. Verified clean at the time of the switch -- 97 tracked .md files,
+    # 0 issues.
+    #
+    # Before 2026-08-30 this job passed `config: '.markdownlintrc'`, a filename
+    # markdownlint-cli2 rejects. Every run aborted before reading a file, and
+    # `continue-on-error: true` reported the abort as success. Run 33332052889
+    # logged `##[error]Unable to use configuration file ... .markdownlintrc` and
+    # still concluded `success`. The gate had never linted anything. Do NOT
+    # re-add `continue-on-error`: it is what made a broken gate indistinguishable
+    # from a clean one.
+    name: Documentation Quality
     runs-on: ubuntu-latest
 
     steps:
@@ -258,8 +427,11 @@ jobs:
       uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff  # v24.2.0
       with:
         globs: '**/*.md'
-        config: '.markdownlintrc'
-      continue-on-error: true
+        # Passed explicitly rather than relying on auto-discovery: a wrong or
+        # missing path now fails the step loudly instead of silently linting
+        # with default rules. tests/unit/test_project_consistency.py asserts
+        # this path exists and that markdownlint-cli2 accepts the name.
+        config: '.markdownlint-cli2.jsonc'
 
   pester-tests:
     name: Pester (ghidra-mcp-setup.ps1)
@@ -282,13 +454,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, pester-tests ]
+    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

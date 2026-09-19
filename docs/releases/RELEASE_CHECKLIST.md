@@ -63,13 +63,18 @@ rg -n "OLD_VERSION|NEW_VERSION|MCP Tools|GUI Endpoints|Headless Endpoints|total_
 Run the cheap gates before any live Ghidra work:
 
 ```text
-python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
-python -m tools.setup build
+./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
 uv build                                  # build the ghidra-mcp-bridge wheel (-> dist/)
 uv run pytest tests/unit/ -v --no-cov
 git diff --check
 git diff --cached --check
 ```
+
+Gradle is the default backend. The Maven equivalents
+(`python -m tools.setup preflight --ghidra-path ...` /
+`python -m tools.setup build`) still work and are what CI runs, but they need
+Maven on PATH and Ghidra's jars installed into the local repository first.
 
 `bump-version` keeps `pyproject.toml` (the wheel version) and the
 `python/bridge_mcp_ghidra/__init__.py` `__version__` fallback in lockstep with
@@ -87,13 +92,47 @@ pytest tests/unit/test_version_bump.py tests/unit/test_endpoint_catalog.py tests
 For Java endpoint/catalog changes, run the offline Java scanner/parity tests:
 
 ```text
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"
+```
+
+Under Maven the Ghidra JARs must be in the local repository first, or dependency
+resolution fails before any test runs. Gradle needs no such step:
+
+```text
+python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
 mvn test -Dtest='com.xebyte.offline.*Test'
+```
+
+If `EndpointsJsonParityTest` fails, `tests/endpoints.json` is stale. Regenerate
+it, re-stamp the `servers` field, then refresh the generated README API section
+it feeds.
+
+**The regenerator needs Maven and has no Gradle form** — Gradle can select the
+class but cannot pass `-Dregenerate=true` into the forked test JVM, so it exits
+BUILD SUCCESSFUL having regenerated nothing. If Maven is not available, the
+catalog cannot be regenerated on this machine; get Maven, or regenerate
+elsewhere.
+
+```text
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
+python -m tools.audit_server_scope --write
+python -m tools.gen_readme_api_reference --write
 ```
 
 ## 4. Live Ghidra Regression
 
 Live regression is required before merging risky deploy, GUI plugin, debugger,
 benchmark, or endpoint behavior changes.
+
+The `release` tier imports the benchmark fixture from
+`tests/fixtures/benchmark/` into the active Ghidra project at
+`/testing/benchmark/`. The fixture is committed and generated rather than
+compiled, so no toolchain is needed — but confirm it is intact before spending a
+build and a Ghidra restart on discovering otherwise:
+
+```text
+python tests/fixtures/benchmark/make_fixture.py --check
+```
 
 - [ ] Confirm the current Ghidra UI has no blocking modal dialogs.
 - [ ] Run the release-grade deploy regression:
@@ -102,10 +141,49 @@ benchmark, or endpoint behavior changes.
 python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test release
 ```
 
-- [ ] Record whether the release regression passed.
+- [ ] Record whether the release regression passed, **and read its last line**.
+  It ends `Debugger live test: ran` or `Debugger live test: SKIPPED (<reason>)`.
+  A skip is tolerated by design — the tier needs a dbgeng backend and
+  `ghidratrace` in the launcher's Python — but it is a hole in the run, not a
+  pass, and it should be recorded as one.
 - [ ] If the run required manual dialog intervention, document the popup and
   decide whether the deploy/prompt-policy automation needs another fix before
   release.
+- [ ] **Commit the evidence file the run wrote.** A passing `--test release`
+  writes `docs/releases/live-regression-evidence.json`, and `release.yml` /
+  `pre-release.yml` refuse to publish without it:
+
+```text
+git add docs/releases/live-regression-evidence.json
+python -m tools.release_evidence verify --version <the version being released>
+```
+
+> **Why the publish gate reads a committed file rather than running the tier.**
+> Until now `release.yml` accepted
+> `needs.release-regression.result == 'skipped'`, and on a **tag push** that job
+> is *always* skipped — its own `if` requires `workflow_dispatch`. So the gate
+> had never blocked a tagged release and could not. It cannot simply be made to
+> run either: the tier needs a live Ghidra GUI on Windows and targets
+> `[self-hosted, Windows]`, and **no self-hosted runner is registered** — a
+> deliberate choice, because on a public repo labelling a fork PR would run a
+> stranger's code on the maintainer's machine.
+>
+> The evidence file records a **source fingerprint**, not a timestamp: the git
+> blob ids of everything under `src/main/java`, `python/bridge_mcp_ghidra`,
+> `tools/setup`, `tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`
+> and `build.gradle`. Change any of them after the run and the release fails
+> until the tier is re-run. Change the CHANGELOG or a doc and it does not — the
+> gate has to survive writing the release notes, or people route around it.
+
+<!-- -->
+
+> **This gate was dead from 2026-08-10 to 2026-08-31.** `fun-doc/` moved to
+> `d2-game-exe` and took the `Benchmark.dll` fixture with it, so `release` and
+> five other tiers raised in `reset_benchmark_fixture()` before running a single
+> assertion. If this section ever stops being satisfiable again, say so in the
+> release notes rather than substituting a tier that does not test the same
+> thing: `endpoint-catalog` and `selected-contract` check that endpoints are
+> *registered*, and never touch a program.
 
 ## 5. Commit and Pull Request
 
@@ -148,8 +226,11 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-- [ ] Enable `run_live_regression` in the release workflow when the
-  self-hosted Windows runner is available.
+- [ ] Enable `run_live_regression` in the release workflow **only** if a
+  self-hosted Windows runner is available — today none is registered, so the
+  committed evidence file from section 4 is the gate. It calls
+  `release-regression.yml` with
+  `test_tier: release`, which works again as of 2026-08-31.
 - [ ] Verify release assets include `GhidraMCP-X.Y.Z.zip`.
 - [ ] Download the release ZIP and sanity-check that it installs or at least
   contains the expected extension payload.

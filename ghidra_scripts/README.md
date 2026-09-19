@@ -5,12 +5,22 @@ This directory contains scripts that run **directly inside Ghidra** (not via MCP
 ## Script Types
 
 ### Java Scripts
+
 - **ClearCallReturnOverrides.java** - Clears incorrect CALL_RETURN flow overrides that prevent proper control flow analysis
 - **DocumentFunctionWithClaude.java** - Documents the current function by calling Claude AI with comprehensive plate comment prompt (Keybinding: Ctrl+Shift+D)
+- **ImportMSDLPDB.java** - Downloads the matching PDB for the current program from
+  Microsoft's symbol server and applies it via Ghidra's PDB Universal Analyzer.
+  One-time Ghidra setup: `Edit > Symbol Server Config` → point at
+  `https://msdl.microsoft.com/download/symbols` with a local cache dir.
+  Skips gracefully (empty JSON result) when the binary has no `PdbInformation`
+  header — no `/DEBUG` link flag, common for third-party DLLs. PDB covers the
+  symbols Microsoft published (CRT / MSVCRT / MFC); a heuristic library-code
+  detector catches the rest.
 
 ## How to Use These Scripts
 
 ### Method 1: Ghidra Script Manager (Recommended)
+
 1. Open Ghidra
 2. Go to **Window → Script Manager**
 3. Click the **"Manage Script Directories"** button (folder icon)
@@ -26,6 +36,7 @@ directory, then refresh the Script Manager in Ghidra.
 ## Script Annotations
 
 Ghidra scripts use special annotations:
+
 - `@author` - Script author
 - `@category` - Category in Script Manager (e.g., Analysis, Data)
 - `@keybinding` - Optional keyboard shortcut
@@ -35,17 +46,21 @@ Ghidra scripts use special annotations:
 ## Development Notes
 
 ### Java Scripts
+
 Must extend `GhidraScript` class and have these imports:
+
 ```java
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
 ```
 
 ### Python Scripts (Jython)
+
 Ghidra uses Jython 2.7, not Python 3. In Ghidra 12.1, Jython is shipped
 as an optional extension and is not enabled by default. Install it from
 **File > Install Extensions**, restart Ghidra, then refresh Script Manager
 before running `.py` scripts. Scripts must use:
+
 ```python
 from ghidra.app.script import GhidraScript
 ```

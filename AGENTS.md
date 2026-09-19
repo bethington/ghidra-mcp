@@ -4,10 +4,10 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 
 ## Project Context
 
-- **Repo**: https://github.com/bethington/ghidra-mcp
+- **Repo**: <https://github.com/bethington/ghidra-mcp>
 - **Version**: 7.0.0
 - **Language**: Java (Ghidra extension) + Python (MCP bridge)
-- **Key feature**: 267 for binary analysis, knowledge database, BSim integration, headless server support, AI documentation workflows
+- **Key feature**: 253 MCP tools for binary analysis, knowledge database, BSim integration, headless server support, AI documentation workflows
 
 ## Directory Structure
 
@@ -28,8 +28,7 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 ## Guidelines
 
 - Run tests before committing: `pytest tests/unit/ -v --no-cov`
-- Build: `mvn clean package assembly:single -DskipTests`
-- Quick compile check: `mvn clean compile -q`
+- Build with Gradle: `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<ghidra-install>`
 - Follow existing code style
 - Update CHANGELOG.md for user-facing changes
 - Create PRs for review (don't push directly to main)
@@ -37,9 +36,22 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 
 ## Commands
 
-- Build: `mvn clean package assembly:single -DskipTests`
-- Quick compile: `mvn clean compile -q`
+**Gradle is the default backend for local work.** It reads Ghidra's jars
+straight out of the installation, so there is no `install-file` step, and it is
+the only backend that works without Maven. **CI still builds and gates with
+Maven**, so Maven is a maintained peer, not a fallback — see `CLAUDE.md`'s
+"Build & Deploy" for the two commands that are Maven-only.
+
+In Git Bash use a **forward-slash** Ghidra path; a backslash path is mangled
+before Gradle sees it and produces ~100 misleading "package does not exist"
+errors.
+
+- Build: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"`
+- Quick compile: `./gradlew compileJava "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"`
 - Test (Python): `pytest tests/unit/ -v --no-cov`
+- Test (Java, offline): `./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"`
+- Test (Java, all): `./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"`
 - Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.2_PUBLIC`
-- Deploy: `python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.2_PUBLIC` then `python -m tools.setup build` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC`
+- Deploy: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.2_PUBLIC"` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC` — leave `TOOLS_SETUP_BACKEND` **unset** for this second step, because the Gradle backend's `deploy` runs no post-deploy test tier and refuses `--test`
 - Version bump: `python -m tools.setup bump-version --new X.Y.Z`
+- Maven equivalents (peer backend): `python -m tools.setup ensure-prereqs --ghidra-path <dir>` then `python -m tools.setup build`

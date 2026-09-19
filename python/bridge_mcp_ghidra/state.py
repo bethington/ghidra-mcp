@@ -254,20 +254,41 @@ def _capture_request_connection_snapshot() -> ConnectionSnapshot:
         return get_connection_snapshot()
 
 
-def remember_tools_changed_context(ctx) -> None:
-    """Remember one MCP session that can receive tools/list_changed."""
-    if ctx is None or getattr(ctx, "_request_context", None) is None:
+def remember_tools_changed_session(session) -> None:
+    """Remember one MCP session that can receive tools/list_changed.
+
+    Must be called from the session's own event loop — the loop is captured
+    here so a worker thread can later dispatch the notification back onto it.
+
+    Registration used to happen ONLY inside connect_instance/load_tool_group/
+    unload_tool_group/import_file, which are tools the client has to call
+    first. That made the whole notification path dead in the one situation it
+    exists for: a bridge started BEFORE Ghidra registers 35 static tools, the
+    background retry succeeds seconds later and calls
+    notify_tools_changed_from_worker() — into an EMPTY target list, because no
+    static tool had been invoked yet. The client is never told, so the session
+    runs to its end showing 35 of 273 tools while Ghidra is healthy. Capturing
+    at tools/list (see server.py) fixes that: every client lists tools right
+    after initialize, so a target always exists before the retry can win.
+    """
+    if session is None:
         return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    session = ctx.request_context.session
     with _tools_changed_session_lock:
         for existing_loop, existing_session in _tools_changed_targets:
             if existing_loop is loop and existing_session is session:
                 return
         _tools_changed_targets.append((loop, session))
+
+
+def remember_tools_changed_context(ctx) -> None:
+    """Remember the MCP session behind a FastMCP Context, if it has one."""
+    if ctx is None or getattr(ctx, "_request_context", None) is None:
+        return
+    remember_tools_changed_session(ctx.request_context.session)
 
 
 def notify_tools_changed_from_worker() -> None:
@@ -389,6 +410,62 @@ _dynamic_tool_names: list[str] = []
 _full_schema: list[dict] = []  # Complete parsed schema
 _loaded_groups: set[str] = set()
 
-# CLI-configurable: --lazy keeps only default groups, otherwise load all
-_lazy_mode = False  # default: eager (load all groups on connect)
+# CLI-configurable: --lazy keeps only default groups, --no-lazy loads all.
+#
+# DEFAULT IS LAZY (#440). Eager was the default until 2026-08-25 and made the
+# bridge advertise all 253 endpoints in one tools/list. That is not merely
+# expensive -- it is over a hard limit for at least one major provider. Gemini
+# compiles function declarations into a constrained-decoding state machine and
+# rejects the whole request before any tool is ever called:
+#
+#     400 INVALID_ARGUMENT
+#     "The specified schema produces a constraint that has too many states
+#      for serving"
+#
+# So the eager default did not degrade Gemini clients, it broke them outright,
+# and no amount of client-side configuration could work around a server that
+# only ever offered the full set. CORE_GROUPS (listing/function/program) is 57
+# endpoints + 8 static tools, which fits.
+#
+# Eager only ever existed for clients that ignore tools/list_changed and would
+# therefore never see a later load_tool_group() registration. That notification
+# actually works as of a7f5936, and the always-present static tools
+# (search_tools / check_tools) hand the model the exact load_tool_group(...)
+# call it needs, so discovery no longer depends on advertising everything up
+# front. Clients that still want the old behaviour pass --no-lazy, or set
+# GHIDRA_MCP_LAZY=0 where the client's config gives no way to pass argv (a
+# container ENTRYPOINT, an `uvx` invocation, a registry-installed server entry).
+_lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)
+
+_TRUTHY_LAZY = {"1", "true", "yes", "on"}
+_FALSEY_LAZY = {"0", "false", "no", "off"}
+
+
+def lazy_mode_from_env(default: bool = True) -> bool:
+    """Resolve lazy mode from GHIDRA_MCP_LAZY, falling back to the default.
+
+    The escape hatch for a client that ignores ``tools/list_changed`` is
+    ``--no-lazy``, but a CLI flag is only reachable when the caller controls
+    argv. Docker ENTRYPOINTs, ``uvx`` one-liners and some MCP client configs
+    do not, and telling those users "pass a flag you cannot pass" is not an
+    escape hatch. GHIDRA_MCP_LAZY=0 is the same switch by another route.
+
+    An unrecognised value is ignored (and warned about) rather than guessed at,
+    because guessing here silently picks one of the two client families this
+    setting exists to keep working.
+    """
+    raw = (os.getenv("GHIDRA_MCP_LAZY") or "").strip().lower()
+    if not raw:
+        return default
+    if raw in _FALSEY_LAZY:
+        return False
+    if raw in _TRUTHY_LAZY:
+        return True
+    logger.warning(
+        "Ignoring GHIDRA_MCP_LAZY=%r: expected one of %s. Leaving lazy tool loading %s.",
+        raw,
+        ",".join(sorted(_TRUTHY_LAZY | _FALSEY_LAZY)),
+        "on" if default else "off",
+    )
+    return default

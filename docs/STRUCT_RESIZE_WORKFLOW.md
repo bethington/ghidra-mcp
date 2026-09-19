@@ -5,7 +5,7 @@ Generic guidance for growing, shrinking, or rebuilding C/C++ structures in Ghidr
 ## When to use which tool
 
 | Goal | Tool |
-|------|------|
+| ------ | ------ |
 | Create a new struct | `create_struct` |
 | 1-byte demangler/placeholder blocks same name | `create_struct` with `replace_placeholder=true`, or `resolve_duplicate_type` then `create_struct` |
 | Grow/shrink total size, keep fields that still fit | `resize_struct` |

@@ -43,7 +43,7 @@ You've been there: six months into a project you find `ProcessItem`, `process_it
 v5.0 moves conventions from "things to remember" into the tool layer, where they can actually be enforced.
 
 | Tier | Behavior | Example |
-|------|----------|---------|
+| ------ | ---------- | --------- |
 | **Auto-fix** | Applied silently | `count` field on a `uint32` → auto-prefixed `dwCount` on save |
 | **Warn** | Change goes through, warning returned | `processData` → "name should be PascalCase with a verb: `ProcessData`" |
 | **Reject** | Change blocked with explanation | `undefined → undefined` type change → "no-op rejected, type unchanged" |
@@ -57,6 +57,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ## 🌟 Features
 
 ### Core MCP Integration
+
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
 - **253 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
@@ -69,6 +70,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 > collisions with static bridge tools.
 
 ### Binary Analysis Capabilities
+
 - **Function Analysis** — Decompilation, call graphs, cross-references, completeness scoring
 - **Data Flow Analysis** — PCode-graph value propagation (forward / backward) from any variable or register
 - **Data Structure Discovery** — Struct/union/enum creation with field analysis and naming suggestions
@@ -78,10 +80,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Cross-Binary Documentation** — Function hash matching and documentation propagation across versions
 
 ### Dynamic Analysis (v5.4.0)
+
 - **P-code Emulation** — Run any function in isolation via Ghidra's `EmulatorHelper`; brute-force API hash resolution in milliseconds
 - **Live Debugger Integration** — 17 Java endpoints + 22 Python bridge tools over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise): attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
 
 ### AI-Powered Reverse Engineering Workflows
+
 - **Function Documentation Workflow V5** — 7-step process for complete function documentation with Hungarian notation, type auditing, and automated verification scoring
 - **Batch Documentation** — Parallel subagent dispatch for documenting multiple functions simultaneously
 - **Orphaned Code Discovery** — Automated scanner finds undiscovered functions in gaps between known code
@@ -89,6 +93,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Cross-Version Matching** — Hash-based function matching across different binary versions
 
 ### Development & Automation
+
 - **Ghidra Script Management** — Create, run, update, and delete Ghidra scripts entirely via MCP
 - **Multi-Program Support** — Switch between and compare multiple open programs
 - **Batch Operations** — Bulk renaming, commenting, typing, and label management (93% fewer API calls)
@@ -122,17 +127,20 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 > `deploy` copies the build output, installs the user-profile extension, and patches Ghidra user config.
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/bethington/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
 2. **Recommended: run environment preflight first:**
+
    ```text
    python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra:**
+
    ```text
    python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
    python -m tools.setup build
@@ -144,6 +152,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    schema smoke checks.
 
 4. **Optional strict/manual mode** (advanced):
+
    ```text
    # Skip automatic prerequisite setup
    python -m tools.setup build
@@ -151,36 +160,45 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```
 
 5. **Show command help**:
+
    ```text
    python -m tools.setup --help
    ```
 
 6. **Optional build-only mode** (advanced/troubleshooting):
+
    ```text
    python -m tools.setup build
    ```
 
-   Supported build path: `python -m tools.setup build` uses Maven under the hood and is the canonical workflow used by the repo tasks and docs.
+   Two Java backends are supported. **Gradle is the default for local work** — it reads Ghidra's jars straight out of the installation, so there is no `install-file` step and nothing to install beyond a JDK. **CI builds and gates with Maven**, so Maven is a maintained peer rather than a fallback.
 
    ```bash
-   # Manual Maven build (requires Ghidra deps already installed in local .m2)
+   # Gradle (default) -- the wrapper is committed, so no Gradle install is needed.
+   # -PGHIDRA_INSTALL_DIR or the GHIDRA_INSTALL_DIR env var both work.
+   # In Git Bash use forward slashes; a backslash path is mangled before Gradle sees it.
+   ./gradlew buildExtension -PGHIDRA_INSTALL_DIR=/path/to/ghidra
+   ```
+
+   ```bash
+   # Maven (peer backend; what CI uses). Needs Ghidra's jars in the local .m2 first:
+   #   python -m tools.setup ensure-prereqs --ghidra-path /path/to/ghidra
    mvn clean package assembly:single -DskipTests
    ```
 
-   ```bash
-   # Secondary/manual Gradle build path only (not used by tools.setup or VS Code tasks)
-   GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
-   ```
+   `python -m tools.setup build` routes to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route it to Gradle instead.
 
 ### Installation (Linux — Ubuntu/Debian)
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/bethington/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
 2. **Install system prerequisites** (if not already installed):
+
    ```bash
    sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip python3-venv curl jq unzip
    ```
@@ -191,11 +209,14 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    > `--break-system-packages` — it can corrupt apt-managed tooling. Instead use
    > [uv](https://docs.astral.sh/uv/) (recommended — it creates and manages a
    > project-local `.venv` automatically, and is what this repo's commands use):
+   >
    > ```bash
    > curl -LsSf https://astral.sh/uv/install.sh | sh
    > uv run bridge-mcp-ghidra    # resolves deps into .venv and starts the bridge
    > ```
+   >
    > or a classic virtual environment:
+   >
    > ```bash
    > python3 -m venv .venv && source .venv/bin/activate
    > pip install -e .
@@ -203,11 +224,13 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    > ```
 
 3. **Run environment preflight:**
+
    ```bash
    python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.2_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
+
    ```bash
    python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.2_PUBLIC
    python -m tools.setup build
@@ -222,11 +245,13 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    - Install Python requirements
 
 5. **Optional: setup only Maven dependencies:**
+
    ```bash
    python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.1.2_PUBLIC
    ```
 
 6. **Show command help:**
+
    ```bash
    python -m tools.setup --help
    ```
@@ -237,23 +262,27 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Installation (macOS — Homebrew)
 
 1. **Install prerequisites:**
+
    ```bash
    brew install openjdk@21 maven python ghidra
    ```
 
 2. **Clone the repository:**
+
    ```bash
    git clone https://github.com/bethington/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
 3. **Install Ghidra JARs into local Maven:**
+
    ```bash
     python -m tools.setup install-ghidra-deps \
        --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
 
 4. **Build and deploy:**
+
    ```bash
     python -m tools.setup ensure-prereqs \
        --ghidra-path /opt/homebrew/opt/ghidra/libexec
@@ -261,27 +290,36 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
     python -m tools.setup deploy \
        --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
+
    The extension is installed to `~/Library/ghidra/ghidra_12.1.2_PUBLIC/Extensions/GhidraMCP/`.
 
    > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
 
 5. **Start Ghidra and enable the plugin:**
+
    ```bash
    /opt/homebrew/opt/ghidra/libexec/ghidraRun
    ```
+
    In the main project window: **Tools > GhidraMCP > Start MCP Server**
 
-6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`):
+6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`) — use the **absolute
+   path** to `uv` (`which uv`), not the bare name; GUI-launched clients do not
+   inherit your shell's PATH ([#441](https://github.com/bethington/ghidra-mcp/issues/441)):
+
    ```json
    {
      "mcpServers": {
        "ghidra": {
-         "command": "uv",
+         "command": "/opt/homebrew/bin/uv",
          "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra"]
        }
      }
    }
    ```
+
+   macOS is the sharpest case: apps launched from Finder/Dock get `launchd`'s
+   PATH, which never contains `~/.local/bin` or `/opt/homebrew/bin`.
 
 ### Installation (Arch Linux — AUR)
 
@@ -299,24 +337,59 @@ yay -S ghidra-mcp        # or ghidra-mcp-git
 ### Basic Usage
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
+
 ```bash
 uv run bridge-mcp-ghidra          # or: python -m bridge_mcp_ghidra
 ```
 
+MCP client config (`.mcp.json`, `~/.cursor/mcp.json`, Claude Desktop config, …).
+**Use the absolute path to `uv`** — see the note below for why:
+
+```json
+{
+  "mcpServers": {
+    "ghidra-mcp": {
+      "command": "/home/<you>/.local/bin/uv",
+      "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra", "--transport", "stdio"],
+      "env": { "GHIDRA_MCP_URL": "http://127.0.0.1:8089" }
+    }
+  }
+}
+```
+
+On Windows the same config points at `uv.exe`, e.g.
+`"command": "C:\\Users\\<you>\\.local\\bin\\uv.exe"`. Find your own path with
+`which uv` (POSIX) or `where.exe uv` (Windows), or just run
+`python -m tools.setup preflight`, which prints the resolved absolute path and a
+ready-to-paste snippet.
+
+> **Why absolute? `"command": "uv"` fails under service and GUI launchers.**
+> The MCP client resolves `command` with **its own** PATH, not your shell's. A
+> client started from a **systemd user service**, a `.desktop` entry, or any
+> other GUI session inherits that launcher's environment, which routinely lacks
+> `~/.local/bin` and `~/.cargo/bin` — the very directories `uv` installs into.
+> The failure lands at process-spawn time as `spawn uv ENOENT`, before any
+> bridge code runs, so there is nothing in any log to read. An absolute path
+> makes the client's PATH irrelevant and works on the first try. The same
+> applies to `python`, `python3`, and the `bridge-mcp-ghidra` console script.
+> ([#441](https://github.com/bethington/ghidra-mcp/issues/441))
+
 To add the bridge to [Autohand Code](https://github.com/autohandai/code-cli/) from a cloned checkout:
 
 ```bash
-autohand mcp add ghidra uv run --directory /path/to/ghidra-mcp bridge-mcp-ghidra
+autohand mcp add ghidra /home/<you>/.local/bin/uv run --directory /path/to/ghidra-mcp bridge-mcp-ghidra
 ```
 
 Add `--scope project` before `ghidra` to save the server in the current project's `.autohand` configuration instead of your user configuration.
 
 #### Option 2: Streamable HTTP Transport (Recommended for web/HTTP clients)
+
 ```bash
 uv run bridge-mcp-ghidra --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
 MCP client config for the HTTP transport (add to your client's MCP config file):
+
 ```json
 {
   "mcpServers": {
@@ -334,6 +407,7 @@ Host-header policy — loopback on any port is always permitted, plus the bind h
 hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
 
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
+
 ```bash
 uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
@@ -341,13 +415,42 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 #### Bridge advanced flags
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | `--transport` | `stdio` | `stdio` (AI tools), `streamable-http` (web clients), `sse` (deprecated) |
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
-| `--lazy` | off | Load only the default tool groups on connect. Faster startup, but MCP clients that don't support `tools/list_changed` will see an incomplete tool list. Not recommended for Claude Code. |
-| `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
-| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
+| `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
+| `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
+| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
+
+#### Lazy tool loading is the default (issue #440)
+
+Advertising all 253 endpoints in a single `tools/list` is over a hard limit for
+at least one major provider. Gemini compiles function declarations into a
+constrained-decoding state machine and rejects the whole request before any tool
+is ever called:
+
+```text
+400 INVALID_ARGUMENT
+The specified schema produces a constraint that has too many states for serving
+```
+
+That is not a degradation, it is an outright break, and no client-side setting
+could work around a server that only ever offered the full set. So the bridge
+now loads `listing,function,program` (84 endpoints plus the 8 static tools) on
+connect and registers the rest on demand.
+
+**If your client ignores `tools/list_changed`** it will not notice tools that
+are registered later, and should turn lazy loading off:
+
+```bash
+uv run bridge-mcp-ghidra --no-lazy          # when you control the command line
+export GHIDRA_MCP_LAZY=0                    # when you don't (Docker, uvx, some client configs)
+```
+
+`GHIDRA_MCP_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
+`--lazy`/`--no-lazy` on the command line wins over it. Startup logs which mode
+is in effect.
 
 #### Strict program routing (multi-program safety)
 
@@ -378,9 +481,9 @@ Off by default: with the variable unset the bridge sends calls unchanged.
 
 #### Reducing tool-context overhead
 
-The bridge exposes a large catalog. To keep the model's tool surface small, run
-with `--lazy` (loads only `listing,function,program` on connect) and let the
-model **discover** the rest on demand instead of registering everything:
+The bridge exposes a large catalog, so it loads only `listing,function,program`
+on connect (see above) and lets the model **discover** the rest on demand
+instead of registering everything:
 
 - `search_tools("rename function")` — keyword-search the **entire** catalog,
   including tools whose group isn't loaded. Each result says whether it's
@@ -391,8 +494,68 @@ model **discover** the rest on demand instead of registering everything:
 - `check_tools("rename_symbol,batch_set_comments")` — confirm specific tools
   are callable right now.
 
-`search_tools` works in both eager and `--lazy` modes, so agents that honor
+`search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.
+
+#### Minimal read-only allowlist
+
+Some MCP clients gate tools through an explicit allowlist. Cut it too far and
+the agent loses **discovery** — it cannot find entry points or enumerate
+functions through MCP, so it works around the allowlist by `curl`-ing the HTTP
+API on `127.0.0.1:8089` directly, which defeats the point of having one. The
+allowlist has to be small *and* self-sufficient.
+
+**Minimum viable read-only set (4 tools):**
+
+| Tool | Group | What it buys you |
+| --- | --- | --- |
+| `get_metadata` | `program` | Which binary is loaded — name, architecture, image base, function count. Orientation, and it confirms the bridge reached Ghidra at all. |
+| `list_methods` | `listing` | Paginated function-name enumeration (`offset`, `limit`). **This is the discovery tool** — without it the agent cannot answer "what is in this binary". |
+| `get_entry_points` | `listing` | Where execution starts, so analysis has a root to work down from. |
+| `decompile_function` | `function` | The payload. Takes `address` **or** `functions=` (comma-separated names *or* addresses), so one call can pull several bodies. |
+
+That set is genuinely closed: `get_entry_points` and `list_methods` supply the
+addresses and names that `decompile_function` consumes, and a decompiled body
+names its callees, which feed straight back into `decompile_function`.
+
+The three tools suggested in [#441](https://github.com/bethington/ghidra-mcp/issues/441)
+— `get_metadata`, `get_entry_points`, `decompile_function` — all exist under
+exactly those names and are a workable floor. `list_methods` is the one addition
+worth making: without it the agent can only reach code that is reachable by name
+from something it already decompiled, so anything not referenced from an entry
+point is invisible.
+
+**Useful next additions, in order:**
+
+| Tool | Group | Why |
+| --- | --- | --- |
+| `get_function_callers` / `get_function_callees` | `xref` | Walk the call graph without decompiling every body to find edges. |
+| `get_xrefs_to` | `xref` | Who touches this address — the standard question about a global. |
+| `list_strings` | `listing` | Strings are the cheapest orientation signal in an unknown binary. |
+| `search_functions` | `listing` | Name search, once the agent knows what it is hunting for. |
+| `list_imports` / `list_exports` | `listing` | The binary's external surface. |
+
+Every tool above is a `GET`; none of them writes to the Ghidra database.
+
+**Two things to check when your allowlist is narrow:**
+
+- **Groups, not just names.** The bridge registers tools by *group*, and the
+  group is the `category` on the Java `@McpTool` annotation (which the running
+  server publishes at `/mcp/schema`) — not the `category` field in
+  `tests/endpoints.json`, which is a separate hand-maintained column and does
+  not always agree. All four tools in the minimum set fall inside the default
+  `listing,function,program` groups, so they are registered even under `--lazy`.
+  Of the additions above, only the `xref` ones fall outside: under `--lazy` you
+  must either allow `load_tool_group` as well, or start the bridge with
+  `--default-groups listing,function,program,xref`.
+- **A narrow allowlist plus `--lazy` needs the group tools.** If you allowlist
+  only leaf tools and run lazily, the agent has no way to load anything else.
+  Either run eagerly (`--no-lazy`, the default) or add `search_tools`,
+  `list_tool_groups`, `load_tool_group`, and `check_tools` to the allowlist.
+
+Verify any allowlist against the running server rather than against this table:
+`curl http://127.0.0.1:8089/mcp/schema` lists every tool with the `category`
+the bridge groups it by.
 
 #### Optional: Connect a standalone debugger server
 
@@ -411,7 +574,7 @@ than appearing and failing.
 Debugger server flags:
 
 | Flag | Default | Description |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | `--port` | `8099` | HTTP server port |
 | `--host` | `127.0.0.1` | Bind address (`0.0.0.0` to expose on LAN) |
 | `--exports-dir` | — | Path to a `dll_exports/` directory for ordinal-to-name resolution |
@@ -420,6 +583,7 @@ Debugger server flags:
 Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so the bridge can find it.
 
 #### In Ghidra
+
 1. Start Ghidra and open a **CodeBrowser** window
 2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
@@ -427,6 +591,7 @@ Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so th
 5. The server runs on `http://127.0.0.1:8089/` by default
 
 #### Verify It's Working
+
 ```bash
 # Quick health check
 curl http://127.0.0.1:8089/check_connection
@@ -451,7 +616,7 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 **If you expose the server beyond loopback, configure these three environment variables first.** The server refuses to start on a non-loopback bind without a token.
 
 | Env var | Effect |
-|---|---|
+| --- | --- |
 | `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are exempt. |
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
 | `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/load_program`, `/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
@@ -501,11 +666,55 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
 
 ## ❓ Troubleshooting
 
+### `spawn uv ENOENT` / `spawn python ENOENT` when the client starts the server
+
+**Cause:** the MCP client could not find the `command` on **its own** PATH. This
+happens before any bridge code runs, so there is nothing in the Ghidra log or
+the bridge log to look at — the process was never created.
+
+It shows up when the client is launched by something other than a login shell:
+
+- a **systemd user service** (`systemctl --user`), whose PATH is
+  `/usr/local/bin:/usr/bin:/bin` unless you extend it;
+- a desktop `.desktop` entry, dock icon, or app launcher;
+- macOS apps started from Finder, which inherit `launchd`'s PATH.
+
+None of those contain `~/.local/bin` (uv's default install location) or
+`~/.cargo/bin`, so `"command": "uv"` cannot resolve even though `uv` works
+perfectly in your terminal.
+
+**Solution:** use an absolute path in the client config.
+
+```jsonc
+// before — resolves against the client's PATH, fails under a service/GUI launcher
+"command": "uv"
+// after — no PATH lookup at all
+"command": "/home/<you>/.local/bin/uv"
+```
+
+Find yours with `which uv` (POSIX) or `where.exe uv` (Windows). Or run:
+
+```bash
+python -m tools.setup preflight
+```
+
+which prints the resolved absolute path, the PATH entries it searched when a
+launcher is missing, and a ready-to-paste config snippet. Note what that check
+can and cannot tell you: it resolves against **your shell's** PATH, not the
+client's, so a pass there is evidence, not proof — the absolute path is what
+actually removes the failure mode. ([#441](https://github.com/bethington/ghidra-mcp/issues/441))
+
+If you must keep a bare command name, give the service manager the PATH instead
+— e.g. `Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"` in the
+unit file, or `systemctl --user import-environment PATH` — but the absolute
+path is the smaller and more portable fix.
+
 ### "GhidraMCP" menu not appearing in Tools
 
 **Cause:** Plugin not enabled or installed incorrectly.
 
 **Solution:**
+
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
 2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
 3. **Restart Ghidra** after installation/enabling
@@ -515,15 +724,18 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
 **Cause:** Server not started or wrong port.
 
 **Solution:**
+
 1. Ensure you started the server: **Tools > GhidraMCP > Start MCP Server**
 2. Check configured port: **Edit > Tool Options > GhidraMCP HTTP Server**
 3. Check if port is in use:
+
    ```bash
    # Linux/macOS
    lsof -i :8089
    # Windows
    netstat -ano | findstr :8089
    ```
+
 4. Look for errors in Ghidra console: **Window > Console**
 
 ### `pip install` fails with `error: externally-managed-environment`
@@ -572,6 +784,7 @@ that repo, and make sure you install into and run from the same interpreter.
 **Cause:** Server-side exception, often due to missing program data.
 
 **Solution:**
+
 1. Ensure a binary is loaded in CodeBrowser
 2. Run auto-analysis first: **Analysis > Auto Analyze**
 3. Check Ghidra console (**Window > Console**) for Java exceptions
@@ -582,6 +795,7 @@ that repo, and make sure you install into and run from the same interpreter.
 **Cause:** Endpoint doesn't exist or wrong URL.
 
 **Solution:**
+
 1. Verify endpoint exists: `curl http://127.0.0.1:8089/get_version`
 2. Check for typos in endpoint name
 3. Ensure you're using correct HTTP method (GET vs POST)
@@ -593,6 +807,7 @@ default. `.py` scripts need the bundled Jython extension; Python 3
 scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 **Solution:**
+
 1. In the Ghidra Front End, open **File > Install Extensions**.
 2. Check **Jython**, restart Ghidra, then refresh Script Manager.
 3. For new automation, prefer Java Ghidra scripts or PyGhidra.
@@ -602,6 +817,7 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 **Cause:** JAR file in wrong location.
 
 **Solution:**
+
 1. Manual install location: `~/.ghidra/ghidra_12.1.2_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
 2. Or use: **File > Install Extensions > Add** and select the ZIP file
 3. Ensure JAR/ZIP was built for your Ghidra version
@@ -611,6 +827,7 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 **Cause:** Ghidra JARs not installed in local Maven repository.
 
 **Solution:**
+
 ```text
 # Windows (recommended)
 python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC"
@@ -618,7 +835,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 272 tools fully implemented
+- **MCP Tools**: 253 tools fully implemented (the whole catalog; the GUI plugin serves 239 of them and the headless server 226)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -631,30 +848,41 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 253 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
+212 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (27) or **(headless only)** (14) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
+
 ### Program & Session Management
 
 - `analysis_status` - Get auto-analysis status for open programs
 - `close_program` - Close an open program by project path or name
+- `create_memory_block` - Create memory block, optionally initialized with byte contents (hex or base64)
 - `create_property_map` - Create a user property map to store typed values keyed by address
+- `delete_bookmark` - Delete bookmark
 - `delete_property_map` - Delete a user property map and all values it holds
 - `exit_ghidra` - Save and exit Ghidra
 - `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
 - `get_current_program_info` - Get current program info
 - `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
+- `get_metadata` - Get program metadata
 - `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
 - `get_property` - Read the value stored at an address in a property map
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
+- `list_bookmarks` - List bookmarks
 - `list_open_programs` - List open programs
 - `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
 - `list_properties` - List (address, value) entries stored in a property map, with pagination
 - `list_property_maps` - List user-defined property maps â€” typed per-address keyâ†’value stores
+- `list_scripts` - List available Ghidra scripts
 - `open_program` - Open program from project
+- `read_memory` - Read raw memory
 - `reanalyze` - Trigger full auto-analysis on a program
 - `remove_program_option` - Remove an option from a program option group
 - `remove_property` - Remove the value stored at a single address in a property map
+- `run_ghidra_script` - Run script with output capture
+- `run_script_inline` - Run inline script code
 - `save_all_programs` - Save all open programs
 - `save_program` - Save current program
+- `set_bookmark` - Set bookmark
 - `set_image_base` - Set the base address of the program (rebases all addresses)
 - `set_program_option` - Set a typed program option
 - `set_property` - Set a value at an address in a property map
@@ -664,32 +892,35 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 - `create_folder` - Create a folder in the project
 - `delete_file` - Delete a file from the project
-- `delete_project` - Delete a Ghidra project
-- `list_projects` - List available Ghidra projects
+- `delete_project` - Delete a Ghidra project **(headless only)**
+- `list_projects` - List available Ghidra projects **(headless only)**
 - `move_file` - Move a program file to a different folder in the project, preserving analysis and documentation
 - `move_folder` - Move a project folder and everything under it into another folder
-- `project_info` - Get detailed project info including running tools and open programs
+- `project_info` - Get detailed project info including running tools and open programs **(GUI only)**
 
 ### Headless Project & Program Lifecycle
 
 Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
-- `archive_project` - Archive the currently open project to a Ghidra-native .gar file
-- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version
-- `close_project` - Close the currently open project
-- `create_project` - Create a new Ghidra project
-- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf)
-- `get_project_info` - Get info about the currently open project
-- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/')
-- `load_program` - Load a binary file into the headless server for analysis
-- `load_program_from_project` - Load program from Ghidra project (headless)
+- `archive_project` - Archive the currently open project to a Ghidra-native .gar file **(headless only)**
+- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version **(headless only)**
+- `close_project` - Close the currently open project **(headless only)**
+- `create_project` - Create a new Ghidra project **(headless only)**
+- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf) **(headless only)**
+- `get_project_info` - Get info about the currently open project **(headless only)**
+- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/') **(headless only)**
+- `load_program` - Load a binary file into the headless server for analysis **(headless only)**
+- `load_program_from_project` - Load program from Ghidra project (headless) **(headless only)**
 - `open_project` - Open an existing Ghidra project (.gpr file or directory)
-- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`
+- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name` **(headless only)**
 - `server_status` - Check headless server connection status
 
 ### Listing & Enumeration
 
-- `list_bookmarks` - List bookmarks
+- `convert_number` - Convert number between bases
+- `get_entry_points` - Get program entry points
+- `get_external_location` - Get external location details
+- `get_function_count` - Return the number of functions in the loaded program
 - `list_calling_conventions` - List available calling conventions
 - `list_classes` - List namespace/class names
 - `list_data_items` - List defined data
@@ -702,68 +933,68 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `list_imports` - List imported symbols
 - `list_methods` - List all function names with pagination
 - `list_namespaces` - List all namespaces
-- `list_scripts` - List available Ghidra scripts
 - `list_segments` - List memory segments
 - `list_shadowed_globals` - List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them
 - `list_strings` - List defined strings
+- `search_functions` - Search functions by name
+- `search_strings` - Search defined strings by a regex/substring pattern
 
-### Context & Lookups
+### Current GUI Context
 
 - `get_current_address` - Get cursor address (GUI only)
 - `get_current_function` - Get function at cursor (GUI only)
-- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only)
-- `get_entry_points` - Get program entry points
-- `get_enum_values` - Get enumeration values
-- `get_external_location` - Get external location details
-- `get_full_call_graph` - Get full call graph
-- `get_function_by_address` - Get function at address
-- `get_function_call_graph` - Get call graph
-- `get_function_callees` - Get functions called
-- `get_function_callers` - Get calling functions
-- `get_function_count` - Return the number of functions in the loaded program
-- `get_function_jump_targets` - Get jump targets
-- `get_function_labels` - Get labels in function
-- `get_function_variables` - List all variables in a function
-- `get_struct_layout` - Get structure layout
-- `get_valid_data_types` - Get valid data type names
+- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only) **(GUI only)**
 
-### Search
+### Functions: Decompile, Rename, Prototypes & Variables
 
-- `find_similar_functions` - Find similar functions
-- `search_byte_patterns` - Search for byte patterns
-- `search_data_types` - Search data types
-- `search_functions` - Search functions by name
-- `search_functions_enhanced` - Advanced function search
-- `search_strings` - Search defined strings by a regex/substring pattern
-
-### Decompilation & Disassembly
-
+- `add_function_tag` - Attach one or more tags to a function
+- `batch_rename_function_components` - Batch rename function components
+- `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
+- `clear_instruction_flow_override` - Clear flow override
+- `create_function` - Create function at address
+- `create_function_tag` - Create a program-wide function tag definition with an optional comment
 - `decompile_function` - Decompile function
+- `delete_function` - Delete function at address
+- `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
 - `force_decompile` - Force fresh decompilation
-
-### Function Tags, Variables & Attributes
-
-- `add_function_tag` - Attach one or more tags to a function
-- `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
-- `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `delete_function_tag` - Delete a program-wide function tag definition
+- `get_function_by_address` - Get function at address
 - `get_function_tags` - List all tags assigned to a specific function
+- `get_function_variables` - List all variables in a function
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
+- `rename_function` - Rename function by name
+- `rename_variables` - Batch rename variables
 - `search_functions_by_tag` - List all functions that have a specified tag attached
 - `set_function_no_return` - Set no-return attribute
+- `set_function_prototype` - Set function prototype (return type, param types, calling convention)
 - `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
 - `set_function_this_type` - Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall)
+- `set_variable_storage` - Set variable storage
 - `set_variable_type` - Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer
 - `set_variables` - Set types and names for multiple variables atomically
 
-### Cross-References
+### Symbols, Labels & Globals
+
+- `can_rename_at_address` - Check if address can be renamed
+- `create_label` - Create label
+- `delete_label` - Delete label at address
+- `get_function_labels` - Get labels in function
+- `rename_symbol` - Rename a symbol of any kind
+
+### Cross-References & Call Graphs
 
 - `add_memory_reference` - Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables)
+- `analyze_call_graph` - Analyze function call graph patterns
+- `get_assembly_context` - Get assembly context
 - `get_bulk_xrefs` - Get xrefs for multiple addresses
+- `get_full_call_graph` - Get full call graph
+- `get_function_call_graph` - Get call graph
+- `get_function_callees` - Get functions called
+- `get_function_callers` - Get calling functions
+- `get_function_jump_targets` - Get jump targets
 - `get_function_xrefs` - Get function cross-references
 - `get_xrefs_from` - Get references from address
 - `get_xrefs_to` - Get references to address
@@ -773,6 +1004,8 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 - `add_struct_field` - Add struct field
 - `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness
+- `analyze_struct_field_usage` - Analyze struct field usage
+- `apply_data_classification` - Apply data classification
 - `apply_data_type` - Apply data type
 - `audit_global` - Audit a global variable's documentation state
 - `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
@@ -787,7 +1020,10 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `create_union` - Create union
 - `delete_data_type` - Delete data type
 - `embed_struct_field` - Replace a structure field with an embedded struct type by value (e.g
+- `get_enum_values` - Get enumeration values
+- `get_struct_layout` - Get structure layout
 - `get_type_size` - Get data type size and info
+- `get_valid_data_types` - Get valid data type names
 - `import_data_types` - Import data types from GDT
 - `list_data_type_categories` - List data type categories
 - `list_data_types` - List data types
@@ -799,106 +1035,84 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `rename_data_type` - Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it
 - `resize_struct` - Grow or shrink an existing structure by total byte size
 - `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
-- `set_function_prototype` - Set function prototype (return type, param types, calling convention)
+- `search_data_types` - Search data types
 - `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
-- `set_variable_storage` - Set variable storage
+- `suggest_field_names` - Suggest field names
 - `validate_data_type` - Validate data type syntax
 - `validate_function_prototype` - Validate function prototype
 
-### Renaming & Labels
-
-- `batch_rename_function_components` - Batch rename function components
-- `create_label` - Create label
-- `delete_label` - Delete label at address
-- `rename_function` - Rename function by name
-- `rename_variables` - Batch rename variables
-
-### Comments & Bookmarks
+### Comments
 
 - `batch_get_comments` - Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
-- `delete_bookmark` - Delete bookmark
 - `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike)
-- `set_bookmark` - Set bookmark
 - `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
 
 ### Analysis
 
-- `analyze_api_call_chains` - Analyze API call chains
-- `analyze_call_graph` - Analyze function call graph patterns
 - `analyze_control_flow` - Analyze control flow
 - `analyze_data_region` - Analyze data region
 - `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
 - `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
-- `analyze_struct_field_usage` - Analyze struct field usage
-- `apply_data_classification` - Apply data classification
-- `batch_apply_documentation` - Apply all documentation to a function in one call
-- `can_rename_at_address` - Check if address can be renamed
-- `clear_instruction_flow_override` - Clear flow override
-- `configure_analyzer` - Configure an analysis plugin
-- `create_function` - Create function at address
-- `create_memory_block` - Create memory block
-- `delete_function` - Delete function at address
+- `batch_apply_documentation` - Apply all documentation to a function in one call **(GUI only)**
+- `configure_analyzer` - Configure an analysis plugin **(headless only)**
 - `detect_array_bounds` - Detect array bounds
-- `detect_crypto_constants` - Detect crypto constants
-- `detect_malware_behaviors` - Detect malware behaviors
-- `extract_iocs_with_context` - Extract IOCs with context
-- `find_anti_analysis_techniques` - Find anti-analysis techniques
 - `find_code_gaps` - Find gaps of undefined bytes between functions in executable memory
 - `find_dead_code` - Find dead code
 - `find_next_undefined_function` - Find next undefined function
-- `get_assembly_context` - Get assembly context
+- `find_similar_functions` - Find similar functions
 - `get_field_access_context` - Get field access context
 - `get_function_pcode` - Dump raw P-code for a function (issue #192)
 - `inspect_memory_content` - Inspect memory bytes
 - `list_analyzers` - List available analysis plugins
-- `read_memory` - Read raw memory
 - `run_analysis` - Run auto-analysis on the current program
+- `search_byte_patterns` - Search for byte patterns
+- `search_functions_enhanced` - Advanced function search
 - `search_instructions` - Search for instructions by mnemonic and/or operand substring
-- `suggest_field_names` - Suggest field names
+
+### Malware & Anti-Analysis
+
+- `analyze_api_call_chains` - Analyze API call chains
+- `detect_crypto_constants` - Detect crypto constants
+- `detect_malware_behaviors` - Detect malware behaviors
+- `extract_iocs_with_context` - Extract IOCs with context
+- `find_anti_analysis_techniques` - Find anti-analysis techniques
 
 ### Cross-Binary Documentation & Archive
 
+- `apply_function_documentation` - Apply function documentation
 - `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres)
 - `archive_ingest_program` - Bulk-ingest every function in a program into the cross-version documentation archive
 - `batch_string_anchor_report` - Report of source file strings and their FUN_* functions
 - `bulk_fuzzy_match` - Bulk cross-binary function matching
-- `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
-- `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
-
-### Utility & Documentation Transfer
-
-- `apply_function_documentation` - Apply function documentation
-- `check_connection` - Health check endpoint
 - `compare_programs_documentation` - Compare documentation across programs
-- `convert_number` - Convert number between bases
 - `diff_functions` - Diff two functions
+- `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
 - `find_undocumented_by_string` - Find undocumented functions referencing string
 - `get_bulk_function_hashes` - Get bulk function hashes
 - `get_function_documentation` - Export function documentation
 - `get_function_hash` - Get function hash
 - `get_function_signature` - Get function feature signature
-- `get_metadata` - Get program metadata
+- `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
+
+### Health, Schema & Tool Control
+
+- `check_connection` - Health check endpoint
 - `get_version` - Get plugin version
-- `health` - Health check endpoint for headless server
-- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count
+- `health` - Health check endpoint for headless server **(headless only)**
+- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count **(GUI only)**
 - `mcp_schema` - Machine-readable API schema with endpoint metadata
-- `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address
-- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed
-- `tool_running_tools` - List all running Ghidra tool windows
+- `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address **(GUI only)**
+- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed **(GUI only)**
+- `tool_running_tools` - List all running Ghidra tool windows **(GUI only)**
 
 ### Emulation
 
 - `emulate_function` - Emulate a single function with controlled register/memory inputs
 - `emulate_hash_batch` - Brute-force API hash resolution
-
-### Scripting
-
-- `run_ghidra_script` - Run script with output capture
-- `run_script_inline` - Run inline script code
 
 ### Ghidra Server & Version Control
 
@@ -906,9 +1120,9 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_admin_terminate_all_checkouts` - Terminate all checkouts in a folder recursively
 - `server_admin_terminate_checkout` - Terminate all checkouts on a single file
 - `server_admin_users` - List all users on the server
-- `server_authenticate` - Register server credentials for programmatic authentication
+- `server_authenticate` - Register server credentials for programmatic authentication **(GUI only)**
 - `server_checkouts` - List all checked-out files in a folder, including server-side checkouts
-- `server_connect` - Connect to a Ghidra server
+- `server_connect` - Report/establish the Ghidra server connection
 - `server_disconnect` - Disconnect from the Ghidra server
 - `server_repositories` - List repositories on the connected server
 - `server_repository_create` - Create a new repository on the server
@@ -920,36 +1134,32 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_version_control_undo_checkout` - Undo a file checkout
 - `server_version_history` - Get version history for a file
 
-### Debugger (Ghidra TraceRmi — GUI only)
+### Debugger (Ghidra TraceRmi)
 
 On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix (e.g. `debugger_status_2`).
 
-- `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address
-- `debugger_interrupt` - Interrupt (break into) the running target
-- `debugger_launch` - Launch an executable through Ghidra's Trace RMI debugger launcher
-- `debugger_launch_offers` - List available debugger launch/attach options for the current program
-- `debugger_list_breakpoints` - List all breakpoints in the current trace
-- `debugger_modules` - List modules (DLLs/EXEs) loaded in the debugged process
-- `debugger_read_memory` - Read memory from the debugged process
-- `debugger_registers` - Read CPU registers from the current debug trace snapshot
-- `debugger_remove_breakpoint` - Remove a breakpoint at an address
-- `debugger_resume` - Resume execution of the debugged process
-- `debugger_set_breakpoint` - Set a software execution breakpoint at an address in the trace
-- `debugger_stack_trace` - Get the call stack backtrace for the current thread
-- `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace
-- `debugger_status` - Get debugger status: active trace, thread, execution state, module count
-- `debugger_step_into` - Single-step into the next instruction (follows calls)
-- `debugger_step_out` - Step out of the current function (run to return)
-- `debugger_step_over` - Step over the next instruction (does not follow calls)
-- `debugger_traces` - List all open debug traces
+- `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
+- `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**
+- `debugger_launch` - Launch an executable through Ghidra's Trace RMI debugger launcher **(GUI only)**
+- `debugger_launch_offers` - List available debugger launch/attach options for the current program **(GUI only)**
+- `debugger_list_breakpoints` - List all breakpoints in the current trace **(GUI only)**
+- `debugger_modules` - List modules (DLLs/EXEs) loaded in the debugged process **(GUI only)**
+- `debugger_read_memory` - Read memory from the debugged process **(GUI only)**
+- `debugger_registers` - Read CPU registers from the current debug trace snapshot **(GUI only)**
+- `debugger_remove_breakpoint` - Remove a breakpoint at an address **(GUI only)**
+- `debugger_resume` - Resume execution of the debugged process **(GUI only)**
+- `debugger_set_breakpoint` - Set a software execution breakpoint at an address in the trace **(GUI only)**
+- `debugger_stack_trace` - Get the call stack backtrace for the current thread **(GUI only)**
+- `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace **(GUI only)**
+- `debugger_status` - Get debugger status: active trace, thread, execution state, module count **(GUI only)**
+- `debugger_step_into` - Single-step into the next instruction (follows calls) **(GUI only)**
+- `debugger_step_out` - Step out of the current function (run to return) **(GUI only)**
+- `debugger_step_over` - Step over the next instruction (does not follow calls) **(GUI only)**
+- `debugger_traces` - List all open debug traces **(GUI only)**
 
 ### System
 
-- `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling
-
-### Symbol (uncategorized)
-
-- `rename_symbol` - Rename a symbol of any kind
+- `prompt_policy` - Temporarily enable, disable, or query scoped automation prompt handling **(GUI only)**
 
 ### Bridge Static Tools
 
@@ -970,7 +1180,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   AI/Automation │◄──►│   MCP Bridge    │◄──►│  Ghidra Plugin  │
 │     Tools       │    │ (bridge_mcp_    │    │ (GhidraMCP.jar) │
@@ -983,14 +1193,15 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (225 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (253 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (239 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 226 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
 
 ### Building from Source
+
 ```bash
 # Recommended: direct Python-first workflow
 python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.2_PUBLIC"
@@ -1006,7 +1217,7 @@ The authoritative build system today is Maven. `tools.setup`, the VS Code tasks,
 ### Command Reference
 
 | Command | What it does |
-|---------|-------------|
+| --------- | ------------- |
 | `ensure-prereqs` | Install Python deps + Ghidra Maven JARs in one shot. Start here on a new machine. |
 | `preflight` | Validate Python, build tool, Ghidra path, and JAR availability without making changes. Add `--strict` to also check network reachability. |
 | `build` | Build the plugin JAR and extension ZIP via Maven (or Gradle when `TOOLS_SETUP_BACKEND=gradle`). |
@@ -1023,7 +1234,7 @@ The authoritative build system today is Maven. `tools.setup`, the VS Code tasks,
 Common flags accepted by most commands:
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `--ghidra-path PATH` | Ghidra installation directory. Defaults to `GHIDRA_PATH` from `.env`. |
 | `--dry-run` | Print actions without executing them. |
 | `--force` | Reinstall Ghidra JARs even if already present (`install-ghidra-deps`, `ensure-prereqs`). |
@@ -1036,8 +1247,9 @@ Deploy test tiers are opt-in because benchmark tiers can import/reset
 `Benchmark.dll` and `BenchmarkDebug.exe` in the active Ghidra project. Use
 `--test release` before cutting releases, or set
 `GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env` when you want every deploy
-on your machine to run the live benchmark regression. See
-[Testing and Release Regression](docs/TESTING.md).
+on your machine to run the live benchmark regression. The value is validated
+against the same tier list `--test` accepts, and an unknown tier is refused
+rather than skipped. See [Testing and Release Regression](docs/TESTING.md).
 
 ```text
 # Standard first-time setup and deploy
@@ -1059,15 +1271,16 @@ python -m tools.setup --help
 ```
 
 ### Project Structure
-```
+
+```text
 ghidra-mcp/
 ├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 225 catalog entries)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 253 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (196 endpoints)
-│       ├── headless/                    # Headless server (183 endpoints)
-│       └── core/                        # Shared service layer (12 services)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (239 endpoints)
+│       ├── headless/                    # Headless server (226 endpoints)
+│       └── core/                        # Shared service layer (14 services)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
@@ -1090,6 +1303,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 `-Deploy` now installs these automatically by default.
 
 The tool enforces version consistency between:
+
 - `pom.xml` (`ghidra.version`)
 - `--ghidra-path` version segment (e.g., `ghidra_12.1.2_PUBLIC`)
 
@@ -1098,6 +1312,7 @@ If these do not match, deployment fails fast with a clear error.
 ### Troubleshooting: Version Mismatch
 
 If you see a version mismatch error, align both values:
+
 1. `pom.xml` → `ghidra.version`
 2. `--ghidra-path` version segment (`ghidra_X.Y.Z_PUBLIC`)
 
@@ -1115,7 +1330,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 **Required Libraries (14 JARs, ~37MB):**
 
 | Library | Source Path | Purpose |
-|---------|------------|---------|
+| --------- | ------------ | --------- |
 | **Base.jar** | `Features/Base/lib/` | Core Ghidra functionality |
 | **Decompiler.jar** | `Features/Decompiler/lib/` | Decompilation engine |
 | **PDB.jar** | `Features/PDB/lib/` | Microsoft PDB symbol support |
@@ -1133,12 +1348,16 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 
 > **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
 
+<!-- two separate call-outs, not one blockquote (MD028) -->
+
 > **Automation entry point**:
+>
 > - `python -m tools.setup` is the supported setup/build/deploy/versioning interface
 > - use `ensure-prereqs`, `build`, `deploy`, `preflight`, `clean-all`, and `bump-version` directly
 > - these commands currently use Maven as the canonical Java build backend
 
 ### Development Features
+
 - **Automated Deployment**: Version-aware deployment script
 - **Batch Operations**: Reduces API calls by 93%
 - **Atomic Transactions**: All-or-nothing semantics
@@ -1147,6 +1366,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 ## 📚 Documentation
 
 ### Core Documentation
+
 - [Documentation Index](docs/README.md) - Complete documentation navigation
 - [Project Structure](docs/PROJECT_STRUCTURE.md) - Project organization guide
 - [Testing and Release Regression](docs/TESTING.md) - Local tests, CI, live Ghidra regression, and release gates
@@ -1154,6 +1374,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 - [Hungarian Notation](docs/HUNGARIAN_NOTATION.md) - Variable naming guide
 
 ### AI Workflow Prompts
+
 - [Function Documentation V5](docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md) — Primary workflow: 7-step process with Hungarian notation, type auditing, and verification scoring
 - [Batch Documentation V5](docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md) — Parallel subagent dispatch for multi-function processing
 - [Orphaned Code Discovery](docs/prompts/ORPHANED_CODE_DISCOVERY_WORKFLOW.md) — Automated scanner for undiscovered functions
@@ -1163,6 +1384,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 - [All Prompts](docs/prompts/README.md) — Complete prompt index
 
 ### Release History
+
 - [Complete Changelog](CHANGELOG.md) - All version release notes
 - [Release Notes](docs/releases/) - Detailed release documentation
 
@@ -1203,7 +1425,7 @@ curl http://localhost:8089/get_metadata
 ### Key Headless Endpoints
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
+| ---------- | -------- | ------------- |
 | `/load_program` | POST | Load binary file for analysis |
 | `/run_analysis` | POST | Run Ghidra auto-analysis |
 | `/list_functions` | GET | List all discovered functions |
@@ -1219,6 +1441,7 @@ curl http://localhost:8089/get_metadata
 ### Configuration
 
 Environment variables for Docker:
+
 - `GHIDRA_MCP_PORT` - Server port (default: 8089)
 - `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
 - `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
@@ -1228,9 +1451,10 @@ Environment variables for Docker:
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
 ### Quick Start
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Build and test your changes (`mvn clean package assembly:single -DskipTests` or `GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension`)
+3. Build and test your changes (`./gradlew buildExtension -PGHIDRA_INSTALL_DIR=/path/to/ghidra`, or `mvn clean package assembly:single -DskipTests` under the Maven backend)
 4. Update documentation as needed
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
@@ -1243,11 +1467,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 ## 🏆 Production Status
 
 | Metric | Value |
-|--------|-------|
+| -------- | ------- |
 | **Version** | 7.0.0 |
-| **MCP Tools** | 249 fully implemented |
-| **GUI Endpoints** | 196 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
+| **MCP Tools** | 253 fully implemented |
+| **GUI Endpoints** | 239 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 226 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |
@@ -1255,7 +1479,6 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 | **Documentation** | Comprehensive with AI prompts |
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
-
 
 ## 🙏 Acknowledgments
 
@@ -1274,16 +1497,17 @@ This project has benefited from the work of dedicated contributors:
 ### Core Contributors
 
 **[@heeen](https://github.com/heeen)** — Significant contributions including:
+
 - Fuzzy function matching and structured diff for cross-binary comparison (#13)
 - Script execution improvements and bug fixes (#12)
 - New API endpoints: `save_program`, `exit_ghidra`, `delete_function`, `create_memory_block`, `run_script_inline` (#11)
 - Architectural vision: annotation-driven design, UDS transport, Python bridge optimization proposals
 
 **[@huehuehuehueing](https://github.com/huehuehuehueing)** — Significant contributions including:
+
 - Address-space prefix support — added `<space>:<hex>` syntax (e.g., `mem:1000`, `code:ff00`) to address parsing across the entire endpoint surface, unlocking multi-space targets like embedded firmware (#84, closes #65)
 - Optional `program` parameter + required-param schema fixes — made `program` optional on every endpoint with a sane currentProgram fallback, and fixed several required-vs-optional schema bugs the catalog had inherited (#92)
 - Seeded #44 (data-type / enum tools) — the issue that motivated the v5.0 enum + struct enforcement layer
-
 
 - **Ghidra Team** - For the incredible reverse engineering platform
 - **Model Context Protocol** - For the standardized AI integration framework

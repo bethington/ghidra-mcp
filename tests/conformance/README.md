@@ -56,6 +56,48 @@ Neither is sufficient alone. A snapshot passes as long as output is unchanged,
 so it cannot tell you a write tool silently stopped writing; a hand assertion
 only covers what its author imagined.
 
+### A refusal is not a golden
+
+`assert: is_error` is the MCP **protocol** flag. A tool that returns
+`{"error": "..."}` in its *body* did not raise a protocol error, so
+`is_error: false` passes on it — and so does `nonempty: true`, because an error
+string is not empty. Recording that body then makes the case assert that the
+endpoint stays broken, and it passes forever.
+
+This is measured, not hypothetical: **20 of 124 goldens in the first recording
+pass were bare `{"error": ...}` bodies**, every one of them a case whose own
+arguments the server refused. So:
+
+- `--record` / `--update-snapshots` **refuse** to write a bare error payload and
+  report it as a case failure. If the refusal is genuinely the point of the case
+  (a bad-input negative test), set `expect_error_payload: true` on it.
+- `tests/unit/test_conformance_snapshots.py` runs offline and enumerates the
+  remaining known-bad goldens with a diagnosis each. That list can only shrink.
+
+When a case's arguments are wrong, fix the **generator**, not just the YAML:
+`--generate` overwrites `corpus/generated_baseline.yaml` wholesale, so a
+hand-edit there is reverted by the next regeneration. `TOOL_ARG_OVERRIDES` in
+`cases.py` is the durable half. It exists because the synthesizer maps a
+parameter *name* to a value globally and that has two blind spots a schema
+cannot close: cross-parameter constraints (`/search_instructions` declares
+`mnemonic` and `operand_pattern` both optional but rejects the call when both
+are empty), and one name meaning different things in different tools (`pattern`
+is a type name for `/search_data_types`, a hex byte string for
+`/search_byte_patterns`).
+
+### `mcp_schema.snap` records a JAR, not a branch
+
+That snapshot stores the whole tool surface — every category, description and
+per-parameter description string. It is therefore only as current as the
+**deployed** plugin, which is usually behind `dev`, and refreshing it from a
+stale deploy re-blesses whatever that build got wrong.
+
+Refresh it only from a server running a JAR built from the tree you intend the
+snapshot to describe. In practice: merge the annotation-touching PRs, deploy,
+then re-record. Re-recording before that produces a confidently wrong golden —
+`get_version.endpoint_count` and the live `count` are the cheap check that the
+deployed build is the one you think it is.
+
 ## Normalization, and why it matters more than it looks
 
 Responses embed values that legitimately vary run to run — elapsed times,

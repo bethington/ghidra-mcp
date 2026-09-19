@@ -127,10 +127,47 @@ every pair, not just asserted.
    holding the VS2003-vs-VC6 diagnosis was removed with the code; it was
    written to `scripts/fid/KNOWLEDGE.md` in the destination instead of lost.
 
-## Still open
+## The move was incomplete, and only running the tests showed it
 
-- `scripts/d2probe/` (removed earlier, 22 files) **still has no owning repo**.
-  Deleting it here only stopped this repo being the answer by default.
-  Restoring it into D2MOO is the outstanding half of that fix.
-- The import branch is **unmerged**. Until it is, the moved files live on a
-  local branch plus `ghidra-mcp` history.
+`tests/unit/test_address_map.py` moved. `tests/fixtures/dll_exports/D2Common.txt`,
+the data it reads, did not — it was tracked here, and only the *test* was in the
+moved set. Run in the new repo, all six `TestOrdinalParsing` cases failed with
+`FileNotFoundError`, and the debugger suite was **6 failed, 165 passed**.
+
+Nothing caught this earlier because the byte-identity check answers "did the
+files I chose arrive intact", not "did I choose the right set". A file-by-file
+verification is blind by construction to a file that was never on the list. The
+thing that found it was **executing the moved tests in their new home** — the
+only check that consults the code's real dependencies rather than my list of
+them.
+
+Fixed in `d2-game-exe` `cf276c8` (fixture verified byte-identical, sha256
+`0cb01e9d…`), removed here in the same pass since its only consumer had already
+left. Suite there is now **171 passed, 1 skipped**.
+
+The general rule: after moving code, *run it*. Byte-identity is necessary and
+nowhere near sufficient.
+
+## Closed
+
+- **The import branch is merged.** `import/ghidra-mcp-tooling` (`af2ebda`) landed
+  in `d2-game-exe` `main` as merge `ababd88` on 2026-08-11 — 85 files,
+  +28,848 lines, zero conflicts. It merged into a `main` carrying unrelated
+  in-flight minimax work; path overlap with both the modified and the untracked
+  files was checked and was empty before merging, and that work was confirmed
+  untouched afterwards.
+- **`scripts/d2probe/` has an owning repo.** D2MOO `tools/d2probe/`, commit
+  `c9438d6`, on `master` and `pd2-focus` and pushed to `origin/pd2-focus`.
+  Verified by sha256 against the blobs deleted here: **21 of 22 byte-identical**,
+  the 22nd being `README.md`, rewritten for the new home rather than lost.
+- **The `ghidra-mcp` side is published.** `origin/main` and `origin/dev` are both
+  at `c4d1ced`; the whole refocus is upstream, not sitting on a local branch.
+
+## Known defect in what stayed
+
+`ghidra_scripts/Repair_AutoFixOrdinalLinkage.java:182` hardcodes
+`C:\Users\benam\source\mcp\ghidra-mcp\dll_exports` unconditionally. Header-stripped
+its logic is generic ordinal-linkage repair, so keeping it was right — but in a
+public repo it aborts with "DLL exports directory not found" for every user but
+one. Kept-because-generic and actually-usable-by-anyone are different bars, and
+the classification pass only measured the first.

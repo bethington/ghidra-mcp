@@ -92,7 +92,13 @@ def test_removed_private_destination_does_not_reappear():
     # files, so a root that no longer exists silently contributes nothing;
     # keeping a dead one here would make this guard quietly narrower than it
     # reads. Add a root back only when this repo tracks files under it.
-    checked_roots = ("src", "ghidra_scripts", "docker", "scripts", "tests")
+    #
+    # "scripts" -> "tools" on 2026-08-12: scripts/ was dissolved into
+    # ghidra_scripts/ and tools/. Dropping the dead root WITHOUT adding tools/
+    # would have shrunk this guard silently, because scripts/bsim/
+    # build_reference_index.py -- BSim tooling, i.e. exactly the code that can
+    # carry a private destination -- landed in tools/, which was never checked.
+    checked_roots = ("src", "ghidra_scripts", "docker", "tools", "tests")
 
     tracked = _tracked_files()
     if tracked is None:

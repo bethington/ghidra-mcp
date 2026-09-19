@@ -39,8 +39,13 @@ def require_server_and_program(server_available, program_loaded):
 
 @pytest.fixture
 def first_function(http_client):
-    """Get the first function with its details."""
-    response = http_client.get("/list_functions", params={"limit": 1})
+    """Get the first function with its details.
+
+    /list_functions declares only `program` -- "List all functions (no
+    pagination)" -- so a `limit` sent here was dropped. The first match in the
+    full listing is what the regex below finds anyway.
+    """
+    response = http_client.get("/list_functions")
     if response.status_code != 200:
         pytest.skip("Cannot list functions")
 
@@ -68,8 +73,12 @@ def first_function(http_client):
 
 @pytest.fixture
 def first_named_function(http_client):
-    """Get the first function that has a non-default name."""
-    response = http_client.get("/list_functions", params={"limit": 50})
+    """Get the first function that has a non-default name.
+
+    /list_functions takes no `limit`; the whole listing is scanned and only
+    the first match is used.
+    """
+    response = http_client.get("/list_functions")
     if response.status_code != 200:
         pytest.skip("Cannot list functions")
 
@@ -143,18 +152,18 @@ class TestSafeRenameOperations:
         name = first_named_function["name"]
         address = first_named_function["address"]
 
-        # Write the same name back (include old_name as some endpoints require it)
+        # The selector is `old_name`, which also accepts the aliases
+        # function_address / function / oldName. `address` is not one of them,
+        # so it was dropped -- and because `old_name` was also sent the call
+        # worked by accident, which is why nothing ever surfaced it.
         response = http_client.post(
             "/rename_function",
-            data={"address": address, "old_name": name, "new_name": name},
+            data={"old_name": name, "new_name": name},
         )
 
-        # Should succeed (200), indicate no change (400), or endpoint requires different params (500)
-        assert response.status_code in [
-            200,
-            400,
-            500,
-        ], f"Unexpected status: {response.status_code}, body: {response.text}"
+        assert response.status_code == 200, response.text
+        # Renaming a function to the name it already has must be accepted.
+        assert "error" not in response.json(), response.text
 
     def test_rename_function_by_address_arg_same_name(
         self, http_client, first_named_function
@@ -263,13 +272,17 @@ class TestSafeFunctionPrototype:
                 pytest.skip("Cannot parse function signature")
             signature = match.group(1)
 
-        # Set the same prototype back
+        # Set the same prototype back. The declared selector is
+        # `function_address`; sent as `address` it was dropped, the endpoint
+        # saw a null address, and the four-way status assertion accepted the
+        # resulting error.
         set_response = http_client.post(
-            "/set_function_prototype", data={"address": address, "prototype": signature}
+            "/set_function_prototype",
+            data={"function_address": address, "prototype": signature},
         )
 
-        # Should succeed or return validation error (signature format may differ)
-        assert set_response.status_code in [200, 400, 404, 500]
+        assert set_response.status_code == 200, set_response.text
+        assert set_response.json().get("status") == "success", set_response.text
 
 
 class TestSafeVariableOperations:
@@ -405,14 +418,25 @@ class TestSafeDocumentationOperations:
         if get_response.status_code != 200:
             pytest.skip("Cannot get function documentation")
 
-        # Try to apply the same documentation back
+        # The endpoint declares exactly two parameters: `json_body` (a JSON
+        # STRING carrying the documentation record) and `program`. Neither
+        # `address` nor `documentation` exists, so both were dropped,
+        # `json_body` was null, and the endpoint answered
+        # {"error": "target_address is required"} -- accepted by the four-way
+        # status assertion on every run.
+        #
+        # The export names the address it came FROM (`source_address`); the
+        # import needs the address to write TO, so the round trip has to set
+        # `target_address` explicitly.
+        document = get_response.json()
+        document["target_address"] = address
         response = http_client.post(
             "/apply_function_documentation",
-            json_data={"address": address, "documentation": get_response.text},
+            json_data={"json_body": json.dumps(document)},
         )
 
-        # May fail due to format, but should not crash
-        assert response.status_code in [200, 400, 404, 500]
+        assert response.status_code == 200, response.text
+        assert "error" not in response.json(), response.text
 
 
 class TestSafeNoReturnAttribute:
@@ -457,10 +481,24 @@ class TestSafeBatchOperations:
         """Test batch comment setting with empty batch."""
         address = first_function["address"]
 
-        response = http_client.post("/batch_set_comments", json_data={"comments": []})
+        # `comments` is not a parameter of this endpoint. The declared lists
+        # are `decompiler_comments` and `disassembly_comments`, and the target
+        # is `address` -- so this used to send a body the endpoint ignored
+        # entirely, and "succeed or be rejected gracefully" accepted that.
+        response = http_client.post(
+            "/batch_set_comments",
+            json_data={
+                "address": address,
+                "decompiler_comments": [],
+                "disassembly_comments": [],
+            },
+        )
 
-        # Empty batch should succeed or be rejected gracefully
-        assert response.status_code in [200, 400, 404]
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body.get("success") is True, response.text
+        assert body["decompiler_comments_set"] == 0, response.text
+        assert body["disassembly_comments_set"] == 0, response.text
 
     def test_batch_rename_function_components_identity(
         self, http_client, first_named_function
@@ -469,47 +507,71 @@ class TestSafeBatchOperations:
         address = first_named_function["address"]
         name = first_named_function["name"]
 
+        # `renames` is not a parameter. The endpoint takes `function_name`
+        # plus `parameter_renames` / `local_renames` maps, so the list this
+        # used to send was dropped and the call became a no-op that the
+        # three-way status assertion accepted.
         response = http_client.post(
             "/batch_rename_function_components",
             json_data={
                 "function_address": address,
-                "renames": [{"old_name": name, "new_name": name}],
+                "function_name": name,
+                "parameter_renames": {},
+                "local_renames": {},
             },
         )
 
-        assert response.status_code in [200, 400, 404]
+        assert response.status_code == 200, response.text
+        assert "error" not in response.json(), response.text
 
 
 class TestSafeAnalysisOperations:
     """Test analysis operations that don't modify data."""
 
     def test_analyze_function_completeness(self, http_client, first_function):
-        """Analyze function completeness (read-only analysis)."""
+        """Analyze function completeness (read-only analysis).
+
+        The declared selector is `function_address`, not `address`.
+        """
         address = first_function["address"]
 
         response = http_client.get(
-            "/analyze_function_completeness", params={"address": address}
+            "/analyze_function_completeness", params={"function_address": address}
         )
 
         assert response.status_code == 200
+        assert "completeness_score" in response.json(), response.text
 
     def test_analyze_function_complete(self, http_client, first_function):
-        """Get complete function analysis."""
+        """Get complete function analysis.
+
+        The declared selector is `name` -- "Function reference (name or
+        address)" -- so an address is fine, but only under that spelling.
+        """
         address = first_function["address"]
 
         response = http_client.get(
-            "/analyze_function_complete", params={"address": address}
+            "/analyze_function_complete", params={"name": address}
         )
 
-        assert response.status_code in [200, 404]
+        assert response.status_code == 200
+        assert "error" not in response.json(), response.text
 
     def test_analyze_data_region(self, http_client, first_data_item):
-        """Analyze a data region (read-only)."""
-        response = http_client.get(
-            "/analyze_data_region", params={"address": first_data_item}
+        """Analyze a data region (read-only).
+
+        Declared POST, with every parameter ParamSource.BODY. The plugin does
+        not enforce the method, so the GET reached the handler with an empty
+        body, `address` resolved to null and the answer was an error -- which
+        `status_code in [200, 404]` accepted. The endpoint opens no
+        transaction, so POSTing it is safe in this tier.
+        """
+        response = http_client.post(
+            "/analyze_data_region", json_data={"address": first_data_item}
         )
 
-        assert response.status_code in [200, 404]
+        assert response.status_code == 200
+        assert "start_address" in response.json(), response.text
 
 
 class TestSafeHashOperations:
@@ -523,46 +585,51 @@ class TestSafeHashOperations:
 
         assert response.status_code == 200
 
-    def test_build_function_hash_index(self, http_client):
-        """Build function hash index (computes but doesn't store externally)."""
-        response = http_client.get("/build_function_hash_index", params={"limit": 10})
+    # /build_function_hash_index and /lookup_function_by_hash are not
+    # endpoints and never have been. Both tests accepted 404, so both were
+    # green while never reaching a handler.
+    #
+    # The capability their author expected was a PERSISTENT hash index plus a
+    # reverse hash -> function lookup. This server has neither. What it does
+    # have is /get_bulk_function_hashes, which computes the same hash for many
+    # functions in one call, so the two tests below ask the surviving surface
+    # the same questions: does bulk hashing work, and does a function's own
+    # hash identify it in that listing?
 
-        assert response.status_code in [200, 404]
+    def test_get_bulk_function_hashes(self, http_client):
+        """Hash many functions in one call (the surviving bulk-hash surface)."""
+        response = http_client.get("/get_bulk_function_hashes", params={"limit": 10})
 
-    def test_lookup_function_by_hash(self, http_client, first_function):
-        """Lookup function by hash (requires hash index)."""
+        assert response.status_code == 200, response.text
+        functions = response.json()["functions"]
+        assert len(functions) <= 10, response.text
+        assert all(entry["hash"] for entry in functions), response.text
+
+    def test_function_hash_matches_bulk_listing(self, http_client, first_function):
+        """A function's own hash must be the one the bulk listing reports.
+
+        This is what /lookup_function_by_hash was reaching for. There is no
+        reverse index, so the check runs the other way: hash one function,
+        then find that hash against the same function in the bulk listing.
+        Two code paths computing one value is exactly the shape that drifts.
+        """
         address = first_function["address"]
 
-        # First get the hash
         hash_response = http_client.get(
             "/get_function_hash", params={"address": address}
         )
+        assert hash_response.status_code == 200, hash_response.text
+        hash_value = hash_response.json()["hash"]
+        assert hash_value, hash_response.text
 
-        if hash_response.status_code != 200:
-            pytest.skip("Cannot get function hash")
-
-        # Try to extract hash value
-        try:
-            data = json.loads(hash_response.text)
-            hash_value = data.get("hash") or data.get("mnemonic_hash")
-        except json.JSONDecodeError:
-            match = re.search(
-                r'"(?:hash|mnemonic_hash)"\s*:\s*"([^"]+)"', hash_response.text
-            )
-            if match:
-                hash_value = match.group(1)
-            else:
-                pytest.skip("Cannot parse hash value")
-
-        if not hash_value:
-            pytest.skip("No hash value found")
-
-        # Lookup by hash
-        lookup_response = http_client.get(
-            "/lookup_function_by_hash", params={"hash": hash_value}
-        )
-
-        assert lookup_response.status_code in [200, 404]
+        bulk = http_client.get("/get_bulk_function_hashes", params={"limit": 200})
+        assert bulk.status_code == 200, bulk.text
+        by_address = {
+            int(entry["address"], 16): entry["hash"]
+            for entry in bulk.json()["functions"]
+        }
+        assert int(address, 16) in by_address, sorted(by_address)[:5]
+        assert by_address[int(address, 16)] == hash_value
 
 
 class TestWriteEndpointAvailability:

@@ -65,6 +65,8 @@ RUN mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Generic/lib/
         -DgroupId=ghidra -DartifactId=DB -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Emulation/lib/Emulation.jar \
         -DgroupId=ghidra -DartifactId=Emulation -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
+    mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Graph/lib/Graph.jar \
+        -DgroupId=ghidra -DartifactId=Graph -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar \
         -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar \
@@ -136,9 +138,18 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 # it; /data and /projects are chown'd before the VOLUME declaration so the
 # anonymous volumes inherit ghidra ownership. HOME drives Java's user.home,
 # where Ghidra writes its per-user settings.
-RUN groupadd --gid 1000 ghidra \
-    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/ghidra ghidra \
-    && chown -R ghidra:ghidra /app /data /projects /home/ghidra
+# Preserve UID/GID 1000 for existing data and project volumes. Ubuntu Noble
+# reserves these IDs for its default ubuntu account, so reclaim them first.
+RUN set -eux; \
+    if getent passwd 1000 >/dev/null; then \
+        userdel --remove "$(getent passwd 1000 | cut -d: -f1)"; \
+    fi; \
+    if getent group 1000 >/dev/null; then \
+        groupdel "$(getent group 1000 | cut -d: -f1)"; \
+    fi; \
+    groupadd --gid 1000 ghidra; \
+    useradd --uid 1000 --gid 1000 --create-home --home-dir /home/ghidra ghidra; \
+    chown -R ghidra:ghidra /app /data /projects /home/ghidra
 ENV HOME=/home/ghidra
 USER ghidra
 

@@ -38,7 +38,23 @@ GHIDRA_MCP_DEPLOY_TESTS=release
 ```
 
 `GHIDRA_MCP_DEPLOY_TESTS` belongs in a local `.env`; it is not intended as the
-repository default.
+repository default. Its value is validated against the same tier list `--test`
+uses (`tools/setup/ghidra.py`'s `DEPLOY_TEST_MODES`) and an unknown tier is
+**refused, not ignored** — `GHIDRA_MCP_DEPLOY_TESTS=relase` used to resolve to
+`['relase']`, match no dispatch branch, and let deploy exit 0 having run only
+the smoke test (#484). Set it to `off` to run no tiers.
+
+The Gradle backend (`TOOLS_SETUP_BACKEND=gradle`) also **refuses** a tier
+request rather than accepting it: `build.gradle`'s `deploy` task is
+`stopGhidra` + `deployExtension` + `installUserExtension` +
+`patchGhidraUserConfig` and runs no post-deploy tier at all. Use the **default
+(Maven) backend** for tiered deploys — leave `TOOLS_SETUP_BACKEND` unset. That
+is a backend *selector*, not a requirement for the `mvn` binary:
+`deploy_to_ghidra` never invokes Maven, it deploys the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it. So `./gradlew buildExtension` followed by
+`python -m tools.setup deploy --test release` is the working combination on a
+machine with no Maven installed.
 
 ## What Runs by Default
 
@@ -64,7 +80,7 @@ unless the user opts in with `--test ...` or `GHIDRA_MCP_DEPLOY_TESTS`.
 Pass one or more `--test` values to `python -m tools.setup deploy`.
 
 | Tier | Project Mutation | Purpose |
-|------|------------------|---------|
+| ------ | ------------------ | --------- |
 | `selected-contract` | No benchmark import | Checks selected release-critical tools against live schema and `tests/endpoints.json`. |
 | `endpoint-catalog` | No benchmark import | Confirms all catalog endpoints are present in the live schema. |
 | `benchmark-read` | Imports/resets benchmark | Runs broader read-only endpoint checks against `/testing/benchmark/Benchmark.dll`. |
@@ -92,20 +108,47 @@ file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 ## Benchmark Fixture
 
-The benchmark binary is built from `fun-doc/benchmark` and imported into the
-active Ghidra project at:
+The fixture lives at `tests/fixtures/benchmark/` and is **generated, not
+compiled** — `make_fixture.py` emits both PE32 images directly, with no
+toolchain of any kind. Both binaries are committed, so a checkout is enough.
+See `tests/fixtures/benchmark/README.md` for what is in them and why they are
+built this way.
+
+```text
+tests/fixtures/benchmark/Benchmark.dll         committed; image base 0x10000000
+tests/fixtures/benchmark/BenchmarkDebug.exe    committed; image base 0x00400000
+tests/fixtures/benchmark/build_manifest.json   provenance + sha256 digests
+tests/fixtures/benchmark/regression/*.yaml     the value assertions the release tier runs
+```
+
+They are imported into the active Ghidra project at:
 
 ```text
 /testing/benchmark/Benchmark.dll
 /testing/benchmark/BenchmarkDebug.exe
 ```
 
-The filesystem build artifacts stay at:
+`tests/unit/test_benchmark_fixture.py` regenerates both images and compares them
+byte-for-byte with what is committed, checks the regression baselines still
+agree with the binaries about every function address, and on Windows executes
+the debuggee and compares its exit code against a CRC computed in Python. That
+last check also proves `Benchmark.dll` loads and resolves an export by name. All
+of it runs offline in the unit tier, with no Ghidra.
 
-```text
-fun-doc/benchmark/build/Benchmark.dll
-fun-doc/benchmark/build/BenchmarkDebug.exe
-```
+> **Between 2026-08-10 and 2026-08-31 this fixture did not exist here.**
+> `fun-doc/` moved to `d2-game-exe` and took it along, and every tier that
+> resets it — `release`, `benchmark-read`, `benchmark-write`, `multi-program`,
+> `debugger-live`, `negative-contract` — raised before running a single
+> assertion. `release` is the release-regression workflow's default tier and
+> the gate the release checklist names.
+
+<!-- -->
+
+> **`debugger-live` is restored only in part.** The debuggee binary is back and
+> genuinely runnable, but the tier still needs a Ghidra GUI, a working dbgeng
+> backend and `ghidratrace` in the launcher's Python. Where those are missing it
+> raises `DebuggerLiveTestSkipped`, which `release` catches and names in its
+> pass line. Nothing here has verified that tier end to end.
 
 Before benchmark tiers run, the deploy harness deletes any existing benchmark
 project file at the legacy and current benchmark paths, recreates the
@@ -129,7 +172,10 @@ Python executable Ghidra should use for debugger launches.
 `.github/workflows/tests.yml` runs on pull requests and pushes to `main` and
 `develop`. It runs the merge-gating checks that work on GitHub-hosted runners:
 
-- Maven build and offline Java tests.
+- Maven build and offline Java tests, under the JaCoCo coverage gate. **CI
+  builds with Maven, not Gradle** — Gradle is the default for local work, but
+  it declares no JaCoCo plugin, so the coverage gate is the one check that a
+  Gradle-only contributor cannot reproduce locally.
 - Python unit tests across supported Python versions.
 - Pester setup tests on Windows.
 - Documentation linting.

@@ -9,20 +9,31 @@ from pathlib import Path
 
 from .envfile import get_env_flag, load_env_file
 from .ghidra import (
+    DEPLOY_TEST_MODES,
+    UnknownDeployTestMode,
     clean_all,
     collect_preflight_issues,
     deploy_to_ghidra,
     install_ghidra_dependencies,
+    resolve_deploy_test_modes,
     start_ghidra,
 )
 from .python_env import detect_repo_root, find_repo_python
-from .maven import ensure_maven_java_supported, find_maven_command, run_gradle, run_maven
+from .maven import (
+    REQUIRED_JAVA_MAJOR,
+    MavenNotFoundError,
+    detect_maven_java_major,
+    locate_maven_command,
+    run_gradle,
+    run_maven,
+)
 from .requirements import (
     ensure_uv_available,
     execute_install_plan,
     make_install_plan,
     uv_sync_command,
 )
+from .spawn import report_spawn_commands
 from .version_bump import apply_version_bump
 from .versioning import (
     infer_ghidra_version_from_path,
@@ -170,21 +181,17 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--test",
         action="append",
-        choices=[
-            "benchmark-read",
-            "benchmark-write",
-            "debugger-live",
-            "endpoint-catalog",
-            "multi-program",
-            "negative-contract",
-            "release",
-            "selected-contract",
-        ],
+        # Read from ghidra.DEPLOY_TEST_MODES rather than restated here. A copy
+        # drifts: the .env route had no validation at all, so a typo there
+        # resolved to a tier nothing dispatches and deploy exited 0 having run
+        # only the smoke test (#484). One list, both routes.
+        choices=list(DEPLOY_TEST_MODES),
         default=[],
         help=(
             "Run an optional post-deploy test tier. May be passed multiple times. "
             "A plain deploy only runs MCP health/schema checks and does not import Benchmark.dll. "
-            "Use --test release before cutting releases, or set GHIDRA_MCP_DEPLOY_TESTS in local .env."
+            "Use --test release before cutting releases, or set GHIDRA_MCP_DEPLOY_TESTS in local .env "
+            "(validated against the same list; an unknown tier is refused, not ignored)."
         ),
     )
     deploy_parser.set_defaults(func=cmd_deploy)
@@ -362,6 +369,43 @@ def cmd_verify_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_maven(maven_command: Path | None) -> None:
+    """Print Maven's status as a preflight report line. Never fails preflight.
+
+    ``preflight`` does not invoke Maven, and Gradle -- the backend the docs lead
+    with -- needs it for nothing, so a contributor who has no Maven must still
+    get the full report. Before this, ``find_maven_command()`` ran first and its
+    ``FileNotFoundError`` aborted the command after one line, which hard-failed
+    the "check what you have" step CONTRIBUTING.md hands a Python-only
+    contributor for a reason that does not apply to them.
+
+    The hard failure still lives where Maven is actually needed: ``run_maven``
+    (``build`` / ``clean`` / ``run-tests`` under the Maven backend) and
+    ``install_ghidra_dependencies`` (``ensure-prereqs`` /
+    ``install-ghidra-deps``) both call ``find_maven_command()``.
+    """
+    if maven_command is None:
+        print("Maven: not found (the Gradle backend does not need it)")
+        print(
+            "  Maven is required only by `tools.setup build|clean|run-tests` under the "
+            "Maven backend\n"
+            "  and by `ensure-prereqs`/`install-ghidra-deps`. To build without it: "
+            "`./gradlew buildExtension`\n"
+            "  or TOOLS_SETUP_BACKEND=gradle."
+        )
+        return
+
+    print(f"Maven: {maven_command}")
+    java_major = detect_maven_java_major(maven_command)
+    if java_major is not None and java_major < REQUIRED_JAVA_MAJOR:
+        print(
+            f"  WARNING: this Maven runs on Java {java_major}; Java "
+            f"{REQUIRED_JAVA_MAJOR}+ is required to build with it.\n"
+            f"  Set JAVA_HOME to a JDK {REQUIRED_JAVA_MAJOR} install, or build with "
+            "`./gradlew buildExtension`."
+        )
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     env_values = _load_repo_env(repo_root)
@@ -375,24 +419,19 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             return 1
         print(f"Python: {python_executable}")
         print("uv: available")
+        report_spawn_commands(repo_root)
         ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
         return run_gradle(repo_root, ["preflight"], ghidra_path=ghidra_path)
 
-    try:
-        maven_command = find_maven_command()
-    except FileNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
     print(f"Python: {python_executable}")
-    print(f"Maven: {maven_command}")
-    if not ensure_maven_java_supported(maven_command):
-        return 1
+    _report_maven(locate_maven_command())
     try:
         ensure_uv_available()
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print("uv: available")
+    report_spawn_commands(repo_root)
     if shutil.which("java") is None:
         print("Java not found on PATH.", file=sys.stderr)
         return 1
@@ -480,12 +519,41 @@ def cmd_install_ghidra_deps(args: argparse.Namespace) -> int:
 def cmd_deploy(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
+
+    # Resolve (and therefore validate) the tiers BEFORE anything is built,
+    # copied or restarted. An unknown tier costs a second here instead of
+    # surfacing after a build, a Ghidra restart and a deploy -- or, before
+    # #484, not surfacing at all.
+    try:
+        test_modes = resolve_deploy_test_modes(repo_root, args.test)
+    except UnknownDeployTestMode as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     if _get_backend() == "gradle":
+        if test_modes:
+            # build.gradle's `deploy` task is stopGhidra + deployExtension +
+            # installUserExtension + patchGhidraUserConfig. It runs no
+            # post-deploy tier and has no way to. Until #484 this branch
+            # accepted `--test release` and dropped it on the floor, exiting 0
+            # -- the same silence the .env typo produced, through a different
+            # door. Refuse instead: naming the tier and not running it is the
+            # failure mode, not the message length.
+            print(
+                "ERROR: the Gradle backend's `deploy` task runs no post-deploy "
+                f"test tiers, so {test_modes} would be accepted and silently "
+                "skipped.\n"
+                "Use the Maven backend for tiered deploys (unset "
+                "TOOLS_SETUP_BACKEND, or set it to 'maven'), or drop --test / "
+                "set GHIDRA_MCP_DEPLOY_TESTS=off to deploy without them.",
+                file=sys.stderr,
+            )
+            return 2
         return run_gradle(
             repo_root, ["deploy"], ghidra_path=ghidra_path, dry_run=args.dry_run
         )
     return deploy_to_ghidra(
-        repo_root, ghidra_path, dry_run=args.dry_run, test_modes=args.test
+        repo_root, ghidra_path, dry_run=args.dry_run, test_modes=test_modes
     )
 
 
@@ -547,4 +615,17 @@ def cmd_bump_version(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except MavenNotFoundError as exc:
+        # A refusal, not a crash. `preflight` now tells the reader which
+        # commands need Maven; those commands should answer in the same voice
+        # rather than with a traceback.
+        print(str(exc), file=sys.stderr)
+        print(
+            f"`tools.setup {args.command}` runs Maven directly, so it cannot proceed "
+            "without it.\nFor the Java build, use `./gradlew buildExtension "
+            "-PGHIDRA_INSTALL_DIR=<dir>` or set TOOLS_SETUP_BACKEND=gradle.",
+            file=sys.stderr,
+        )
+        return 1

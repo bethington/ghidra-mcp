@@ -14,11 +14,13 @@ This release adds powerful new capabilities for fixing decompilation issues caus
 Provides detailed information about variable storage and guidance on changing it.
 
 **Parameters**:
+
 - `function_address`: Function address in hex (e.g., "0x6fb6aef0")
 - `variable_name`: Variable to inspect (e.g., "unaff_EBP")
 - `storage`: Desired storage specification (e.g., "Stack[-0x4]:4")
 
 **Returns**:
+
 - Current variable storage location
 - Requested storage specification
 - Step-by-step GUI instructions for manual changes
@@ -34,14 +36,17 @@ Provides detailed information about variable storage and guidance on changing it
 Forces Ghidra to create a fresh decompilation, bypassing all caches.
 
 **Parameters**:
+
 - `function_address`: Function address in hex format
 
 **Returns**:
+
 - Complete fresh decompiled C code
 
 **Use Case**: After making changes to function signatures, data types, or flow overrides, get updated decompilation.
 
 **Example Workflow**:
+
 ```python
 # 1. Clear flow override
 clear_instruction_flow_override("0x6fb6af51")
@@ -62,10 +67,12 @@ print(result)  # See the updated code
 Provides guidance on running Ghidra scripts for automation.
 
 **Parameters**:
+
 - `script_path`: Path to Ghidra script (.java or .py)
 - `args`: Optional arguments (placeholder for future enhancement)
 
 **Returns**:
+
 - Instructions for running scripts via GUI
 - Headless analyzer command examples
 - Alternative automation approaches
@@ -80,9 +87,11 @@ Provides guidance on running Ghidra scripts for automation.
 Lists common Ghidra script locations and provides discovery guidance.
 
 **Parameters**:
+
 - `filter`: Optional filter pattern (for future enhancement)
 
 **Returns**:
+
 - Common script directory locations
 - Instructions for browsing scripts via GUI
 - Search tips
@@ -126,6 +135,7 @@ Ghidra's variable storage API has intentional limitations:
 3. **Decompiler Integration**: Storage changes require high-level Pcode analysis
 
 **Our Approach**:
+
 - Provide detailed information and guidance
 - Enable informed manual fixes via GUI
 - Support script-based automation for advanced users
@@ -134,12 +144,14 @@ Ghidra's variable storage API has intentional limitations:
 ### What Works Programmatically
 
 ✅ **Fully Implemented**:
+
 - `force_decompile` - Complete fresh decompilation
 - `clear_instruction_flow_override` - Remove CALL_TERMINATOR overrides
 - `set_function_no_return` - Control function flow analysis
 - Variable storage **inspection** (current location, type, etc.)
 
 ⚠️ **Guidance Only**:
+
 - Variable storage **modification** (requires GUI or custom script)
 - Script execution (requires GUI or headless mode)
 
@@ -148,6 +160,7 @@ Ghidra's variable storage API has intentional limitations:
 ### From v1.6.7 to v1.7.0
 
 **New Tools Available**:
+
 ```python
 # v1.6.7: Manual workflow
 # 1. Clear override manually
@@ -161,6 +174,7 @@ result = force_decompile("0x6fb6aef0")  # ← NEW: Force fresh analysis
 ```
 
 **Enhanced Debugging**:
+
 ```python
 # Get detailed variable information
 info = set_variable_storage("0x6fb6aef0", "unaff_EBP", "Stack[-0x4]:4")
@@ -174,6 +188,7 @@ info = set_variable_storage("0x6fb6aef0", "unaff_EBP", "Stack[-0x4]:4")
 **Issue**: Cannot programmatically change variable storage through REST API
 **Reason**: Ghidra API design requires UI interaction or Pcode-level scripting
 **Workaround**: Use `set_variable_storage()` to get instructions, then:
+
 1. Follow GUI instructions provided by the tool
 2. Write custom Ghidra script (see `FixEBPRegisterReuse.py`)
 3. Use Ghidra's decompiler right-click menu
@@ -183,6 +198,7 @@ info = set_variable_storage("0x6fb6aef0", "unaff_EBP", "Stack[-0x4]:4")
 **Issue**: Cannot execute Ghidra scripts via REST API
 **Reason**: Scripts require GhidraScript runtime environment
 **Workaround**: Use `run_script()` for guidance, then:
+
 1. Run via Ghidra GUI Script Manager
 2. Use headless analyzer: `analyzeHeadless ... -postScript script.py`
 3. Implement functionality as new MCP endpoint
@@ -258,12 +274,14 @@ print("Use disassembly for accurate analysis.")
 ### For Future Development (v1.8.0+)
 
 **Potential Enhancements**:
+
 1. Advanced Pcode-based variable storage modification
 2. Custom decompiler callback for register reuse detection
 3. Automated pattern recognition for common optimization issues
 4. Integration with Binary Ninja or IDA for comparison
 
 **Community Contributions Welcome**:
+
 - Custom scripts for common patterns
 - Documentation improvements
 - Bug reports and feature requests
@@ -274,6 +292,6 @@ This release directly addresses the EBP register reuse issue discovered during a
 
 ---
 
-**Full Changelog**: https://github.com/bethington/ghidra-mcp/releases/tag/v1.7.0
+**Full Changelog**: <https://github.com/bethington/ghidra-mcp/releases/tag/v1.7.0>
 **Documentation**: See `docs/EBP_REGISTER_REUSE_SOLUTIONS.md`
 **Scripts**: `FixEBPRegisterReuse.py`, `FixEBPRegisterReuse.java`

@@ -1,0 +1,344 @@
+"""The test double has to be trustworthy before anything it says means much.
+
+A fake that silently answers 200 to everything makes every suite pointing at it
+green and worthless. These tests pin the two properties that give the fake its
+value: it serves what Ghidra really returned, and it REFUSES what the catalog
+does not describe.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+import pytest
+
+from .fake_ghidra import (
+    CATALOG_PATH,
+    SCHEMA_SNAPSHOT,
+    SNAPSHOT_DIR,
+    FakeGhidraServer,
+    load_contract,
+    rehydrate,
+)
+
+#: GUI-served endpoints that `tests/conformance/snapshots/mcp_schema.snap` does
+#: not cover, because the recording predates them. The fake routes calls to
+#: these and validates **no parameter** of them.
+#:
+#: This is staleness, not design. The real fix is to re-record the snapshot
+#: against a deployed GUI server, which needs a live Ghidra and so happens at a
+#: deploy, not in CI. Until then the list is pinned so the exemption cannot grow
+#: silently -- which is exactly how these four got here.
+#:
+#: `/move_file` and `/move_folder` were headless-only when the snapshot was
+#: taken; 7.0.0 fixed them being "unreachable outside one mode", which made them
+#: GUI-served. `/batch_get_comments` and `/list_shadowed_globals` were added
+#: after the recording.
+SCHEMA_RECORDING_PREDATES = frozenset(
+    {
+        "/batch_get_comments",
+        "/list_shadowed_globals",
+        "/move_file",
+        "/move_folder",
+    }
+)
+
+
+def _get(url: str, timeout: float = 10):
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8")
+
+
+def _post(url: str, payload: dict | None, timeout: float = 10):
+    data = json.dumps(payload or {}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Fixture integrity
+# ---------------------------------------------------------------------------
+
+
+class TestFixtureIntegrity:
+    def test_every_json_shaped_snapshot_rehydrates_to_valid_json(self):
+        """A new normalization mask must not degrade the fake to a text server.
+
+        tests/conformance/runner.py masks volatile values before recording, and
+        a mask that lands outside a JSON string makes the snapshot unparseable.
+        Exactly one does today (`"memory":<MEM>`), and fake_ghidra.rehydrate
+        knows about it. If somebody adds another, this fails here rather than
+        surfacing as a mystery in a replay run.
+
+        Not every endpoint returns JSON -- /check_connection answers a bare
+        sentence -- so the check is scoped to snapshots that are JSON-shaped.
+        """
+        broken = []
+        for snap in sorted(SNAPSHOT_DIR.glob("*.snap")):
+            text = rehydrate(snap.read_text(encoding="utf-8")).lstrip()
+            if not text.startswith(("{", "[")):
+                continue
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as exc:
+                broken.append(f"{snap.name}: {exc}")
+        assert not broken, (
+            "snapshots that do not rehydrate to JSON: "
+            + "; ".join(broken)
+            + ". Add the mask to fake_ghidra._UNQUOTED_MASKS."
+        )
+
+    def test_contract_covers_the_whole_catalog(self):
+        contract = load_contract()
+        catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["endpoints"]
+        assert len(contract) == len(catalog)
+
+    def test_schema_is_a_subset_of_the_catalog(self):
+        """Every advertised tool must be a catalogued endpoint."""
+        contract = load_contract()
+        schema = json.loads(SCHEMA_SNAPSHOT.read_text(encoding="utf-8"))["tools"]
+        missing = [
+            (t["path"], t["method"])
+            for t in schema
+            if (t["path"], t["method"].upper()) not in contract
+        ]
+        assert not missing, f"schema advertises endpoints absent from the catalog: {missing}"
+
+    def test_only_headless_endpoints_escape_parameter_checking(self):
+        """An endpoint the recording does not cover is checked against nothing.
+
+        For the headless-only project-management surface that is correct and
+        permanent: the snapshot is a recording of the **GUI** server's
+        ``/mcp/schema``, which never advertises those routes.
+
+        For a GUI-served endpoint it is not correct, it is staleness -- the
+        recording simply predates it, so the fake routes the call and validates
+        no parameter of it, silently. Four endpoints are in that state today
+        and the previous version of this assertion could not see them: it
+        compared ``len(unchecked)`` against ``len(contract) - len(schema)``,
+        which is true by construction whenever the schema is a subset of the
+        catalog, and so could not fail for this.
+
+        Pinning the exact set makes the exemption a decision instead of an
+        accident. Adding a GUI endpoint now fails here until the snapshot is
+        re-recorded against a deployed server -- which is the real fix, and
+        needs a live Ghidra. Teaching the fake to synthesise a contract for the
+        missing routes would be the fake asserting on itself.
+        """
+        catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))["endpoints"]
+        servers = {e["path"]: e["servers"] for e in catalog}
+
+        contract = load_contract()
+        unchecked = {spec.path for spec in contract.values() if spec.params is None}
+
+        gui_unchecked = sorted(p for p in unchecked if "gui" in servers.get(p, []))
+        assert gui_unchecked == sorted(SCHEMA_RECORDING_PREDATES), (
+            "GUI-served endpoints with no parameter contract in the offline "
+            "tier changed.\n"
+            f"  expected: {sorted(SCHEMA_RECORDING_PREDATES)}\n"
+            f"  actual:   {gui_unchecked}\n"
+            "If you added an endpoint, the recorded /mcp/schema no longer "
+            "covers it and the fake validates nothing it sends. Re-record "
+            "tests/conformance/snapshots/mcp_schema.snap against a deployed "
+            "server, or add the path here with the reason it must stay "
+            "unvalidated. Do NOT make the fake invent a contract."
+        )
+
+        headless_unchecked = {p for p in unchecked if "gui" not in servers.get(p, [])}
+        headless_only = {p for p, s in servers.items() if "gui" not in s}
+        assert headless_unchecked == headless_only, (
+            "The headless-only set and the unchecked set disagree; one of them "
+            "moved without the other.\n"
+            f"  only in unchecked:     {sorted(headless_unchecked - headless_only)}\n"
+            f"  only in headless-only: {sorted(headless_only - headless_unchecked)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Routing
+# ---------------------------------------------------------------------------
+
+
+class TestRouting:
+    def test_serves_a_recorded_payload_verbatim(self, fake_ghidra):
+        status, body = _get(f"{fake_ghidra.url}/list_segments")
+        assert status == 200
+        recorded = (SNAPSHOT_DIR / "list_segments.snap").read_text(encoding="utf-8")
+        assert json.loads(body) == json.loads(recorded)
+
+    def test_unknown_endpoint_is_404(self, fake_ghidra):
+        status, body = _get(f"{fake_ghidra.url}/definitely_not_an_endpoint")
+        assert status == 404
+        assert json.loads(body)["error"] == "no_such_endpoint"
+
+    def test_wrong_method_is_405_and_names_the_right_one(self, fake_ghidra):
+        # /disassemble_bytes is POST in the catalog.
+        status, body = _get(f"{fake_ghidra.url}/disassemble_bytes")
+        assert status == 405
+        assert json.loads(body)["allowed"] == "POST"
+
+    def test_schema_endpoint_serves_the_recorded_schema(self, fake_ghidra):
+        status, body = _get(f"{fake_ghidra.url}/mcp/schema")
+        assert status == 200
+        assert json.loads(body) == json.loads(
+            SCHEMA_SNAPSHOT.read_text(encoding="utf-8")
+        )
+
+    def test_instance_info_is_flat_not_enveloped(self, fake_ghidra):
+        """ServerManager.buildInstanceInfoJson is Response.ok(map).toJson(),
+        and Response.Ok.toJson() is JsonHelper.toJson(data) -- no wrapper."""
+        status, body = _get(f"{fake_ghidra.url}/mcp/instance_info")
+        assert status == 200
+        info = json.loads(body)
+        assert "data" not in info
+        for key in ("project", "pid", "tcp_port"):
+            assert key in info
+        assert info["tcp_port"] == fake_ghidra.port
+
+    def test_endpoint_without_a_recording_says_so(self, fake_ghidra):
+        """No fixture must never look like a real answer."""
+        status, body = _get(f"{fake_ghidra.url}/list_shadowed_globals")
+        assert status == 200
+        payload = json.loads(body)
+        assert payload["_fake"] == "synthesized"
+        assert "prove nothing" in payload["_note"]
+
+    def test_never_binds_a_fixed_port(self):
+        """Two fakes must coexist, and neither may be near 8089."""
+        a = FakeGhidraServer().start()
+        b = FakeGhidraServer().start()
+        try:
+            assert a.port != b.port
+            assert 8089 not in (a.port, b.port)
+        finally:
+            a.stop()
+            b.stop()
+
+
+# ---------------------------------------------------------------------------
+# The contract rules -- the reason this is a strict fake and not a replayer
+# ---------------------------------------------------------------------------
+
+
+class TestContractRules:
+    def test_query_sourced_param_in_the_body_is_refused(self, fake_ghidra):
+        """The wrong-binary bug, caught at the wire.
+
+        `@Param(value = "program")` defaults to ParamSource.QUERY. A caller
+        that puts `program` in the JSON body has it ignored by the real plugin,
+        which then operates on whatever program is CURRENT -- a write to the
+        wrong binary that reports success. A replaying fake cannot see this;
+        this one refuses it.
+        """
+        status, body = _post(
+            f"{fake_ghidra.url}/add_function_tag",
+            {"function": "0x10001000", "tags": "crc", "program": "Benchmark.dll"},
+        )
+        assert status == 400
+        payload = json.loads(body)
+        assert payload["error"] == "param_in_wrong_place"
+        assert payload["parameter"] == "program"
+
+    def test_same_call_with_program_in_the_query_is_accepted(self, fake_ghidra):
+        status, _ = _post(
+            f"{fake_ghidra.url}/add_function_tag?program=Benchmark.dll",
+            {"function": "0x10001000", "tags": "crc"},
+        )
+        assert status == 200
+
+    def test_undeclared_parameter_is_refused(self, fake_ghidra):
+        status, body = _get(f"{fake_ghidra.url}/list_functions?limit=5")
+        assert status == 400
+        payload = json.loads(body)
+        assert payload["error"] == "unknown_parameter"
+        assert payload["parameter"] == "limit"
+
+    def test_bridge_synthetic_dry_run_is_not_treated_as_undeclared(self, fake_ghidra):
+        """registry._build_tool_function appends `dry_run` as a query param for
+        POST tools that do not declare one. It is a bridge convention, not a
+        schema parameter, and must not trip the unknown-parameter rule."""
+        status, _ = _post(
+            f"{fake_ghidra.url}/add_function_tag?program=Benchmark.dll&dry_run=true",
+            {"function": "0x10001000", "tags": "crc"},
+        )
+        assert status == 200
+
+    def test_required_parameters_are_only_enforced_on_request(self, fake_ghidra, strict_fake):
+        """The schema's `required` flag is unreliable (program selectors are
+        declared required while the server still falls back to the current
+        program), so enforcing it by default would manufacture failures the
+        real server does not produce."""
+        # /analyze_dataflow declares `address` required.
+        lenient, _ = _get(f"{fake_ghidra.url}/analyze_dataflow")
+        strict, body = _get(f"{strict_fake.url}/analyze_dataflow")
+        assert lenient == 200
+        assert strict == 400
+        assert json.loads(body)["error"] == "missing_required_parameter"
+
+
+class TestLenientMode:
+    def test_lenient_mode_records_instead_of_refusing(self):
+        server = FakeGhidraServer(strict=False).start()
+        try:
+            status, body = _get(f"{server.url}/list_functions?limit=5")
+            assert status == 200, "lenient mode must serve the fixture"
+            assert json.loads(body)["count"] > 0
+            assert server.violation_keys() == ["unknown_parameter GET /list_functions [limit]"]
+        finally:
+            server.stop()
+
+    def test_lenient_mode_still_404s_an_endpoint_it_cannot_serve(self):
+        """Leniency is about not aborting the run, not about inventing data.
+        With no catalog entry there is no fixture, so 404 is the honest answer
+        -- and it is what a real plugin returns for an unregistered path."""
+        server = FakeGhidraServer(strict=False).start()
+        try:
+            status, _ = _get(f"{server.url}/search_functions_by_name?name=main")
+            assert status == 404
+            assert server.violation_keys() == [
+                "no_such_endpoint GET /search_functions_by_name"
+            ]
+        finally:
+            server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Fault injection
+# ---------------------------------------------------------------------------
+
+
+class TestFaultInjection:
+    def test_fail_next_returns_the_injected_status_once(self, fake_ghidra):
+        fake_ghidra.fail_next(503)
+        assert _get(f"{fake_ghidra.url}/check_connection")[0] == 503
+        assert _get(f"{fake_ghidra.url}/check_connection")[0] == 200
+
+    def test_fail_next_can_be_scoped_to_one_path(self, fake_ghidra):
+        fake_ghidra.fail_next(500, path="/get_version")
+        assert _get(f"{fake_ghidra.url}/check_connection")[0] == 200
+        assert _get(f"{fake_ghidra.url}/get_version")[0] == 500
+
+    def test_malformed_next_returns_unparseable_json(self, fake_ghidra):
+        fake_ghidra.malformed_next()
+        status, body = _get(f"{fake_ghidra.url}/check_connection")
+        assert status == 200
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(body)
+
+    def test_requests_are_recorded_for_inspection(self, fake_ghidra):
+        _get(f"{fake_ghidra.url}/get_version")
+        calls = fake_ghidra.calls_to("/get_version")
+        assert len(calls) == 1
+        assert calls[0].method == "GET"
+        assert calls[0].status == 200

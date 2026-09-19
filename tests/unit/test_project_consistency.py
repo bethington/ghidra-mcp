@@ -30,6 +30,38 @@ def bridge_source_text() -> str:
     return "\n".join(p.read_text() for p in sorted(BRIDGE_PKG.glob("*.py")))
 
 
+def strip_jsonc_comments(text: str) -> str:
+    """Remove // line comments from JSONC, leaving string literals intact."""
+    out = []
+    in_string = False
+    escaped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if text[i:i + 2] == "//":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def get_pom_version() -> str:
     """Extract version from pom.xml."""
     tree = ET.parse(POM_XML)
@@ -171,6 +203,44 @@ class TestBridgeConfiguration(unittest.TestCase):
         # The thin bridge uses stdlib http.client, not requests
         self.assertNotIn("import requests", content)
 
+    def test_mcp_requirement_excludes_the_2x_sdk(self):
+        """The declared `mcp` range must not admit an SDK without FastMCP.
+
+        The bridge imports `mcp.server.fastmcp`, which 2.x removed when FastMCP
+        became MCPServer. `uv.lock` pins 1.28.1, so CI and every developer
+        checkout keep running a working SDK no matter what the range says --
+        but the published wheel is resolved fresh, so `pip install
+        ghidra-mcp-bridge` under a range like `<3.0.0` installs mcp 2.x and the
+        bridge dies at import with ModuleNotFoundError. Nothing else in this
+        repo can see that: it is the one dependency whose range is exercised
+        only by users.
+        """
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        deps = re.search(
+            r"(?ms)^dependencies = \[(.*?)^\]", PYPROJECT_TOML.read_text(encoding="utf-8")
+        )
+        self.assertIsNotNone(deps, "pyproject.toml has no [project] dependencies array")
+        requirement = re.search(r'"mcp([^"]*)"', deps.group(1))
+        self.assertIsNotNone(requirement, "pyproject.toml declares no `mcp` requirement")
+
+        spec = SpecifierSet(requirement.group(1))
+        for rejected in ("2.0.0", "2.2.0", "3.0.0"):
+            self.assertNotIn(
+                Version(rejected),
+                spec,
+                f"mcp{requirement.group(1)} admits {rejected}, which has no "
+                "mcp.server.fastmcp -- the installed bridge would fail at import",
+            )
+
+        self.assertIn(
+            "mcp.server.fastmcp",
+            bridge_source_text(),
+            "bridge no longer imports mcp.server.fastmcp: if it migrated to the "
+            "2.x MCPServer API, widen the range and rewrite this test",
+        )
+
 
 class TestJavaArchitecture(unittest.TestCase):
     """Verify Java architectural invariants."""
@@ -301,6 +371,141 @@ class TestProjectStructure(unittest.TestCase):
     def test_headless_server_exists(self):
         self.assertTrue(
             (JAVA_SRC / "headless" / "GhidraMCPHeadlessServer.java").exists()
+        )
+
+
+class TestMarkdownLintConfig(unittest.TestCase):
+    """The documentation-quality gate must actually be able to run.
+
+    Until 2026-08-30 `.github/workflows/tests.yml` passed
+    `config: '.markdownlintrc'` to markdownlint-cli2-action. markdownlint-cli2
+    rejects that filename outright, so every run aborted before reading a
+    Markdown file -- and `continue-on-error: true` reported the abort as a
+    green check. The gate had never linted anything. These tests pin the two
+    halves of that failure so it cannot come back silently.
+    """
+
+    # markdownlint-cli2's accepted configuration-file names, quoted from the
+    # error it raises for anything else: one of the supported base names, a
+    # prefixed form of one, or a supported extension.
+    SUPPORTED_BASENAMES = (
+        ".markdownlint-cli2.jsonc",
+        ".markdownlint-cli2.yaml",
+        ".markdownlint-cli2.cjs",
+        ".markdownlint-cli2.mjs",
+        ".markdownlint.jsonc",
+        ".markdownlint.json",
+        ".markdownlint.yaml",
+        ".markdownlint.yml",
+        ".markdownlint.cjs",
+        ".markdownlint.mjs",
+    )
+    SUPPORTED_EXTENSIONS = (".jsonc", ".json", ".yaml", ".yml", ".cjs", ".mjs")
+
+    def workflow_text(self) -> str:
+        path = PROJECT_ROOT / ".github" / "workflows" / "tests.yml"
+        return path.read_text(encoding="utf-8")
+
+    def lint_step_config(self) -> str:
+        """The `config:` value the markdown-lint job passes to the action."""
+        parts = self.workflow_text().split("markdown-lint:", 1)
+        self.assertEqual(len(parts), 2, "markdown-lint job missing from tests.yml")
+        match = re.search(r"^\s*config:\s*'([^']+)'", parts[1], re.M)
+        self.assertIsNotNone(match, "markdown-lint job passes no config: path")
+        return match.group(1)
+
+    def test_lint_config_file_exists(self):
+        """The configured path must resolve; a wrong one lints nothing."""
+        configured = self.lint_step_config()
+        self.assertTrue(
+            (PROJECT_ROOT / configured).is_file(),
+            "tests.yml points markdownlint at %r, which does not exist" % configured,
+        )
+
+    def test_lint_config_name_is_one_markdownlint_cli2_accepts(self):
+        """`.markdownlintrc` is markdownlint-cli v1; cli2 refuses to load it."""
+        name = Path(self.lint_step_config()).name
+        accepted = name in self.SUPPORTED_BASENAMES or name.endswith(
+            self.SUPPORTED_EXTENSIONS
+        )
+        self.assertTrue(
+            accepted,
+            "markdownlint-cli2 cannot load %r: it needs one of %s or an "
+            "extension in %s" % (name, self.SUPPORTED_BASENAMES,
+                                 self.SUPPORTED_EXTENSIONS),
+        )
+
+    def test_lint_config_parses_and_keeps_every_disable_justified(self):
+        """Every rule set to false must carry a comment saying why.
+
+        Reaching zero findings by switching rules off is the same non-gate in
+        a different disguise, so the config is JSONC specifically to keep the
+        reason next to the setting.
+        """
+        text = (PROJECT_ROOT / self.lint_step_config()).read_text(encoding="utf-8")
+        config = json.loads(strip_jsonc_comments(text)).get("config", {})
+        disabled = [rule for rule, value in config.items() if value is False]
+        self.assertTrue(disabled, "expected at least the historical disables")
+        for rule in disabled:
+            self.assertRegex(
+                text,
+                r"//[^\n]*\b" + re.escape(rule) + r"\b",
+                "%s is disabled with no comment explaining why" % rule,
+            )
+
+    def test_lint_job_gates_the_build_and_can_still_fail(self):
+        """markdown-lint is a real gate, and reports its own result.
+
+        It was advisory until 2026-09-18, and advisory did not work. Sitting
+        outside `build-status.needs` blocked nothing, but the job carries no
+        `continue-on-error`, so a violation still made the WORKFLOW's own
+        conclusion `failure` while every blocking job was green. A check that
+        is red without consequence is one people stop reading: dev sat red for
+        four commits on 12 accumulated findings, and three community merges
+        reproduced it within the hour of #520 clearing them.
+
+        Both halves are asserted, because either one alone recreates a failure
+        mode this repo has already shipped:
+
+        - it must be in `build-status.needs` and compared there, or a
+          violation blocks nothing again;
+        - it must not carry `continue-on-error`, which is what made the
+          2026-08-30 gate report success while linting zero files.
+        """
+        workflow = self.workflow_text()
+        job = workflow.split("markdown-lint:", 1)[1].split("\n  pester-tests:", 1)[0]
+        # A YAML key, not the phrase -- the job carries a comment block
+        # explaining at length why the key is gone, and that prose must
+        # not itself satisfy or trip this test.
+        self.assertIsNone(
+            re.search(r"^\s*continue-on-error\s*:", job, re.M),
+            "the markdown-lint job must be able to report failure",
+        )
+        needs = re.search(r"^    needs: \[([^\]]*)\]", workflow, re.M)
+        self.assertIsNotNone(needs, "build-status needs: list not found")
+        self.assertIn(
+            "markdown-lint",
+            needs.group(1),
+            "markdown-lint must gate build-status: outside `needs` it turns "
+            "the run red without failing the build, which is the state that "
+            "trained people to stop reading the status",
+        )
+        # `needs` alone only makes build-status WAIT for it. The reported
+        # status comes from the explicit result comparison in the script, so a
+        # job listed but never compared is waited on and then ignored.
+        self.assertIn(
+            "needs.markdown-lint.result",
+            workflow,
+            "build-status waits for markdown-lint but never compares its "
+            "result, so its failures do not affect the reported status",
+        )
+
+    def test_no_stale_markdownlintrc(self):
+        """A leftover .markdownlintrc would silently be the wrong source."""
+        self.assertFalse(
+            (PROJECT_ROOT / ".markdownlintrc").exists(),
+            ".markdownlintrc is unreadable by markdownlint-cli2; "
+            "the live config is .markdownlint-cli2.jsonc",
         )
 
 

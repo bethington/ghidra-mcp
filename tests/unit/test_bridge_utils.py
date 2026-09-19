@@ -1446,6 +1446,224 @@ class TestBuildToolFunction(unittest.TestCase):
         )
 
 
+class TestParamAliases(unittest.TestCase):
+    """Back-compat parameter spellings, end to end through the bridge.
+
+    ``@Param(aliases = {...})`` names spellings the Ghidra plugin genuinely
+    serves. Until 7.0.0 ``ParamDescriptor.toJson`` never emitted them, so
+    ``/mcp/schema`` understated the contract; and even with the schema fixed the
+    bridge would have dropped an alias argument on the floor, because FastMCP
+    validates against the built signature with a pydantic model that ignores
+    extras. Both halves are pinned here.
+    """
+
+    def test_parse_schema_carries_aliases_through(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/get_function_labels",
+                        "method": "GET",
+                        "params": [
+                            {
+                                "name": "name",
+                                "type": "string",
+                                "required": True,
+                                "aliases": ["function", "address", "function_address"],
+                            },
+                            {"name": "limit", "type": "integer", "default": "20"},
+                        ],
+                    }
+                ]
+            }
+        )
+        props = schema[0]["input_schema"]["properties"]
+        self.assertEqual(
+            ["function", "address", "function_address"], props["name"]["aliases"]
+        )
+        self.assertNotIn("aliases", props["limit"])
+
+    def test_alias_is_declared_in_the_signature(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/get_function_labels",
+            "GET",
+            {
+                "properties": {
+                    "name": {"type": "string", "aliases": ["function", "address"]},
+                },
+                "required": ["name"],
+            },
+        )
+        sig = inspect.signature(fn)
+        # Without these, FastMCP's arg model silently discards the argument.
+        self.assertIn("function", sig.parameters)
+        self.assertIn("address", sig.parameters)
+        self.assertIsNone(sig.parameters["address"].default)
+        # A required param that has aliases must not stay required in the
+        # signature -- an alias may be the one carrying the value.
+        self.assertIsNone(sig.parameters["name"].default)
+
+    def test_alias_argument_is_sent_under_the_canonical_name(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/get_function_labels",
+            "GET",
+            {
+                "properties": {
+                    "name": {"type": "string", "aliases": ["function", "address"]},
+                },
+                "required": ["name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(address="DrawFrame")
+        mock_get.assert_called_once_with(
+            "/get_function_labels", params={"name": "DrawFrame"}
+        )
+
+    def test_canonical_wins_when_both_are_supplied(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/get_function_labels",
+            "GET",
+            {
+                "properties": {
+                    "name": {"type": "string", "aliases": ["function", "address"]},
+                },
+                "required": ["name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(name="DrawFrame", address="0x401000")
+        mock_get.assert_called_once_with(
+            "/get_function_labels", params={"name": "DrawFrame"}
+        )
+
+    def test_first_alias_in_declaration_order_wins(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/get_function_labels",
+            "GET",
+            {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "aliases": ["function", "address", "function_address"],
+                    },
+                },
+                "required": ["name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(function="DrawFrame", function_address="0x401000")
+        mock_get.assert_called_once_with(
+            "/get_function_labels", params={"name": "DrawFrame"}
+        )
+
+    def test_missing_required_still_fails_loudly(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/get_function_labels",
+            "GET",
+            {
+                "properties": {
+                    "name": {"type": "string", "aliases": ["function", "address"]},
+                },
+                "required": ["name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            result = json.loads(fn())
+        mock_get.assert_not_called()
+        self.assertIn("Missing required parameter", result["error"])
+        # The message must name every accepted spelling, not just the canonical.
+        self.assertIn("`address`", result["error"])
+
+    def test_alias_never_shadows_a_real_parameter(self):
+        """A collision would bind one value to two parameters.
+
+        /rename_symbol declared `old_name` as a parameter AND as an alias of
+        `target`. The Java side no longer does; the bridge refuses to honour it
+        either, so a stale or hand-written schema cannot resurrect the bug.
+        """
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/rename_symbol",
+            "POST",
+            {
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "source": "body",
+                        "aliases": ["address", "old_name"],
+                    },
+                    "old_name": {"type": "string", "source": "body", "default": ""},
+                    "new_name": {"type": "string", "source": "body"},
+                },
+                "required": ["target", "new_name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
+            mock_post.return_value = "ok"
+            fn(target="0x401000", old_name="LAB_00401000", new_name="loop_top")
+        _, kwargs = mock_post.call_args
+        self.assertEqual(
+            {
+                "target": "0x401000",
+                "old_name": "LAB_00401000",
+                "new_name": "loop_top",
+            },
+            kwargs["data"],
+        )
+
+    def test_address_aliases_are_sanitized_like_the_canonical(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/rename_symbol",
+            "POST",
+            {
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "source": "body",
+                        "param_type": "address",
+                        "aliases": ["address", "function_address"],
+                    },
+                    "new_name": {"type": "string", "source": "body"},
+                },
+                "required": ["target", "new_name"],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
+            mock_post.return_value = "ok"
+            fn(function_address="6FA26FD0", new_name="DrawFrame")
+        _, kwargs = mock_post.call_args
+        self.assertEqual("0x6fa26fd0", kwargs["data"]["target"])
+
+    def test_tools_without_aliases_are_untouched(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/test", "GET", {"properties": {"name": {"type": "string"}}, "required": ["name"]}
+        )
+        sig = inspect.signature(fn)
+        self.assertEqual(["name"], list(sig.parameters))
+        self.assertEqual(inspect.Parameter.empty, sig.parameters["name"].default)
+
+
 class TestToolNameSanitization(unittest.TestCase):
     """Test MCP tool name normalization for strict clients."""
 
