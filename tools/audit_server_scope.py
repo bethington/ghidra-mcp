@@ -108,6 +108,12 @@ _IMPLEMENTS_PROVIDER_RE = re.compile(
     re.DOTALL,
 )
 
+#: `class DirectThreadingStrategy implements ThreadingStrategy`.
+_IMPLEMENTS_THREADING_STRATEGY_RE = re.compile(
+    r"\bclass\s+\w+[^{]*?\b(?:implements|extends)\b[^{]*?\bThreadingStrategy\b",
+    re.DOTALL,
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -278,6 +284,30 @@ def _provider_classes(src_root: Path) -> set[str]:
     return providers
 
 
+def _threading_strategy_classes(src_root: Path) -> set[str]:
+    """Class names that are ``ThreadingStrategy`` implementations, read from source.
+
+    Mirrors :func:`_provider_classes` for the same reason: the dry-run wrapper
+    in ``AnnotationScanner.createHandler`` needs the SAME ``ThreadingStrategy``
+    instance the scanned services were built with, so every server passes one
+    to the scanner's constructor alongside its services. It is routing
+    plumbing, not a service to reflect over — and the two servers happen to
+    declare their field with different type spellings (GUI keeps the
+    ``ThreadingStrategy`` interface type; headless keeps the concrete
+    ``DirectThreadingStrategy``), so excluding only the literal interface name
+    would silently miss the headless side. Derived rather than listed so a
+    renamed or added strategy needs no edit here.
+    """
+    strategies = {"ThreadingStrategy"}
+    for java in sorted(src_root.rglob("*.java")):
+        text = java.read_text(encoding="utf-8")
+        if "ThreadingStrategy" not in text:
+            continue
+        if _IMPLEMENTS_THREADING_STRATEGY_RE.search(_strip_comments(text)):
+            strategies.add(java.stem)
+    return strategies
+
+
 def server_service_classes(repo: Path, server_rel: str) -> list[str]:
     """Resolve one server's ``new AnnotationScanner(...)`` arguments to service class names.
 
@@ -300,7 +330,9 @@ def server_service_classes(repo: Path, server_rel: str) -> list[str]:
     own_fields, own_getters = _declared_types(text)
     handler_text = _strip_comments((repo / HEADLESS_HANDLER).read_text(encoding="utf-8"))
     _, handler_getters = _declared_types(handler_text)
-    providers = _provider_classes(repo / "src" / "main" / "java" / "com" / "xebyte")
+    src_root = repo / "src" / "main" / "java" / "com" / "xebyte"
+    providers = _provider_classes(src_root)
+    strategies = _threading_strategy_classes(src_root)
 
     classes: list[str] = []
     for arg in _split_args(body):
@@ -311,7 +343,7 @@ def server_service_classes(repo: Path, server_rel: str) -> list[str]:
                 "declared type. Teach tools/audit_server_scope._resolve_arg about it "
                 "rather than hand-listing the service."
             )
-        if resolved in providers:
+        if resolved in providers or resolved in strategies:
             continue
         classes.append(resolved)
     return classes
