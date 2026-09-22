@@ -19,6 +19,45 @@ the same cycle.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
+
+`FunctionManagerDB.doRemoveFunction` iterates a function's own tag set while
+removing tags from it — a Ghidra internal, not ours to patch — so
+`deleteFunctionAtAddress` calling `removeFunction` on a tagged function threw
+`ConcurrentModificationException` every time (`HashMap$KeyIterator.next` <-
+`FunctionManagerDB.doRemoveFunction` <- `FunctionSymbol.delete` <-
+`FunctionManagerDB.removeFunction`). Found while clearing tagged funclet
+functions out of a live project; the previous workaround was two calls —
+`/remove_function_tag` with every tag, then `/delete_function`. It now
+detaches the function's tags itself, via the same `func.removeTag(name)` call
+`/remove_function_tag` already uses, before calling `removeFunction`, so
+Ghidra's internal loop has nothing left to iterate. The response now reports
+`detached_tags`.
+
+A second, independent `ConcurrentModificationException` hit every `dry_run`
+delete, tagged or not, even after the fix above. `AnnotationScanner`'s
+dry-run wrapper opened its transaction directly via `program.startTransaction`
+on the calling (HTTP) thread, while the wrapped write's own
+`threadingStrategy.executeWrite` dispatched the real work to a *different*
+thread — the Swing EDT in GUI mode, via a separate
+`SwingUtilities.invokeAndWait` — nesting a transaction opened by one thread
+inside one opened by another. The dry-run wrapper, including the transaction
+it opens, now runs entirely through `threadingStrategy.executeWrite`, so it
+lands on the same thread the wrapped write's own nested `executeWrite` call
+detects (`SwingUtilities.isEventDispatchThread()`) and reuses in place, with
+no second dispatch. `AnnotationScanner` gained a `ThreadingStrategy`
+constructor parameter for this; the two varargs constructors kept for
+existing callers and offline test fixtures default to a same-thread fallback,
+so no existing call site needed to change.
+
+Covered by `FunctionServiceDeleteFunctionTest` (tagged and untagged deletes)
+and `AnnotationScannerOfflineTest`'s
+`testDryRunDeleteFunctionOpensItsTransactionOnlyInsideTheThreadingStrategy`,
+both of which fail against the previous behaviour — the former with a real
+`ConcurrentModificationException` from a live-view tag set, the latter via a
+mocked `Program.startTransaction` that throws if called outside
+`executeWrite`.
+
 ### Added — two endpoints, after the consolidation pass
 
 Both landed in the 7.0.0 cycle after the 272 → 251 consolidation, which is why
