@@ -469,5 +469,152 @@ public class AnnotationScannerOfflineTest extends TestCase {
             return Response.ok("wrote");
         }
     }
+
+    /**
+     * Regression test for the 2026-09-21 incident: even after {@code delete_function}
+     * detaches a function's tags before removing it (fixing the
+     * {@code ConcurrentModificationException} thrown from inside Ghidra's own
+     * {@code FunctionManagerDB.doRemoveFunction}), a DRY-RUN delete threw its OWN
+     * {@code ConcurrentModificationException} every time, on every function, tagged or
+     * not. Root cause: {@code AnnotationScanner.createHandler}'s dry-run wrapper opened
+     * its transaction directly via {@code program.startTransaction(...)} on the calling
+     * (HTTP) thread, while the wrapped service method's own
+     * {@code threadingStrategy.executeWrite} dispatched the real work to a DIFFERENT
+     * thread (the Swing EDT in GUI mode, via a separate
+     * {@code SwingUtilities.invokeAndWait}) -- nesting a transaction opened by one thread
+     * inside one opened by another. Fix: route the whole dry-run wrapper, including the
+     * transaction it opens, through {@code threadingStrategy.executeWrite}, so it lands on
+     * the same thread the wrapped write's own nested {@code executeWrite} call detects
+     * (via {@code SwingUtilities.isEventDispatchThread()}) and reuses in place, with no
+     * second dispatch.
+     *
+     * <p>This test cannot drive Ghidra's real cross-thread transaction bookkeeping, but it
+     * encodes the exact invariant the fix establishes: {@code program.startTransaction} may
+     * only be called from inside {@code threadingStrategy.executeWrite}'s own callable. A
+     * mocked {@code Program.startTransaction} throws if that invariant is violated, turning
+     * a regression back into a hard test failure instead of a live-only symptom. It also
+     * exercises a TAGGED function through the dry-run path, proving {@code delete_function}'s
+     * tag-detach fix composes correctly with the dry-run wrapper (the bug report noted the
+     * dry-run CME reproduced "even on functions where the fix above would succeed").
+     */
+    public void testDryRunDeleteFunctionOpensItsTransactionOnlyInsideTheThreadingStrategy() throws Exception {
+        boolean[] insideExecuteWrite = {false};
+        com.xebyte.core.ThreadingStrategy strategy = new com.xebyte.core.ThreadingStrategy() {
+            @Override
+            public <T> T executeRead(java.util.concurrent.Callable<T> action) throws Exception {
+                return action.call();
+            }
+
+            @Override
+            public <T> T executeWrite(Program program, String txName,
+                    java.util.concurrent.Callable<T> action) throws Exception {
+                insideExecuteWrite[0] = true;
+                try {
+                    return action.call();
+                } finally {
+                    insideExecuteWrite[0] = false;
+                }
+            }
+
+            @Override
+            public boolean isHeadless() {
+                return true;
+            }
+        };
+
+        Program program = mock(Program.class);
+        when(program.startTransaction(org.mockito.ArgumentMatchers.anyString())).thenAnswer(inv -> {
+            if (!insideExecuteWrite[0]) {
+                throw new IllegalStateException(
+                    "startTransaction called outside threadingStrategy.executeWrite -- this is the "
+                    + "mismatched-thread nesting that threw ConcurrentModificationException on every "
+                    + "dry run before the fix.");
+            }
+            return 42;
+        });
+
+        ghidra.program.model.listing.FunctionManager functionManager =
+            mock(ghidra.program.model.listing.FunctionManager.class);
+        ghidra.program.model.listing.Function func = mock(ghidra.program.model.listing.Function.class);
+        ghidra.program.model.address.Address addr = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.AddressFactory addressFactory =
+            mock(ghidra.program.model.address.AddressFactory.class);
+        ghidra.program.model.address.AddressSpace space =
+            mock(ghidra.program.model.address.AddressSpace.class);
+        ghidra.program.model.address.AddressSetView body =
+            mock(ghidra.program.model.address.AddressSetView.class);
+
+        when(space.isOverlaySpace()).thenReturn(false);
+        when(space.getType()).thenReturn(ghidra.program.model.address.AddressSpace.TYPE_RAM);
+        when(addr.toString(false)).thenReturn("401000");
+        when(addr.getAddressSpace()).thenReturn(space);
+        when(addressFactory.getAddress("0x401000")).thenReturn(addr);
+        when(addressFactory.getAddressSpaces())
+            .thenReturn(new ghidra.program.model.address.AddressSpace[0]);
+        when(program.getAddressFactory()).thenReturn(addressFactory);
+        when(program.getFunctionManager()).thenReturn(functionManager);
+        when(functionManager.getFunctionAt(addr)).thenReturn(func);
+        when(body.getNumAddresses()).thenReturn(1L);
+        when(func.getName()).thenReturn("FUN_401000");
+        when(func.getBody()).thenReturn(body);
+
+        Set<ghidra.program.model.listing.FunctionTag> liveTags = new HashSet<>();
+        ghidra.program.model.listing.FunctionTag tag = mock(ghidra.program.model.listing.FunctionTag.class);
+        when(tag.getName()).thenReturn("HOT");
+        liveTags.add(tag);
+        when(func.getTags()).thenAnswer(inv -> liveTags);
+        org.mockito.Mockito.doAnswer(inv -> {
+            String name = inv.getArgument(0);
+            liveTags.removeIf(t -> t.getName().equals(name));
+            return null;
+        }).when(func).removeTag(org.mockito.ArgumentMatchers.anyString());
+        // Stands in for FunctionManagerDB.doRemoveFunction: iterates the function's own
+        // live tag set while removing from it. Throws a real ConcurrentModificationException
+        // if any tag is still attached -- proving delete_function's own fix survives being
+        // wrapped by the dry-run path.
+        org.mockito.Mockito.doAnswer(inv -> {
+            for (ghidra.program.model.listing.FunctionTag t : func.getTags()) {
+                liveTags.remove(t);
+            }
+            return null;
+        }).when(functionManager).removeFunction(addr);
+
+        ProgramProvider provider = mock(ProgramProvider.class);
+        when(provider.getCurrentProgram()).thenReturn(program);
+        when(provider.getProgram("Test.dll")).thenReturn(program);
+
+        com.xebyte.core.FunctionService functionService =
+            new com.xebyte.core.FunctionService(provider, strategy);
+        AnnotationScanner dryRunScanner = new AnnotationScanner(provider, strategy, functionService);
+
+        EndpointDef endpoint = null;
+        for (EndpointDef ep : dryRunScanner.getEndpoints()) {
+            if ("/delete_function".equals(ep.path())) endpoint = ep;
+        }
+        assertNotNull("delete_function not found", endpoint);
+
+        Map<String, String> query = new HashMap<>();
+        query.put("program", "Test.dll");
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("address", "0x401000");
+        requestBody.put("dry_run", Boolean.TRUE);
+
+        Response response = endpoint.handler().handle(query, requestBody);
+
+        JsonObject root = new Gson().fromJson(response.toJson(), JsonObject.class);
+        assertTrue("dry run must report success, got: " + response.toJson(),
+            root.get("success").getAsBoolean());
+        assertTrue("dry run response must flag itself as a dry run", root.get("dry_run").getAsBoolean());
+        assertEquals("dry run response must report what would be deleted",
+            "FUN_401000", root.get("deleted_function").getAsString());
+
+        // The wrapper can only undo Ghidra transaction state, not arbitrary Java side
+        // effects, so the fixture write is still invoked either way -- what proves this
+        // was a genuine dry run (the function is left in place) is the rollback commit.
+        verify(functionManager).removeFunction(addr);
+        verify(program).endTransaction(anyInt(), eq(false));
+        assertTrue("tags must have been fully detached before removeFunction ran",
+            liveTags.isEmpty());
+    }
 }
 
