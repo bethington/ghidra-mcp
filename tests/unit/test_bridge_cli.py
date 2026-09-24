@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from bridge_mcp_ghidra import cli, state  # noqa: E402
 from bridge_mcp_ghidra.server import mcp  # noqa: E402
+from mcp.server.transport_security import TransportSecurityMiddleware  # noqa: E402
 
 
 class _CliHarness(unittest.TestCase):
@@ -160,6 +161,25 @@ class TestCliRebindProtection(_CliHarness):
         mcp.settings.transport_security = sentinel
         self.run_main("--mcp-host", "127.0.0.1")
         self.assertIs(mcp.settings.transport_security, sentinel)
+
+    def test_loopback_default_security_rejects_unlisted_host(self):
+        self.run_main("--mcp-host", "127.0.0.1")
+        guard = TransportSecurityMiddleware(mcp.settings.transport_security)
+        self.assertTrue(guard._validate_host("localhost:8091"))
+        self.assertFalse(guard._validate_host("host.containers.internal:8091"))
+
+    def test_loopback_bind_extra_hosts_from_env(self):
+        self.run_main(
+            "--mcp-host",
+            "127.0.0.1",
+            env={"GHIDRA_MCP_ALLOWED_HOSTS": "host.containers.internal"},
+        )
+        sec = mcp.settings.transport_security
+        guard = TransportSecurityMiddleware(sec)
+        self.assertTrue(sec.enable_dns_rebinding_protection)
+        self.assertTrue(guard._validate_host("host.containers.internal:8091"))
+        self.assertTrue(guard._validate_host("127.0.0.1:8091"))
+        self.assertFalse(guard._validate_host("unlisted.example:8091"))
 
     def test_specific_remote_host_enables_protection(self):
         self.run_main("--mcp-host", "192.168.1.50")

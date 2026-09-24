@@ -280,3 +280,136 @@ class TestCorpusYamlRoundTrip:
         cases = {c.tool: c for c in load_cases(path)}
         assert cases["a"].expect_error_payload is True
         assert cases["b"].expect_error_payload is False
+
+
+class TestCaseSelection:
+    """`--only` exists so ONE golden can be re-recorded.
+
+    `--update-snapshots` is otherwise all-or-nothing: re-recording
+    `mcp_schema.snap` after a deploy meant accepting whatever the other 118
+    goldens happened to return in the same pass. That is 118 unreviewed
+    rewrites to fix 1, so in practice the schema snapshot simply went stale --
+    which is how four GUI-served endpoints ended up exempt from the offline
+    tier's parameter checking (`SCHEMA_RECORDING_PREDATES`).
+    """
+
+    @staticmethod
+    def _cases():
+        from tests.conformance.runner import Case
+
+        return [
+            Case(tool="mcp_schema", tier="read"),
+            Case(tool="list_functions", tier="read"),
+            Case(tool="rename_function", tier="write"),
+            Case(tool="delete_function", tier="destructive"),
+        ]
+
+    def test_only_narrows_to_one_case(self):
+        from tests.conformance.run_conformance import select_cases
+
+        picked = select_cases(self._cases(), only=["mcp_schema"], tier="all")
+        assert [c.tool for c in picked] == ["mcp_schema"]
+
+    def test_only_accepts_glob_and_repeats(self):
+        from tests.conformance.run_conformance import select_cases
+
+        picked = select_cases(self._cases(), only=["mcp_*", "rename_function"],
+                              tier="all")
+        assert sorted(c.tool for c in picked) == ["mcp_schema", "rename_function"]
+
+    def test_unmatched_pattern_is_fatal(self):
+        """A typo must not exit 0 having recorded nothing."""
+        from tests.conformance.run_conformance import NoCasesSelected, select_cases
+
+        with pytest.raises(NoCasesSelected, match="matched none"):
+            select_cases(self._cases(), only=["mcp_scheme"], tier="all")
+
+    def test_tier_exclusion_is_a_distinct_message(self):
+        from tests.conformance.run_conformance import NoCasesSelected, select_cases
+
+        with pytest.raises(NoCasesSelected, match="excludes all of them"):
+            select_cases(self._cases(), only=["mcp_schema"], tier="write")
+
+    def test_no_only_keeps_existing_behaviour(self):
+        """Default path must still drop destructive/debugger and sort read-first."""
+        from tests.conformance.run_conformance import select_cases
+
+        picked = select_cases(self._cases(), only=[], tier="all")
+        assert [c.tool for c in picked] == [
+            "mcp_schema", "list_functions", "rename_function"
+        ]
+
+
+class TestRunnerRefusesToBlessTransportErrors:
+    """An `isError` result means the call never reached the tool.
+
+    Measured 2026-09-18: #440 made the bridge lazy by default, so `mcp_schema`
+    was no longer registered, and `--update-snapshots` overwrote the committed
+    7,119-line `mcp_schema.snap` with the single line
+    `Unknown tool: mcp_schema` -- reporting `new=1` as if it had recorded a
+    response. `is_error_payload` could not catch it: that guard tests for a
+    JSON `{"error": ...}` body, and a transport error is not JSON.
+    """
+
+    @staticmethod
+    def _error_result(text):
+        from tests.conformance.mcp_client import ToolResult
+
+        return ToolResult(tool="t", text=text, is_error=True, raw={},
+                          elapsed_ms=1)
+
+    def _runner(self, tmp_path, **kw):
+        from tests.conformance.runner import ConformanceRunner
+
+        return ConformanceRunner(transport=None, snapshot_dir=tmp_path, **kw)
+
+    def test_transport_error_is_not_recorded(self, tmp_path):
+        from tests.conformance.runner import Case
+
+        runner = self._runner(tmp_path, update=True)
+        status, detail = runner._handle_snapshot(
+            Case(tool="mcp_schema"), self._error_result("Unknown tool: mcp_schema")
+        )
+        assert status == "refused"
+        assert "never reached the tool" in detail
+        assert not (tmp_path / "mcp_schema.snap").exists()
+
+    def test_transport_error_does_not_clobber_an_existing_golden(self, tmp_path):
+        """The damage this actually did: an existing snapshot was destroyed."""
+        from tests.conformance.runner import Case
+
+        golden = tmp_path / "mcp_schema.snap"
+        golden.write_text('{"count": 239}', encoding="utf-8")
+
+        runner = self._runner(tmp_path, update=True)
+        status, _ = runner._handle_snapshot(
+            Case(tool="mcp_schema"), self._error_result("Unknown tool: mcp_schema")
+        )
+        assert status == "refused"
+        assert golden.read_text(encoding="utf-8") == '{"count": 239}'
+
+    def test_expect_error_payload_does_not_excuse_a_transport_error(self, tmp_path):
+        """`expect_error_payload` opts into a refusal BODY, not a dead call."""
+        from tests.conformance.runner import Case
+
+        runner = self._runner(tmp_path, update=True)
+        status, _ = runner._handle_snapshot(
+            Case(tool="search_instructions", expect_error_payload=True),
+            self._error_result("Unknown tool: search_instructions"),
+        )
+        assert status == "refused"
+
+
+def test_conformance_transport_disables_lazy_tool_loading():
+    """The corpus describes the SERVER's surface, not a client's default.
+
+    Without `--no-lazy` the bridge advertises CORE_GROUPS only (118 of 239
+    tools), and every corpus case outside those groups dies on
+    `Unknown tool: <name>`.
+    """
+    from tests.conformance.mcp_client import bridge_transport
+
+    transport = bridge_transport("/repo")
+    assert "--no-lazy" in transport.command, (
+        f"bridge_transport must disable lazy loading; got {transport.command}"
+    )

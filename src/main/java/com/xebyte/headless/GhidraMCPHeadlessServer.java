@@ -394,7 +394,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
         // ==========================================================================
 
-        AnnotationScanner scanner = new AnnotationScanner(endpointHandler.getProgramProvider(),
+        AnnotationScanner scanner = new AnnotationScanner(endpointHandler.getProgramProvider(), threadingStrategy,
             endpointHandler.getListingService(), endpointHandler.getFunctionService(),
             endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),

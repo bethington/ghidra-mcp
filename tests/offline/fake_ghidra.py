@@ -21,7 +21,7 @@ repo's own machine-checked contract:
 
 * ``tests/endpoints.json``                      -- the routing table (253 endpoints)
 * ``tests/conformance/snapshots/mcp_schema.snap`` -- the parameter contract
-  (235 tools, each parameter carrying its declared ``source``: ``query`` or
+  (239 tools, each parameter carrying its declared ``source``: ``query`` or
   ``body``)
 
 and only its *payloads* come from recordings (the 119 conformance snapshots,
@@ -136,12 +136,13 @@ class EndpointSpec:
     # None when the endpoint is in the catalog but not in the recorded schema
     # snapshot. Routing still works; parameter contract checking is skipped.
     #
-    # Mostly that is the headless-only project-management surface, which a GUI
-    # recording legitimately never advertises. But it is NOT only that: four
-    # GUI-served endpoints are in the set because the recording predates them,
-    # and they are therefore exempt from parameter validation by accident
-    # rather than by design. `test_fake_ghidra.py` pins exactly which, so the
-    # exemption cannot grow silently the next time an endpoint is added.
+    # That should only ever be the headless-only project-management surface,
+    # which a GUI recording legitimately never advertises. It has NOT only been
+    # that: four GUI-served endpoints were exempt from parameter validation by
+    # accident, because the recording predated them, until it was re-recorded
+    # at the 2026-09-18 deploy. `test_fake_ghidra.py` asserts the GUI-served
+    # side of this set is empty, so the exemption cannot reappear silently the
+    # next time an endpoint is added.
     params: dict[str, ParamSpec] | None
     # {alias: canonical} back-compat spellings the runtime resolver accepts.
     # /mcp/schema does not advertise these (see tests/offline/param_aliases),

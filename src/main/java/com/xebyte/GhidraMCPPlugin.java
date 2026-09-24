@@ -265,6 +265,11 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // Program provider for on-demand program access (FrontEnd mode)
     private final FrontEndProgramProvider programProvider;
 
+    // Threading strategy shared by every service AND the AnnotationScanner's
+    // dry-run wrapper, so a dry-run transaction and the write it wraps always
+    // nest on the same thread (see AnnotationScanner.createHandler).
+    private final com.xebyte.core.ThreadingStrategy threadingStrategy;
+
     // Server authenticator for programmatic login (bypasses GUI password dialog)
     private com.xebyte.core.GhidraMCPAuthenticator authenticator;
 
@@ -290,7 +295,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         // Initialize service layer — FrontEnd mode: opens programs on-demand from project
         this.programProvider = new FrontEndProgramProvider(tool, this);
-        com.xebyte.core.ThreadingStrategy threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
+        this.threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
         this.listingService = new com.xebyte.core.ListingService(programProvider);
         this.commentService = new com.xebyte.core.CommentService(programProvider, threadingStrategy);
         this.symbolLabelService = new com.xebyte.core.SymbolLabelService(programProvider, threadingStrategy);
@@ -641,7 +646,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // Discovers @McpTool-annotated methods on service instances via reflection
         // ==========================================================================
 
-        AnnotationScanner scanner = new AnnotationScanner(programProvider,
+        AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService,

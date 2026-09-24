@@ -1,5 +1,5 @@
 {
-  "count": 235,
+  "count": 239,
   "tools": [
     {
       "category": "function",
@@ -34,6 +34,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -90,6 +91,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -105,18 +107,21 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing structure to add to, matched across every category (no /path prefix needed).",
           "name": "struct_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Name for the new field. The project's Hungarian prefix is applied automatically from field_type, so the stored name can differ from what you send — the response reports the name actually used, and remove_struct_field accepts either form.",
           "name": "field_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Type of the new field, resolved recursively (pointer chains, array syntax such as dword[8], existing struct/enum names).",
           "name": "field_type",
           "required": true,
           "source": "body",
@@ -124,6 +129,7 @@
         },
         {
           "default": "-1",
+          "description": "BYTE offset to place the field at. -1 (the default) appends to the end. A non-negative offset OVERWRITES whatever occupies that range rather than shifting later fields, and grows the struct when it lies at or past the current end.",
           "name": "offset",
           "required": false,
           "source": "body",
@@ -164,6 +170,7 @@
       "params": [
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -202,6 +209,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -250,6 +258,7 @@
         },
         {
           "default": "1024",
+          "description": "How many BYTES forward from `address` to walk while collecting references and hunting the next named symbol (default 1024). String detection only ever reads the first 256 bytes of whatever the scan covered.",
           "name": "max_scan_bytes",
           "required": false,
           "source": "body",
@@ -257,6 +266,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds xref_map: a per-byte map from address to the sources referencing it, for every byte in the scanned range that has at least one. False keeps the aggregate counts and drops the map, which is most of the payload on a heavily referenced region.",
           "name": "include_xref_map",
           "required": false,
           "source": "body",
@@ -264,13 +274,7 @@
         },
         {
           "default": "true",
-          "name": "include_assembly_patterns",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        },
-        {
-          "default": "true",
+          "description": "True (the default) stops the forward scan at the first named symbol that is not a DAT_ autogen, so the region ends where the next documented global begins. False scans the full max_scan_bytes whatever symbols it crosses.",
           "name": "include_boundary_detection",
           "required": false,
           "source": "body",
@@ -376,6 +380,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds `xrefs` — the sources referencing the entry point — capped at the first 100. `xref_count` counts what was listed, so a value of exactly 100 may mean 'more than 100'; use get_xrefs_to for the true total.",
           "name": "include_xrefs",
           "required": false,
           "source": "query",
@@ -383,6 +388,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds `callees`, the names of the functions this one calls, and may add a wrapper_hint when the body is a thin forwarder.",
           "name": "include_callees",
           "required": false,
           "source": "query",
@@ -390,6 +396,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds `callers`, the names of the functions that call this one.",
           "name": "include_callers",
           "required": false,
           "source": "query",
@@ -397,6 +404,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds `disassembly`: address plus MNEMONIC only, no operands, capped at the first 100 instructions of the body. Use disassemble_function when you need operands or the whole body.",
           "name": "include_disasm",
           "required": false,
           "source": "query",
@@ -404,6 +412,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) adds the function's parameters and locals with their types and storage.",
           "name": "include_variables",
           "required": false,
           "source": "query",
@@ -473,7 +482,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
       "method": "GET",
       "params": [
         {
@@ -518,6 +527,7 @@
           "type": "string"
         },
         {
+          "description": "Optional label for the structure being analysed. It does NOT select the type — that comes from the data already applied at `address` — and is only echoed back; omit it to use the applied type's own name.",
           "name": "struct_name",
           "required": true,
           "source": "body",
@@ -525,6 +535,7 @@
         },
         {
           "default": "10",
+          "description": "How many referencing functions to decompile: 1 to 100, default 10. A value outside that range is REJECTED, not clamped.",
           "name": "max_functions",
           "required": false,
           "source": "body",
@@ -556,6 +567,7 @@
           "type": "string"
         },
         {
+          "description": "Which shape to build, matched case-sensitively against exactly PRIMITIVE, STRUCTURE, ARRAY or STRING. Any other value applies NO type at all and the call falls through to the rename and comment steps.",
           "name": "classification",
           "required": true,
           "source": "body",
@@ -563,6 +575,7 @@
         },
         {
           "default": "",
+          "description": "Optional label to place at the address. Applied only when a data type actually ended up defined there, so it is skipped whenever the classification applied nothing.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -570,12 +583,14 @@
         },
         {
           "default": "",
+          "description": "Optional PRE comment for the address. Unlike the plate-comment tools, this one DOES turn the two-character escapes for newline, tab and return into real whitespace, so an escaped string arrives as multiple lines.",
           "name": "comment",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON object whose required keys depend on `classification`: PRIMITIVE needs {\"type\": \"dword\"}; STRUCTURE needs a name plus a fields array of {name, type} objects; ARRAY needs count plus either element_type or element_struct; STRING takes an optional type. It must be an OBJECT — a JSON string is rejected.",
           "name": "type_definition",
           "required": true,
           "source": "body",
@@ -607,6 +622,7 @@
           "type": "string"
         },
         {
+          "description": "Type to apply at the address. Any name the resolver understands: a built-in (uint, char *), an existing struct/enum/typedef name, a pointer chain (int**), or array syntax basetype[count] such as dword[10]. Create the type first with create_struct / create_enum / create_array_type if it does not exist yet.",
           "name": "type_name",
           "required": true,
           "source": "body",
@@ -614,6 +630,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) clears whatever code or data occupies the FULL target range first, which is what lets you retype an address sitting inside a wider existing unit. False leaves existing units alone, and the write then fails with a conflict if anything overlaps. Clearing is also what arms the guard that refuses a write which would destroy named neighbours.",
           "name": "clear_existing",
           "required": false,
           "source": "body",
@@ -645,6 +662,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "The whole payload as one JSON STRING, in the shape get_function_documentation emits. Required key: target_address. Optional top-level keys: function_name, return_type, calling_convention, plate_comment, plus the arrays parameters and comments. It is read with a flat string extractor, so those keys must sit at the TOP level — a nested object wrapping them is not looked into. An empty plate_comment is skipped rather than clearing, and a name, convention or return type that fails to apply is only logged: changes_applied reports what actually landed.",
           "name": "json_body",
           "required": true,
           "source": "body",
@@ -807,72 +825,84 @@
       "method": "POST",
       "params": [
         {
+          "description": "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step below is applied to the function at this address.",
           "name": "address",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "New function name. Omit or leave empty to skip the rename step.",
           "name": "name",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Full C signature. Applied BEFORE the comment step on purpose, because setting a prototype wipes the plate comment.",
           "name": "prototype",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Convention for the prototype step, e.g. __stdcall. Read only when prototype is also given.",
           "name": "calling_convention",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Object mapping variable name to new type. Each is applied on its own; the step reports set/failed counts plus per-variable errors.",
           "name": "variable_types",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Object mapping each variable's CURRENT name to its new name.",
           "name": "variable_renames",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Plate comment for the function. Pass real multi-line text: an escaped newline sequence is stored as those two literal characters, not as a line break.",
           "name": "plate_comment",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Array of {address, comment} objects setting PRE comments. Each entry carries its own address; the top-level address is the function entry only.",
           "name": "decompiler_comments",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Array of {address, comment} objects setting EOL comments. Each entry carries its own address.",
           "name": "disassembly_comments",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "True navigates the CodeBrowser to address before anything else. Must be a JSON boolean: any other type is read as FALSE. Default false.",
           "name": "goto",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "True (the default) appends a compact completeness score. Must be a JSON boolean: any other type falls back to the default and is read as TRUE, so the string false does not switch it off.",
           "name": "score",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Accepted but not read by this route: every step runs against the active program. Use the individual tools when you need to target a specific one.",
           "name": "program",
           "required": false,
           "source": "body",
@@ -880,6 +910,38 @@
         }
       ],
       "path": "/batch_apply_documentation"
+    },
+    {
+      "category": "comment",
+      "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "method": "GET",
+      "params": [
+        {
+          "description": "Comma-separated addresses, each 0x<hex> (default space) or <space>:<hex>.",
+          "name": "addresses",
+          "required": true,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "If true, omit addresses where has_comment is false -- keeps sweep responses to just the interesting subset.",
+          "name": "only_with_comments",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/batch_get_comments"
     },
     {
       "category": "function",
@@ -897,18 +959,21 @@
         },
         {
           "default": "",
+          "description": "Optional new name for the function; leave empty to keep the current one. Unlike rename_function this writes the name directly and does NOT run the naming-quality gate.",
           "name": "function_name",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON object mapping each parameter's CURRENT name to its new name. Keys must match exactly; an entry naming a parameter that does not exist is ignored silently, and parameters_renamed in the response reports how many actually landed.",
           "name": "parameter_renames",
           "required": true,
           "source": "body",
           "type": "object"
         },
         {
+          "description": "JSON object mapping each local variable's CURRENT name to its new name, same rules as parameter_renames; locals_renamed reports how many landed.",
           "name": "local_renames",
           "required": true,
           "source": "body",
@@ -916,6 +981,7 @@
         },
         {
           "default": "",
+          "description": "Optional new return type. It is looked up by exact data-type-manager PATH (/uint), not through the recursive resolver the other tools use, so a bare name or a pointer chain does not resolve — and a failed lookup is IGNORED SILENTLY, leaving the return type unchanged while the call still reports success. Prefer set_function_prototype when the return type matters.",
           "name": "return_type",
           "required": false,
           "source": "body",
@@ -923,6 +989,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -947,6 +1014,7 @@
         },
         {
           "default": "[]",
+          "description": "JSON array of {address, comment} objects setting PRE comments — the lines the decompiler shows above a statement. Every entry carries its OWN address (0x<hex> or <space>:<hex>); the top-level `address` is the function entry and is not used for these. An entry missing either key, or whose address does not parse, is skipped silently — compare decompiler_comments_set against what you sent. An empty comment string clears that address's PRE comment.",
           "name": "decompiler_comments",
           "required": false,
           "source": "body",
@@ -954,6 +1022,7 @@
         },
         {
           "default": "[]",
+          "description": "JSON array of {address, comment} objects setting EOL comments — the trailing comment on a listing line. Same per-entry address rules and the same silent skip as decompiler_comments; an empty comment string clears that address's EOL comment.",
           "name": "disassembly_comments",
           "required": false,
           "source": "body",
@@ -1033,6 +1102,7 @@
         },
         {
           "default": "0",
+          "description": "Number of SOURCE functions to skip before this page starts; 0 begins at the first. Negative values are clamped to 0, and an offset past the end returns an empty match list.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -1040,6 +1110,7 @@
         },
         {
           "default": "50",
+          "description": "How many SOURCE functions this page tries to match (default 50) — it slices the source list, not the matches. 0 returns an EMPTY page; total_source_functions reports the full count to page against.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -1071,6 +1142,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1111,6 +1183,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1135,6 +1208,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) removes the function's plate comment — the block above its entry. False leaves it alone.",
           "name": "clear_plate",
           "required": false,
           "source": "body",
@@ -1142,6 +1216,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) removes every PRE (decompiler) comment inside the function body. False leaves them alone.",
           "name": "clear_pre",
           "required": false,
           "source": "body",
@@ -1149,6 +1224,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) removes every EOL (disassembly) comment inside the function body. False leaves them alone.",
           "name": "clear_eol",
           "required": false,
           "source": "body",
@@ -1181,6 +1257,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1196,12 +1273,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing type to copy, matched across every category (no /path prefix needed).",
           "name": "source_type",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Name for the copy. The clone is independent — later edits to source_type do not follow it.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -1290,6 +1369,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Element type. Resolution is recursive, so pointer chains (int**), nested array syntax and existing struct/enum names all work.",
           "name": "base_type",
           "required": true,
           "source": "body",
@@ -1297,6 +1377,7 @@
         },
         {
           "default": "1",
+          "description": "Number of ELEMENTS, not bytes — total size is length x sizeof(base_type). Must be positive; default 1.",
           "name": "length",
           "required": false,
           "source": "body",
@@ -1304,6 +1385,7 @@
         },
         {
           "default": "",
+          "description": "Optional name for the array type. Omit to let Ghidra name it after the element type (e.g. dword[16]); the response reports the name actually used.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -1327,6 +1409,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "New category as a /-separated path, e.g. /D2Structs/Units. Missing parent categories are created too.",
           "name": "category_path",
           "required": true,
           "source": "body",
@@ -1350,12 +1433,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "New enum type name, e.g. UnitType. Creation FAILS if a type with this name already exists — delete it first or choose another name.",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON object mapping member name to integer value, e.g. {\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal strings, or 0x-prefixed hex strings; floats and non-numeric strings are rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any complaint comes back as a warning, not a failure.",
           "name": "values",
           "required": true,
           "source": "body",
@@ -1363,6 +1448,7 @@
         },
         {
           "default": "4",
+          "description": "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). Anything else is rejected.",
           "name": "size",
           "required": false,
           "source": "body",
@@ -1419,6 +1505,7 @@
         },
         {
           "default": "",
+          "description": "Optional name for the new function; leave empty to keep Ghidra's generated FUN_<address>. Written directly, so the naming-quality gate does not run here — use rename_function if you want it to.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -1426,6 +1513,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) disassembles the entry address first when no instruction exists there, which is what lets you create a function over raw undefined bytes. False requires the address to be disassembled already; function creation fails otherwise.",
           "name": "disassemble_first",
           "required": false,
           "source": "body",
@@ -1433,6 +1521,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1448,18 +1537,21 @@
       "method": "POST",
       "params": [
         {
+          "description": "Name for the function-definition type. This creates a SIGNATURE in the data type manager; it changes no function in the listing.",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Return type, resolved recursively (pointer chains, arrays, struct names). Required — pass `void` for no return value.",
           "name": "return_type",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON array of parameter objects, e.g. [{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. Only the TYPES are used: parameter names are discarded and the created signature has unnamed arguments. Parsing is a plain comma/colon split, so a type containing a comma or a colon does not survive it, and a parameter whose type cannot be resolved is dropped silently.",
           "name": "parameters",
           "required": true,
           "source": "body",
@@ -1499,6 +1591,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1540,6 +1633,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1551,10 +1645,11 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "POST",
       "params": [
         {
+          "description": "Name for the new block as it appears in the memory map, e.g. MMIO or PERIPH. Required.",
           "name": "name",
           "required": true,
           "source": "body",
@@ -1570,6 +1665,7 @@
         },
         {
           "default": "0",
+          "description": "Block length in bytes. Omit (or 0) when byte content is supplied to size the block to the content exactly. If larger than the content, the remainder is filled with fill_byte. Must be positive when no content is supplied. Outside an overlay, address..address+size-1 must not overlap an existing block.",
           "name": "size",
           "required": false,
           "source": "body",
@@ -1577,6 +1673,7 @@
         },
         {
           "default": "true",
+          "description": "Read permission on the new block (default true); the r in the response's `permissions` string.",
           "name": "read",
           "required": false,
           "source": "body",
@@ -1584,6 +1681,7 @@
         },
         {
           "default": "true",
+          "description": "Write permission on the new block (default true); the w in the response's `permissions` string.",
           "name": "write",
           "required": false,
           "source": "body",
@@ -1591,6 +1689,7 @@
         },
         {
           "default": "false",
+          "description": "Execute permission, default FALSE. Set true only for a code region — leaving it false is what keeps disassembly out of a data or MMIO block.",
           "name": "execute",
           "required": false,
           "source": "body",
@@ -1598,6 +1697,7 @@
         },
         {
           "default": "false",
+          "description": "Marks the block volatile (default false): its contents can change outside program flow, so the decompiler stops folding repeated reads away. Set this for MMIO and peripheral register regions.",
           "name": "volatile",
           "required": false,
           "source": "body",
@@ -1605,6 +1705,7 @@
         },
         {
           "default": "",
+          "description": "Optional comment stored on the memory block itself. Empty (the default) leaves it unset.",
           "name": "comment",
           "required": false,
           "source": "body",
@@ -1612,7 +1713,47 @@
         },
         {
           "default": "",
-          "description": "Target program name",
+          "description": "Block contents as a hex string, e.g. \"deadbeef\" or \"de ad be ef\". Whitespace, commas and a leading 0x are ignored. Supplying content forces initialized=true. Max 16777216 decoded bytes. Mutually exclusive with bytes_base64.",
+          "name": "bytes_hex",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Block contents as a standard base64 string — preferred over bytes_hex for large or fully binary payloads. Supplying content forces initialized=true. Max 16777216 decoded bytes. Mutually exclusive with bytes_hex.",
+          "name": "bytes_base64",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Create an initialized block (real bytes backed by the program database) rather than an uninitialized one. Implied true when byte content is supplied. An initialized block is capped at 268435456 bytes; leave it false for larger MMIO apertures.",
+          "name": "initialized",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "0",
+          "description": "Byte value (0-255) for every byte of an initialized block not covered by the supplied content. Defaults to 0, which Ghidra stores most compactly.",
+          "name": "fill_byte",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "false",
+          "description": "Create the block in a new overlay address space instead of the program's physical memory. Use this to map a region that deliberately overlaps existing blocks (bank switching, ROM shadowing); the overlap check is skipped and the response reports the generated overlay space in address_space.",
+          "name": "overlay",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1628,6 +1769,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Type pointed at. `void` is special-cased to Ghidra's void type; everything else resolves recursively, so int**, dword[16] and existing struct/enum names all work.",
           "name": "base_type",
           "required": true,
           "source": "body",
@@ -1635,6 +1777,7 @@
         },
         {
           "default": "",
+          "description": "Optional name for the pointer type. Omit to let Ghidra name it after the pointee (e.g. UnitAny *); the response reports the name actually used.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -1674,6 +1817,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1728,12 +1872,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "New typedef (alias) name. An existing same-named type is replaced.",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Type the alias resolves to. Resolution is recursive, so pointer chains (int**), array syntax (dword[16]), well-known C types and existing struct/enum names all work.",
           "name": "base_type",
           "required": true,
           "source": "body",
@@ -1757,12 +1903,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "New union type name. An existing same-named type is REPLACED here, unlike create_enum, which refuses.",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON array of member objects, same shape as create_struct: required keys name and type; field_name/fieldName and field_type/fieldType/data_type/dataType are accepted as alternates. Any offset key is IGNORED — union members all start at 0. A member whose type cannot be resolved is skipped and reported under fields_skipped instead of failing the call. Names get the project's Hungarian prefix applied automatically.",
           "name": "fields",
           "required": true,
           "source": "body",
@@ -1861,6 +2009,14 @@
           "default": "",
           "description": "Optional Python executable for Python-backed debugger launchers",
           "name": "python_executable",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Directory containing dbgeng.dll, for the dbgeng launcher. Set this when the Windows Debugger Toolkit is not installed: pybag hard-codes the Windows Kits path and fails to load without it, while Windows itself ships a usable dbgeng.dll in System32.",
+          "name": "windbg_dir",
           "required": false,
           "source": "body",
           "type": "string"
@@ -2116,6 +2272,7 @@
         },
         {
           "default": "",
+          "description": "Delete only bookmarks in this category. Empty (the default) deletes EVERY bookmark at the address whatever its category; `deleted` in the response counts how many went.",
           "name": "category",
           "required": false,
           "source": "body",
@@ -2139,6 +2296,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the type to delete, matched across every category (no /path prefix needed). Deletion fails while anything still references the type.",
           "name": "type_name",
           "required": true,
           "source": "body",
@@ -2195,6 +2353,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2218,6 +2377,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2259,6 +2419,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2282,6 +2443,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2305,21 +2467,8 @@
           "type": "string"
         },
         {
-          "default": "true",
-          "name": "analyze_loop_bounds",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        },
-        {
-          "default": "true",
-          "name": "analyze_indexing",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        },
-        {
           "default": "2048",
+          "description": "How many BYTES forward from `address` to scan for references while estimating the array's extent (default 2048).",
           "name": "max_scan_range",
           "required": false,
           "source": "body",
@@ -2361,6 +2510,7 @@
       "params": [
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2433,6 +2583,7 @@
         },
         {
           "default": "0",
+          "description": "Number of BYTES to disassemble from start_address, as an alternative to end_address; end_address wins when both are given. 0 (the default) with no end_address auto-detects the run of undefined bytes and stops at a 100-byte safety cap.",
           "name": "length",
           "required": false,
           "source": "body",
@@ -2440,6 +2591,7 @@
         },
         {
           "default": "true",
+          "description": "True (the default) refuses to disassemble outside memory blocks marked executable, which stops a stray address turning data into instructions. Set false only for code that genuinely lives in a non-execute block.",
           "name": "restrict_to_execute_memory",
           "required": false,
           "source": "body",
@@ -2463,6 +2615,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2474,7 +2627,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.",
       "method": "GET",
       "params": [
         {
@@ -2487,6 +2640,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2502,6 +2656,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the structure that CONTAINS the field being replaced — the outer type, not the one being embedded.",
           "name": "parent_struct",
           "required": true,
           "source": "body",
@@ -2524,6 +2679,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2578,6 +2734,15 @@
         },
         {
           "default": "",
+          "description": "Memory regions to read back AFTER emulation, as a JSON array: [{\"address\": \"0x408300\", \"length\": 16}, ...]. Needed to observe in-place mutations (e.g. a function that lowercases a string via a pointer argument) -- the emulator's memory is an ISOLATED overlay and never touches the real program, so a plain read_memory call after emulation sees only the ORIGINAL unmodified bytes, not the emulated result. This reads from the emulator's own state instead.",
+          "name": "read_memory_after",
+          "required": false,
+          "source": "body",
+          "type": "json"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2647,6 +2812,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2670,6 +2836,7 @@
       "params": [
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2711,6 +2878,7 @@
         },
         {
           "default": "0",
+          "description": "Number of gaps to skip before this page starts; 0 begins at the first. Applied after the min_size filter.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -2718,6 +2886,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum gaps returned in this page (default 100). This endpoint slices directly, so 0 returns an EMPTY page rather than everything — page with offset against the `total` the response reports.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -2874,6 +3043,7 @@
         },
         {
           "default": "20",
+          "description": "Maximum matches returned, highest similarity first (default 20). It truncates the result only: every candidate in the target program is still scored, so a small limit does not make the call cheaper.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -2923,6 +3093,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2955,6 +3126,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Instruction addresses to pull context around. Accepts a JSON array of address strings or one comma-separated string, each in the usual 0x<hex> or <space>:<hex> form. The result is keyed by the exact string you sent, and an address with no instruction at it gets its own error entry rather than failing the batch.",
           "name": "xref_sources",
           "required": true,
           "source": "body",
@@ -2962,19 +3134,15 @@
         },
         {
           "default": "5",
+          "description": "How many instructions to include on EACH side of every source address (default 5), so the window is up to 2n+1 instructions. The walk stops early at the start or end of the listing.",
           "name": "context_instructions",
           "required": false,
           "source": "body",
           "type": "integer"
         },
         {
-          "name": "include_patterns",
-          "required": true,
-          "source": "body",
-          "type": "any"
-        },
-        {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2991,6 +3159,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of matching functions to skip before this page starts; 0 begins at the first. The filter is applied before the skip, so paging is stable only within one filter value.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -2998,6 +3167,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum functions whose hash is computed and returned in this page (default 100). The walk still visits every function to produce total_matching, so 0 returns an EMPTY page rather than everything.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3028,6 +3198,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Addresses to fetch references TO. Accepts a JSON array of address strings or one comma-separated string, each entry in the usual 0x<hex> or <space>:<hex> form. The result is keyed by the exact string you sent. Beware: an entry that does not parse comes back as an EMPTY array, which is indistinguishable from an address that genuinely has no references.",
           "name": "addresses",
           "required": true,
           "source": "body",
@@ -3035,6 +3206,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3154,14 +3326,18 @@
       "method": "GET",
       "params": [
         {
+          "description": "Address of the external location, as 0x<hex> (default space) or <space>:<hex> (e.g. mem:1000). This is the selector: matching is done on the address alone, so a dll_name with no address finds nothing.",
           "name": "address",
+          "param_type": "address",
           "required": true,
           "source": "query",
           "type": "string"
         },
         {
+          "default": "",
+          "description": "External library name (as list_imports / list_external_locations report it) to scope the search to. Omit to scan every library. It narrows the search only — it cannot select an entry by itself.",
           "name": "dll_name",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },
@@ -3192,6 +3368,7 @@
         },
         {
           "default": "0",
+          "description": "BYTE offset of the field inside the struct at struct_address; context is gathered at struct_address + this. Must be 0 to 65536.",
           "name": "field_offset",
           "required": false,
           "source": "body",
@@ -3199,6 +3376,7 @@
         },
         {
           "default": "5",
+          "description": "How many referencing sites to report: 1 to 50, default 5. A value outside that range is REJECTED, not clamped.",
           "name": "num_examples",
           "required": false,
           "source": "body",
@@ -3239,6 +3417,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3312,6 +3491,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3344,6 +3524,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3351,6 +3532,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3358,6 +3540,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3390,6 +3573,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3397,6 +3581,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3404,6 +3589,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3503,6 +3689,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3510,6 +3697,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3517,6 +3705,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3532,6 +3721,11 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "function",
+            "address",
+            "function_address"
+          ],
           "description": "Function name or address (0x<hex> / <space>:<hex>).",
           "name": "name",
           "param_type": "address",
@@ -3541,6 +3735,7 @@
         },
         {
           "default": "0",
+          "description": "Number of labels to skip before this page starts; 0 begins at the first.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3548,6 +3743,7 @@
         },
         {
           "default": "20",
+          "description": "Maximum labels returned in this page (default 20). Pass 0 or a negative value for no limit; `total` in the response always reports the full count for the function.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3555,6 +3751,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3637,6 +3834,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3669,6 +3867,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3717,6 +3916,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3724,6 +3924,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3731,6 +3932,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3836,6 +4038,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3939,6 +4142,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3946,6 +4150,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -3953,6 +4158,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3977,6 +4183,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -3984,6 +4191,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4007,6 +4215,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "C declarations — structs, unions, enums, typedefs — as one string of source TEXT, not a file path. Passed straight to Ghidra's CParser.",
           "name": "source",
           "required": true,
           "source": "body",
@@ -4014,6 +4223,7 @@
         },
         {
           "default": "c",
+          "description": "Accepted but ignored: parsing is always C through Ghidra's CParser whatever you pass. Kept so existing callers that send it keep working.",
           "name": "format",
           "required": false,
           "source": "body",
@@ -4202,6 +4412,7 @@
         },
         {
           "default": "0",
+          "description": "Number of members to skip before this page starts; 0 begins at the first. Negative values are clamped to 0.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4209,6 +4420,7 @@
         },
         {
           "default": "200",
+          "description": "Maximum members returned in this page (default 200). It is clamped to a MINIMUM of 1, so 0 returns one member rather than everything — page with offset against total_members instead.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4233,6 +4445,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4240,6 +4453,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4264,6 +4478,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4271,6 +4486,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4295,6 +4511,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4302,6 +4519,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4366,6 +4584,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4373,6 +4592,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4405,6 +4625,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4412,6 +4633,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4436,6 +4658,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4443,6 +4666,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4467,6 +4691,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of external locations to skip before this page starts; 0 begins at the first entry. An offset past the end returns an empty list.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4474,6 +4699,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum external locations returned (default 100). This endpoint slices the result directly and returns a bare array with no total, so 0 here returns an EMPTY list rather than everything.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4498,6 +4724,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of tag definitions to skip before this page starts; 0 begins at the first. Negative values are clamped to 0.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4513,6 +4740,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4546,6 +4774,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4553,6 +4782,7 @@
         },
         {
           "default": "10000",
+          "description": "Maximum functions returned, counted after `offset` is applied (default 10000, which covers most programs in one call). This endpoint stops at the limit rather than treating 0 as unlimited, so 0 returns an EMPTY list.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4577,6 +4807,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4584,6 +4815,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4648,6 +4880,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4655,6 +4888,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4679,6 +4913,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4686,6 +4921,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4710,6 +4946,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4717,6 +4954,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4823,6 +5061,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4873,6 +5112,7 @@
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4880,6 +5120,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4899,11 +5140,53 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals — it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
+      "method": "GET",
+      "params": [
+        {
+          "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
+          "name": "offset",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "500",
+          "description": "Maximum entries returned in this page (default 500). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
+          "name": "limit",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "false",
+          "description": "By default only data sections are scanned, matching list_globals.",
+          "name": "include_all_sections",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program)",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/list_shadowed_globals"
+    },
+    {
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List defined strings with optional filter",
       "method": "GET",
       "params": [
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -4911,6 +5194,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4987,6 +5271,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing structure to edit, matched across every category (no /path prefix needed).",
           "name": "struct_name",
           "required": true,
           "source": "body",
@@ -5002,6 +5287,7 @@
         },
         {
           "default": "",
+          "description": "Replacement type for the field, resolved recursively (pointer chains, array syntax, struct names). Leave empty to keep the current type and only rename.",
           "name": "new_type",
           "required": false,
           "source": "body",
@@ -5009,6 +5295,7 @@
         },
         {
           "default": "",
+          "description": "Replacement field name. Leave empty to keep the current name and only retype. The project's Hungarian prefix is applied automatically from the field's type, so the stored name can differ from what you send.",
           "name": "new_name",
           "required": false,
           "source": "body",
@@ -5032,6 +5319,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing structure to edit, matched across every category (no /path prefix needed).",
           "name": "struct_name",
           "required": true,
           "source": "body",
@@ -5045,6 +5333,7 @@
           "type": "string"
         },
         {
+          "description": "Replacement type for the field, resolved recursively (pointer chains, array syntax, struct names). Required here — use modify_struct_field if you also want to rename.",
           "name": "new_type",
           "required": true,
           "source": "body",
@@ -5052,6 +5341,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5067,12 +5357,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the type to move, matched across every category (no /path prefix needed).",
           "name": "type_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Destination category as a /-separated path, e.g. /D2Structs/Units. It is created, with any missing parents, if it does not exist.",
           "name": "category_path",
           "required": true,
           "source": "body",
@@ -5088,6 +5380,52 @@
         }
       ],
       "path": "/move_data_type_to_category"
+    },
+    {
+      "category": "project",
+      "category_description": "Program management, script execution, memory read, bookmarks, save",
+      "description": "Move a program file to a different folder in the project, preserving all analysis and documentation. Refuses when the program has unsaved changes -- call save_program first -- rather than discarding them. A program that is open but clean is closed, moved, then reopened at its new path.",
+      "method": "POST",
+      "params": [
+        {
+          "description": "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll",
+          "name": "filePath",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "Destination project folder path, e.g. /Mods/PD2-S12",
+          "name": "destFolder",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/move_file"
+    },
+    {
+      "category": "project",
+      "category_description": "Program management, script execution, memory read, bookmarks, save",
+      "description": "Move a project folder (and everything under it) into another folder. Refuses to move a folder into itself or into its own descendant, which would orphan the subtree.",
+      "method": "POST",
+      "params": [
+        {
+          "description": "Project folder path to move, e.g. /Vanilla/1.00",
+          "name": "sourcePath",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "Destination parent folder path, e.g. /Mods",
+          "name": "destPath",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/move_folder"
     },
     {
       "category": "program",
@@ -5119,18 +5457,21 @@
       "method": "POST",
       "params": [
         {
+          "description": "Path to the project: its .gpr file or the project directory holding it.",
           "name": "path",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "GUI mode only. True (the default) loads the project into the FrontEnd tool without opening a CodeBrowser window; false launches one for `program`. The headless server ignores it.",
           "name": "headless",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "GUI mode only, and only when headless=false: the DomainFile path to open in the launched CodeBrowser.",
           "name": "program",
           "required": false,
           "source": "body",
@@ -5235,12 +5576,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Name of the structure to (re)create. An existing same-named type is deleted first, but only when replace_placeholder or force allows it.",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "JSON array of field objects, exactly the shape create_struct takes: required keys name and type, optional offset as a decimal BYTE offset. field_name/fieldName, field_type/fieldType/data_type/dataType and field_offset/fieldOffset/off are accepted as alternates. Field names get the project's Hungarian prefix applied automatically.",
           "name": "fields",
           "required": true,
           "source": "body",
@@ -5272,6 +5615,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5313,6 +5657,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5343,6 +5688,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5374,6 +5720,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5414,6 +5761,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5429,12 +5777,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing structure to edit, matched across every category (no /path prefix needed).",
           "name": "struct_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Field to remove. Matched exactly first, then by Hungarian stem, so the name you originally sent still works after auto-prefixing changed it.",
           "name": "field_name",
           "required": true,
           "source": "body",
@@ -5489,6 +5839,11 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "function_address",
+            "function",
+            "oldName"
+          ],
           "description": "Function name or address to rename. Address accepts 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact function name.",
           "name": "old_name",
           "required": true,
@@ -5496,6 +5851,7 @@
           "type": "string"
         },
         {
+          "description": "New function name in PascalCase, verb first: GetPlayerHealth, not get_player_health and not PlayerHealth. An UPPERCASE module prefix is allowed and validated separately (D2COMMON_GetUnitStat). The quality gate rejects a vague verb carrying fewer than two specifier tokens (ProcessData), a single-token name (Get), a weak-noun-only name (GetInfo), and a name whose tokens are a strict subset of an existing function's within the same module prefix. strict_mode downgrades those rejections to warnings.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -5503,6 +5859,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5526,7 +5883,11 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.",
+          "aliases": [
+            "address",
+            "function_address"
+          ],
+          "description": "Address (0x<hex> / <space>:<hex>) or current symbol name to rename. May be omitted when old_name carries the symbol name, which is how the replaced rename_global_variable was called.",
           "name": "target",
           "param_type": "address",
           "required": true,
@@ -5534,6 +5895,7 @@
           "type": "string"
         },
         {
+          "description": "The name to apply. A data global should be g_ + Hungarian + descriptor (g_dwPlayerCount); a code label should be snake_case. Convention misses come back as warnings on an otherwise successful write. IMPORTANT: at a CODE address with no defined data, this ADDS a label rather than renaming one — the existing symbol survives and may stay primary, so the listing can still show the old name after a success. Call delete_label on the old name first when you meant to replace it.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -5549,7 +5911,7 @@
         },
         {
           "default": "",
-          "description": "For kind=label only: the current label name at the address.",
+          "description": "For kind=label: the current label name at the address given by target. When target is omitted this is used as the target instead, for callers migrated from rename_global_variable(old_name, new_name).",
           "name": "old_name",
           "required": false,
           "source": "body",
@@ -5557,6 +5919,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5580,6 +5943,7 @@
           "type": "string"
         },
         {
+          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_function_variables and decompile_function report, not the raw listing's.",
           "name": "variable_renames",
           "required": true,
           "source": "body",
@@ -5587,6 +5951,7 @@
         },
         {
           "default": "false",
+          "description": "Skip the batched decompiler path and rename each variable on its own via HighFunctionDBUtil. Slower, but it does not commit parameters to the database or suppress events, and it reports per-variable failures instead of losing the whole batch. Use it when the batch path fails or renames the wrong symbol; the response carries \"method\": \"individual\".",
           "name": "force_individual",
           "required": false,
           "source": "body",
@@ -5594,6 +5959,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5609,12 +5975,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name of the existing structure to resize, matched across every category (no /path prefix needed).",
           "name": "name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "New TOTAL size of the struct in bytes, not a field count. Must be positive. Growing pads with undefined filler; shrinking past a defined field is refused unless force=true.",
           "name": "new_size",
           "required": true,
           "source": "body",
@@ -5638,6 +6006,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5653,6 +6022,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Simple name to look for duplicates of (no /path prefix) — every category is searched for that name.",
           "name": "type_name",
           "required": true,
           "source": "body",
@@ -5668,6 +6038,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5684,6 +6055,7 @@
       "params": [
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5699,6 +6071,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Script to run. Searched in ~/ghidra_scripts, <cwd>/ghidra_scripts and ./ghidra_scripts, then tried as an absolute path. A name with no dot in it is tried with .java, then .py, then bare.",
           "name": "script_name",
           "required": true,
           "source": "body",
@@ -5706,6 +6079,7 @@
         },
         {
           "default": "",
+          "description": "Arguments handed to the script, split on WHITESPACE into a String[]. There is no quoting, so an argument containing a space arrives as two arguments.",
           "name": "args",
           "required": false,
           "source": "body",
@@ -5713,6 +6087,7 @@
         },
         {
           "default": "300",
+          "description": "Wall-clock limit for the run in SECONDS: 1 to 1800, default 300. A value outside that range is REJECTED, not clamped.",
           "name": "timeout_seconds",
           "required": false,
           "source": "body",
@@ -5720,6 +6095,7 @@
         },
         {
           "default": "true",
+          "description": "Return the script's console output in the response. Set false for scripts that emit large volumes of console text you do not need -- the script still runs and 'success' is still reported, but 'console_output' is omitted and 'output_captured' is false. Output of a FAILED script is always returned regardless, so a failure is never silent.",
           "name": "capture_output",
           "required": false,
           "source": "body",
@@ -5743,6 +6119,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Complete Java source for a GhidraScript, as one string — not a bare statement. If it declares `public class X` that name is used for the file; otherwise a unique McpInline_<hex> class name is generated. The source is written into ~/ghidra_scripts and compiled by Ghidra, so a compile error surfaces as script output rather than as a request error.",
           "name": "code",
           "required": true,
           "source": "body",
@@ -5750,6 +6127,7 @@
         },
         {
           "default": "",
+          "description": "Arguments handed to the script, split on WHITESPACE into a String[]. There is no quoting, so an argument containing a space arrives as two arguments.",
           "name": "args",
           "required": false,
           "source": "body",
@@ -5838,6 +6216,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -5845,6 +6224,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -5877,6 +6257,7 @@
         },
         {
           "default": "0",
+          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -5884,6 +6265,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -5915,6 +6297,7 @@
         },
         {
           "default": "0",
+          "description": "Number of matching functions to skip before this page starts; 0 begins at the first. Negative values are clamped to 0.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -5922,6 +6305,7 @@
         },
         {
           "default": "1000",
+          "description": "Maximum functions returned in this page (default 1000). 0 returns an EMPTY page rather than everything — page with offset against the `total` the response reports.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -5929,6 +6313,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6017,6 +6402,7 @@
         },
         {
           "default": "0",
+          "description": "Number of matches to skip before this page starts; 0 begins at the first. Applied after every filter and the sort.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -6024,6 +6410,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum matches returned in this page (default 100). This endpoint slices directly, so 0 returns an EMPTY page rather than everything — page with offset against the `total` the response reports.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -6104,6 +6491,7 @@
         },
         {
           "default": "4",
+          "description": "Ignore strings shorter than this many CHARACTERS of decoded text (not bytes on disk). Default 4 drops one- to three-character fragments.",
           "name": "min_length",
           "required": false,
           "source": "query",
@@ -6111,7 +6499,7 @@
         },
         {
           "default": "",
-          "description": "String encoding filter (omit for all encodings)",
+          "description": "Label echoed back in each match's `encoding` field. It does NOT filter: every defined string is searched whatever you pass here, and matches that carry no value report the literal string `ascii`.",
           "name": "encoding",
           "required": false,
           "source": "query",
@@ -6119,6 +6507,7 @@
         },
         {
           "default": "0",
+          "description": "Number of matches to skip before this page starts; 0 begins at the first match. Applied after the regex and min_length filters.",
           "name": "offset",
           "required": false,
           "source": "query",
@@ -6126,6 +6515,7 @@
         },
         {
           "default": "100",
+          "description": "Maximum matches returned in this page (default 100). `total` in the response reports how many matched before paging. Unlike the paged list endpoints, 0 here returns an EMPTY page rather than everything.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -6148,18 +6538,21 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it. The GUI plugin answers that this operation needs headless mode.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Server user whose access is being set. The repository ACL is read, this one entry replaced or appended, and every other user preserved.",
           "name": "user",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Numeric Ghidra access level: 0 no access, 1 read only, 2 read/write, 3 admin. Defaults to 1.",
           "name": "accessLevel",
           "required": false,
           "source": "body",
@@ -6174,12 +6567,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Folder to walk recursively, terminating every checkout under it. Defaults to / — the whole repository or project.",
           "name": "path",
           "required": false,
           "source": "body",
@@ -6194,24 +6589,28 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Path of the file whose checkout is being terminated.",
           "name": "path",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Numeric checkout id to terminate, as /server/checkouts reports it. Headless mode only, and defaults to 0 when absent; the GUI plugin terminates by path alone.",
           "name": "checkoutId",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Alternative spelling of checkoutId, read only when checkoutId is absent.",
           "name": "checkout_id",
           "required": false,
           "source": "body",
@@ -6233,12 +6632,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Server username. Omit to fall back to Ghidra's stored PasswordPrompt.Name, then to the OS user name.",
           "name": "username",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Server password. Required — the call is refused without it.",
           "name": "password",
           "required": false,
           "source": "body",
@@ -6253,6 +6654,7 @@
       "method": "GET",
       "params": [
         {
+          "description": "Folder to list checkouts under. Defaults to / — everything.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -6263,22 +6665,9 @@
     },
     {
       "category": "server",
-      "description": "Connect to a Ghidra server",
+      "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.",
       "method": "POST",
-      "params": [
-        {
-          "name": "host",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "name": "port",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        }
-      ],
+      "params": [],
       "path": "/server/connect"
     },
     {
@@ -6301,6 +6690,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Name for the new repository. Headless mode only; the GUI plugin refuses and points at Ghidra's Project Manager.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -6315,12 +6705,14 @@
       "method": "GET",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
           "type": "string"
         },
         {
+          "description": "Path of the file to describe. Required.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -6335,12 +6727,14 @@
       "method": "GET",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
           "type": "string"
         },
         {
+          "description": "Folder to list. Defaults to / — the repository or project root.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -6362,24 +6756,28 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Path of the not-yet-versioned file to add.",
           "name": "path",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Check-in comment recorded for the initial version. Defaults to a generic Added via GhidraMCP.",
           "name": "comment",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Accepted but not read on this route — neither handler passes it through. Use /server/version_control/checkin, where it does apply.",
           "name": "keepCheckedOut",
           "required": false,
           "source": "body",
@@ -6394,24 +6792,28 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Path of the checked-out file to check in.",
           "name": "path",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Check-in comment recorded on the new version. Defaults to a generic Checked in via GhidraMCP.",
           "name": "comment",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "True keeps the file checked out after the version lands, so you can keep editing. False (the default) releases the checkout.",
           "name": "keepCheckedOut",
           "required": false,
           "source": "body",
@@ -6426,12 +6828,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Path of the versioned file to check out.",
           "name": "path",
           "required": false,
           "source": "body",
@@ -6446,12 +6850,14 @@
       "method": "POST",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Path of the checked-out file to release. Any local changes not checked in are discarded.",
           "name": "path",
           "required": false,
           "source": "body",
@@ -6466,12 +6872,14 @@
       "method": "GET",
       "params": [
         {
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
           "type": "string"
         },
         {
+          "description": "Path of the versioned file whose history to return.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -6496,6 +6904,7 @@
         },
         {
           "default": "",
+          "description": "Bookmark category, free text; empty or omitted becomes the literal `Note`. An existing bookmark at this address in the SAME category is replaced, while a different category adds a second bookmark. Everything here is created under Ghidra's Note bookmark type.",
           "name": "category",
           "required": false,
           "source": "body",
@@ -6503,6 +6912,7 @@
         },
         {
           "default": "",
+          "description": "Bookmark text. Empty is allowed and stores an empty comment.",
           "name": "comment",
           "required": false,
           "source": "body",
@@ -6575,6 +6985,10 @@
           "type": "string"
         },
         {
+          "aliases": [
+            "noReturn"
+          ],
+          "description": "True marks the function non-returning: its call sites become CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing execution continuing past the call. False clears that back to an ordinary returning function. Required — there is no default.",
           "name": "no_return",
           "required": true,
           "source": "body",
@@ -6582,6 +6996,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6605,6 +7020,7 @@
           "type": "string"
         },
         {
+          "description": "Full C signature as one string, e.g. int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed and then discarded — it does NOT rename the function, call rename_function for that. A calling convention written here is only recognised before the first '(', so one inside a callback parameter type survives untouched.",
           "name": "prototype",
           "required": true,
           "source": "body",
@@ -6612,6 +7028,7 @@
         },
         {
           "default": "",
+          "description": "Convention to apply — __cdecl, __stdcall, __fastcall, __thiscall and whatever else list_calling_conventions reports for this program's language. When set it OVERRIDES the convention written into the prototype string; omit to use whatever the prototype says.",
           "name": "calling_convention",
           "required": false,
           "source": "body",
@@ -6650,6 +7067,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6673,6 +7091,9 @@
           "type": "string"
         },
         {
+          "aliases": [
+            "thisType"
+          ],
           "description": "Class type for this, e.g. 'MyWidget *' or 'MyWidget'. The base struct name becomes the function's class.",
           "name": "this_type",
           "required": true,
@@ -6748,6 +7169,14 @@
           "required": false,
           "source": "body",
           "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.",
+          "name": "allow_evict",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
         }
       ],
       "path": "/set_global"
@@ -6767,6 +7196,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6812,6 +7242,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6851,6 +7282,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6862,7 +7294,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Set variable storage location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "POST",
       "params": [
         {
@@ -6874,12 +7306,14 @@
           "type": "string"
         },
         {
+          "description": "Local or parameter to address, matched by exact name against the function's variables.",
           "name": "variable_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "Storage specification: a location followed by a size in bytes, e.g. Stack[-0x10]:4, EBP:4, EAX:4. The response echoes it as requested_storage next to the variable's current_storage.",
           "name": "storage",
           "required": true,
           "source": "body",
@@ -6887,6 +7321,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6902,6 +7337,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Entry address of the function that owns the variable. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use get_address_spaces first on targets that are not address-space-agnostic.",
           "name": "function_address",
           "param_type": "address",
           "required": true,
@@ -6909,12 +7345,17 @@
           "type": "string"
         },
         {
+          "aliases": [
+            "parameter_name"
+          ],
+          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_function_variables lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
           "name": "variable_name",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "description": "New data type, resolved recursively (pointer chains, array syntax such as dword[8], existing struct/enum names). A type starting with `undefined` is REJECTED whatever the current type is — swapping one undefined width for another is a no-op, not documentation. For 'this', a bare struct name is auto-suffixed with ' *'.",
           "name": "new_type",
           "required": true,
           "source": "body",
@@ -6922,6 +7363,7 @@
         },
         {
           "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6952,6 +7394,7 @@
           "type": "string"
         },
         {
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": true,
           "source": "query",
@@ -6976,6 +7419,7 @@
         },
         {
           "default": "0",
+          "description": "Size of the structure in BYTES, or 0 (the default) to take the size from the data already applied at struct_address. Must be 0 to 65536.",
           "name": "struct_size",
           "required": false,
           "source": "body",
@@ -7014,6 +7458,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only — it moves a CodeBrowser window.",
           "name": "address",
           "required": false,
           "source": "body",
@@ -7028,6 +7473,7 @@
       "method": "POST",
       "params": [
         {
+          "description": "DomainFile path of the program to open, e.g. /Vanilla/1.13c/D2Common.dll. GUI mode only.",
           "name": "path",
           "required": false,
           "source": "body",

@@ -3113,6 +3113,24 @@ public class FunctionService {
 
                 String funcName = func.getName();
                 long bodySize = func.getBody().getNumAddresses();
+
+                // FunctionManagerDB.doRemoveFunction iterates the function's own
+                // tag set (a live HashMap-backed view) while removing tags from
+                // that same set, throwing ConcurrentModificationException on any
+                // tagged function -- confirmed via HashMap$KeyIterator.next <-
+                // FunctionManagerDB.doRemoveFunction <- FunctionSymbol.delete <-
+                // FunctionManagerDB.removeFunction. Detach the tags ourselves
+                // first into a detached snapshot so removeFunction has nothing
+                // left to iterate; func.removeTag(name) is the same call
+                // removeFunctionTag already uses for this.
+                List<String> detachedTags = new ArrayList<>();
+                for (FunctionTag tag : new ArrayList<>(func.getTags())) {
+                    detachedTags.add(tag.getName());
+                }
+                for (String tagName : detachedTags) {
+                    func.removeTag(tagName);
+                }
+
                 program.getFunctionManager().removeFunction(addr);
 
                 Map<String, Object> delResult = new LinkedHashMap<>();
@@ -3120,6 +3138,7 @@ public class FunctionService {
                 delResult.putAll(ServiceUtils.addressToJson(addr, program));
                 delResult.put("deleted_function", funcName);
                 delResult.put("body_size", bodySize);
+                delResult.put("detached_tags", detachedTags);
                 delResult.put("message", "Function '" + funcName + "' deleted at " + addr);
                 resultData.set(delResult);
                 return null;

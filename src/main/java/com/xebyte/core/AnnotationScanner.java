@@ -5,6 +5,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -36,9 +37,46 @@ public class AnnotationScanner {
     private static final Logger LOG = Logger.getLogger(AnnotationScanner.class.getName());
     private static final String NO_DEFAULT = Param.NO_DEFAULT;
 
+    /**
+     * Fallback used only by the constructors that predate {@link ThreadingStrategy}
+     * support (kept so existing callers and offline test fixtures compile
+     * unchanged). Runs directly on the calling thread with no EDT dispatch and
+     * no locking -- adequate for single-threaded offline scanning, never used
+     * by the real plugin or headless server, both of which always pass their
+     * own strategy through the three-argument constructor below.
+     */
+    private static final ThreadingStrategy DIRECT_NO_LOCK = new ThreadingStrategy() {
+        @Override
+        public <T> T executeRead(Callable<T> action) throws Exception {
+            return action.call();
+        }
+
+        @Override
+        public <T> T executeWrite(Program program, String txName, Callable<T> action) throws Exception {
+            if (program == null) {
+                throw new IllegalArgumentException("Program cannot be null for write operations");
+            }
+            int tx = program.startTransaction(txName);
+            boolean success = false;
+            try {
+                T result = action.call();
+                success = true;
+                return result;
+            } finally {
+                program.endTransaction(tx, success);
+            }
+        }
+
+        @Override
+        public boolean isHeadless() {
+            return true;
+        }
+    };
+
     private final List<EndpointDef> endpoints = new ArrayList<>();
     private final List<ToolDescriptor> descriptors = new ArrayList<>();
     private final ProgramProvider programProvider;
+    private final ThreadingStrategy threadingStrategy;
 
     /**
      * Scan the given service instances for {@link McpTool}-annotated methods.
@@ -46,7 +84,7 @@ public class AnnotationScanner {
      * @param services service objects to scan (e.g., ListingService, FunctionService, ...)
      */
     public AnnotationScanner(Object... services) {
-        this(null, services);
+        this(null, DIRECT_NO_LOCK, services);
     }
 
     /**
@@ -56,7 +94,24 @@ public class AnnotationScanner {
      * @param services        service objects to scan
      */
     public AnnotationScanner(ProgramProvider programProvider, Object... services) {
+        this(programProvider, DIRECT_NO_LOCK, services);
+    }
+
+    /**
+     * Scan the given service instances for {@link McpTool}-annotated methods.
+     *
+     * @param programProvider  provider for resolving programs (enables dry-run support)
+     * @param threadingStrategy strategy the dry-run wrapper uses to run the wrapped
+     *                          write on the same thread Ghidra's own threading model
+     *                          requires (the Swing EDT in GUI mode); pass the same
+     *                          instance the scanned services themselves were built
+     *                          with, e.g. {@link SwingThreadingStrategy}
+     * @param services          service objects to scan
+     */
+    public AnnotationScanner(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
+            Object... services) {
         this.programProvider = programProvider;
+        this.threadingStrategy = threadingStrategy != null ? threadingStrategy : DIRECT_NO_LOCK;
         for (Object service : services) {
             scanService(service);
         }
@@ -181,13 +236,29 @@ public class AnnotationScanner {
                 if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
                     Program program = resolveProgramForDryRun(bindings, query, body);
                     if (program != null) {
-                        int tx = program.startTransaction("[DRY RUN] " + tool.path());
-                        try {
-                            Response result = (Response) method.invoke(service, args);
-                            return wrapDryRunResponse(result);
-                        } finally {
-                            program.endTransaction(tx, false); // Always rollback
-                        }
+                        // The transaction must be opened on the same thread Ghidra's
+                        // threading model actually runs the write on -- the Swing EDT
+                        // in GUI mode. Opening it directly here left it on the calling
+                        // HTTP thread, while the wrapped service method's own
+                        // threadingStrategy.executeWrite dispatched the real work to
+                        // the EDT through a SEPARATE SwingUtilities.invokeAndWait,
+                        // nesting a transaction opened by one thread inside one opened
+                        // by another. That mismatched-thread nesting threw its own
+                        // ConcurrentModificationException on every dry run, independent
+                        // of any bug in the wrapped method itself. Routing the whole
+                        // thing through executeWrite keeps every transaction on one
+                        // thread: the service method's own executeWrite call sees it is
+                        // already on the EDT and just nests its transaction in place,
+                        // no second dispatch.
+                        return threadingStrategy.executeWrite(program, "[DRY RUN] " + tool.path(), () -> {
+                            int tx = program.startTransaction("[DRY RUN] " + tool.path());
+                            try {
+                                Response result = (Response) method.invoke(service, args);
+                                return wrapDryRunResponse(result);
+                            } finally {
+                                program.endTransaction(tx, false); // Always rollback
+                            }
+                        });
                     }
                 }
 
