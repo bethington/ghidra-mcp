@@ -111,8 +111,13 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // Start the HTTP server
         startServer();
 
-        // Keep running until interrupted
-        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+        // Through Ghidra's registry, not Runtime: a plain JVM hook runs concurrently
+        // with Ghidra's own, which dispose the program databases (a save then fails
+        // "File is read-only") and shut down logging. Not ShutdownPriority.FIRST:
+        // ShutdownHook.compareTo subtracts priorities, and Integer.MIN_VALUE minus
+        // DISPOSE_DATABASES overflows, so FIRST actually sorts after the disposers.
+        ghidra.framework.ShutdownHookRegistry.addShutdownHook(this::stop,
+                ghidra.framework.ShutdownPriority.DISPOSE_DATABASES.before());
 
         System.out.println("GhidraMCP Headless Server v" + VERSION + " running on port " + port);
         System.out.println("Press Ctrl+C to stop");
