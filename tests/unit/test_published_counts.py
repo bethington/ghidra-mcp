@@ -473,23 +473,42 @@ class TestReleaseNotesCannotInventANumber(unittest.TestCase):
     of a file deleted three weeks earlier was softened with ``|| echo "0"``.
     """
 
+    # Both workflows publish a page with a tool count on it. pre-release.yml
+    # once read a different key with `|| echo "unknown"` -- the same softened
+    # read that produced v6.0.0's number, one workflow over.
+    PUBLISHING_WORKFLOWS = (".github/workflows/release.yml", ".github/workflows/pre-release.yml")
+
     def test_release_workflow_uses_release_counts_without_a_default(self):
-        text = _read(".github/workflows/release.yml")
-        self.assertIn(
-            "tools.audit_server_scope --release-counts",
+        for path in self.PUBLISHING_WORKFLOWS:
+            with self.subTest(workflow=path):
+                text = _read(path)
+                self.assertIn(
+                    "tools.audit_server_scope --release-counts",
+                    text,
+                    f"{path} no longer derives its counts from the catalog.",
+                )
+                for line in text.splitlines():
+                    if "--release-counts" not in line:
+                        continue
+                    self.assertNotRegex(
+                        line.strip(),
+                        r"\|\|\s*(echo|true|:)",
+                        f"release-counts line has a fallback default: {line.strip()}\n"
+                        f"A suppressed read error must fail the release, not become a "
+                        f"plausible number.",
+                    )
+
+    def test_prerelease_notes_name_the_wheel_that_ships(self):
+        """The wheel keeps pyproject's version (7.0.0), not the pre-release label
+        (7.0.0-rc.1), so an install line built from the label names a file that
+        was never attached. The notes must use the built file's real name."""
+        text = _read(".github/workflows/pre-release.yml")
+        self.assertNotIn(
+            "ghidra_mcp_bridge-${VERSION}",
             text,
-            "release.yml no longer derives its counts from the catalog.",
+            "pre-release notes build the wheel filename from the pre-release "
+            "label; the attached wheel carries pyproject's version instead.",
         )
-        for line in text.splitlines():
-            if "--release-counts" not in line:
-                continue
-            self.assertNotRegex(
-                line.strip(),
-                r"\|\|\s*(echo|true|:)",
-                f"release-counts line has a fallback default: {line.strip()}\n"
-                f"A suppressed read error must fail the release, not become a "
-                f"plausible number.",
-            )
 
 
 if __name__ == "__main__":
