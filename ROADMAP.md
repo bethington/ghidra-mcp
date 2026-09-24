@@ -259,10 +259,9 @@ ignored — it has been decided.
 - **Prose responses from any endpoint.** Everything returns JSON as of 7.0.0.
   Tooling that parsed stdout as English needs to read the envelope.
 - **Supporting multiple Ghidra versions at once.** The project targets one
-  Ghidra release at a time (currently **12.1.2**, tracked in `pom.xml` and
+  Ghidra release at a time (currently **12.1.3**, tracked in `pom.xml` and
   pinned in the three CI workflows). A new Ghidra release is a retarget, not a
-  compatibility matrix. A 12.1.3 retarget is proposed in community PR #447 and
-  has not landed; until it does, 12.1.2 is what this project supports.
+  compatibility matrix.
 - **A GUI, web dashboard, or IDE plugin shipped from this repository.** The
   product is an MCP server. Clients are other people's software.
 - **Game-specific or corpus-specific tooling.** Anything that only makes sense
