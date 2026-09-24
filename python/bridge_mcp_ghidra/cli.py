@@ -284,7 +284,10 @@ def main():
         mcp.settings.port = args.mcp_port
 
     _host = args.mcp_host
-    if _host not in _LOOPBACK_HOSTS:
+    _has_extra_hosts = any(
+        host.strip() for host in os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "").split(",")
+    )
+    if _host not in _LOOPBACK_HOSTS or _has_extra_hosts:
         # Wildcard bind is the MOST exposed configuration — keep
         # DNS-rebinding protection ON and allow only the machine's actual
         # hostnames/IPs. Previously this branch disabled protection
