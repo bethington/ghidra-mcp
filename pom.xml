@@ -499,8 +499,8 @@
                             <additionalClasspathElements>
                                 <!-- Framework/Generic/lib -->
                                 <!-- log4j: DefaultLanguageService.<clinit> -> LogManager. -->
-                                <element>${ghidra.generic.lib}/log4j-api-2.25.4.jar</element>
-                                <element>${ghidra.generic.lib}/log4j-core-2.25.4.jar</element>
+                                <element>${ghidra.generic.lib}/log4j-api-2.26.1.jar</element>
+                                <element>${ghidra.generic.lib}/log4j-core-2.26.1.jar</element>
                                 <!-- guava: SleighLanguage's caches -> com.google.common.collect.BiMap. -->
                                 <element>${ghidra.generic.lib}/guava-32.1.3-jre.jar</element>
                                 <!-- failureaccess is guava's declared runtime companion. The current
