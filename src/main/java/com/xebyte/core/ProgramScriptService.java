@@ -1783,7 +1783,19 @@ public class ProgramScriptService {
             return;
         }
         if (tool == null) {
-            closeProgram(filePath, false);
+            // Headless: close exactly this file, the same rule the GUI branch
+            // below uses. Not closeProgram(filePath, false) -- its matcher falls
+            // back to a SUBSTRING test and closes every hit, and the headless
+            // provider's close is a bare release with no save, so deleting
+            // /x/a.dll would also close /x/a.dll.orig and discard its unsaved
+            // edits while still reporting success.
+            for (Program prog : programProvider.getAllOpenPrograms()) {
+                ghidra.framework.model.DomainFile df = prog.getDomainFile();
+                if (df != null && df.getPathname().equalsIgnoreCase(filePath)) {
+                    programProvider.closeProgram(prog);
+                    return;
+                }
+            }
             return;
         }
         // Close paths must NEVER spawn a CodeBrowser — there is nothing useful

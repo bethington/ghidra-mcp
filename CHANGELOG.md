@@ -1532,6 +1532,9 @@ load-bearing: removing it turns 7 passing tests into 7 errors.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
 - **`list_project_files`, `create_folder`, and `delete_file` failed in headless mode with `"requires GUI mode"`.**
   Now routed through `resolveProject()` to operate across GUI, FrontEnd, and headless modes alike.
+  Headless `delete_file` closes the program it deletes by **exact** path: the first cut
+  went through `close_program`'s substring matcher, which would also close (and, headless,
+  discard the unsaved edits of) any open program whose path merely contained the target.
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
 - **A non-loopback HTTP bridge approved a browser's preflight and then refused
