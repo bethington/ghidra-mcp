@@ -662,10 +662,25 @@ public class HeadlessProgramProvider implements ProgramProvider {
     }
 
     /**
-     * Close all open programs.
+     * Save modified programs, then close all open programs.
      */
     public void closeAllPrograms() {
         for (Program program : openPrograms.values()) {
+            // Runs on shutdown (SIGTERM from systemd included) and on project
+            // switch; release() alone would silently discard every unsaved edit.
+            // Saving lands in the local working copy only -- checkin stays explicit.
+            if (program.isChanged()) {
+                if (program.canSave()) {
+                    try {
+                        program.save("saved on close", monitor);
+                    } catch (Exception e) {
+                        Msg.error(this, "Unsaved changes LOST in " + program.getName() + ": " + e.getMessage());
+                    }
+                } else {
+                    Msg.error(this, "Unsaved changes LOST in " + program.getName()
+                            + ": opened read-only (check it out to keep edits)");
+                }
+            }
             try {
                 program.release(this);
             } catch (Exception e) {
