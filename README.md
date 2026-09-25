@@ -151,6 +151,10 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    needed, installs the extension, starts Ghidra, waits for MCP health, and runs
    schema smoke checks.
 
+   Prefer to click through Ghidra's own dialogs, or installing a release zip on
+   a machine without the repo? Follow the illustrated
+   [manual GUI install guide](docs/INSTALL_GUI.md).
+
 4. **Optional strict/manual mode** (advanced):
 
    ```text
@@ -301,7 +305,8 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    /opt/homebrew/opt/ghidra/libexec/ghidraRun
    ```
 
-   In the main project window: **Tools > GhidraMCP > Start MCP Server**
+   The server starts with the plugin. Check it from the project window:
+   **Tools > GhidraMCP > Server Status**
 
 6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`) — use the **absolute
    path** to `uv` (`which uv`), not the bare name; GUI-launched clients do not
@@ -599,10 +604,12 @@ Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so th
 #### In Ghidra
 
 1. Start Ghidra and open a **CodeBrowser** window
-2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
+2. In **CodeBrowser**, enable the plugin via **File > Configure > Utility > Configure > GhidraMCPPlugin**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
-4. Start the server via **Tools > GhidraMCP > Start MCP Server**
+4. The server starts with the plugin; check it via **Tools > GhidraMCP > Server Status** in the project window
 5. The server runs on `http://127.0.0.1:8089/` by default
+
+Screenshots of every step: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 
 #### Verify It's Working
 
@@ -730,8 +737,10 @@ path is the smaller and more portable fix.
 **Solution:**
 
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
-2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
+2. Enable the plugin: **File > Configure > Utility > Configure > GhidraMCPPlugin** (check the box)
 3. **Restart Ghidra** after installation/enabling
+
+Illustrated walkthrough: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 
 ### Server not responding / Connection refused
 
@@ -739,7 +748,7 @@ path is the smaller and more portable fix.
 
 **Solution:**
 
-1. Ensure you started the server: **Tools > GhidraMCP > Start MCP Server**
+1. Check the server state: **Tools > GhidraMCP > Server Status** (it starts with the plugin; use **Restart Server** if it is stopped)
 2. Check configured port: **Edit > Tool Options > GhidraMCP HTTP Server**
 3. Check if port is in use:
 
@@ -832,8 +841,10 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 **Solution:**
 
-1. Manual install location: `~/.ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
-2. Or use: **File > Install Extensions > Add** and select the ZIP file
+1. Manual install location: `~/.config/ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+   (`%APPDATA%\ghidra\...` on Windows, `~/Library/ghidra/...` on macOS)
+2. Or use: **File > Install Extensions > Add** and select the ZIP file — see the
+   [illustrated guide](docs/INSTALL_GUI.md)
 3. Ensure JAR/ZIP was built for your Ghidra version
 
 ### Build fails with "Ghidra dependencies not found"

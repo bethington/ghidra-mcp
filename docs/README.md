@@ -7,6 +7,8 @@ release notes for Ghidra MCP.
 
 - Start in the repo root `README.md` for installation, build, and day-to-day
   usage.
+- Read [INSTALL_GUI.md](INSTALL_GUI.md) to install the extension through
+  Ghidra's own dialogs, with a screenshot of every step.
 - Read `PROJECT_STRUCTURE.md` for the current layout of the codebase and where
   major subsystems live.
 - Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
@@ -34,6 +36,8 @@ release notes for Ghidra MCP.
 ```text
 docs/
 ├── README.md
+├── INSTALL_GUI.md
+├── images/install/
 ├── PROJECT_STRUCTURE.md
 ├── NAMING_CONVENTIONS.md
 ├── HUNGARIAN_NOTATION.md
