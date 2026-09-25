@@ -87,7 +87,7 @@ test = [
 # Standalone debugger server + Ghidra TraceRmi backend (Windows-only bits).
 debugger = [
     "pybag==2.2.16 ; sys_platform == 'win32'",
-    "comtypes==1.4.16 ; sys_platform == 'win32'",
+    "comtypes==1.4.17 ; sys_platform == 'win32'",
     "protobuf>=7.35.1",
 ]
 dev = [
