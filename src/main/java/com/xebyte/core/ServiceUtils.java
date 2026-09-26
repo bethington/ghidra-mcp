@@ -591,6 +591,212 @@ public final class ServiceUtils {
     }
 
     // ========================================================================
+    // Language variants
+    // ========================================================================
+
+    /**
+     * One selectable SLEIGH language variant for a program's
+     * processor/endian/size, as Ghidra's language picker would list it.
+     */
+    public record VariantChoice(String variant, String languageId, String description) {}
+
+    /**
+     * Memoized variant buckets, keyed by the program's own language id.
+     *
+     * <p>Walking Ghidra's language table is cheap but not free, and
+     * {@code /decompile_function} is among the hottest endpoints in the server.
+     * The key is safe because a program's language id is fixed for as long as it
+     * describes that program: changing the language (Set Language, or a
+     * re-import) yields a different id and therefore a different cache entry.
+     */
+    private static final Map<String, List<VariantChoice>> VARIANT_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Every language variant Ghidra offers for this program's processor at the
+     * <em>same</em> endian and size, plus the variant the program is actually
+     * loaded under.
+     *
+     * <p>Endian and size are held fixed on purpose. Those two columns come off
+     * the file header and the loader gets them right; the variant column is the
+     * one it guesses. Widening the bucket to every language sharing a processor
+     * would offer a 32-bit program a set of 64-bit answers and turn a precise
+     * question into a menu.
+     *
+     * <p>The loaded variant is unioned in because {@code getLanguageDescriptions(false)}
+     * omits deprecated languages: without it, a program imported under a
+     * deprecated or since-removed processor module would be refused with no legal
+     * answer available.
+     */
+    public static List<VariantChoice> languageVariantChoices(Program program) {
+        if (program == null) return List.of();
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return List.of();
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld == null) return List.of();
+        String languageId = lang.getLanguageID().getIdAsString();
+
+        return VARIANT_CACHE.computeIfAbsent(languageId, key -> {
+            List<VariantChoice> found = new ArrayList<>();
+            try {
+                ghidra.program.model.lang.LanguageService svc =
+                        ghidra.program.util.DefaultLanguageService.getLanguageService();
+                String processor = String.valueOf(ld.getProcessor());
+                for (ghidra.program.model.lang.LanguageDescription d :
+                        svc.getLanguageDescriptions(false)) {
+                    if (!processor.equals(String.valueOf(d.getProcessor()))) continue;
+                    if (!Objects.equals(d.getEndian(), ld.getEndian())) continue;
+                    if (d.getSize() != ld.getSize()) continue;
+                    found.add(new VariantChoice(d.getVariant(),
+                            d.getLanguageID().getIdAsString(), d.getDescription()));
+                }
+            } catch (Throwable t) {
+                // A processor module that cannot enumerate must not take the
+                // decompiler down with it. Falling through to the single loaded
+                // variant degrades this gate to a no-op, which is the correct
+                // direction to fail: a refusal with no legal answer would be worse
+                // than no gate at all.
+                Msg.warn(ServiceUtils.class,
+                        "Could not enumerate language variants for " + key + ": " + t);
+            }
+
+            String loaded = LanguageVariants.normalize(ld.getVariant());
+            boolean hasLoaded = false;
+            for (VariantChoice c : found) {
+                if (loaded.equalsIgnoreCase(LanguageVariants.normalize(c.variant()))) {
+                    hasLoaded = true;
+                    break;
+                }
+            }
+            if (!hasLoaded) {
+                found.add(new VariantChoice(ld.getVariant(), key, ld.getDescription()));
+            }
+
+            // "default" first, then alphabetical. Deterministic ordering keeps the
+            // refusal text stable across calls, which matters when the refusal is
+            // the thing a caller is expected to read and act on.
+            found.sort((a, b) -> {
+                String ka = LanguageVariants.key(a.variant());
+                String kb = LanguageVariants.key(b.variant());
+                int ra = "default".equals(ka) ? 0 : 1;
+                int rb = "default".equals(kb) ? 0 : 1;
+                return ra != rb ? Integer.compare(ra, rb) : ka.compareTo(kb);
+            });
+            return List.copyOf(found);
+        });
+    }
+
+    /** The variant a program is loaded under, or "" when it cannot be determined. */
+    public static String loadedVariant(Program program) {
+        if (program == null) return "";
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return "";
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        return ld == null ? "" : LanguageVariants.normalize(ld.getVariant());
+    }
+
+    /** Just the variant names from {@link #languageVariantChoices}. */
+    public static List<String> languageVariantNames(Program program) {
+        List<String> names = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) names.add(c.variant());
+        return names;
+    }
+
+    /** The variant candidates rendered for a JSON response body. */
+    public static List<Map<String, Object>> languageVariantsAsJson(Program program) {
+        String loaded = loadedVariant(program);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("variant", c.variant());
+            m.put("language_id", c.languageId());
+            m.put("description", c.description());
+            m.put("loaded", loaded.equalsIgnoreCase(LanguageVariants.normalize(c.variant())));
+            out.add(m);
+        }
+        return out;
+    }
+
+    /**
+     * The variant gate every decompile tool runs before producing output.
+     * Returns {@code null} when the call may proceed, or a structured rejection
+     * naming the candidates and the remedy.
+     *
+     * <p>Shared rather than copied, for the same reason the eviction guard is
+     * shared across its three writers: a rule that only one entry point enforces
+     * is a rule the next tool in the chain steps around. Four endpoints return
+     * decompiler-produced C to a caller — /decompile_function, /force_decompile,
+     * /analyze_function_complete, /analyze_for_documentation — and all four
+     * consult this check. Endpoints that merely decompile internally to derive a
+     * score or a field-usage map (/analyze_function_completeness,
+     * /analyze_struct_field_usage) do not: they hand back no pseudocode, so there
+     * is nothing for a caller to misread as verified output.
+     *
+     * @see LanguageVariants for the decision table and why it is a refusal rather
+     *      than a warning field
+     */
+    public static Response variantGate(Program program, String requestedVariant) {
+        Map<String, Object> rejection = variantRejectionData(program, requestedVariant);
+        return rejection == null ? null : Response.ok(rejection);
+    }
+
+    /**
+     * The gate's refusal as a plain map, or {@code null} when the selection is
+     * acceptable.
+     *
+     * <p>Composite tools that return pseudocode as one field among many
+     * (/analyze_function_complete, /analyze_for_documentation) embed this instead
+     * of failing the whole call: the rest of their payload is still worth having,
+     * but the pseudocode field itself must not travel unlabelled. Without that,
+     * a caller refused by /decompile_function could simply ask a composite for
+     * the same C and get it — the guard would be a speed bump rather than a rule.
+     */
+    public static Map<String, Object> variantRejectionData(Program program, String requestedVariant) {
+        if (program == null) return null;
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return null;
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld == null) return null;
+
+        String languageId = lang.getLanguageID().getIdAsString();
+        String loaded = ld.getVariant();
+        LanguageVariants.Rejection rejection = LanguageVariants.check(
+                languageId, loaded, languageVariantNames(program), requestedVariant);
+        if (rejection == null) return null;
+
+        return JsonHelper.mapOf(
+                "status", "rejected",
+                "error", rejection.error(),
+                "issue", rejection.error(),
+                "program", program.getName(),
+                "language_id", languageId,
+                "processor", String.valueOf(lang.getProcessor()),
+                "loaded_variant", loaded,
+                "available_variants", languageVariantsAsJson(program),
+                "message", rejection.message(),
+                "suggestion", rejection.suggestion());
+    }
+
+    /**
+     * Stamp the language the output was produced under onto a decompiler
+     * response.
+     *
+     * <p>Decompiled C used to travel with no record of the dialect that produced
+     * it, so a transcript full of PowerPC pseudocode could not be audited after
+     * the fact for which of eleven variants decoded it. Two fields fix that at
+     * negligible cost, and they make the gate's answer verifiable rather than
+     * merely asserted.
+     */
+    public static void putLanguageSelection(Map<String, Object> out, Program program) {
+        if (out == null || program == null) return;
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return;
+        out.put("language_id", lang.getLanguageID().getIdAsString());
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld != null) out.put("variant", ld.getVariant());
+    }
+
+    // ========================================================================
     // Program Resolution
     // ========================================================================
 

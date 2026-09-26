@@ -198,6 +198,71 @@ def current_program(server_url, server_available):
 
 
 @pytest.fixture
+def language_metadata(http_client, program_loaded):
+    """The active program's language description.
+
+    Registers and default symbols are switched off: this fixture exists for the
+    variant fields, and x86 alone would otherwise drag several hundred register
+    entries through every decompile test.
+    """
+    if not program_loaded:
+        pytest.skip("No program loaded")
+
+    response = http_client.get(
+        "/get_language_metadata",
+        params={"include_registers": "false", "include_default_symbols": "false"},
+    )
+    if response.status_code != 200:
+        pytest.skip("/get_language_metadata not available on this build")
+    try:
+        data = response.json()
+    except ValueError:
+        pytest.skip("/get_language_metadata returned non-JSON")
+    if not isinstance(data, dict) or data.get("error"):
+        pytest.skip("/get_language_metadata returned an error")
+    return data
+
+
+@pytest.fixture
+def program_variant(http_client, program_loaded):
+    """The SLEIGH variant the active program is loaded under.
+
+    The decompile endpoints refuse to answer without variant= on any processor
+    that offers more than one (PowerPC vs PowerPC VLE, and x86 at both widths), so
+    every decompile call in the suite passes this. Tests that want to exercise the gate
+    itself omit it deliberately.
+
+    Deliberately does NOT reuse the language_metadata fixture: this one must not
+    skip. A server built before the gate ignores an unknown query parameter, so
+    returning "" there keeps the ordinary decompile tests running instead of
+    silently disabling them until the plugin is redeployed.
+    """
+    if not program_loaded:
+        pytest.skip("No program loaded")
+    try:
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "false", "include_default_symbols": "false"},
+        )
+        if response.status_code != 200:
+            return ""
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return data.get("variant") or ""
+
+
+@pytest.fixture
+def variant_required(language_metadata):
+    """Whether this program's processor forces an explicit variant selection."""
+    if "variant_required" not in language_metadata:
+        pytest.skip("server predates the decompile variant gate")
+    return bool(language_metadata.get("variant_required"))
+
+
+@pytest.fixture
 def sample_function(http_client, program_loaded):
     """Get a sample function name for testing."""
     if not program_loaded:

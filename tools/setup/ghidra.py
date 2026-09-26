@@ -1287,12 +1287,51 @@ def _ensure_benchmark_function(repo_root: Path, mcp_url: str, address: str, name
     _ensure_mcp_ok("/create_function", payload)
 
 
+# Resolved SLEIGH variant per program, so the smoke path asks Ghidra once.
+_PROGRAM_VARIANT_CACHE: dict[str, str] = {}
+
+
+def _program_variant(repo_root: Path, mcp_url: str, program: str) -> str:
+    """The SLEIGH language variant `program` is loaded under.
+
+    /decompile_function refuses to answer without variant= on any processor that
+    offers more than one, which includes x86 at both widths (`default` vs
+    `System Management Mode` at 32-bit, `default` vs `compat32` at 64-bit). This
+    smoke path is verifying that the endpoint works, not deciding which dialect a
+    binary targets, so it confirms whatever the program is actually loaded as.
+    """
+    cached = _PROGRAM_VARIANT_CACHE.get(program)
+    if cached is not None:
+        return cached
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_language_metadata",
+        params={
+            "program": program,
+            "include_registers": "false",
+            "include_default_symbols": "false",
+        },
+        timeout=30,
+    )
+    _ensure_mcp_ok("/get_language_metadata", payload)
+    variant = ""
+    if isinstance(payload, dict):
+        variant = str(payload.get("variant") or "")
+    _PROGRAM_VARIANT_CACHE[program] = variant
+    return variant
+
+
 def _has_editable_variable(repo_root: Path, mcp_url: str, address: str) -> bool:
     _status, decompile_payload = _mcp_request(
         repo_root,
         mcp_url,
         "/decompile_function",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "variant": _program_variant(repo_root, mcp_url, DEFAULT_BENCHMARK_PROGRAM),
+        },
         timeout=60,
     )
     _ensure_mcp_ok("/decompile_function", decompile_payload)
@@ -1364,7 +1403,8 @@ def run_benchmark_read_test(repo_root: Path, mcp_url: str) -> None:
     read_calls = [
         ("/list_open_programs", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/search_data_types", {"program": DEFAULT_BENCHMARK_PROGRAM, "pattern": "int", "limit": 5}),
-        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address,
+                                 "variant": _program_variant(repo_root, mcp_url, DEFAULT_BENCHMARK_PROGRAM)}),
         ("/get_function_variables", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
         ("/analyze_function_completeness", {"program": DEFAULT_BENCHMARK_PROGRAM, "function_address": address}),
         ("/get_comment", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
@@ -1412,7 +1452,8 @@ def run_benchmark_extended_read_test(repo_root: Path, mcp_url: str) -> None:
         ("/list_imports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/list_exports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/list_strings", {"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 10}),
-        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address,
+                                 "variant": _program_variant(repo_root, mcp_url, DEFAULT_BENCHMARK_PROGRAM)}),
     ]
     for path, params in read_calls:
         _status, payload = _mcp_request(repo_root, mcp_url, path, params=params, timeout=60)
@@ -1508,7 +1549,14 @@ def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
         repo_root,
         mcp_url,
         "/decompile_function",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": "not-an-address"},
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": "not-an-address",
+            # The variant gate runs ahead of address resolution, so without this
+            # the call would be refused for the wrong reason and this assertion
+            # would stop testing address validation at all.
+            "variant": _program_variant(repo_root, mcp_url, DEFAULT_BENCHMARK_PROGRAM),
+        },
         timeout=30,
     )
     _expect_mcp_error("/decompile_function", payload, ("address",))
@@ -2064,7 +2112,9 @@ def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
             failures.append(f"function@{addr}.xref_count_to_min: expected >={entry['xref_count_to_min']}; got {n}")
 
     if entry.get("decompile_must_be_nonempty") or entry.get("decompile_contains"):
-        _, dec = _bench_get(repo_root, mcp_url, "/decompile_function", p_query, timeout=60)
+        dec_query = dict(p_query)
+        dec_query["variant"] = _program_variant(repo_root, mcp_url, program_path)
+        _, dec = _bench_get(repo_root, mcp_url, "/decompile_function", dec_query, timeout=60)
         dec_text = _bench_text(dec)
         if entry.get("decompile_must_be_nonempty") and not dec_text.strip():
             failures.append(f"function@{addr}.decompile_must_be_nonempty: /decompile_function returned empty")

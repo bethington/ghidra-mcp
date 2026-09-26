@@ -343,7 +343,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Composite analysis for RE documentation workflow. Pass variant= to receive decompiled_code on a processor with more than one SLEIGH variant (PowerPC vs PowerPC VLE); without it that one field is withheld and the rest of the analysis is returned as usual. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
@@ -361,6 +361,14 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "SLEIGH language variant this analysis is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. REQUIRED to receive the decompiled_code field when the program's processor offers more than one variant at its endian/size; the rest of the analysis is returned either way, with decompiled_code_withheld explaining the omission. get_language_metadata reports available_variants.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/analyze_for_documentation"
@@ -368,7 +376,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. Pass variant= to receive decompiled_code on a processor with more than one SLEIGH variant (PowerPC vs PowerPC VLE); without it that one field is withheld and the rest of the analysis is returned as usual.",
       "method": "GET",
       "params": [
         {
@@ -430,6 +438,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "SLEIGH language variant this analysis is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. REQUIRED to receive the decompiled_code field when the program's processor offers more than one variant at its endian/size; the rest of the analysis is returned either way, with decompiled_code_withheld explaining the omission. get_language_metadata reports available_variants.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -2217,7 +2233,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.",
+      "description": "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. REQUIRES variant= when the program's processor offers more than one SLEIGH variant at its endian/size (PowerPC vs PowerPC VLE, x86 vs System Management Mode): the same bytes decode into different instructions per variant, so the wrong one returns confident, wrong C. Call get_language_metadata for available_variants. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.",
       "method": "GET",
       "params": [
         {
@@ -2252,6 +2268,14 @@
           "required": false,
           "source": "query",
           "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "SLEIGH language variant this decompile is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). REQUIRED whenever the program's processor offers more than one variant at its endian/size; optional when it offers exactly one. It must name the variant the program is actually loaded under — this endpoint decodes with the program's own language and will not reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_required.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/decompile_function"
@@ -3080,7 +3104,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Force decompiler cache refresh for function. REQUIRES variant= when the program's processor offers more than one SLEIGH variant at its endian/size (PowerPC vs PowerPC VLE) — a cache flush re-runs the same language, so the wrong variant simply re-derives the same wrong C. Call get_language_metadata for available_variants. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
@@ -3095,6 +3119,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "SLEIGH language variant this decompile is meant to run under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). REQUIRED whenever the program's processor offers more than one variant at its endian/size; optional when it offers exactly one. It must name the variant the program is actually loaded under — flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_required.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3944,7 +3976,7 @@
     {
       "category": "program",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants and variant_required — the decompile tools refuse to run without variant= when more than one variant exists (PowerPC vs PowerPC VLE), and this is where you look them up. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
       "method": "GET",
       "params": [
         {
