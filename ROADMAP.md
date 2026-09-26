@@ -259,7 +259,7 @@ ignored — it has been decided.
 - **Prose responses from any endpoint.** Everything returns JSON as of 7.0.0.
   Tooling that parsed stdout as English needs to read the envelope.
 - **Supporting multiple Ghidra versions at once.** The project targets one
-  Ghidra release at a time (currently **12.1.3**, tracked in `pom.xml` and
+  Ghidra release at a time (currently **12.1.4**, tracked in `pom.xml` and
   pinned in the three CI workflows). A new Ghidra release is a retarget, not a
   compatibility matrix.
 - **A GUI, web dashboard, or IDE plugin shipped from this repository.** The
