@@ -13,8 +13,8 @@ FROM eclipse-temurin:21-jdk AS builder
 # the Ghidra release zip. A mismatch means Maven can't resolve dependencies
 # (see #183). GHIDRA_DATE must match the asset filename of the chosen
 # version on the upstream NSA/ghidra GitHub release.
-ARG GHIDRA_VERSION=12.1.3
-ARG GHIDRA_DATE=20260817
+ARG GHIDRA_VERSION=12.1.4
+ARG GHIDRA_DATE=20260921
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
