@@ -9,7 +9,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Ghidra](https://img.shields.io/badge/Ghidra-12.1.3-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
+[![Ghidra](https://img.shields.io/badge/Ghidra-12.1.4-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-6C5CE7?style=for-the-badge&logoColor=white)](https://modelcontextprotocol.io/)
 
 [![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
@@ -107,14 +107,14 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.1.3** (or compatible version)
+- **Ghidra 12.1.4** (or compatible version)
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
-> Shared Ghidra Server users: Ghidra 12.1.3 clients require a Ghidra
+> Shared Ghidra Server users: Ghidra 12.1.4 clients require a Ghidra
 > Server at 12.1, 12.0.5, or a newer compatible version. Upgrade the
 > server before using this plugin from a 12.1 client.
 >
-> Ghidra 12.1.3 ships Jython as an optional extension. Java scripts work
+> Ghidra 12.1.4 ships Jython as an optional extension. Java scripts work
 > by default, but `.py` scripts in `ghidra_scripts/` require installing
 > the Jython extension from **File > Install Extensions** and restarting
 > Ghidra.
@@ -136,15 +136,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 2. **Recommended: run environment preflight first:**
 
    ```text
-   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra:**
 
    ```text
-   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
    `deploy` saves/closes an already-running matching Ghidra instance when
@@ -160,7 +160,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```text
    # Skip automatic prerequisite setup
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
 5. **Show command help**:
@@ -230,15 +230,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 3. **Run environment preflight:**
 
    ```bash
-   python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
 
    ```bash
-   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.4_PUBLIC
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup deploy --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
    This will:
@@ -251,7 +251,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 5. **Optional: setup only Maven dependencies:**
 
    ```bash
-   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
 6. **Show command help:**
@@ -295,7 +295,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
        --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
 
-   The extension is installed to `~/Library/ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/`.
+   The extension is installed to `~/Library/ghidra/ghidra_12.1.4_PUBLIC/Extensions/GhidraMCP/`.
 
    > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
 
@@ -668,7 +668,7 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 
 When connecting to a shared Ghidra Server, GhidraMCP can suppress the password dialog automatically. It resolves credentials in this order (first non-empty value wins):
 
-Compatibility note: Ghidra 12.1.3 clients require Ghidra Server 12.1.2,
+Compatibility note: Ghidra 12.1.4 clients require Ghidra Server 12.1.2,
 12.0.5, or a newer compatible server. Older shared servers are not safe
 targets for a 12.1 client upgrade.
 
@@ -825,7 +825,7 @@ that repo, and make sure you install into and run from the same interpreter.
 
 ### Python Ghidra scripts fail with "No script provider found"
 
-**Cause:** In Ghidra 12.1.3, Jython support is no longer enabled by
+**Cause:** In Ghidra 12.1.4, Jython support is no longer enabled by
 default. `.py` scripts need the bundled Jython extension; Python 3
 scripts should use PyGhidra instead of the Ghidra Script Manager.
 
@@ -841,7 +841,7 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 **Solution:**
 
-1. Manual install location: `~/.config/ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+1. Manual install location: `~/.config/ghidra/ghidra_12.1.4_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
    (`%APPDATA%\ghidra\...` on Windows, `~/Library/ghidra/...` on macOS)
 2. Or use: **File > Install Extensions > Add** and select the ZIP file — see the
    [illustrated guide](docs/INSTALL_GUI.md)
@@ -855,7 +855,7 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 ```text
 # Windows (recommended)
-python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 ```
 
 ## 📊 Production Performance
@@ -1229,9 +1229,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ```bash
 # Recommended: direct Python-first workflow
-python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup build
-python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Version bump (updates all maintained version references atomically)
 python -m tools.setup bump-version --new X.Y.Z
@@ -1278,12 +1278,12 @@ rather than skipped. See [Testing and Release Regression](docs/TESTING.md).
 
 ```text
 # Standard first-time setup and deploy
-python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup build
-python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Preflight check before deploying
-python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Version bump and tag
 python -m tools.setup bump-version --new X.Y.Z --tag
@@ -1330,7 +1330,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 The tool enforces version consistency between:
 
 - `pom.xml` (`ghidra.version`)
-- `--ghidra-path` version segment (e.g., `ghidra_12.1.3_PUBLIC`)
+- `--ghidra-path` version segment (e.g., `ghidra_12.1.4_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
@@ -1344,12 +1344,12 @@ If you see a version mismatch error, align both values:
 Then rerun:
 
 ```text
-python -m tools.setup preflight --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup preflight --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 ```
 
 ```text
 # Windows
-python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.3_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.4_PUBLIC"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**

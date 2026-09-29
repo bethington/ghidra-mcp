@@ -46,12 +46,12 @@ In Git Bash use a **forward-slash** Ghidra path; a backslash path is mangled
 before Gradle sees it and produces ~100 misleading "package does not exist"
 errors.
 
-- Build: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"`
-- Quick compile: `./gradlew compileJava "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"`
+- Build: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Quick compile: `./gradlew compileJava "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
 - Test (Python): `pytest tests/unit/ -v --no-cov`
-- Test (Java, offline): `./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"`
-- Test (Java, all): `./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"`
-- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.3_PUBLIC`
-- Deploy: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.3_PUBLIC` — leave `TOOLS_SETUP_BACKEND` **unset** for this second step, because the Gradle backend's `deploy` runs no post-deploy test tier and refuses `--test`
+- Test (Java, offline): `./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Test (Java, all): `./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.4_PUBLIC`
+- Deploy: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.4_PUBLIC` — leave `TOOLS_SETUP_BACKEND` **unset** for this second step, because the Gradle backend's `deploy` runs no post-deploy test tier and refuses `--test`
 - Version bump: `python -m tools.setup bump-version --new X.Y.Z`
 - Maven equivalents (peer backend): `python -m tools.setup ensure-prereqs --ghidra-path <dir>` then `python -m tools.setup build`
