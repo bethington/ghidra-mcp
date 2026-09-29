@@ -5,6 +5,7 @@ Tests endpoint registration, response formats, and basic functionality.
 
 import pytest
 import json
+import requests
 from pathlib import Path
 
 
@@ -66,7 +67,7 @@ class TestEndpointRegistration:
             # Endpoint should not return 404
             assert response.status_code != 404, f"{path} returned 404 - not registered"
 
-        except Exception as e:
+        except requests.RequestException as e:
             # Connection errors are acceptable for this test
             # (server might not be running or endpoint might timeout)
             pytest.skip(f"Connection error: {e}")
