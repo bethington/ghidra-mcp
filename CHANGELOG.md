@@ -28,6 +28,10 @@ the same cycle.
   `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
+- **Doctor mode fails fast when nothing is listening.** A refused
+  `/check_connection` is not retried, and the later instance, health, schema,
+  and MCP probes are not run. Timeouts and unexpected HTTP statuses still use
+  the existing retry budget.
 
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
