@@ -46,7 +46,13 @@ from urllib.parse import urlparse
 
 from . import state
 from . import config
-from .config import ORACLE_URL, ORACLE_TOOL_NAMES, logger
+from .config import (
+    DESTRUCTIVE_TOOL,
+    ORACLE_TOOL_NAMES,
+    ORACLE_URL,
+    READ_ONLY_TOOL,
+    logger,
+)
 from .server import mcp
 from .validation import validate_server_url
 
@@ -178,7 +184,7 @@ def _oracle_request(
         conn.close()
 
 
-@_oracle_tool()
+@_oracle_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def oracle_status() -> str:
     """Check whether the live game + in-process oracle are up, and what they hold.
 
@@ -193,7 +199,7 @@ def oracle_status() -> str:
     return _oracle_request("GET", "/status")
 
 
-@_oracle_tool()
+@_oracle_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def oracle_modules() -> str:
     """List every module loaded in the LIVE game, with its RUNTIME base address.
 
@@ -214,7 +220,7 @@ def oracle_modules() -> str:
     return _oracle_request("GET", "/modules")
 
 
-@_oracle_tool()
+@_oracle_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def oracle_read_memory(module: str, rva: str, length: int = 256) -> str:
     """Read raw bytes out of the LIVE game process (no elevation, no suspend).
 
@@ -317,7 +323,7 @@ def oracle_read_memory(module: str, rva: str, length: int = 256) -> str:
     )
 
 
-@_oracle_tool()
+@_oracle_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def oracle_call_function(
     module: str,
     rva: str,
@@ -416,7 +422,7 @@ def oracle_call_function(
     )
 
 
-@_oracle_tool()
+@_oracle_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def oracle_prove_function(spec: str) -> str:
     """Differentially prove one function: call the ORIGINAL and D2MOO's REIMPL and diff.
 
