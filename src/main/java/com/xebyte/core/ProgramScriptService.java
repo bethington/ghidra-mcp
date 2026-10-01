@@ -292,7 +292,7 @@ public class ProgramScriptService {
         return getMetadata(null);
     }
 
-    @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program")
+    @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program", access = ToolAccess.READ_ONLY)
     public Response getMetadata(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -341,7 +341,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/list_option_groups",
              description = "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response listOptionGroups(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -372,7 +372,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/get_program_options",
              description = "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response getProgramOptions(
             @Param(value = "group", description = "Option group name from list_option_groups (e.g. 'Program Information', 'Analyzers').") String group,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -459,7 +459,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/set_program_option", method = "POST",
              description = "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.WRITE)
     public Response setProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name (e.g. 'Program Information'). Use list_option_groups to discover names.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name within the group.") String name,
@@ -550,7 +550,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/remove_program_option", method = "POST",
              description = "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response removeProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
@@ -603,7 +603,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/list_property_maps",
              description = "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response listPropertyMaps(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -638,7 +638,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/create_property_map", method = "POST",
              description = "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.WRITE)
     public Response createPropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
@@ -688,7 +688,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/delete_property_map", method = "POST",
              description = "Delete a user property map and all values it holds. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deletePropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
             @Param(value = "program", defaultValue = "",
@@ -732,7 +732,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/set_property", method = "POST",
              description = "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.WRITE)
     public Response setProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name (from list_property_maps).") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
@@ -814,7 +814,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/get_property",
              description = "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response getProperty(
             @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
             @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
@@ -857,7 +857,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/remove_property", method = "POST",
              description = "Remove the value stored at a single address in a property map. Call save_program to persist.",
-             category = "program")
+             category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
@@ -904,7 +904,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/list_properties",
              description = "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response listProperties(
             @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
             @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") String startStr,
@@ -1013,7 +1013,7 @@ public class ProgramScriptService {
         return saveCurrentProgram(null);
     }
 
-    @McpTool(path = "/save_program", description = "Save current program", category = "program")
+    @McpTool(path = "/save_program", description = "Save current program", category = "program", access = ToolAccess.WRITE)
     public Response saveCurrentProgram(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1060,7 +1060,7 @@ public class ProgramScriptService {
      * such as deploy shutdown where Ghidra would otherwise prompt for each
      * modified domain object on exit.
      */
-    @McpTool(path = "/save_all_programs", description = "Save all open programs", category = "program")
+    @McpTool(path = "/save_all_programs", description = "Save all open programs", category = "program", access = ToolAccess.WRITE)
     public Response saveAllOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -1140,7 +1140,7 @@ public class ProgramScriptService {
     /**
      * List all currently open programs in Ghidra.
      */
-    @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.", category = "program")
+    @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -1183,7 +1183,7 @@ public class ProgramScriptService {
              description = "Close an open program by project path or name. Never prompts interactively: "
                          + "unsaved changes are saved first by default (save=true) or silently discarded "
                          + "(save=false) before closing, so this cannot block the caller on a GUI "
-                         + "confirmation dialog the way Ghidra's own close normally would.", category = "program")
+                         + "confirmation dialog the way Ghidra's own close normally would.", category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response closeProgram(
             @Param(value = "name", source = ParamSource.BODY,
                     description = "Program name or project path") String name,
@@ -1280,7 +1280,7 @@ public class ProgramScriptService {
                          + "Overlay spaces are also listed, each marked is_overlay=true with its "
                          + "overlayed_space (base). Address an overlay location as <overlay>::<hex> "
                          + "(e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response getAddressSpaces(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1362,7 +1362,7 @@ public class ProgramScriptService {
         return getCurrentProgramInfo(null);
     }
 
-    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program. When multiple programs are open, call this first to confirm which program will receive tool calls that omit the program argument.", category = "program")
+    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program. When multiple programs are open, call this first to confirm which program will receive tool calls that omit the program argument.", category = "program", access = ToolAccess.READ_ONLY)
     public Response getCurrentProgramInfo(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1415,7 +1415,7 @@ public class ProgramScriptService {
     /**
      * Switch MCP context to a different open program by name.
      */
-    @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program")
+    @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program", access = ToolAccess.WRITE)
     public Response switchProgram(
             @Param(value = "program", description = "Program name to switch to") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
@@ -1471,7 +1471,7 @@ public class ProgramScriptService {
     /**
      * List all files in the current Ghidra project.
      */
-    @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program")
+    @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program", access = ToolAccess.READ_ONLY)
     public Response listProjectFiles(
             @Param(value = "folder", description = "Project folder path") String folderPath) {
         ghidra.framework.model.Project project = resolveProject();
@@ -1527,7 +1527,7 @@ public class ProgramScriptService {
         ));
     }
 
-    @McpTool(path = "/create_folder", method = "POST", description = "Create a folder in the project", category = "project")
+    @McpTool(path = "/create_folder", method = "POST", description = "Create a folder in the project", category = "project", access = ToolAccess.WRITE)
     public Response createFolder(
             @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
@@ -1561,7 +1561,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/delete_file", method = "POST", description = "Delete a file from the project", category = "project")
+    @McpTool(path = "/delete_file", method = "POST", description = "Delete a file from the project", category = "project", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFile(
             @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
         ghidra.framework.model.Project project = resolveProject();
@@ -1624,7 +1624,7 @@ public class ProgramScriptService {
                          + "analysis and documentation. Refuses when the program has unsaved changes "
                          + "-- call save_program first -- rather than discarding them. A program that "
                          + "is open but clean is closed, moved, then reopened at its new path.",
-             category = "project")
+             category = "project", access = ToolAccess.WRITE)
     public Response moveFile(
             @Param(value = "filePath", source = ParamSource.BODY,
                    description = "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll") String filePath,
@@ -1716,7 +1716,7 @@ public class ProgramScriptService {
              description = "Move a project folder (and everything under it) into another folder. "
                          + "Refuses to move a folder into itself or into its own descendant, which "
                          + "would orphan the subtree.",
-             category = "project")
+             category = "project", access = ToolAccess.WRITE)
     public Response moveFolder(
             @Param(value = "sourcePath", source = ParamSource.BODY,
                    description = "Project folder path to move, e.g. /Vanilla/1.00") String sourcePath,
@@ -1828,7 +1828,7 @@ public class ProgramScriptService {
         return openProgramFromProject(path, false);
     }
 
-    @McpTool(path = "/open_program", description = "Open a program from the current project", category = "program")
+    @McpTool(path = "/open_program", description = "Open a program from the current project", category = "program", access = ToolAccess.WRITE)
     public Response openProgramFromProject(
             @Param(value = "path", description = "Program path in project") String path,
             @Param(value = "auto_analyze", defaultValue = "false", description = "Run auto-analysis") boolean autoAnalyze) {
@@ -1979,7 +1979,7 @@ public class ProgramScriptService {
     @McpTool(path = "/import_file", method = "POST",
             description = "Import a binary file from disk into the current Ghidra project and open it. "
                 + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
-            category = "program")
+            category = "program", access = ToolAccess.WRITE)
     public Response importFile(
             @Param(value = "file_path", source = ParamSource.BODY, description = "Absolute path to the binary file on disk") String filePath,
             @Param(value = "project_folder", source = ParamSource.BODY, defaultValue = "/", description = "Destination folder in the Ghidra project") String projectFolder,
@@ -2135,7 +2135,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program")
+    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
     public Response reanalyze(
             @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2156,7 +2156,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program")
+    @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program", access = ToolAccess.READ_ONLY)
     public Response analysisStatus(
             @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
 
@@ -2612,7 +2612,7 @@ public class ProgramScriptService {
                 "console_output", resultMsg.toString()));
     }
 
-    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
+    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY,
                    description = "Complete Java source for a GhidraScript, as one string — not a bare "
@@ -2648,41 +2648,19 @@ public class ProgramScriptService {
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
 
-        // Pre-cleanup: remove stale McpInline_*.java files so Ghidra's per-directory
-        // build state doesn't contaminate this run's output with old failures.
-        //
-        // Three cases handled:
-        //  1. Oracle exists (McpInline_*.java_failed)  → confirmed failure from a
-        //     previous run; delete both the .java and the oracle immediately.
-        //  2. No oracle, file older than 60 s          → crash-orphaned (server died
-        //     before the oracle could be written); delete as a safe fallback.
-        //  3. No oracle, file is fresh                 → likely a concurrent parallel
-        //     agent; leave it alone.
-        // Also purge any orphaned oracles whose .java has already been deleted.
-        long now = System.currentTimeMillis();
-        File[] staleJava = scriptsDir.listFiles(
-            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
-        if (staleJava != null) {
-            for (File stale : staleJava) {
-                File oracle = new File(scriptsDir, stale.getName() + "_failed");
-                if (oracle.exists()) {
-                    oracle.delete();
-                    stale.delete();
-                } else if (now - stale.lastModified() > 60_000L) {
-                    stale.delete();
-                }
-            }
-        }
-        File[] orphanOracles = scriptsDir.listFiles(
-            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java_failed"));
-        if (orphanOracles != null) {
-            for (File o : orphanOracles) {
-                String javaName = o.getName().substring(0, o.getName().length() - "_failed".length());
-                if (!new File(scriptsDir, javaName).exists()) o.delete();
-            }
-        }
+        purgeStaleInlineScripts(scriptsDir, System.currentTimeMillis());
 
         File tempScript = new File(scriptsDir, className + ".java");
+        // Refuse to clobber a script this service did not create. `className` comes
+        // from the caller's own `public class Foo`, so without this check an inline
+        // script named after an existing hand-written script silently overwrites it.
+        // A leftover of ours is already gone by now (purge above), so anything still
+        // standing here belongs to the operator.
+        if (tempScript.exists()) {
+            return Response.err("Refusing to overwrite " + tempScript.getName()
+                + " in " + scriptsDir + ": that file was not created by /run_script_inline. "
+                + "Rename the class in your code, or remove the file if it is disposable.");
+        }
 
         // Capture response so the finally block can decide success vs failure.
         Response[] responseHolder = {null};
@@ -2747,13 +2725,76 @@ public class ProgramScriptService {
         }
     }
 
+    /** How long an oracle-less inline script may linger before it is presumed orphaned. */
+    public static final long INLINE_SCRIPT_ORPHAN_AGE_MS = 60_000L;
+
+    /**
+     * Remove inline scripts left behind by earlier runs, so Ghidra's per-directory build
+     * state stops replaying their compile errors.
+     *
+     * <p>Ghidra caches "these files failed to compile" per script directory and keeps
+     * reporting them — the stale errors are prefixed onto the output of <em>every</em>
+     * later script, and they survive deleting the file and even restarting Ghidra. So a
+     * single failed script poisons the whole directory until its record is cleared.
+     *
+     * <p>Cases handled, for <em>any</em> class name rather than only {@code McpInline_*}:
+     * <ol>
+     *   <li>An oracle ({@code X.java_failed}) exists → a confirmed failure of ours. Only
+     *       this method writes oracles, so an oracle proves {@code X.java} was written by
+     *       {@code /run_script_inline}; delete both. This is the case that used to be
+     *       missed: a script declaring {@code public class Foo} produced {@code Foo.java},
+     *       which the old {@code McpInline_} prefix filter skipped forever.</li>
+     *   <li>No oracle, name is ours, older than {@link #INLINE_SCRIPT_ORPHAN_AGE_MS} →
+     *       crash-orphaned before the oracle could be written; delete. Restricted to
+     *       generated names, since for a caller-chosen name there is no provenance and
+     *       the file may be the operator's own.</li>
+     *   <li>No oracle, fresh → likely a concurrent run; leave alone.</li>
+     * </ol>
+     * Orphaned oracles whose {@code .java} is already gone are purged too.
+     *
+     * <p>Static, and side-effect-scoped to {@code scriptsDir}, so {@code InlineScriptCleanupTest}
+     * can drive it against a temporary directory. Public only because the offline tests live
+     * in {@code com.xebyte.offline}; it is not part of the endpoint surface.
+     *
+     * @param scriptsDir the script directory to sweep
+     * @param now current time in millis, injected for testability
+     * @return the names of files deleted, for logging/assertions
+     */
+    public static java.util.List<String> purgeStaleInlineScripts(File scriptsDir, long now) {
+        java.util.List<String> removed = new java.util.ArrayList<>();
+        File[] javaFiles = scriptsDir.listFiles((d, n) -> n.endsWith(".java"));
+        if (javaFiles != null) {
+            for (File script : javaFiles) {
+                File oracle = new File(scriptsDir, script.getName() + "_failed");
+                boolean generatedName = script.getName().startsWith("McpInline_");
+                if (oracle.exists()) {
+                    if (oracle.delete()) removed.add(oracle.getName());
+                    if (script.delete()) removed.add(script.getName());
+                } else if (generatedName && now - script.lastModified() > INLINE_SCRIPT_ORPHAN_AGE_MS) {
+                    if (script.delete()) removed.add(script.getName());
+                }
+            }
+        }
+        File[] oracles = scriptsDir.listFiles((d, n) -> n.endsWith(".java_failed"));
+        if (oracles != null) {
+            for (File oracle : oracles) {
+                String javaName = oracle.getName()
+                    .substring(0, oracle.getName().length() - "_failed".length());
+                if (!new File(scriptsDir, javaName).exists() && oracle.delete()) {
+                    removed.add(oracle.getName());
+                }
+            }
+        }
+        return removed;
+    }
+
     /**
      * List available Ghidra scripts.
      *
      * @param filter Optional filter string to match script names
      * @return JSON list of available scripts
      */
-    @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program")
+    @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program", access = ToolAccess.READ_ONLY)
     public Response listGhidraScripts(
             @Param(value = "filter", description = "Script name filter", defaultValue = "") String filter) {
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
@@ -2798,7 +2839,7 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    @McpTool(path = "/read_memory", description = "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.READ_ONLY)
     public Response readMemory(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3106,7 +3147,7 @@ public class ProgramScriptService {
                 comment, "", "", false, 0, false, programName);
     }
 
-    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response createMemoryBlock(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Name for the new block as it appears in the memory map, e.g. MMIO or "
@@ -3293,7 +3334,7 @@ public class ProgramScriptService {
         return setBookmark(addressStr, category, comment, null);
     }
 
-    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response setBookmark(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3373,7 +3414,7 @@ public class ProgramScriptService {
         return listBookmarks(category, addressStr, null);
     }
 
-    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listBookmarks(
             @Param(value = "category", description = "Category filter (omit to return all categories)", defaultValue = "") String category,
             @Param(value = "address", paramType = "address", defaultValue = "",
@@ -3446,7 +3487,7 @@ public class ProgramScriptService {
         return deleteBookmark(addressStr, category, null);
     }
 
-    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deleteBookmark(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3514,7 +3555,7 @@ public class ProgramScriptService {
         return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
     }
 
-    @McpTool(path = "/run_ghidra_script", method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
+    @McpTool(path = "/run_ghidra_script", method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runGhidraScriptWithCapture(
 @Param(value = "script_name", source = ParamSource.BODY,
                    description = "Script to run. Searched in ~/ghidra_scripts, <cwd>/ghidra_scripts and "
@@ -3656,7 +3697,7 @@ public class ProgramScriptService {
     // Image Base Operations
     // ========================================================================
 
-    @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
+    @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program", access = ToolAccess.WRITE)
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
             @Param(value = "program", defaultValue = "",

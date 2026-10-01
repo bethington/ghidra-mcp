@@ -36,7 +36,7 @@ public class HeadlessManagementService {
                 + "For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') "
                 + "and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary "
                 + "with the requested processor. When `language` is omitted, the loader auto-detects the format.",
-            category = "headless")
+            category = "headless", access = ToolAccess.WRITE)
     public Response loadProgram(
             @Param(value = "file", source = ParamSource.BODY, description = "Absolute path to the binary file") String filePath,
             @Param(value = "language", source = ParamSource.BODY, defaultValue = "",
@@ -118,7 +118,7 @@ public class HeadlessManagementService {
     // Project management
     // ========================================================================
 
-    @McpTool(path = "/create_project", method = "POST", description = "Create a new Ghidra project", category = "headless")
+    @McpTool(path = "/create_project", method = "POST", description = "Create a new Ghidra project", category = "headless", access = ToolAccess.WRITE)
     public Response createProject(
             @Param(value = "parentDir", source = ParamSource.BODY,
                    description = "Existing filesystem directory that will CONTAIN the new project, e.g. "
@@ -146,7 +146,7 @@ public class HeadlessManagementService {
         }
     }
 
-    @McpTool(path = "/open_project", method = "POST", description = "Open an existing Ghidra project (.gpr file or directory)", category = "headless")
+    @McpTool(path = "/open_project", method = "POST", description = "Open an existing Ghidra project (.gpr file or directory)", category = "headless", access = ToolAccess.WRITE)
     public Response openProject(
             @Param(value = "path", source = ParamSource.BODY,
                    description = "Path to an existing project: either its .gpr file or the project "
@@ -161,7 +161,7 @@ public class HeadlessManagementService {
         return Response.err("Failed to open project: " + projectPath);
     }
 
-    @McpTool(path = "/close_project", method = "POST", description = "Close the currently open project", category = "headless")
+    @McpTool(path = "/close_project", method = "POST", description = "Close the currently open project", category = "headless", access = ToolAccess.DESTRUCTIVE)
     public Response closeProject() {
         if (!programProvider.hasProject()) {
             return Response.err("No project currently open");
@@ -171,7 +171,7 @@ public class HeadlessManagementService {
         return Response.ok(JsonHelper.mapOf("success", true, "closed", projectName));
     }
 
-    @McpTool(path = "/load_program_from_project", method = "POST", description = "Load a program from the open project. Returns structured diagnostics on failure (available paths, server-binding state) so the operator can tell server-side-checkout-but-not-shared from path-typo from server-unreachable. See discussion #119.", category = "headless")
+    @McpTool(path = "/load_program_from_project", method = "POST", description = "Load a program from the open project. Returns structured diagnostics on failure (available paths, server-binding state) so the operator can tell server-side-checkout-but-not-shared from path-typo from server-unreachable. See discussion #119.", category = "headless", access = ToolAccess.WRITE)
     public Response loadProgramFromProject(
             @Param(value = "path", source = ParamSource.BODY, description = "Program path within the project") String programPath) {
         if (programPath == null || programPath.isEmpty()) {
@@ -221,7 +221,7 @@ public class HeadlessManagementService {
         return Response.ok(body);
     }
 
-    @McpTool(path = "/checkin_program", method = "POST", description = "Check a program back in to the shared Ghidra Server as a new version (the write-back path GhidraServerManager.checkinFile can't provide — see #119). Requires a shared (server-bound) project opened via /open_project and the file checked out. Saves pending edits and releases the open program first so keep_checked_out=false can actually drop the server checkout. Returns version_before/version/version_bumped.", category = "headless")
+    @McpTool(path = "/checkin_program", method = "POST", description = "Check a program back in to the shared Ghidra Server as a new version (the write-back path GhidraServerManager.checkinFile can't provide — see #119). Requires a shared (server-bound) project opened via /open_project and the file checked out. Saves pending edits and releases the open program first so keep_checked_out=false can actually drop the server checkout. Returns version_before/version/version_bumped.", category = "headless", access = ToolAccess.WRITE)
     public Response checkinProgram(
             @Param(value = "path", source = ParamSource.BODY, description = "Project path of the file (e.g. '/scratch/writetest'); empty uses the current program") String path,
             @Param(value = "comment", source = ParamSource.BODY, description = "Checkin comment") String comment,
@@ -233,7 +233,7 @@ public class HeadlessManagementService {
         return Response.ok(res);
     }
 
-    @McpTool(path = "/get_project_info", description = "Get info about the currently open project, including server-binding state. A shared (server-bound) project is required for /server/version_control/checkout to deliver content the headless can open; if `project_server_bound` is false, the open project is local-only.", category = "headless")
+    @McpTool(path = "/get_project_info", description = "Get info about the currently open project, including server-binding state. A shared (server-bound) project is required for /server/version_control/checkout to deliver content the headless can open; if `project_server_bound` is false, the open project is local-only.", category = "headless", access = ToolAccess.READ_ONLY)
     public Response getProjectInfo() {
         if (!programProvider.hasProject()) {
             return Response.ok(JsonHelper.mapOf("has_project", false));
@@ -272,7 +272,7 @@ public class HeadlessManagementService {
                 + "analyst edits); (2) a DomainFile in the open project (on-disk state). Output is written to "
                 + "`output_dir/output_name` (defaults: /data/exports and `<program>.gzf`). Refuses to overwrite "
                 + "an existing file.",
-            category = "headless")
+            category = "headless", access = ToolAccess.WRITE)
     public Response exportProgram(
             @Param(value = "program_name", source = ParamSource.BODY,
                 description = "Program name or project path (e.g. 'myprog' or '/myprog').") String programName,
@@ -325,7 +325,7 @@ public class HeadlessManagementService {
                 + "exist on disk at `gzf_path` (typically staged on a shared volume by the orchestrator). Lands at "
                 + "`target_folder/target_name` (defaults: `/` and the GZF basename sans `.gzf`). Set `overwrite=true` "
                 + "to replace an existing program at the destination; otherwise the call fails on collision.",
-            category = "headless")
+            category = "headless", access = ToolAccess.WRITE)
     public Response importProgram(
             @Param(value = "gzf_path", source = ParamSource.BODY,
                 description = "Absolute path to the .gzf file on disk.") String gzfPath,
@@ -367,7 +367,7 @@ public class HeadlessManagementService {
                 + "Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). "
                 + "Refuses to overwrite an existing file. Callers should /save_all_programs first to flush "
                 + "pending in-memory edits.",
-            category = "headless")
+            category = "headless", access = ToolAccess.WRITE)
     public Response archiveProject(
             @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/data/exports",
                 description = "Directory the .gar will be written to. Must already exist.") String outputDir,
@@ -416,7 +416,7 @@ public class HeadlessManagementService {
                 + "Closes any currently-open project first. The restored project is NOT re-opened automatically; "
                 + "follow up with /open_project so owner reset and project bookkeeping run via the same code path "
                 + "as a user-driven open. Fails loudly if the destination project already exists.",
-            category = "headless")
+            category = "headless", access = ToolAccess.DESTRUCTIVE)
     public Response restoreProject(
             @Param(value = "gar_path", source = ParamSource.BODY,
                 description = "Absolute path to the .gar file on disk.") String garPath,
@@ -445,7 +445,7 @@ public class HeadlessManagementService {
     // Server status
     // ========================================================================
 
-    @McpTool(path = "/server/status", description = "Check headless server connection status", category = "headless")
+    @McpTool(path = "/server/status", description = "Check headless server connection status", category = "headless", access = ToolAccess.READ_ONLY)
     public Response serverStatus() {
         return Response.text(serverManager.getStatus());
     }

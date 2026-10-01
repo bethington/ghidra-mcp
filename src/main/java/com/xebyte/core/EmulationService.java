@@ -79,7 +79,7 @@ public class EmulationService {
             description = "Emulate a single function with controlled register/memory inputs. " +
                     "Returns final register state after execution. Ideal for understanding " +
                     "hash functions, crypto routines, or any pure-computation code path.",
-            category = "emulation")
+            category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateFunction(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                     description = "Entry point address of the function to emulate") String addressStr,
@@ -330,7 +330,7 @@ public class EmulationService {
             description = "Brute-force API hash resolution. Emulates a hash function with " +
                     "each candidate API name and returns the one that produces the target hash. " +
                     "Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms.",
-            category = "emulation")
+            category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateHashBatch(
             @Param(value = "hash_function_address", paramType = "address", source = ParamSource.BODY,
                     description = "Address of the hash computation function") String hashFuncAddr,

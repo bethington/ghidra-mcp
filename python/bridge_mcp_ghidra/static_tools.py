@@ -14,7 +14,13 @@ from . import dispatch
 from . import registry
 from . import state
 from . import transport
-from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
+from .config import (
+    DEFAULT_TCP_URL,
+    READ_ONLY_TOOL,
+    STATIC_TOOL_NAMES,
+    WRITE_TOOL,
+    logger,
+)
 from .server import Context, mcp
 from .validation import validate_server_url
 
@@ -207,7 +213,7 @@ def _load_groups_sync(group_names: list[str]) -> list[str]:
     return loaded
 
 
-@mcp.tool(name="list_instances")
+@mcp.tool(name="list_instances", annotations=READ_ONLY_TOOL, structured_output=False)
 async def _list_instances_tool() -> str:
     """
     List known Ghidra instances from UDS discovery and the active TCP fallback.
@@ -255,7 +261,7 @@ def _summarize_instance(inst: dict) -> dict:
     return summary
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
 async def connect_instance(
     project: Annotated[str, Field(description="Project name (or substring) to connect to")],
     ctx: Context | None = None,
@@ -288,7 +294,7 @@ async def connect_instance(
     return json.dumps(result)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def list_tool_groups() -> str:
     """
     List all available tool groups with their tool counts and loaded status.
@@ -302,7 +308,7 @@ def list_tool_groups() -> str:
     return json.dumps({"groups": groups, "total_tools": len(state._full_schema)}, indent=2)
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
 async def load_tool_group(
     group: Annotated[str, Field(description='Category name (e.g. "function", "datatype") or "all"')],
     ctx: Context | None = None,
@@ -375,7 +381,7 @@ async def load_tool_group(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
 async def unload_tool_group(
     group: Annotated[str, Field(description="Category name to unload")],
     ctx: Context | None = None,
@@ -413,7 +419,7 @@ async def unload_tool_group(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
 async def check_tools(
     tools: Annotated[
         str,
@@ -481,7 +487,7 @@ async def check_tools(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
 async def search_tools(
     query: Annotated[
         str,
@@ -543,7 +549,7 @@ async def search_tools(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
 async def import_file(
     file_path: Annotated[str, Field(description="Absolute path to the binary file on disk")],
     project_folder: Annotated[
@@ -599,6 +605,9 @@ async def import_file(
         payload["compiler_spec"] = compiler_spec
 
     result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
+    # A refused import is a failed tool call, not a successful one that happens
+    # to contain the word "error" (see dispatch.raise_on_failure).
+    dispatch.raise_on_failure(result)
 
     # Parse result to check if analysis was started
     try:

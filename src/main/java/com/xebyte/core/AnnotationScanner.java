@@ -581,7 +581,7 @@ public class AnnotationScanner {
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
-            category, categoryDescription, params);
+            category, categoryDescription, tool.access(), params);
     }
 
     private static String jsonType(Class<?> type, boolean fieldsJson) {
@@ -602,7 +602,8 @@ public class AnnotationScanner {
 
     /** Describes an MCP tool for schema generation. */
     public record ToolDescriptor(String path, String method, String description,
-            String category, String categoryDescription, List<ParamDescriptor> params) {
+            String category, String categoryDescription, ToolAccess access,
+            List<ParamDescriptor> params) {
 
         /** Serialize to JSON. */
         public String toJson() {
@@ -617,6 +618,13 @@ public class AnnotationScanner {
             }
             if (categoryDescription != null && !categoryDescription.isEmpty()) {
                 sb.append(", \"category_description\": ").append(jsonStr(categoryDescription));
+            }
+            // Emitted only when classified, so an unclassified tool carries no
+            // hints and the client keeps its own defaults. The bridge turns
+            // these into MCP's readOnlyHint / destructiveHint annotations.
+            if (access != null && access != ToolAccess.UNSPECIFIED) {
+                sb.append(", \"read_only\": ").append(access.isReadOnly());
+                sb.append(", \"destructive\": ").append(access.isDestructive());
             }
             sb.append(", \"params\": [");
             for (int i = 0; i < params.size(); i++) {

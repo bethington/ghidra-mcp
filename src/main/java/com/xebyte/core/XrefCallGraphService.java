@@ -30,7 +30,7 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getXrefsTo(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -87,7 +87,7 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
+    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getXrefsFrom(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -158,7 +158,7 @@ public class XrefCallGraphService {
                         + "pointers, missed jump/switch tables). Leaves the underlying bytes untouched and "
                         + "adds proper bidirectional navigation. On programs with multiple address spaces "
                         + "(e.g. embedded targets), prefix addresses with the space name (mem:1000).",
-            category = "xref")
+            category = "xref", access = ToolAccess.WRITE)
     public Response addMemoryReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from (the table slot / instruction). "
@@ -236,7 +236,7 @@ public class XrefCallGraphService {
                         + "reference on that operand. Removes both user-defined and analyzer-inferred "
                         + "references — the response reports each removed reference's source_type. "
                         + "On multi-space programs, prefix addresses with the space name (mem:1000).",
-            category = "xref")
+            category = "xref", access = ToolAccess.DESTRUCTIVE)
     public Response removeReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
@@ -327,7 +327,7 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref")
+    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionXrefs(
             @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
@@ -389,7 +389,7 @@ public class XrefCallGraphService {
         return getFunctionJumpTargets(functionName, null, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Accepts function name or address.", category = "xref")
+    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionJumpTargets(
             @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
@@ -481,7 +481,7 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Accepts function name or address.", category = "xref")
+    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallees(
             @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
@@ -554,7 +554,7 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Accepts function name or address.", category = "xref")
+    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallers(
             @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
@@ -617,7 +617,7 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Accepts function name or address.", category = "xref")
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallGraph(
             @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
             @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
@@ -784,7 +784,7 @@ public class XrefCallGraphService {
     /**
      * Get the complete call graph for the entire program
      */
-    @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref")
+    @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFullCallGraph(
             @Param(value = "format", defaultValue = "edges", description = "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)") String format,
             @Param(value = "limit", defaultValue = "1000", description = "Max edges to return. 0 = unlimited.") int limit,
@@ -946,7 +946,7 @@ public class XrefCallGraphService {
      * Enhanced call graph analysis with cycle detection and path finding
      * Provides advanced graph algorithms for understanding function relationships
      */
-    @McpTool(path = "/analyze_call_graph", description = "Analyze call graph paths between functions", category = "xref")
+    @McpTool(path = "/analyze_call_graph", description = "Analyze call graph paths between functions", category = "xref", access = ToolAccess.READ_ONLY)
     public Response analyzeCallGraph(
             @Param(value = "start_function", description = "Start function name") String startFunction,
             @Param(value = "end_function", description = "End function name") String endFunction,
@@ -1354,7 +1354,7 @@ public class XrefCallGraphService {
         return getBulkXrefs(addressesObj, null);
     }
 
-    @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
+    @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getBulkXrefs(
             @Param(value = "addresses", source = ParamSource.BODY,
                    description = "Addresses to fetch references TO. Accepts a JSON array of address "
@@ -1432,7 +1432,7 @@ public class XrefCallGraphService {
         return getAssemblyContext(xrefSourcesObj, contextInstructions, null);
     }
 
-    @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref")
+    @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getAssemblyContext(
 @Param(value = "xref_sources", source = ParamSource.BODY,
                    description = "Instruction addresses to pull context around. Accepts a JSON array of "

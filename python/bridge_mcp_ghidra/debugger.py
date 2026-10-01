@@ -15,7 +15,14 @@ from urllib.parse import urlencode, urlparse
 from . import config
 from . import dispatch
 from . import state
-from .config import DEBUGGER_URL, DEBUGGER_TOOL_NAMES, logger
+from .config import (
+    DEBUGGER_URL,
+    DEBUGGER_TOOL_NAMES,
+    DESTRUCTIVE_TOOL,
+    READ_ONLY_TOOL,
+    WRITE_TOOL,
+    logger,
+)
 from .server import mcp
 from .validation import validate_server_url
 
@@ -152,7 +159,7 @@ def _debugger_request(
         conn.close()
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_attach(target: str) -> str:
     """Attach the debugger to a running process for live dynamic analysis.
 
@@ -211,19 +218,19 @@ def debugger_attach(target: str) -> str:
     return result
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_detach() -> str:
     """Detach from the debugged process. The process continues running."""
     return _debugger_request("POST", "/debugger/detach")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_status() -> str:
     """Get debugger connection status, loaded modules, active traces/watches."""
     return _debugger_request("GET", "/debugger/status")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_modules() -> str:
     """List loaded modules (DLLs) with runtime and Ghidra base addresses.
 
@@ -233,7 +240,7 @@ def debugger_modules() -> str:
     return _debugger_request("GET", "/debugger/modules")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     """Resolve a DLL ordinal export to its runtime and Ghidra addresses.
 
@@ -247,7 +254,7 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     return _debugger_request("GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_set_breakpoint(
     ghidra_address: str,
     module: str = "",
@@ -274,7 +281,7 @@ def debugger_set_breakpoint(
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_remove_breakpoint(bp_id: int) -> str:
     """Remove a breakpoint by its ID.
 
@@ -284,13 +291,13 @@ def debugger_remove_breakpoint(bp_id: int) -> str:
     return _debugger_request("DELETE", f"/debugger/breakpoint/{bp_id}")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_list_breakpoints() -> str:
     """List all active breakpoints with their addresses and status."""
     return _debugger_request("GET", "/debugger/breakpoints")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_continue() -> str:
     """Resume execution of the debugged process.
 
@@ -300,7 +307,7 @@ def debugger_continue() -> str:
     return _debugger_request("POST", "/debugger/go")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_step_into(count: int = 1) -> str:
     """Single-step into the next instruction(s). Follows calls.
 
@@ -310,7 +317,7 @@ def debugger_step_into(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_into", {"count": count})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_step_over(count: int = 1) -> str:
     """Step over the next instruction(s). Steps over calls.
 
@@ -320,7 +327,7 @@ def debugger_step_over(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_over", {"count": count})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_registers() -> str:
     """Read all CPU registers. Must be stopped at a breakpoint.
 
@@ -329,7 +336,7 @@ def debugger_registers() -> str:
     return _debugger_request("GET", "/debugger/registers")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_read_memory(address: str, size: int = 64, address_type: str = "runtime", module: str = "") -> str:
     """Read memory from the debugged process.
 
@@ -353,7 +360,7 @@ def debugger_read_memory(address: str, size: int = 64, address_type: str = "runt
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_stack_trace(depth: int = 20) -> str:
     """Get the call stack backtrace with return addresses mapped to Ghidra symbols.
 
@@ -363,7 +370,7 @@ def debugger_stack_trace(depth: int = 20) -> str:
     return _debugger_request("GET", "/debugger/stack", query={"depth": str(depth)})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names: str = "") -> str:
     """Read function arguments at the current breakpoint based on calling convention.
 
@@ -382,7 +389,7 @@ def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names:
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_trace_function(
     ghidra_address: str,
     module: str = "",
@@ -422,7 +429,7 @@ def debugger_trace_function(
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_trace_stop(trace_id: int = -1) -> str:
     """Stop a function trace. Use trace_id=-1 to stop all traces.
 
@@ -432,7 +439,7 @@ def debugger_trace_stop(trace_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/trace/stop", {"trace_id": trace_id})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     """Read the trace log. Shows timestamped function calls with arguments.
 
@@ -447,13 +454,13 @@ def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_trace_list() -> str:
     """List all active and completed traces with hit counts."""
     return _debugger_request("GET", "/debugger/trace/list")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_watch_memory(ghidra_address: str, size: int = 4, access: str = "write", module: str = "") -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
@@ -478,7 +485,7 @@ def debugger_watch_memory(ghidra_address: str, size: int = 4, access: str = "wri
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.
 
@@ -488,7 +495,7 @@ def debugger_watch_stop(watch_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/watch/stop", {"watch_id": watch_id})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
     """Read the watchpoint hit log. Shows memory accesses with values and accessors.
 

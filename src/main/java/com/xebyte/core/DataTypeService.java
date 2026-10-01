@@ -94,7 +94,7 @@ public class DataTypeService {
     /**
      * List all data types available in the program with optional category filtering
      */
-    @McpTool(path = "/list_data_types", description = "List all data types with optional category filter", category = "datatype")
+    @McpTool(path = "/list_data_types", description = "List all data types with optional category filter", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response listDataTypes(
             // Optional, as the tool description has always claimed. Without a
             // default this was REQUIRED, so there was no way to list every data
@@ -204,7 +204,7 @@ public class DataTypeService {
     /**
      * Search for data types by pattern
      */
-    @McpTool(path = "/search_data_types", description = "Search data types by pattern", category = "datatype")
+    @McpTool(path = "/search_data_types", description = "Search data types by pattern", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response searchDataTypes(
             @Param(value = "pattern", description = "Search pattern") String pattern,
             @Param(value = "offset", defaultValue = "0",
@@ -249,7 +249,7 @@ public class DataTypeService {
     /**
      * Get the size of a data type
      */
-    @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype")
+    @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getTypeSize(
             @Param(value = "type_name", description = "Data type name") String typeName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -281,7 +281,7 @@ public class DataTypeService {
     /**
      * Get the layout of a structure
      */
-    @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype")
+    @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getStructLayout(
             @Param(value = "struct_name", description = "Structure name") String structName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -328,7 +328,7 @@ public class DataTypeService {
     /**
      * Get all values in an enumeration
      */
-    @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype")
+    @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getEnumValues(
             @Param(value = "enum_name", description = "Enum name") String enumName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -373,7 +373,7 @@ public class DataTypeService {
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
-    @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype")
+    @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getValidDataTypes(
             @Param(value = "category", description = "Category filter") String category,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -434,7 +434,7 @@ public class DataTypeService {
     /**
      * Create a new structure data type with specified fields
      */
-    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype")
+    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype", access = ToolAccess.WRITE)
     public Response createStruct(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New structure type name, for example UnitAny or SkillTableEntry") String name,
@@ -599,7 +599,7 @@ public class DataTypeService {
     /**
      * Create a new enumeration data type with name-value pairs
      */
-    @McpTool(path = "/create_enum", method = "POST", description = "Create an enum data type", category = "datatype")
+    @McpTool(path = "/create_enum", method = "POST", description = "Create an enum data type", category = "datatype", access = ToolAccess.WRITE)
     public Response createEnum(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New enum type name, e.g. UnitType. Creation FAILS if a type with this "
@@ -696,7 +696,7 @@ public class DataTypeService {
     /**
      * Create a union data type (legacy method)
      */
-    @McpTool(path = "/create_union", method = "POST", description = "Create a union data type", category = "datatype")
+    @McpTool(path = "/create_union", method = "POST", description = "Create a union data type", category = "datatype", access = ToolAccess.WRITE)
     public Response createUnion(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New union type name. An existing same-named type is REPLACED here, "
@@ -778,7 +778,7 @@ public class DataTypeService {
     /**
      * Create a typedef (type alias)
      */
-    @McpTool(path = "/create_typedef", method = "POST", description = "Create a typedef alias", category = "datatype")
+    @McpTool(path = "/create_typedef", method = "POST", description = "Create a typedef alias", category = "datatype", access = ToolAccess.WRITE)
     public Response createTypedef(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New typedef (alias) name. An existing same-named type is replaced.") String name,
@@ -837,7 +837,7 @@ public class DataTypeService {
     /**
      * Clone/copy a data type with a new name
      */
-    @McpTool(path = "/clone_data_type", method = "POST", description = "Clone a data type with new name", category = "datatype")
+    @McpTool(path = "/clone_data_type", method = "POST", description = "Clone a data type with new name", category = "datatype", access = ToolAccess.WRITE)
     public Response cloneDataType(
             @Param(value = "source_type", source = ParamSource.BODY,
                    description = "Simple name of the existing type to copy, matched across every "
@@ -894,7 +894,7 @@ public class DataTypeService {
     /**
      * Create an array data type
      */
-    @McpTool(path = "/create_array_type", method = "POST", description = "Create an array data type", category = "datatype")
+    @McpTool(path = "/create_array_type", method = "POST", description = "Create an array data type", category = "datatype", access = ToolAccess.WRITE)
     public Response createArrayType(
             @Param(value = "base_type", source = ParamSource.BODY,
                    description = "Element type. Resolution is recursive, so pointer chains (int**), "
@@ -962,7 +962,7 @@ public class DataTypeService {
     /**
      * Create a pointer data type
      */
-    @McpTool(path = "/create_pointer_type", method = "POST", description = "Create a pointer data type", category = "datatype")
+    @McpTool(path = "/create_pointer_type", method = "POST", description = "Create a pointer data type", category = "datatype", access = ToolAccess.WRITE)
     public Response createPointerType(
             @Param(value = "base_type", source = ParamSource.BODY,
                    description = "Type pointed at. `void` is special-cased to Ghidra's void type; "
@@ -1034,7 +1034,7 @@ public class DataTypeService {
     /**
      * Create a function signature data type
      */
-    @McpTool(path = "/create_function_signature", method = "POST", description = "Create a function signature data type", category = "datatype")
+    @McpTool(path = "/create_function_signature", method = "POST", description = "Create a function signature data type", category = "datatype", access = ToolAccess.WRITE)
     public Response createFunctionSignature(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Name for the function-definition type. This creates a SIGNATURE in the "
@@ -1142,7 +1142,7 @@ public class DataTypeService {
     /**
      * Apply a specific data type at the given memory address
      */
-    @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.WRITE)
     public Response applyDataType(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1333,7 +1333,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/delete_data_type", method = "POST",
             description = "Delete a data type by name. Fails if the type is referenced; use resolve_duplicate_type first to remove unused /Demangler 1-byte stubs when a full type exists.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.DESTRUCTIVE)
     public Response deleteDataType(
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Simple name of the type to delete, matched across every category (no "
@@ -1408,7 +1408,7 @@ public class DataTypeService {
     /**
      * Modify a field in an existing structure
      */
-    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype")
+    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype", access = ToolAccess.WRITE)
     public Response modifyStructField(
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to edit, matched across every "
@@ -1534,7 +1534,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/modify_struct_field_type", method = "POST",
             description = "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response modifyStructFieldType(
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to edit, matched across every "
@@ -1556,7 +1556,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/embed_struct_field", method = "POST",
             description = "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response embedStructField(
             @Param(value = "parent_struct", source = ParamSource.BODY,
                    description = "Simple name of the structure that CONTAINS the field being replaced — "
@@ -1579,7 +1579,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/resize_struct", method = "POST",
             description = "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response resizeStruct(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to resize, matched across every "
@@ -1666,7 +1666,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/recreate_struct", method = "POST",
             description = "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response recreateStruct(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Name of the structure to (re)create. An existing same-named type is "
@@ -1795,7 +1795,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/resolve_duplicate_type", method = "POST",
             description = "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response resolveDuplicateType(
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Simple name to look for duplicates of (no /path prefix) — every "
@@ -2013,7 +2013,7 @@ public class DataTypeService {
     /**
      * Add a new field to an existing structure
      */
-    @McpTool(path = "/add_struct_field", method = "POST", description = "Add a field to a structure", category = "datatype")
+    @McpTool(path = "/add_struct_field", method = "POST", description = "Add a field to a structure", category = "datatype", access = ToolAccess.WRITE)
     public Response addStructField(
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to add to, matched across every "
@@ -2141,7 +2141,7 @@ public class DataTypeService {
         return matches == 1 ? ord : (matches > 1 ? -2 : -1);
     }
 
-    @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure (by the name you created it with, even after Hungarian auto-prefixing).", category = "datatype")
+    @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure (by the name you created it with, even after Hungarian auto-prefixing).", category = "datatype", access = ToolAccess.DESTRUCTIVE)
     public Response removeStructField(
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to edit, matched across every "
@@ -2213,7 +2213,7 @@ public class DataTypeService {
     /**
      * Move a data type to a different category
      */
-    @McpTool(path = "/move_data_type_to_category", method = "POST", description = "Move data type to category", category = "datatype")
+    @McpTool(path = "/move_data_type_to_category", method = "POST", description = "Move data type to category", category = "datatype", access = ToolAccess.WRITE)
     public Response moveDataTypeToCategory(
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Simple name of the type to move, matched across every category (no "
@@ -2279,7 +2279,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/rename_data_type", method = "POST",
              description = "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it",
-             category = "datatype")
+             category = "datatype", access = ToolAccess.WRITE)
     public Response renameDataType(
             @Param(value = "old_name", source = ParamSource.BODY,
                    description = "Current type name; may be bare (Foo) or category-qualified (/MyCat/Foo)") String oldName,
@@ -2363,7 +2363,7 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    @McpTool(path = "/validate_data_type", description = "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.", category = "datatype")
+    @McpTool(path = "/validate_data_type", description = "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response validateDataType(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Optional address. Omit to check type existence only; provide to validate "
@@ -2458,7 +2458,7 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Validate function prototype before applying
      */
-    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response validateFunctionPrototype(
             @Param(value = "function_address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2566,7 +2566,7 @@ public class DataTypeService {
     /**
      * Import data types (placeholder)
      */
-    @McpTool(path = "/import_data_types", method = "POST", description = "Parse C source (structs/unions/enums/typedefs) into the program's data type manager via Ghidra's CParser. Returns how many types were added and any parser messages. Used to load a project's canonical type vocabulary from a generated header.", category = "datatype")
+    @McpTool(path = "/import_data_types", method = "POST", description = "Parse C source (structs/unions/enums/typedefs) into the program's data type manager via Ghidra's CParser. Returns how many types were added and any parser messages. Used to load a project's canonical type vocabulary from a generated header.", category = "datatype", access = ToolAccess.WRITE)
     public Response importDataTypes(
             @Param(value = "source", source = ParamSource.BODY,
                    description = "C declarations — structs, unions, enums, typedefs — as one string of "
@@ -2626,7 +2626,7 @@ public class DataTypeService {
     /**
      * Create a new data type category
      */
-    @McpTool(path = "/create_data_type_category", method = "POST", description = "Create a new data type category", category = "datatype")
+    @McpTool(path = "/create_data_type_category", method = "POST", description = "Create a new data type category", category = "datatype", access = ToolAccess.WRITE)
     public Response createDataTypeCategory(
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "New category as a /-separated path, e.g. /D2Structs/Units. Missing "
@@ -2661,7 +2661,7 @@ public class DataTypeService {
     /**
      * List all data type categories
      */
-    @McpTool(path = "/list_data_type_categories", description = "List all data type categories", category = "datatype")
+    @McpTool(path = "/list_data_type_categories", description = "List all data type categories", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response listDataTypeCategories(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -2722,7 +2722,7 @@ public class DataTypeService {
      * @param maxFunctionsToAnalyze Maximum number of referencing functions to analyze
      * @return Response with field usage analysis
      */
-    @McpTool(path = "/analyze_struct_field_usage", method = "POST", description = "Analyze structure field access patterns. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/analyze_struct_field_usage", method = "POST", description = "Analyze structure field access patterns. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response analyzeStructFieldUsage(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2968,7 +2968,7 @@ public class DataTypeService {
      * @param structSize Size of the structure in bytes (0 for auto-detect)
      * @return Response with field name suggestions
      */
-    @McpTool(path = "/suggest_field_names", method = "POST", description = "AI-assisted field name suggestions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/suggest_field_names", method = "POST", description = "AI-assisted field name suggestions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response suggestFieldNames(
             @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3101,7 +3101,7 @@ public class DataTypeService {
     /**
      * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
      */
-    @McpTool(path = "/apply_data_classification", method = "POST", description = "Atomic type application with classification. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
+    @McpTool(path = "/apply_data_classification", method = "POST", description = "Atomic type application with classification. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.WRITE)
     @SuppressWarnings("unchecked")
     public Response applyDataClassification(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -4314,7 +4314,7 @@ public class DataTypeService {
 
     @McpTool(path = "/audit_global", method = "GET",
             description = "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.READ_ONLY)
     public Response auditGlobal(
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
@@ -4524,7 +4524,7 @@ public class DataTypeService {
 
     @McpTool(path = "/analyze_global_completeness", method = "GET",
             description = "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.READ_ONLY)
     public Response analyzeGlobalCompleteness(
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
@@ -4554,7 +4554,7 @@ public class DataTypeService {
 
     @McpTool(path = "/audit_globals_in_function", method = "GET",
             description = "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.READ_ONLY)
     public Response auditGlobalsInFunction(
             @Param(value = "address", paramType = "address",
                    description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
@@ -4639,7 +4639,7 @@ public class DataTypeService {
 
     @McpTool(path = "/set_global", method = "POST",
             description = "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label).",
-            category = "datatype")
+            category = "datatype", access = ToolAccess.WRITE)
     public Response setGlobal(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,

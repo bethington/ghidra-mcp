@@ -72,9 +72,10 @@ public final class ManualToolDescriptors {
     }
 
     private static void add(Map<String, AnnotationScanner.ToolDescriptor> m,
-            String path, String method, String category, String description, String... paramPairs) {
+            String path, String method, String category, String description,
+            ToolAccess access, String... paramPairs) {
         m.put(path, new AnnotationScanner.ToolDescriptor(
-            path, method, description, category, "", params(method, paramPairs)));
+            path, method, description, category, "", access, params(method, paramPairs)));
     }
 
     /** Keyed by path. Built once; entries never mutate after class init. */
@@ -90,7 +91,7 @@ public final class ManualToolDescriptors {
     private static Map<String, AnnotationScanner.ToolDescriptor> buildAll() {
         Map<String, AnnotationScanner.ToolDescriptor> m = new LinkedHashMap<>();
         add(m, "/batch_apply_documentation", "POST", "analysis",
-            "Apply all documentation to a function in one call",
+            "Apply all documentation to a function in one call", ToolAccess.WRITE,
             "address", "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step below is applied to the function at this address.",
             "name", "New function name. Omit or leave empty to skip the rename step.",
             "prototype", "Full C signature. Applied BEFORE the comment step on purpose, because setting a prototype wipes the plate comment.",
@@ -103,23 +104,23 @@ public final class ManualToolDescriptors {
             "goto", "True navigates the CodeBrowser to address before anything else. Must be a JSON boolean: any other type is read as FALSE. Default false.",
             "score", "True (the default) appends a compact completeness score. Must be a JSON boolean: any other type falls back to the default and is read as TRUE, so the string false does not switch it off.",
             "program", "Accepted but not read by this route: every step runs against the active program. Use the individual tools when you need to target a specific one.");
-        add(m, "/check_connection", "GET", "utility", "Health check endpoint");
-        add(m, "/configure_analyzer", "POST", "analysis", "Configure an analysis plugin",
+        add(m, "/check_connection", "GET", "utility", "Health check endpoint", ToolAccess.READ_ONLY);
+        add(m, "/configure_analyzer", "POST", "analysis", "Configure an analysis plugin", ToolAccess.WRITE,
             "name", "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.",
             "enabled", "True enables the analyzer, false disables it. Omitting the key entirely leaves the current setting alone.",
             "program", "Target program name (omit to use the active program). Headless mode only.");
-        add(m, "/delete_project", "POST", "project", "Delete a Ghidra project",
+        add(m, "/delete_project", "POST", "project", "Delete a Ghidra project", ToolAccess.DESTRUCTIVE,
             "projectPath", "Filesystem path of the project to delete: its .gpr file or the project directory. Headless mode only; the GUI plugin does not register this route.");
-        add(m, "/exit_ghidra", "POST", "program", "Save and exit Ghidra");
-        add(m, "/get_current_address", "GET", "getter", "Get cursor address (GUI only)");
-        add(m, "/get_current_function", "GET", "getter", "Get function at cursor (GUI only)");
-        add(m, "/get_current_selection", "GET", "getter", "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted.");
-        add(m, "/get_version", "GET", "utility", "Get plugin version");
-        add(m, "/health", "GET", "utility", "Health check endpoint for headless server");
-        add(m, "/list_projects", "GET", "project", "List available Ghidra projects",
+        add(m, "/exit_ghidra", "POST", "program", "Save and exit Ghidra", ToolAccess.DESTRUCTIVE);
+        add(m, "/get_current_address", "GET", "getter", "Get cursor address (GUI only)", ToolAccess.READ_ONLY);
+        add(m, "/get_current_function", "GET", "getter", "Get function at cursor (GUI only)", ToolAccess.READ_ONLY);
+        add(m, "/get_current_selection", "GET", "getter", "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted.", ToolAccess.READ_ONLY);
+        add(m, "/get_version", "GET", "utility", "Get plugin version", ToolAccess.READ_ONLY);
+        add(m, "/health", "GET", "utility", "Health check endpoint for headless server", ToolAccess.READ_ONLY);
+        add(m, "/list_projects", "GET", "project", "List available Ghidra projects", ToolAccess.READ_ONLY,
             "searchDir", "Directory to scan for .gpr projects. Headless mode only; the GUI plugin does not register this route.");
-        add(m, "/mcp/health", "GET", "utility", "HTTP server health: pool stats, uptime, memory, active request count");
-        add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata");
+        add(m, "/mcp/health", "GET", "utility", "HTTP server health: pool stats, uptime, memory, active request count", ToolAccess.READ_ONLY);
+        add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata", ToolAccess.READ_ONLY);
         // /move_file and /move_folder used to live here: manually routed in the
         // headless server, absent from the GUI/FrontEnd server entirely, and so
         // present in tests/endpoints.json but missing from the live /mcp/schema
@@ -127,69 +128,69 @@ public final class ManualToolDescriptors {
         // ProgramScriptService.{moveFile,moveFolder}, which registers them in
         // every mode. Do not re-add them here -- double registration throws
         // "cannot add context to list" on headless startup (see #180).
-        add(m, "/open_project", "POST", "headless", "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params.",
+        add(m, "/open_project", "POST", "headless", "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params.", ToolAccess.WRITE,
             "path", "Path to the project: its .gpr file or the project directory holding it.",
             "headless", "GUI mode only. True (the default) loads the project into the FrontEnd tool without opening a CodeBrowser window; false launches one for `program`. The headless server ignores it.",
             "program", "GUI mode only, and only when headless=false: the DomainFile path to open in the launched CodeBrowser.");
-        add(m, "/project/info", "GET", "project", "Get detailed project info including running tools and open programs");
-        add(m, "/server/admin/set_permissions", "POST", "server", "Set user permissions on a repository",
+        add(m, "/project/info", "GET", "project", "Get detailed project info including running tools and open programs", ToolAccess.READ_ONLY);
+        add(m, "/server/admin/set_permissions", "POST", "server", "Set user permissions on a repository", ToolAccess.WRITE,
             "repo", REPO_HEADLESS_ONLY + " The GUI plugin answers that this operation needs headless mode.",
             "user", "Server user whose access is being set. The repository ACL is read, this one entry replaced or appended, and every other user preserved.",
             "accessLevel", "Numeric Ghidra access level: 0 no access, 1 read only, 2 read/write, 3 admin. Defaults to 1.");
-        add(m, "/server/admin/terminate_all_checkouts", "POST", "server", "Terminate all checkouts in a folder recursively",
+        add(m, "/server/admin/terminate_all_checkouts", "POST", "server", "Terminate all checkouts in a folder recursively", ToolAccess.DESTRUCTIVE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Folder to walk recursively, terminating every checkout under it. Defaults to / — the whole repository or project.");
-        add(m, "/server/admin/terminate_checkout", "POST", "server", "Terminate all checkouts on a single file",
+        add(m, "/server/admin/terminate_checkout", "POST", "server", "Terminate all checkouts on a single file", ToolAccess.DESTRUCTIVE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the file whose checkout is being terminated.",
             "checkoutId", "Numeric checkout id to terminate, as /server/checkouts reports it. Headless mode only, and defaults to 0 when absent; the GUI plugin terminates by path alone.",
             "checkout_id", "Alternative spelling of checkoutId, read only when checkoutId is absent.");
-        add(m, "/server/admin/users", "GET", "server", "List all users on the server");
-        add(m, "/server/authenticate", "POST", "server", "Register server credentials for programmatic authentication",
+        add(m, "/server/admin/users", "GET", "server", "List all users on the server", ToolAccess.READ_ONLY);
+        add(m, "/server/authenticate", "POST", "server", "Register server credentials for programmatic authentication", ToolAccess.WRITE,
             "username", "Server username. Omit to fall back to Ghidra's stored PasswordPrompt.Name, then to the OS user name.",
             "password", "Server password. Required — the call is refused without it.");
-        add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts",
+        add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts", ToolAccess.READ_ONLY,
             "path", "Folder to list checkouts under. Defaults to / — everything.");
         // No parameters: GUI mode reports the already-open project, and headless
         // mode connects with the host/port GhidraServerManager read from
         // GHIDRA_SERVER_HOST/GHIDRA_SERVER_PORT at construction. Neither handler
         // has ever read a per-request host/port.
-        add(m, "/server/connect", "POST", "server", "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.");
-        add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server");
-        add(m, "/server/repositories", "GET", "server", "List repositories on the connected server");
-        add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server",
+        add(m, "/server/connect", "POST", "server", "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.", ToolAccess.WRITE);
+        add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server", ToolAccess.WRITE);
+        add(m, "/server/repositories", "GET", "server", "List repositories on the connected server", ToolAccess.READ_ONLY);
+        add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server", ToolAccess.WRITE,
             "name", "Name for the new repository. Headless mode only; the GUI plugin refuses and points at Ghidra's Project Manager.");
-        add(m, "/server/repository/file", "GET", "server", "Get file info from a server repository",
+        add(m, "/server/repository/file", "GET", "server", "Get file info from a server repository", ToolAccess.READ_ONLY,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the file to describe. Required.");
-        add(m, "/server/repository/files", "GET", "server", "List files in a server repository folder",
+        add(m, "/server/repository/files", "GET", "server", "List files in a server repository folder", ToolAccess.READ_ONLY,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Folder to list. Defaults to / — the repository or project root.");
-        add(m, "/server/status", "GET", "headless", "Check headless server connection status");
-        add(m, "/server/version_control/add", "POST", "server", "Add a file to version control",
+        add(m, "/server/status", "GET", "headless", "Check headless server connection status", ToolAccess.READ_ONLY);
+        add(m, "/server/version_control/add", "POST", "server", "Add a file to version control", ToolAccess.WRITE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the not-yet-versioned file to add.",
             "comment", "Check-in comment recorded for the initial version. Defaults to a generic Added via GhidraMCP.",
             "keepCheckedOut", "Accepted but not read on this route — neither handler passes it through. Use /server/version_control/checkin, where it does apply.");
-        add(m, "/server/version_control/checkin", "POST", "server", "Check in a version-controlled file",
+        add(m, "/server/version_control/checkin", "POST", "server", "Check in a version-controlled file", ToolAccess.WRITE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the checked-out file to check in.",
             "comment", "Check-in comment recorded on the new version. Defaults to a generic Checked in via GhidraMCP.",
             "keepCheckedOut", "True keeps the file checked out after the version lands, so you can keep editing. False (the default) releases the checkout.");
-        add(m, "/server/version_control/checkout", "POST", "server", "Check out a version-controlled file",
+        add(m, "/server/version_control/checkout", "POST", "server", "Check out a version-controlled file", ToolAccess.WRITE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the versioned file to check out.");
-        add(m, "/server/version_control/undo_checkout", "POST", "server", "Undo a file checkout",
+        add(m, "/server/version_control/undo_checkout", "POST", "server", "Undo a file checkout", ToolAccess.DESTRUCTIVE,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the checked-out file to release. Any local changes not checked in are discarded.");
-        add(m, "/server/version_history", "GET", "server", "Get version history for a file",
+        add(m, "/server/version_history", "GET", "server", "Get version history for a file", ToolAccess.READ_ONLY,
             "repo", REPO_HEADLESS_ONLY,
             "path", "Path of the versioned file whose history to return.");
-        add(m, "/tool/goto_address", "POST", "utility", "Navigate CodeBrowser listing and decompiler to a specific address",
+        add(m, "/tool/goto_address", "POST", "utility", "Navigate CodeBrowser listing and decompiler to a specific address", ToolAccess.WRITE,
             "address", "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only — it moves a CodeBrowser window.");
-        add(m, "/tool/launch_codebrowser", "POST", "utility", "Open a file in CodeBrowser, launching a new one if needed",
+        add(m, "/tool/launch_codebrowser", "POST", "utility", "Open a file in CodeBrowser, launching a new one if needed", ToolAccess.WRITE,
             "path", "DomainFile path of the program to open, e.g. /Vanilla/1.13c/D2Common.dll. GUI mode only.");
-        add(m, "/tool/running_tools", "GET", "utility", "List all running Ghidra tool windows");
+        add(m, "/tool/running_tools", "GET", "utility", "List all running Ghidra tool windows", ToolAccess.READ_ONLY);
         return m;
     }
 
