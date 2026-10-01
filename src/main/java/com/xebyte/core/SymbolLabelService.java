@@ -146,8 +146,21 @@ public class SymbolLabelService {
                                + "migrated from rename_global_variable(old_name, new_name).") String oldName,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        target = resolveRenameTarget(target, oldName);
+                               + "when multiple programs are open)") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Per-call override for the naming-quality gate: 'enforce' rejects a "
+                               + "convention miss, 'warn' applies the name and returns the miss as a "
+                               + "warning, 'off' skips the check. Omit to use the project/global setting.")
+                    String strictModeArg) {
+        try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
+            return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, programName);
+        } catch (Exception e) {
+            return Response.err("rename_symbol failed: " + e.getMessage());
+        }
+    }
+
+    private Response renameSymbolKind(String target, String newName, String kind, String oldName,
+            String programName) {
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
             case "data":     return renameDataAtAddress(target, newName, programName);
@@ -743,7 +756,8 @@ public class SymbolLabelService {
                     + "address=\"" + addressStr + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -867,7 +881,8 @@ public class SymbolLabelService {
                     + "address=\"" + addrHint + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",

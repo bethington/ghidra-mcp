@@ -2533,7 +2533,8 @@
         "new_name",
         "kind",
         "old_name",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "servers": [
         "gui",
