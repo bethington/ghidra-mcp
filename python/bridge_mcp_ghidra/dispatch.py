@@ -55,16 +55,21 @@ def failure_message(text: str) -> str | None:
         return None
 
     error = payload.get("error")
-    if isinstance(error, str) and error.strip():
-        return error
-    if payload.get("success") is False or payload.get("status") == "rejected":
-        # These carry their reason in `message` when there is no `error`.
-        for key in ("error", "message", "status"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value
-        return "the server reported failure"
-    return None
+    failed = (isinstance(error, str) and error.strip()) or payload.get("success") is False \
+        or payload.get("status") == "rejected"
+    if not failed:
+        return None
+    # A rejection carries a short code in `error` (``name_quality``) and the reason in
+    # `message` and `suggestion`; reporting the code alone left the caller guessing why.
+    parts = []
+    for key in ("error", "message", "suggestion"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip() and value.strip() not in parts:
+            parts.append(value.strip())
+    if parts:
+        return " — ".join(parts)
+    status = payload.get("status")
+    return status if isinstance(status, str) and status.strip() else "the server reported failure"
 
 
 def raise_on_failure(text: str) -> str:

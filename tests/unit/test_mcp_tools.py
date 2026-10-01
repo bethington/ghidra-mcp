@@ -602,6 +602,15 @@ class TestFailureDetection(unittest.TestCase):
         msg = self._msg('{"status": "rejected", "error": "first line too short"}')
         self.assertEqual(msg, "first line too short")
 
+    def test_a_rejection_reports_its_reason_not_just_its_code(self):
+        """Found live: rename_symbol's rejection reached the caller as a bare
+        "name_quality", its message and suggestion dropped."""
+        msg = self._msg('{"status": "rejected", "error": "name_quality", '
+                        '"issue": "missing_g_prefix", '
+                        '"message": "Global \'x\' must start with \'g_\'.", '
+                        '"suggestion": "Prepend g_."}')
+        self.assertEqual(msg, "name_quality — Global 'x' must start with 'g_'. — Prepend g_.")
+
     def test_successful_payloads_are_not_failures(self):
         for body in (
             '{"status": "success", "message": "renamed"}',
