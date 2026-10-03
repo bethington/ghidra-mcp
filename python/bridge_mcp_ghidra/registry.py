@@ -286,6 +286,8 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
 
     Returns: count of registered tools.
     """
+    if state._catalog_frozen:
+        raise RuntimeError("Named tool catalog is immutable for this MCP session")
     with state._tool_registry_lock:
         # Remove previously registered dynamic tools
         for name in state._dynamic_tool_names:
@@ -349,6 +351,8 @@ def _load_group(group_name: str) -> list[str]:
 
 def _unload_group(group_name: str) -> int:
     """Unload tools for a specific group. Returns count of removed tools."""
+    if state._catalog_frozen:
+        raise ValueError("Named tools stay registered for the session; unloading requires explicit --lazy mode")
     if group_name in state._default_groups:
         return 0  # Default groups can't be unloaded
 

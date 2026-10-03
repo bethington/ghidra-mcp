@@ -1,13 +1,13 @@
 """GhidraMCP Bridge — thin MCP↔HTTP multiplexer.
 
-On startup: exposes list_instances + connect_instance (plus tool-group and
-debugger proxy tools). On connect_instance: fetches /mcp/schema from the Ghidra
-server and dynamically registers every analysis tool as a generic HTTP
-dispatcher.
+With --no-lazy: registers the bundled named-tool contract independently of Ghidra.
+On connect_instance: verifies the selected instance and binds its live schema
+to the connection without replacing tool definitions. The default --lazy mode
+retains dynamic registration for clients that support tool-list changes.
 
 Supports two transports to Ghidra:
-  - UDS (Unix domain sockets) — preferred for local instances
-  - TCP (HTTP) — fallback for headless/remote servers
+  - TCP (HTTP) — preferred after verifying the discovered instance identity
+  - UDS (Unix domain sockets) — for instances without an available TCP listener
 
 This package was split out of the historical single-file ``bridge_mcp_ghidra.py``.
 The public names below are re-exported for backwards compatibility; mutable

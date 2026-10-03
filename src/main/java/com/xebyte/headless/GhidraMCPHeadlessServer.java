@@ -373,10 +373,33 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
     }
 
+    private String buildInstanceInfoJson() {
+        // Read the project once so its name and locator describe the same identity.
+        var project = programProvider.getProject();
+        var programs = new ArrayList<Map<String, Object>>();
+        for (Program program : programProvider.getAllOpenPrograms()) {
+            var file = program.getDomainFile();
+            programs.add(JsonHelper.mapOf("name", program.getName(),
+                "path", file == null ? program.getName() : file.getPathname(), "open", true));
+        }
+        return JsonHelper.toJson(JsonHelper.mapOf(
+            "pid", ProcessHandle.current().pid(),
+            "project", project == null ? "unknown" : project.getName(),
+            "project_path", project == null ? "" : project.getProjectLocator().toString(),
+            "tcp_port", server.getAddress().getPort(),
+            "programs", programs,
+            "tools", 0));
+    }
+
     private void registerEndpoints() {
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
         // ==========================================================================
+
+        // Like the GUI metadata route, this must pass through the normal auth guard.
+        safeContext("/mcp/instance_info", exchange -> {
+            sendResponse(exchange, buildInstanceInfoJson());
+        });
 
         safeContext("/check_connection", exchange -> {
             sendResponse(exchange, "Connection OK - GhidraMCP Headless Server v" + VERSION);

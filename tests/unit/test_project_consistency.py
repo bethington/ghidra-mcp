@@ -312,7 +312,6 @@ class TestJavaArchitecture(unittest.TestCase):
             # generalize to "currentProgram-relative" outside a UI context).
             "/get_current_selection",
             "/mcp/health",
-            "/mcp/instance_info",
             "/project/info",
             "/server/authenticate",
             "/tool/goto_address",

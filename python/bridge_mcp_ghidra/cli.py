@@ -14,7 +14,7 @@ from . import state
 from .config import AUTH_TOKEN, logger
 from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
-
+from . import catalog
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -240,7 +240,7 @@ def main():
         "--no-lazy",
         dest="lazy",
         action="store_false",
-        help="Load all tool groups on connect. Needed only by clients that "
+        help="Register the bundled tool catalog before connecting. For clients that "
         "ignore tools/list_changed; rejected outright by the Gemini API "
         "(400 INVALID_ARGUMENT, too many states for serving). "
         "GHIDRA_MCP_LAZY=0 does the same where argv is not yours to set.",
@@ -263,7 +263,8 @@ def main():
         state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
 
     if not state._lazy_mode:
-        logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
+        catalog.initialize()
+        logger.info("Named tools loaded from bundled catalog; select a Ghidra instance with connect_instance")
     else:
         logger.info(
             "Lazy tool loading: only %s on connect. "
@@ -271,7 +272,7 @@ def main():
             "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front.",
             ",".join(sorted(state._default_groups)),
         )
-    if not _auto_connect():
+    if state._lazy_mode and not _auto_connect():
         # Ghidra may simply not be up yet. Keep looking in the background so a
         # bridge that wins the startup race still gets its tools, instead of
         # serving only the static ones for the life of the process.

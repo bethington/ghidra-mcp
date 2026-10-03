@@ -27,6 +27,8 @@ _active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
 _transport_mode: str = "none"  # "uds", "tcp", or "none"
 _connected_project: str | None = None  # Project name for auto-reconnect
 _connection_generation = 0
+_connection_binding: str | None = None
+_catalog_frozen = False  # Eager-mode tool definitions remain fixed for the session.
 _executor_lock = threading.Lock()
 
 
@@ -37,6 +39,7 @@ class ConnectionSnapshot:
     active_tcp: str | None
     connected_project: str | None
     generation: int
+    binding: str | None = None  # Immutable live schema and instance identity for this route.
 
 
 class RequestCancelHandle:
@@ -164,6 +167,7 @@ def get_connection_snapshot() -> ConnectionSnapshot:
             active_tcp=_active_tcp,
             connected_project=_connected_project,
             generation=_connection_generation,
+            binding=_connection_binding,
         )
 
 
@@ -183,14 +187,16 @@ def set_connection_snapshot(
     active_socket: str | None = None,
     active_tcp: str | None = None,
     connected_project: str | None = None,
+    binding: str | None = None,
 ) -> ConnectionSnapshot:
     """Install a new global connection target and advance the generation."""
-    global _active_socket, _active_tcp, _transport_mode, _connected_project, _connection_generation
+    global _active_socket, _active_tcp, _transport_mode, _connected_project, _connection_generation, _connection_binding
     with _reconnect_lock:
         _active_socket = active_socket
         _active_tcp = active_tcp
         _transport_mode = mode
         _connected_project = connected_project
+        _connection_binding = binding
         _connection_generation += 1
         return ConnectionSnapshot(
             mode=_transport_mode,
@@ -198,6 +204,7 @@ def set_connection_snapshot(
             active_tcp=_active_tcp,
             connected_project=_connected_project,
             generation=_connection_generation,
+            binding=_connection_binding,
         )
 
 
@@ -205,7 +212,7 @@ def maybe_promote_connection_snapshot(
     previous: ConnectionSnapshot, candidate: ConnectionSnapshot
 ) -> ConnectionSnapshot | None:
     """Install `candidate` only if the global connection still equals `previous`."""
-    global _active_socket, _active_tcp, _transport_mode, _connected_project, _connection_generation
+    global _active_socket, _active_tcp, _transport_mode, _connected_project, _connection_generation, _connection_binding
     with _reconnect_lock:
         current = ConnectionSnapshot(
             mode=_transport_mode,
@@ -213,6 +220,7 @@ def maybe_promote_connection_snapshot(
             active_tcp=_active_tcp,
             connected_project=_connected_project,
             generation=_connection_generation,
+            binding=_connection_binding,
         )
         if current != previous:
             return None
@@ -220,6 +228,7 @@ def maybe_promote_connection_snapshot(
         _active_tcp = candidate.active_tcp
         _transport_mode = candidate.mode
         _connected_project = candidate.connected_project
+        _connection_binding = candidate.binding
         _connection_generation += 1
         return ConnectionSnapshot(
             mode=_transport_mode,
@@ -227,6 +236,7 @@ def maybe_promote_connection_snapshot(
             active_tcp=_active_tcp,
             connected_project=_connected_project,
             generation=_connection_generation,
+            binding=_connection_binding,
         )
 
 
@@ -237,6 +247,7 @@ def build_connection_snapshot(
     active_tcp: str | None = None,
     connected_project: str | None = None,
     generation: int = 0,
+    binding: str | None = None,
 ) -> ConnectionSnapshot:
     """Construct an explicit connection snapshot without mutating global state."""
     return ConnectionSnapshot(
@@ -245,6 +256,7 @@ def build_connection_snapshot(
         active_tcp=active_tcp,
         connected_project=connected_project,
         generation=generation,
+        binding=binding,
     )
 
 
