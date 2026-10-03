@@ -1125,8 +1125,12 @@ much larger feature.
 Internal Java callers are not checked: the check sits on the MCP boundary, where
 a caller states a belief (`FunctionService.decompileAt` / `forceDecompileAt`).
 The decision table is pure and Ghidra-free in `LanguageVariants`, covered offline
-by `LanguageVariantsTest` (28 cases); the live behavior is pinned by
-`tests/integration/test_readonly_endpoints.py::TestDecompileVariantLabelling`,
+by `LanguageVariantsTest` (28 cases). The measurement itself is covered by
+`LanguageVariantDecoderGhidraTest`, which puts the question to Ghidra's real
+language table rather than to a reading of its `.ldefs`: a release that gave
+`System Management Mode` its own `.sla` would put the advisory back on every
+32-bit Windows binary, and nothing else would notice. The live behavior is pinned
+by `tests/integration/test_readonly_endpoints.py::TestDecompileVariantLabelling`,
 which skips itself against a server built before this rather than reporting its
 absence as failures.
 
