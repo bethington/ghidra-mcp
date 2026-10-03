@@ -3976,7 +3976,7 @@
     {
       "category": "program",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants and variant_ambiguous — true when the processor offers more than one SLEIGH decoder at this endian/size (PowerPC vs PowerPC VLE), meaning the loader guessed that column and decompiler output may be confidently wrong. This is where the legal variant= values are enumerated. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants (each with the decoder it loads) and variant_ambiguous — true when the processor offers more than one SLEIGH decoder at this endian/size (PowerPC vs PowerPC VLE), meaning the loader guessed that column and decompiler output may be confidently wrong. variant_enumeration_failed is true when Ghidra's language table could not be walked at all, in which case variant_ambiguous reports ignorance rather than a single variant. This is where the legal variant= values are enumerated. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
       "method": "GET",
       "params": [
         {
