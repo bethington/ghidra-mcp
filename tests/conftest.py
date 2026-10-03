@@ -198,6 +198,77 @@ def current_program(server_url, server_available):
 
 
 @pytest.fixture
+def language_metadata(http_client, program_loaded):
+    """The active program's language description.
+
+    Registers and default symbols are switched off: this fixture exists for the
+    variant fields, and x86 alone would otherwise drag several hundred register
+    entries through every test that reads them.
+    """
+    if not program_loaded:
+        pytest.skip("No program loaded")
+
+    response = http_client.get(
+        "/get_language_metadata",
+        params={"include_registers": "false", "include_default_symbols": "false"},
+    )
+    if response.status_code != 200:
+        pytest.skip("/get_language_metadata not available on this build")
+    try:
+        data = response.json()
+    except ValueError:
+        pytest.skip("/get_language_metadata returned non-JSON")
+    if not isinstance(data, dict) or data.get("error"):
+        pytest.skip("/get_language_metadata returned an error")
+    return data
+
+
+@pytest.fixture
+def program_variant(http_client, program_loaded):
+    """The SLEIGH variant the active program is loaded under.
+
+    variant= is optional on every decompile endpoint, so ordinary tests do not
+    need this -- it exists for the tests that exercise the accepted-assertion
+    path, where the suite has to name the variant the program is really loaded
+    under rather than hard-coding one.
+
+    Deliberately does NOT reuse the language_metadata fixture: this one must not
+    skip. A server built before this work ignores an unknown query parameter, so
+    returning "" there keeps the tests running instead of silently disabling
+    them until the plugin is redeployed.
+    """
+    if not program_loaded:
+        pytest.skip("No program loaded")
+    try:
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "false", "include_default_symbols": "false"},
+        )
+        if response.status_code != 200:
+            return ""
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    return data.get("variant") or ""
+
+
+@pytest.fixture
+def variant_ambiguous(language_metadata):
+    """Whether this program's processor offers more than one SLEIGH *decoder*.
+
+    Not the same as offering more than one variant row: x86's `default` and
+    `System Management Mode` are one x86.sla configured two ways, while
+    PowerPC's eleven variants load ten different decoders. Only the second kind
+    means the loader made a guess worth flagging.
+    """
+    if "variant_ambiguous" not in language_metadata:
+        pytest.skip("server predates the decompile variant labelling")
+    return bool(language_metadata.get("variant_ambiguous"))
+
+
+@pytest.fixture
 def sample_function(http_client, program_loaded):
     """Get a sample function name for testing."""
     if not program_loaded:

@@ -343,7 +343,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Composite analysis for RE documentation workflow. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
@@ -361,6 +361,14 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/analyze_for_documentation"
@@ -368,7 +376,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
       "method": "GET",
       "params": [
         {
@@ -430,6 +438,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -2217,7 +2233,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.",
+      "description": "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. Bulk mode returns the per-function results under a functions object, with the language stamp beside it. Every response is stamped with language_id + variant, so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) the response also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and the wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.",
       "method": "GET",
       "params": [
         {
@@ -2252,6 +2268,14 @@
           "required": false,
           "source": "query",
           "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because this endpoint decodes with the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/decompile_function"
@@ -3080,7 +3104,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Force decompiler cache refresh for function. Stamped with language_id + variant like decompile_function, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
@@ -3095,6 +3119,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3944,7 +3976,7 @@
     {
       "category": "program",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants (each with the decoder it loads) and variant_ambiguous — true when the processor offers more than one SLEIGH decoder at this endian/size (PowerPC vs PowerPC VLE), meaning the loader guessed that column and decompiler output may be confidently wrong. variant_enumeration_failed is true when Ghidra's language table could not be walked at all, in which case variant_ambiguous reports ignorance rather than a single variant. This is where the legal variant= values are enumerated. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
       "method": "GET",
       "params": [
         {

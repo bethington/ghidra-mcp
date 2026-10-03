@@ -1080,6 +1080,113 @@ it contains and needed no refresh.
 - `.gitignore`'s blanket `audit_*.py` one-off rule would have silently swallowed
   the reproducer. `tools/` is now negated too.
 
+### Decompiler output says which language variant produced it
+
+Ghidra's language picker has five columns — processor, endian, size, **variant**,
+compiler. The first three come off the file header and the loader gets them
+right; the variant is the column it *guesses*, and it is the one that changes
+what the bytes mean. `PowerPC:BE:32:default` and `PowerPC:BE:64:VLE-32addr` (VLE)
+decode the same bytes into different instruction streams, so a VLE image opened
+as classic PowerPC decompiles into C that is syntactically perfect and entirely
+fictional. The decompiler reports success, the pseudocode reads plausibly, and
+nothing in the response said which of eleven dialects produced it.
+
+This server never exposed that choice at all. Now:
+
+- **Every response carrying decompiler C is stamped** with `language_id` and
+  `variant` — unconditionally, on every processor, including
+  `decompile_function`'s `functions=` bulk mode, which was previously the one
+  decompile path handing back C with nothing on it while the single-function
+  path was labelled. Pseudocode can now be audited after the fact for the
+  dialect that produced it.
+- **Bulk mode nests its results under `functions`.** The stamp cannot share a
+  map with the per-function results, because the keys of that map are function
+  references the *caller* chose: a flat shape puts up to five reserved names
+  into the same namespace as user input, so a caller iterating `ref -> code`
+  sees entries that are not functions (one of them a list), and a function
+  genuinely named `language_id` collides with the stamp and travels unlabelled.
+  Bulk mode is itself this release's consolidation of `batch_decompile`, so no
+  shipped caller depends on the flat shape.
+- **A processor whose variants load more than one SLEIGH *decoder* also gets an
+  advisory**: `variant_ambiguous`, `variant_candidates`, and a `variant_notice`
+  sentence built from that processor's own candidates, saying the loader guessed
+  and what to do if the guess is wrong. Absent, not false, on unambiguous
+  processors — a field that is always present and almost always false is one
+  readers learn to skip.
+- **`variant=` is optional on all four C-returning endpoints, and checked when
+  supplied.** Naming a variant the program is not loaded under is refused
+  (`variant_mismatch`), never answered: the decompiler decodes with the language
+  the program was imported under and cannot be asked for another, so answering
+  would return one dialect's output under a label the caller chose — worse than
+  no answer, because the label makes it look checked. A full language id
+  (`PowerPC:BE:64:VLE-32addr`) is accepted as well as a bare variant name, and is
+  compared whole, so `PowerPC:BE:64:default` cannot satisfy a 32-bit program on a
+  variant-column match. An unknown name is `unknown_variant`.
+- **`get_language_metadata` reports `variant_ambiguous`, `variant_enumeration_failed`
+  and `available_variants`** (each with `variant`, `language_id`, `description`,
+  the `decoder` it loads, and a `loaded` flag). This is where the legal values
+  are enumerated.
+- **`analyze_function_complete` and `analyze_for_documentation` stamp their
+  pseudocode too, and withhold only that field** on a contradicted claim. Both
+  return `decompiled_code`, so labelling just the two decompile endpoints would
+  have left the same C reachable one tool over with nothing on it — the exact
+  shape of the eviction-guard bypass in `set_global`. Endpoints that decompile
+  internally to derive a score or a field-usage map
+  (`analyze_function_completeness`, `analyze_struct_field_usage`) are untouched:
+  they hand back no pseudocode.
+
+**Why a label and not a required parameter.** The first implementation made
+`variant=` *mandatory* whenever the processor offered more than one variant row.
+Two measurements sank that. It fires on x86 at every width — `default` vs
+`System Management Mode` at 32-bit, `default` vs `compat32` at 64-bit — so every
+ordinary PE and ELF would have had to answer a question about a mode nothing
+loads, on the most-called tool in the catalog. And the confirmation is
+unenforceable: a refusal has to enumerate the legal values or it is an outage,
+which means it names the answer, and the caller — usually a model — re-sends the
+value it was just shown and records a confirmation it never performed. This
+repository already learned that shape from the eviction guard, whose refusal text
+must never name `allow_evict` because a model read the suggestion and used the
+override within one turn; here the override *is* the parameter, so the same fix
+was not available. What remains is the half that carries information rather than
+ceremony.
+
+**Ambiguity counts decoders, not variant rows.** Measured against Ghidra
+12.1.2's `.ldefs` files: of 83 processor/endian/size buckets, 30 hold more than
+one variant but only **19 hold more than one `.sla`**, covering **96 of 177
+non-deprecated languages** rather than 124. All three x86 buckets are in the
+difference (`x86.sla` for `default` and `System Management Mode`; `x86-64.sla`
+for `default` and `compat32`), along with MIPS/64, tricore, Z80, Z180, HC05,
+HC08 and HCS08. What stays flagged is what is worth flagging: PowerPC/BE/32 (ten
+decoders across eleven variants, VLE among them), PowerPC/LE/32, both ARM/32
+buckets, PIC-16, PIC-24, MIPS/32, AARCH64, SuperH, 68000, RISCV and Dalvik. The
+bucket key is `(processor, endian, getSize())` — `getSize()` is the *address*
+size, not the id's middle field, which is why `PowerPC:BE:64:VLE-32addr` (size
+32) shares a bucket with `PowerPC:BE:32:default`.
+
+**The honest limit**, stated rather than left to be found: a shared `.sla` is a
+proxy for "the loader was not choosing between two decoders", not a proof that
+decoding is identical. `x86-16.pspec` sets `addrsize`/`opsize` context defaults
+and `mips64micro.pspec` sets `RELP`, so those same-decoder variants really do
+decode differently — they are simply modes no PE/ELF loader auto-selects.
+Widening the rule to catch them re-admits x86, which is the trade being made;
+the unconditional stamp is what covers the gap. `LanguageVariantsTest` pins both
+directions so the trade cannot be undone by accident. This is detection by the
+reader, not prevention: what would actually prevent a VLE-as-classic-PowerPC
+mistake is a coherence heuristic on the loaded program, which is a separate and
+much larger feature.
+
+Internal Java callers are not checked: the check sits on the MCP boundary, where
+a caller states a belief (`FunctionService.decompileAt` / `forceDecompileAt`).
+The decision table is pure and Ghidra-free in `LanguageVariants`, covered offline
+by `LanguageVariantsTest` (28 cases). The measurement itself is covered by
+`LanguageVariantDecoderGhidraTest`, which puts the question to Ghidra's real
+language table rather than to a reading of its `.ldefs`: a release that gave
+`System Management Mode` its own `.sla` would put the advisory back on every
+32-bit Windows binary, and nothing else would notice. The live behavior is pinned
+by `tests/integration/test_readonly_endpoints.py::TestDecompileVariantLabelling`,
+which skips itself against a server built before this rather than reporting its
+absence as failures.
+
 ### MCP-protocol conformance suite
 
 `tests/conformance/` drives the server through a real MCP client rather than raw

@@ -193,12 +193,16 @@ class TestDecompilationEndpoints:
         )
         assert response.status_code == 200
 
-        # Should contain C-like code or error
-        text = response.text
-        assert len(text) > 0
-        # If successful, should have function-like syntax
-        if "error" not in text.lower():
-            assert "{" in text or "(" in text or "void" in text or "int" in text
+        # Parsed, not measured. This endpoint returns its structured refusals as
+        # HTTP 200, so "non-empty body" is satisfied by a response carrying no C
+        # at all -- which is how this assertion passed while testing nothing.
+        data = response.json()
+        code = data.get("decompiled")
+        assert code, data
+        assert "{" in code or "(" in code
+        # Output is labelled with the dialect that produced it, always.
+        assert data.get("language_id"), data
+        assert "variant" in data, data
 
     @pytest.mark.requires_program
     def test_disassemble_function(self, http_client, sample_address):

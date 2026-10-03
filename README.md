@@ -978,12 +978,12 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `clear_instruction_flow_override` - Clear flow override
 - `create_function` - Create function at address
 - `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `decompile_function` - Decompile function
+- `decompile_function` - Decompile function (output stamped with language_id + variant; optional variant= is checked against the loaded one)
 - `delete_function` - Delete function at address
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation
+- `force_decompile` - Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)
 - `get_function_by_address` - Get function at address
 - `get_function_tags` - List all tags assigned to a specific function
 - `get_function_variables` - List all variables in a function
@@ -1079,7 +1079,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_control_flow` - Analyze control flow
 - `analyze_data_region` - Analyze data region
 - `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
-- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
+- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness); decompiled_code is stamped with language_id + variant
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
 - `batch_apply_documentation` - Apply all documentation to a function in one call **(GUI only)**

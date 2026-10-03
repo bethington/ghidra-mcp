@@ -170,13 +170,14 @@
       "category": "analysis",
       "params": [
         "function_address",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
+      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness); decompiled_code is stamped with language_id + variant"
     },
     {
       "path": "/analyze_function_complete",
@@ -190,13 +191,14 @@
         "include_disasm",
         "include_variables",
         "include_completeness",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Comprehensive single-call function analysis. Accepts function name or address."
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. decompiled_code is stamped with language_id + variant."
     },
     {
       "path": "/analyze_function_completeness",
@@ -1089,13 +1091,14 @@
         "address",
         "functions",
         "program",
-        "timeout"
+        "timeout",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Decompile function"
+      "description": "Decompile function (output stamped with language_id + variant; optional variant= is checked against the loaded one)"
     },
     {
       "path": "/delete_bookmark",
@@ -1505,13 +1508,14 @@
       "category": "function",
       "params": [
         "address",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Force fresh decompilation"
+      "description": "Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)"
     },
     {
       "path": "/get_address_spaces",
@@ -1932,7 +1936,7 @@
         "gui",
         "headless"
       ],
-      "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections."
+      "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Also reports variant, available_variants (each with the SLEIGH decoder it loads) and variant_ambiguous — where the legal decompile variant= values are enumerated. Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections."
     },
     {
       "path": "/get_metadata",
