@@ -111,9 +111,9 @@ def _probe_tcp_port(port: int, timeout: float, cancel_handle) -> tuple[str, dict
                 with cancel_handle.hold_send_window(conn) as can_send:
                     if not can_send:
                         return None
-                    conn.request("GET", "/mcp/instance_info")
+                    conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             else:
-                conn.request("GET", "/mcp/instance_info")
+                conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             resp = conn.getresponse()
             if resp.status != 200:
                 return None

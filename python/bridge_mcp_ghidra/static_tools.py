@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import discovery
+from . import catalog, connections, discovery
 from . import dispatch
 from . import registry
 from . import state
@@ -21,6 +21,8 @@ from .validation import validate_server_url
 
 def _connect_instance_sync(project: str) -> dict:
     """Blocking connect_instance implementation for worker-thread execution."""
+    if state._catalog_frozen:
+        return connections.connect(project)
     cancel_handle = state.get_request_cancel_handle()
 
     def _commit_if_live(func, /, *args, **kwargs):
@@ -179,8 +181,8 @@ def _list_instances_sync() -> str:
     Returns JSON with each instance's project name, PID, open programs, and
     socket path or TCP URL. Also shows which instance is currently connected.
     """
-    instances = discovery.discover_instances()
-    tcp_instance = discovery.discover_active_tcp_instance()
+    instances = connections.instances() if state._catalog_frozen else discovery.discover_instances()
+    tcp_instance = None if state._catalog_frozen else discovery.discover_active_tcp_instance()
     if tcp_instance:
         instances.append(tcp_instance)
 
@@ -263,15 +265,11 @@ async def connect_instance(
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
-    IMPORTANT: Before calling this function only the static bridge tools are
-    exposed (list_instances, connect_instance, tool-group management,
-    debugger proxy). After a successful connect the bridge fetches the
-    instance's /mcp/schema and registers Ghidra analysis tools dynamically.
-    By default all tool groups are loaded on connect. When started with
-    --lazy, only the default groups are loaded initially and clients may need
-    to call load_tool_group() for additional categories. Clients that cache
-    the initial tools/list and don't honor tools/list_changed must re-list
-    tools after this call.
+    Named tools are registered at startup from the bundled contract. Connecting
+    selects a live instance and verifies its capabilities without changing the
+    tool list. Ambiguous matches are rejected. Pass a full project path or an
+    instance socket/URL when names collide. Explicit --lazy mode retains dynamic
+    registration and requires client support for tools/list_changed.
 
     Use list_instances() first to see available instances.
 
@@ -283,7 +281,7 @@ async def connect_instance(
         project,
         bind_connection=False,
     )
-    if result.get("connected"):
+    if result.get("connected") and not state._catalog_frozen:
         await registry._notify_tools_changed(ctx)
     return json.dumps(result)
 
@@ -427,7 +425,8 @@ async def check_tools(
 ) -> str:
     """
     Check if specific tools are callable right now. Returns status for each tool:
-    "callable", "not_loaded" (exists but group not loaded), or "not_found" (doesn't exist).
+    "callable", "unavailable" (registered but disconnected/unsupported/incompatible),
+    "not_loaded" (lazy group not loaded), or "not_found" (doesn't exist).
 
     Args:
         tools: Comma-separated tool names, e.g. "rename_symbol,batch_set_comments,analyze_function_completeness"
@@ -462,6 +461,13 @@ async def check_tools(
                 "status": "callable",
                 "group": all_known.get(name, "unknown"),
             }
+            if state._catalog_frozen:
+                definition = next(t for t in state._full_schema if t["name"] == name)
+                error = catalog.capability_error(
+                    definition["endpoint"], definition.get("http_method", "GET"), state.get_connection_snapshot()
+                )
+                if error:
+                    results[name].update(status="unavailable", reason=error, registered=True)
         elif name in all_known:
             group = all_known[name]
             results[name] = {
@@ -529,6 +535,12 @@ async def search_tools(
         }
         if not loaded:
             result["fix"] = f'load_tool_group("{category}")'
+        if state._catalog_frozen and name not in STATIC_TOOL_NAMES:
+            error = catalog.capability_error(
+                td["endpoint"], td.get("http_method", "GET"), state.get_connection_snapshot()
+            )
+            if error:
+                result.update(status="unavailable", reason=error, registered=loaded)
         scored.append((score, result))
 
     scored.sort(key=lambda x: x[0], reverse=True)

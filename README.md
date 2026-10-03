@@ -439,7 +439,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
 | `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
-| `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
+| `--no-lazy` | off | Register the bundled named-tool catalog before connecting to Ghidra. For MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
 
 #### Lazy tool loading is the default (issue #440)
@@ -470,6 +470,35 @@ export GHIDRA_MCP_LAZY=0                    # when you don't (Docker, uvx, some 
 `GHIDRA_MCP_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
 `--lazy`/`--no-lazy` on the command line wins over it. Startup logs which mode
 is in effect.
+
+#### Stable eager catalog
+
+With `--no-lazy`, the bridge starts without a selected instance. Use `list_instances()` and
+`connect_instance(project)` to select one at runtime, even if Ghidra started after
+the MCP client. Exact project names or paths are preferred; ambiguous names are
+rejected. No project-specific startup arguments are needed. Connections and
+reconnections preserve the initial named-tool list. `check_tools` distinguishes
+registered tools from tools available on the selected instance. Missing or
+incompatible endpoint contracts are rejected before dispatch.
+
+The bridge verifies instance identity and prefers the instance's TCP listener,
+whose GUI endpoint surface may exceed its Unix socket's. A verified socket can
+still be used when TCP is unavailable; unsupported endpoints are reported as
+unavailable. In-flight calls retain their connection and capabilities across
+project switches. Restart recovery matches full project paths.
+
+Headless servers also expose authenticated `/mcp/instance_info` metadata. Update
+the headless server together with the bridge: older headless versions without
+this route cannot be verified in eager mode. A server with no project can be
+selected by URL; after creating or opening a project, explicitly reconnect to
+its new identity before making further calls.
+
+The wheel includes `tool_catalog.json`, generated using the extension's annotation
+scanner and manual descriptors. To regenerate after endpoint changes, run
+`mvn -Dtest=BridgeCatalogTest -DupdateBridgeCatalog=true test`; ordinary Java tests
+check for drift. Shipping a changed contract requires updating the bridge package.
+The default `--lazy` mode retains dynamic discovery for clients that
+support tool-list refresh; `--no-lazy` mode does not unload tool groups.
 
 #### Strict program routing (multi-program safety)
 
@@ -569,7 +598,7 @@ Every tool above is a `GET`; none of them writes to the Ghidra database.
   `--default-groups listing,function,program,xref`.
 - **A narrow allowlist plus `--lazy` needs the group tools.** If you allowlist
   only leaf tools and run lazily, the agent has no way to load anything else.
-  Either run eagerly (`--no-lazy`, the default) or add `search_tools`,
+  Either run eagerly (`--no-lazy`) or add `search_tools`,
   `list_tool_groups`, `load_tool_group`, and `check_tools` to the allowlist.
 
 Verify any allowlist against the running server rather than against this table:

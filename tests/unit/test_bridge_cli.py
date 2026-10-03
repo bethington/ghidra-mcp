@@ -47,6 +47,7 @@ class _CliHarness(unittest.TestCase):
             patch.object(mcp, "run"),
             patch.object(cli.uvicorn, "run"),
             patch.object(cli, "_build_http_app"),
+            patch.object(cli.catalog, "initialize"),
         ]
         # os.environ is patched unconditionally (patch.dict restores the whole
         # mapping on stop) so a test that does not name GHIDRA_MCP_LAZY can

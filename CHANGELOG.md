@@ -802,6 +802,23 @@ its own justification.
   the empty string was coerced to `false`, silently activating tri-state filters
   such as `has_custom_name`, `is_thunk`, and `is_external`.
 
+### Stable named-tool discovery
+
+With `--no-lazy`, the bridge registers a generated, bundled tool contract before MCP
+initialization, including when Ghidra is absent. Runtime instance selection and
+restart recovery preserve named tool definitions and validate endpoint contracts
+before dispatch. Ambiguous project selections fail explicitly. In-flight calls
+retain their instance and capabilities across switches. Verified TCP listeners
+expose GUI endpoints missing from the socket server; socket-only instances retain
+explicit capability reporting. `--lazy` remains the default dynamic-discovery mode.
+The headless server now exposes `/mcp/instance_info` behind its normal auth guard,
+so eager connections can verify its PID, project path, and actual bound TCP port
+without bypassing identity checks.
+TCP discovery includes configured authentication credentials. Socket-only
+instances ignore the disabled TCP-port sentinel, explicit custom-port connections
+can recover after restart by revalidating their project path, and the bundled
+catalog is read as UTF-8 regardless of the system locale.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

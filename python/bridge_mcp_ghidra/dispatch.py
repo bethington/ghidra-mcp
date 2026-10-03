@@ -146,6 +146,10 @@ def _try_reconnect(
 ) -> state.ConnectionSnapshot | None:
     """Reconnect one request to its original project without clobbering a switch."""
     base = connection or state.get_connection_snapshot()
+    from . import connections
+
+    if state._catalog_frozen:
+        return connections.reconnect(base)
     if not base.connected_project:
         return None
 
@@ -226,6 +230,13 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
     timeout = get_timeout(endpoint, params)
     for attempt in range(retries):
         try:
+            from .catalog import capability_error
+            from .connections import refresh_if_changed
+
+            connection = refresh_if_changed(connection)
+            error = capability_error(endpoint, "GET", connection)
+            if error:
+                return json.dumps({"error": error})
             text, status = transport.do_request(
                 "GET",
                 endpoint,
@@ -278,6 +289,13 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3, query_params: dic
     # sent — attempted once on the first iteration. Everything else surfaces as an error.
     for attempt in range(retries):
         try:
+            from .catalog import capability_error
+            from .connections import refresh_if_changed
+
+            connection = refresh_if_changed(connection)
+            error = capability_error(endpoint, "POST", connection)
+            if error:
+                return json.dumps({"error": error})
             text, status = transport.do_request(
                 "POST",
                 endpoint,
