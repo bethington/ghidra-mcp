@@ -23,59 +23,95 @@ rename_symbol(address, "dwName")          # Step 2: Rename with Hungarian notati
 set_comment(address, "comment", type='pre')  # Step 3: Add documentation
 ```
 
-## Decompiling: name the language variant
+## Decompiling: read the language stamp
 
 Ghidra's language picker chooses processor, endian, size, **variant** and
 compiler. The first three come off the file header; the variant is the column
 the loader *guesses*, and it decides what the bytes mean. `PowerPC:BE:32:default`
-and `PowerPC:BE:64:VLE-32addr` (VLE) decode the same bytes into different instruction
-streams, so a VLE image opened as classic PowerPC decompiles into C that is
-syntactically perfect and entirely fictional — the decompiler reports success and
-the pseudocode reads plausibly.
+and `PowerPC:BE:64:VLE-32addr` (VLE) decode the same bytes into different
+instruction streams, so a VLE image opened as classic PowerPC decompiles into C
+that is syntactically perfect and entirely fictional — the decompiler reports
+success and the pseudocode reads plausibly.
 
-`decompile_function` and `force_decompile` therefore **require** `variant=`
-whenever the program's processor offers more than one variant at its endian and
-size. Expect that on most targets: in Ghidra 12.1.2, 30 of 83
-processor/endian/size buckets offer a choice, covering 124 of 177 non-deprecated
-languages. 32-bit x86 has `default` and `System Management Mode`, 64-bit x86 has
-`default` and `compat32`, ARM/LE/32 has ten. Buckets with a single variant
-(RISC-V 64, Sparc, AVR8, MSP430, …) ask nothing of you.
+Every response carrying decompiler C is therefore **stamped** with `language_id`
+and `variant`, so you can tell afterwards which dialect produced it. On a
+processor whose variants load more than one SLEIGH *decoder*, the response also
+carries `variant_ambiguous`, the candidate names, and a sentence saying the
+loader guessed.
 
 ```python
-# 1. Look up what this program is, and what the alternatives are
-meta = get_language_metadata(include_registers=False, include_default_symbols=False)
-# -> {"language_id": "PowerPC:BE:64:VLE-32addr",
+decompile_function(address="0x00020000")
+# -> {"name": ..., "address": ...,
+#     "language_id": "PowerPC:BE:64:VLE-32addr",
 #     "variant": "PowerISA-VLE-64-32addr",
-#     "variant_required": true,
-#     "available_variants": [
-#        {"variant": "default", "language_id": "PowerPC:BE:32:default", "loaded": false, ...},
-#        {"variant": "PowerISA-VLE-64-32addr", "language_id": "PowerPC:BE:64:VLE-32addr", "loaded": true, ...}, ...]}
-
-# 2. Confirm the loaded variant is the one this binary actually targets, then decompile
-decompile_function(address="0x00020000", variant="PowerISA-VLE-64-32addr")
-# -> {"name": ..., "address": ..., "language_id": ..., "variant": ..., "decompiled": "..."}
+#     "variant_ambiguous": true,
+#     "variant_candidates": ["default", "4xx", ..., "PowerISA-VLE-64-32addr"],
+#     "variant_notice": "This processor offers 11 SLEIGH variants ...",
+#     "decompiled": "..."}
 ```
 
-A full language id is accepted in place of the bare name
-(`variant="PowerPC:BE:64:VLE-32addr"`), and matching is case-insensitive.
+`variant_ambiguous` counts **decoders, not rows**. Measured against Ghidra
+12.1.2's `.ldefs`: 30 of 83 processor/endian/size buckets hold more than one
+variant, but only **19** hold more than one decoder (96 of 177 non-deprecated
+languages). All three x86 buckets are in the difference — `default` and
+`System Management Mode` are both `x86.sla`, differing only in processor spec —
+so ordinary PE and ELF work never sees the advisory. PowerPC/BE/32 (eleven
+variants, ten decoders), both ARM/32 buckets, PIC-16, PIC-24, MIPS/32, SuperH,
+68000, AARCH64 and Dalvik do.
 
-**Confirming is not a formality.** The parameter exists so that the dialect is a
-decision you made rather than one the loader made for you. Before passing it,
-check that it matches the binary: ELF `e_flags` / PE machine type, the vendor's
-core documentation, or simply whether disassembly at known entry points is
-coherent.
+### Asserting the variant
+
+`variant=` is **optional everywhere**. Pass it when you have established which
+dialect the binary targets and want that assumption checked rather than assumed:
+
+```python
+decompile_function(address="0x00020000", variant="PowerISA-VLE-64-32addr")
+```
+
+If the program is not loaded under that variant the call is **refused**, not
+answered — returning the loaded variant's C under a label you chose would be
+worse than no answer, because the label makes it look verified. A full language
+id works in place of the bare name (`variant="PowerPC:BE:64:VLE-32addr"`), and
+matching is case-insensitive.
+
+Look the legal values up with:
+
+```python
+get_language_metadata(include_registers=False, include_default_symbols=False)
+# -> {"language_id": "PowerPC:BE:64:VLE-32addr",
+#     "variant": "PowerISA-VLE-64-32addr",
+#     "variant_ambiguous": true,
+#     "available_variants": [
+#        {"variant": "default", "language_id": "PowerPC:BE:32:default",
+#         "decoder": "ppc_32_be.sla", "loaded": false, ...}, ...]}
+```
+
+**Asserting is not a formality.** It is only worth anything if you checked
+something first: ELF `e_flags` / PE machine type, the vendor's core
+documentation, or whether disassembly at known entry points is coherent. Echoing
+back the variant the server just told you is not a check, and the server cannot
+tell the difference — which is exactly why the parameter is optional rather than
+mandatory.
 
 ### What the refusals mean
 
 | `error` | Meaning | What to do |
 | --- | --- | --- |
-| `variant_required` | Several variants exist and none was named | Confirm the `loaded_variant` is right, then re-send with it |
 | `variant_mismatch` | You named a real variant, but not the loaded one | Decompile what is loaded, or change the program's language first (below) |
 | `unknown_variant` | The name is not a variant of this processor | Check `available_variants`; you may be talking to a different program than you think |
 
 Refusals arrive as HTTP 200 with `status: "rejected"`, so branch on the `error`
 key, not the status code. Each one carries `loaded_variant`, the full
 `available_variants` list, and a `suggestion`.
+
+### Known limits
+
+- The decoder test is a proxy for "the loader made a guess", not a proof that
+  two variants decode identically. x86's `System Management Mode` and MIPS/64's
+  `micro` select a different decode mode through the processor spec while
+  sharing a `.sla`, so they are not flagged. The stamp still tells you what ran.
+- `disassemble_function` and `get_function_pcode` are equally variant-dependent
+  and are not stamped. Use `get_language_metadata` alongside them.
 
 ### When the loaded variant is wrong
 
@@ -90,9 +126,10 @@ answered. Fixing it is a program-level operation:
 ### Composite analyses
 
 `analyze_function_complete` and `analyze_for_documentation` also return
-pseudocode. Without `variant=` they return everything else and replace
-`decompiled_code` with `decompiled_code_withheld`, which carries the same
-refusal. Pass `variant=` when you want the C.
+pseudocode, stamped the same way. They accept the same optional `variant=`; name
+one the program is not loaded under and they return everything else with
+`decompiled_code` replaced by `decompiled_code_withheld`, rather than failing
+the whole call.
 
 ## Complete Workflow Pattern
 

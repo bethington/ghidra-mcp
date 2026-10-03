@@ -184,24 +184,25 @@ class TestDecompilationEndpoints:
 
     @pytest.mark.requires_program
     @pytest.mark.slow
-    def test_decompile_by_address(self, http_client, sample_address, program_variant):
+    def test_decompile_by_address(self, http_client, sample_address):
         """decompile_function should return C code."""
-        # variant= is mandatory on a multi-variant processor. Omitting it would
-        # still return HTTP 200 (with a structured refusal), so a test that did
-        # not pass it would keep passing while testing nothing.
         response = http_client.get(
             "/decompile_function",
-            params={"address": sample_address, "variant": program_variant},
+            params={"address": sample_address},
             timeout=120,  # Decompilation can be slow
         )
         assert response.status_code == 200
 
-        # Should contain C-like code or error
-        text = response.text
-        assert len(text) > 0
-        # If successful, should have function-like syntax
-        if "error" not in text.lower():
-            assert "{" in text or "(" in text or "void" in text or "int" in text
+        # Parsed, not measured. This endpoint returns its structured refusals as
+        # HTTP 200, so "non-empty body" is satisfied by a response carrying no C
+        # at all -- which is how this assertion passed while testing nothing.
+        data = response.json()
+        code = data.get("decompiled")
+        assert code, data
+        assert "{" in code or "(" in code
+        # Output is labelled with the dialect that produced it, always.
+        assert data.get("language_id"), data
+        assert "variant" in data, data
 
     @pytest.mark.requires_program
     def test_disassemble_function(self, http_client, sample_address):

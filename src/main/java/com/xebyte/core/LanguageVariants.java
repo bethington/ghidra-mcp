@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Language-variant selection gate for decompiler output.
+ * Language-variant labelling and mismatch check for decompiler output.
  *
  * <p>Ghidra's import dialog picks a SLEIGH language out of five columns:
  * processor, endian, size, <em>variant</em>, compiler. The first three come off
@@ -21,18 +21,47 @@ import java.util.Locale;
  * the pseudocode reads plausibly, and a documentation pass will happily write
  * prose about instructions the CPU never executes.
  *
- * <p>Until 7.0.0 this server never surfaced the variant at all. A caller could
- * decompile a thousand functions without once learning which of eleven PowerPC
- * dialects produced them. The fix is deliberately a <em>gate</em> rather than an
- * advisory field: when the loaded processor/endian/size bucket holds more than
- * one variant, the decompile tools refuse to answer until the caller names the
- * variant it believes it is reading. Naming it is cheap; being wrong about it is
- * not detectable by reading the output.
+ * <p><b>Why this is a label and not a mandatory parameter.</b> The first cut
+ * made {@code variant=} <em>required</em> whenever the processor offered a
+ * choice, so the caller had to state which dialect it believed it was reading.
+ * Two things sank that. First, it fires on x86 — every bucket has a second row
+ * ({@code System Management Mode} at 32-bit, {@code compat32} at 64-bit), so
+ * every ordinary PE and ELF would have had to answer a question about a mode
+ * nothing loads. Second, and worse, the confirmation is unenforceable: the
+ * refusal has to enumerate the legal values or it is an outage, which means it
+ * names the answer, and the caller — usually a model — re-sends the value it
+ * was just shown and records a confirmation it never performed. This repository
+ * already learned that shape from the eviction guard, whose refusal text must
+ * never name {@code allow_evict} because a model read the suggestion and used
+ * the override within one turn. Here the override <em>is</em> the parameter, so
+ * the same fix is not available.
+ *
+ * <p>What survives is the half that carries information rather than ceremony:
+ * <ul>
+ *   <li>Every response carrying decompiler C is <b>stamped</b> with
+ *       {@code language_id} and {@code variant}, so pseudocode can be audited
+ *       after the fact for the dialect that produced it.</li>
+ *   <li>When the processor genuinely offers more than one <em>decoder</em>, the
+ *       response also carries an <b>advisory</b> ({@code variant_ambiguous} plus
+ *       the candidate names) alongside the code. Visible at the moment the C is
+ *       handed over, and nobody is refused.</li>
+ *   <li>A caller that <em>does</em> name a variant and names the wrong one is
+ *       <b>refused</b> ({@link #VARIANT_MISMATCH}). That refusal is never
+ *       ceremony: the caller volunteered a belief and the program contradicts
+ *       it. Answering anyway would return one dialect's output under a label the
+ *       caller chose, which is worse than no answer because the label makes it
+ *       look checked.</li>
+ * </ul>
+ *
+ * <p>This is detection by the reader, not prevention. Nothing here stops a
+ * caller from decompiling a VLE image as classic PowerPC and never looking at
+ * the stamp; what would prevent that is a coherence heuristic on the loaded
+ * program, which is a different and much larger feature.
  *
  * <p>This class is deliberately free of Ghidra imports so the whole decision
  * table is exercised offline by {@code LanguageVariantsTest}. The Ghidra-facing
- * half (enumerating the variants a processor actually offers) lives in
- * {@link ServiceUtils#languageVariantChoices} and {@link ServiceUtils#variantGate}.
+ * half (enumerating the variants and decoders a processor actually offers) lives
+ * in {@link ServiceUtils#languageVariantChoices} and {@link ServiceUtils#variantGate}.
  *
  * @since 7.0.0
  */
@@ -40,8 +69,6 @@ public final class LanguageVariants {
 
     private LanguageVariants() {}
 
-    /** No variant was supplied and the processor offers more than one. */
-    public static final String VARIANT_REQUIRED = "variant_required";
     /** A real variant was supplied, but not the one the program is loaded under. */
     public static final String VARIANT_MISMATCH = "variant_mismatch";
     /** The supplied variant is not one this processor offers at all. */
@@ -62,9 +89,9 @@ public final class LanguageVariants {
     /**
      * Whether a caller-supplied selection is spelled as a full SLEIGH language id
      * ({@code PowerPC:BE:64:VLE-32addr}) rather than a bare variant name
-     * ({@code e200}). Both spellings are accepted: {@code get_language_metadata}
-     * reports the full id, and echoing back the thing you were just shown is the
-     * first thing anyone tries.
+     * ({@code PowerISA-VLE-64-32addr}). Both spellings are accepted:
+     * {@code get_language_metadata} reports the full id, and echoing back the
+     * thing you were just shown is the first thing anyone tries.
      */
     public static boolean looksLikeLanguageId(String requested) {
         return normalize(requested).indexOf(':') >= 0;
@@ -109,9 +136,60 @@ public final class LanguageVariants {
         return new ArrayList<>(names);
     }
 
-    /** Whether this processor/endian/size bucket offers a genuine choice. */
-    public static boolean isAmbiguous(Collection<String> available, String loadedVariant) {
-        return variantNames(available, loadedVariant).size() > 1;
+    /**
+     * Whether this processor/endian/size bucket offers a genuine <em>decoding</em>
+     * choice, judged by the number of distinct SLEIGH decoders ({@code .sla}
+     * files) its variants load rather than by the number of rows.
+     *
+     * <p>Measured against Ghidra 12.1.2's own {@code .ldefs}: 30 of 83
+     * processor/endian/size buckets hold more than one variant row, but only
+     * <b>19</b> hold more than one decoder, covering 96 of 177 non-deprecated
+     * languages instead of 124. The 11 that drop out are the ones where the
+     * variants are the same decoder configured differently — all three x86
+     * buckets ({@code x86.sla} for {@code default} and {@code System Management
+     * Mode}, {@code x86-64.sla} for {@code default} and {@code compat32}), plus
+     * MIPS/64, tricore, Z80, Z180, HC05, HC08 and HCS08. The ones that stay are
+     * the ones worth saying something about: PowerPC/BE/32 (eleven variants, ten
+     * decoders, VLE among them), PowerPC/LE/32, both ARM/32 buckets, PIC-16,
+     * PIC-24, MIPS/32, AARCH64, SuperH, 68000, RISCV and Dalvik.
+     *
+     * <p>Honest about its own limit: this is a proxy for plausibility, not a
+     * proof of identity. {@code x86-16.pspec} sets {@code addrsize}/{@code opsize}
+     * context defaults and {@code mips64micro.pspec} sets {@code RELP}, so those
+     * same-decoder variants <em>do</em> decode differently — they are simply
+     * modes no PE/ELF loader auto-selects, which is why they are not worth an
+     * advisory on every response. A distinct {@code .sla} means the loader chose
+     * between two different decoder programs, and that is a guess. The cases this
+     * proxy lets through are covered by the stamp, which ships unconditionally.
+     *
+     * @param decoders one decoder identifier per variant on offer; blanks ignored
+     */
+    public static boolean isAmbiguous(Collection<String> decoders) {
+        LinkedHashSet<String> distinct = new LinkedHashSet<>();
+        if (decoders != null) {
+            for (String d : decoders) {
+                String n = key(d);
+                if (!n.isEmpty()) distinct.add(n);
+            }
+        }
+        return distinct.size() > 1;
+    }
+
+    /**
+     * The sentence that rides along with accepted pseudocode on an ambiguous
+     * processor. Built from the actual candidates: an earlier version hard-coded
+     * the PowerPC/VLE example into every message, which told an ARM caller about
+     * a processor it was not using.
+     */
+    public static String ambiguityNotice(Collection<String> names, String loadedVariant) {
+        List<String> all = variantNames(names, loadedVariant);
+        return "This processor offers " + all.size() + " SLEIGH variants at this endian/size ("
+                + joinVariants(all) + ") that do not all decode the same bytes into the same "
+                + "instructions, and this output was produced under '" + normalize(loadedVariant)
+                + "' — the variant Ghidra's loader chose at import, which is a guess. If that is "
+                + "not the dialect this binary targets the C above is plausible and wrong; re-import "
+                + "with import_file(language=...) or change it under Language > Set Language. Pass "
+                + "variant= on this call to have that assumption checked instead of assumed.";
     }
 
     /**
@@ -120,10 +198,11 @@ public final class LanguageVariants {
      *
      * <p>The decision table:
      * <ul>
-     *   <li>Nothing requested, one variant exists: proceed. There is no choice to
-     *       confirm, so demanding one would be ceremony.</li>
-     *   <li>Nothing requested, several variants exist: {@link #VARIANT_REQUIRED}.</li>
-     *   <li>Requested matches what is loaded: proceed.</li>
+     *   <li>Nothing requested: proceed. The caller stated no belief, so there is
+     *       nothing to contradict; the response is stamped with what actually ran
+     *       and, on an ambiguous processor, carries the advisory.</li>
+     *   <li>Requested matches what is loaded: proceed. The caller's belief is
+     *       confirmed, and the stamp records it.</li>
      *   <li>Requested is a real variant of this processor but not the loaded one:
      *       {@link #VARIANT_MISMATCH}. Never softened to a warning. The decompiler
      *       decodes with the language the program was imported under and cannot be
@@ -133,9 +212,8 @@ public final class LanguageVariants {
      * </ul>
      *
      * <p>A mismatch is checked even when the processor has only one variant. A
-     * caller that asks for {@code VLE} on an x86 program has mistaken which
-     * program it is talking to, and that is worth catching where it is cheapest
-     * to fix.
+     * caller that asks for VLE on an x86 program has mistaken which program it is
+     * talking to, and that is worth catching where it is cheapest to fix.
      */
     public static Rejection check(String languageId, String loadedVariant,
                                   Collection<String> availableVariants, String requested) {
@@ -144,18 +222,22 @@ public final class LanguageVariants {
         List<String> names = variantNames(availableVariants, loaded);
         String req = normalize(requested);
 
-        if (req.isEmpty()) {
-            if (names.size() <= 1) return null;
-            return new Rejection(VARIANT_REQUIRED, requiredMessage(names), confirmSuggestion(id, loaded));
-        }
+        // No claim, no contradiction. The label on the way out is what tells the
+        // caller which dialect produced the code.
+        if (req.isEmpty()) return null;
 
         // A full-id spelling is compared whole. Comparing only its variant column
         // would let "PowerPC:BE:64:default" satisfy a 32-bit program, which is a
-        // bigger mistake than the one this gate exists to catch.
+        // bigger mistake than the one this check exists to catch.
         if (looksLikeLanguageId(req)) {
             if (req.equalsIgnoreCase(id)) return null;
+            // The suggestion carries the caller's own spelling, not its variant
+            // column: variantToken("PowerPC:BE:64:VLE-32addr") is "VLE-32addr",
+            // which is not a variant name Ghidra 12.1.2 offers (the picker calls
+            // it PowerISA-VLE-64-32addr), so echoing the token back would name
+            // something import_file would reject.
             return new Rejection(VARIANT_MISMATCH, idMismatchMessage(req, id),
-                                 switchSuggestion(id, loaded, variantToken(req)));
+                                 switchSuggestion(id, loaded, req));
         }
 
         if (req.equalsIgnoreCase(loaded)) return null;
@@ -178,23 +260,13 @@ public final class LanguageVariants {
         return String.join(", ", names);
     }
 
-    private static String requiredMessage(List<String> names) {
-        return "This program's processor offers " + names.size() + " language variants ("
-                + joinVariants(names) + ") at its endian/size, and decompiler output is only "
-                + "meaningful under the one the code was actually built for: the same bytes decode "
-                + "into different instructions under PowerPC 'default' and PowerPC VLE, and the "
-                + "wrong choice yields pseudocode that is plausible, confident and wrong. Re-send "
-                + "with variant=<one of the names above>.";
-    }
-
     private static String confirmSuggestion(String languageId, String loadedVariant) {
-        return "This program is loaded as '" + loadedVariant + "' (" + languageId + "). Pass "
-                + "variant=" + loadedVariant + " once you have confirmed that is the variant this "
-                + "binary actually targets: check the ELF/PE machine flags, the vendor's core "
-                + "documentation, or whether disassembly at known entry points is coherent. If it "
-                + "is the wrong variant, decompiling under it produces wrong C, so fix the program "
-                + "first by re-importing with import_file(language=\"processor:endian:size:variant\") "
-                + "or by changing it in Ghidra under Language > Set Language.";
+        return "This program is loaded as '" + loadedVariant + "' (" + languageId + "). Omit "
+                + "variant= to decompile what is loaded, or pass variant=" + loadedVariant + " to "
+                + "assert that is the variant this binary targets. If it is the wrong variant, "
+                + "decompiling under it produces wrong C, so fix the program first by re-importing "
+                + "with import_file(language=\"processor:endian:size:variant\") or by changing it in "
+                + "Ghidra under Language > Set Language.";
     }
 
     private static String mismatchMessage(String requested, String loadedVariant, String languageId) {
@@ -211,12 +283,12 @@ public final class LanguageVariants {
                 + "the one asked.";
     }
 
-    private static String switchSuggestion(String languageId, String loadedVariant, String requestedVariant) {
+    private static String switchSuggestion(String languageId, String loadedVariant, String requested) {
         return "Either decompile what is actually loaded by re-sending variant=" + loadedVariant
-                + ", or make '" + requestedVariant + "' real first by re-importing the file with "
-                + "import_file(language=...) or changing the program's language in Ghidra under "
-                + "Language > Set Language. This endpoint will not reinterpret " + languageId
-                + " bytes under another variant.";
+                + " (or omitting variant= entirely), or make '" + requested + "' real first by "
+                + "re-importing the file with import_file(language=...) or changing the program's "
+                + "language in Ghidra under Language > Set Language. This endpoint will not "
+                + "reinterpret " + languageId + " bytes under another variant.";
     }
 
     private static String unknownMessage(String requested, List<String> names) {

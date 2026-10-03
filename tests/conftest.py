@@ -203,7 +203,7 @@ def language_metadata(http_client, program_loaded):
 
     Registers and default symbols are switched off: this fixture exists for the
     variant fields, and x86 alone would otherwise drag several hundred register
-    entries through every decompile test.
+    entries through every test that reads them.
     """
     if not program_loaded:
         pytest.skip("No program loaded")
@@ -227,15 +227,15 @@ def language_metadata(http_client, program_loaded):
 def program_variant(http_client, program_loaded):
     """The SLEIGH variant the active program is loaded under.
 
-    The decompile endpoints refuse to answer without variant= on any processor
-    that offers more than one (PowerPC vs PowerPC VLE, and x86 at both widths), so
-    every decompile call in the suite passes this. Tests that want to exercise the gate
-    itself omit it deliberately.
+    variant= is optional on every decompile endpoint, so ordinary tests do not
+    need this -- it exists for the tests that exercise the accepted-assertion
+    path, where the suite has to name the variant the program is really loaded
+    under rather than hard-coding one.
 
     Deliberately does NOT reuse the language_metadata fixture: this one must not
-    skip. A server built before the gate ignores an unknown query parameter, so
-    returning "" there keeps the ordinary decompile tests running instead of
-    silently disabling them until the plugin is redeployed.
+    skip. A server built before this work ignores an unknown query parameter, so
+    returning "" there keeps the tests running instead of silently disabling
+    them until the plugin is redeployed.
     """
     if not program_loaded:
         pytest.skip("No program loaded")
@@ -255,11 +255,17 @@ def program_variant(http_client, program_loaded):
 
 
 @pytest.fixture
-def variant_required(language_metadata):
-    """Whether this program's processor forces an explicit variant selection."""
-    if "variant_required" not in language_metadata:
-        pytest.skip("server predates the decompile variant gate")
-    return bool(language_metadata.get("variant_required"))
+def variant_ambiguous(language_metadata):
+    """Whether this program's processor offers more than one SLEIGH *decoder*.
+
+    Not the same as offering more than one variant row: x86's `default` and
+    `System Management Mode` are one x86.sla configured two ways, while
+    PowerPC's eleven variants load ten different decoders. Only the second kind
+    means the loader made a guess worth flagging.
+    """
+    if "variant_ambiguous" not in language_metadata:
+        pytest.skip("server predates the decompile variant labelling")
+    return bool(language_metadata.get("variant_ambiguous"))
 
 
 @pytest.fixture

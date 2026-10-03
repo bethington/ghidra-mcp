@@ -597,8 +597,27 @@ public final class ServiceUtils {
     /**
      * One selectable SLEIGH language variant for a program's
      * processor/endian/size, as Ghidra's language picker would list it.
+     *
+     * <p>{@code decoder} is the {@code .sla} the variant loads — the compiled
+     * SLEIGH decoder, not a label. Two variants sharing one are the same decoder
+     * configured differently; two variants with different ones are different
+     * programs for turning bytes into instructions. That distinction is what
+     * decides whether the advisory fires: see
+     * {@link LanguageVariants#isAmbiguous}.
      */
-    public record VariantChoice(String variant, String languageId, String description) {}
+    public record VariantChoice(String variant, String languageId, String description,
+                                String decoder) {}
+
+    /**
+     * A processor/endian/size bucket as enumerated once and reused.
+     *
+     * <p>{@code enumerationFailed} is carried rather than swallowed. When
+     * Ghidra's language table cannot be walked, the bucket degrades to the single
+     * loaded variant and the advisory silently stops firing — which looks exactly
+     * like an unambiguous processor. Recording it lets the response say so
+     * instead of quietly asserting a fact it could not establish.
+     */
+    private record VariantBucket(List<VariantChoice> choices, boolean enumerationFailed) {}
 
     /**
      * Memoized variant buckets, keyed by the program's own language id.
@@ -609,7 +628,7 @@ public final class ServiceUtils {
      * describes that program: changing the language (Set Language, or a
      * re-import) yields a different id and therefore a different cache entry.
      */
-    private static final Map<String, List<VariantChoice>> VARIANT_CACHE =
+    private static final Map<String, VariantBucket> VARIANT_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
@@ -629,15 +648,21 @@ public final class ServiceUtils {
      * answer available.
      */
     public static List<VariantChoice> languageVariantChoices(Program program) {
-        if (program == null) return List.of();
+        return variantBucket(program).choices();
+    }
+
+    private static VariantBucket variantBucket(Program program) {
+        VariantBucket empty = new VariantBucket(List.of(), false);
+        if (program == null) return empty;
         ghidra.program.model.lang.Language lang = program.getLanguage();
-        if (lang == null) return List.of();
+        if (lang == null) return empty;
         ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
-        if (ld == null) return List.of();
+        if (ld == null) return empty;
         String languageId = lang.getLanguageID().getIdAsString();
 
         return VARIANT_CACHE.computeIfAbsent(languageId, key -> {
             List<VariantChoice> found = new ArrayList<>();
+            boolean failed = false;
             try {
                 ghidra.program.model.lang.LanguageService svc =
                         ghidra.program.util.DefaultLanguageService.getLanguageService();
@@ -648,14 +673,15 @@ public final class ServiceUtils {
                     if (!Objects.equals(d.getEndian(), ld.getEndian())) continue;
                     if (d.getSize() != ld.getSize()) continue;
                     found.add(new VariantChoice(d.getVariant(),
-                            d.getLanguageID().getIdAsString(), d.getDescription()));
+                            d.getLanguageID().getIdAsString(), d.getDescription(),
+                            decoderOf(d)));
                 }
             } catch (Throwable t) {
                 // A processor module that cannot enumerate must not take the
-                // decompiler down with it. Falling through to the single loaded
-                // variant degrades this gate to a no-op, which is the correct
-                // direction to fail: a refusal with no legal answer would be worse
-                // than no gate at all.
+                // decompiler down with it. The bucket degrades to the single
+                // loaded variant, which reads as "unambiguous" — so the failure
+                // is recorded and reported rather than inferred away.
+                failed = true;
                 Msg.warn(ServiceUtils.class,
                         "Could not enumerate language variants for " + key + ": " + t);
             }
@@ -669,12 +695,13 @@ public final class ServiceUtils {
                 }
             }
             if (!hasLoaded) {
-                found.add(new VariantChoice(ld.getVariant(), key, ld.getDescription()));
+                found.add(new VariantChoice(ld.getVariant(), key, ld.getDescription(),
+                        decoderOf(ld)));
             }
 
             // "default" first, then alphabetical. Deterministic ordering keeps the
-            // refusal text stable across calls, which matters when the refusal is
-            // the thing a caller is expected to read and act on.
+            // advisory and refusal text stable across calls, which matters when
+            // they are the thing a caller is expected to read and act on.
             found.sort((a, b) -> {
                 String ka = LanguageVariants.key(a.variant());
                 String kb = LanguageVariants.key(b.variant());
@@ -682,8 +709,28 @@ public final class ServiceUtils {
                 int rb = "default".equals(kb) ? 0 : 1;
                 return ra != rb ? Integer.compare(ra, rb) : ka.compareTo(kb);
             });
-            return List.copyOf(found);
+            return new VariantBucket(List.copyOf(found), failed);
         });
+    }
+
+    /**
+     * The SLEIGH decoder a language loads, as a stable identifier.
+     *
+     * <p>{@code SleighLanguageProvider} sets the {@code .sla} on every
+     * description it builds out of an {@code .ldefs} and throws if the file is
+     * missing, so this is populated for anything {@code DefaultLanguageService}
+     * hands back. A description that is not a Sleigh one, or that somehow has no
+     * {@code .sla}, falls back to its own language id — which makes it distinct
+     * from every other row and so counts as its own decoder. That errs toward
+     * showing the advisory, which costs a sentence; erring the other way would
+     * silently drop it.
+     */
+    private static String decoderOf(ghidra.program.model.lang.LanguageDescription d) {
+        if (d instanceof ghidra.program.model.lang.SleighLanguageDescription sld) {
+            generic.jar.ResourceFile sla = sld.getSlaFile();
+            if (sla != null) return sla.getAbsolutePath();
+        }
+        return d.getLanguageID().getIdAsString();
     }
 
     /** The variant a program is loaded under, or "" when it cannot be determined. */
@@ -702,6 +749,29 @@ public final class ServiceUtils {
         return names;
     }
 
+    /**
+     * Whether this program's processor offers more than one SLEIGH <em>decoder</em>
+     * at its endian and size — the test that decides whether decompiler output
+     * carries the ambiguity advisory.
+     *
+     * @see LanguageVariants#isAmbiguous for the measurement behind counting
+     *      decoders rather than variant rows, and for what that proxy misses
+     */
+    public static boolean variantAmbiguous(Program program) {
+        List<String> decoders = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) decoders.add(c.decoder());
+        return LanguageVariants.isAmbiguous(decoders);
+    }
+
+    /**
+     * Whether Ghidra's language table could not be walked for this program, so
+     * {@link #variantAmbiguous} is reporting ignorance rather than a single
+     * variant.
+     */
+    public static boolean variantEnumerationFailed(Program program) {
+        return variantBucket(program).enumerationFailed();
+    }
+
     /** The variant candidates rendered for a JSON response body. */
     public static List<Map<String, Object>> languageVariantsAsJson(Program program) {
         String loaded = loadedVariant(program);
@@ -711,29 +781,47 @@ public final class ServiceUtils {
             m.put("variant", c.variant());
             m.put("language_id", c.languageId());
             m.put("description", c.description());
+            // The decoder's file name, not its path: the path differs per
+            // installation and would make every snapshot machine-specific, while
+            // the name is what makes two rows visibly the same decoder.
+            m.put("decoder", decoderName(c.decoder()));
             m.put("loaded", loaded.equalsIgnoreCase(LanguageVariants.normalize(c.variant())));
             out.add(m);
         }
         return out;
     }
 
+    /** The trailing path element of a decoder identifier, for display. */
+    private static String decoderName(String decoder) {
+        String d = LanguageVariants.normalize(decoder);
+        int slash = Math.max(d.lastIndexOf('/'), d.lastIndexOf('\\'));
+        return slash >= 0 ? d.substring(slash + 1) : d;
+    }
+
     /**
-     * The variant gate every decompile tool runs before producing output.
+     * The variant check every decompile tool runs before producing output.
      * Returns {@code null} when the call may proceed, or a structured rejection
-     * naming the candidates and the remedy.
+     * naming the loaded variant and the remedy.
+     *
+     * <p>This fires only when the caller <em>named</em> a variant and named one
+     * the program is not loaded under. Omitting {@code variant=} is always
+     * accepted: the response is labelled with what actually ran, and on a
+     * multi-decoder processor it carries the ambiguity advisory. See
+     * {@link LanguageVariants} for why the parameter is not mandatory.
      *
      * <p>Shared rather than copied, for the same reason the eviction guard is
      * shared across its three writers: a rule that only one entry point enforces
      * is a rule the next tool in the chain steps around. Four endpoints return
-     * decompiler-produced C to a caller — /decompile_function, /force_decompile,
-     * /analyze_function_complete, /analyze_for_documentation — and all four
-     * consult this check. Endpoints that merely decompile internally to derive a
-     * score or a field-usage map (/analyze_function_completeness,
-     * /analyze_struct_field_usage) do not: they hand back no pseudocode, so there
-     * is nothing for a caller to misread as verified output.
+     * decompiler-produced C to a caller — /decompile_function (including its
+     * bulk mode), /force_decompile, /analyze_function_complete,
+     * /analyze_for_documentation — and all four consult this check. Endpoints
+     * that merely decompile internally to derive a score or a field-usage map
+     * (/analyze_function_completeness, /analyze_struct_field_usage) do not: they
+     * hand back no pseudocode, so there is nothing for a caller to misread as
+     * verified output.
      *
-     * @see LanguageVariants for the decision table and why it is a refusal rather
-     *      than a warning field
+     * @see LanguageVariants for the decision table and why a mismatch is a
+     *      refusal rather than a warning field
      */
     public static Response variantGate(Program program, String requestedVariant) {
         Map<String, Object> rejection = variantRejectionData(program, requestedVariant);
@@ -747,9 +835,10 @@ public final class ServiceUtils {
      * <p>Composite tools that return pseudocode as one field among many
      * (/analyze_function_complete, /analyze_for_documentation) embed this instead
      * of failing the whole call: the rest of their payload is still worth having,
-     * but the pseudocode field itself must not travel unlabelled. Without that,
-     * a caller refused by /decompile_function could simply ask a composite for
-     * the same C and get it — the guard would be a speed bump rather than a rule.
+     * but the pseudocode field itself must not travel under a label the program
+     * contradicts. Without that, a caller refused by /decompile_function could
+     * simply ask a composite for the same C and get it — the rule would be a
+     * speed bump rather than a rule.
      */
     public static Map<String, Object> variantRejectionData(Program program, String requestedVariant) {
         if (program == null) return null;
@@ -779,13 +868,24 @@ public final class ServiceUtils {
 
     /**
      * Stamp the language the output was produced under onto a decompiler
-     * response.
+     * response, and say so when that language was a guess between real
+     * alternatives.
      *
-     * <p>Decompiled C used to travel with no record of the dialect that produced
-     * it, so a transcript full of PowerPC pseudocode could not be audited after
-     * the fact for which of eleven variants decoded it. Two fields fix that at
-     * negligible cost, and they make the gate's answer verifiable rather than
-     * merely asserted.
+     * <p>This is the half of the variant work that is unconditional. Decompiled
+     * C used to travel with no record of the dialect that produced it, so a
+     * transcript full of PowerPC pseudocode could not be audited after the fact
+     * for which of eleven variants decoded it. {@code language_id} and
+     * {@code variant} fix that at negligible cost, on every response, for every
+     * program — there is no processor for which the label is not worth having.
+     *
+     * <p>On a processor whose variants load more than one SLEIGH decoder, three
+     * further fields ride along: {@code variant_ambiguous}, the candidate names,
+     * and a sentence saying the loader guessed. They are the replacement for the
+     * mandatory-parameter gate this started as — visible at the moment the C is
+     * handed over, costing nobody an outage. They are deliberately absent on
+     * unambiguous processors rather than present-and-false: a field that is
+     * always there and almost always false is a field readers learn to skip, and
+     * this one is only worth anything if it is read.
      */
     public static void putLanguageSelection(Map<String, Object> out, Program program) {
         if (out == null || program == null) return;
@@ -793,7 +893,22 @@ public final class ServiceUtils {
         if (lang == null) return;
         out.put("language_id", lang.getLanguageID().getIdAsString());
         ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
-        if (ld != null) out.put("variant", ld.getVariant());
+        if (ld == null) return;
+        out.put("variant", ld.getVariant());
+
+        if (variantEnumerationFailed(program)) {
+            // Ignorance, reported. Without this the response looks exactly like
+            // one from a processor that genuinely offers a single variant.
+            out.put("variant_enumeration_failed", true);
+            return;
+        }
+        if (variantAmbiguous(program)) {
+            out.put("variant_ambiguous", true);
+            out.put("variant_candidates", languageVariantNames(program));
+            out.put("variant_notice",
+                    LanguageVariants.ambiguityNotice(languageVariantNames(program),
+                            ld.getVariant()));
+        }
     }
 
     // ========================================================================
