@@ -133,6 +133,14 @@ public class FunctionService {
                         Map<String, Object> out = new LinkedHashMap<>();
                         out.put("name", func.getName());
                         out.put("address", func.getEntryPoint().toString(false));
+                        // Stamped even though nothing routes here today: the three
+                        // wrappers that call this (the GUI plugin's private one, the
+                        // headless handler's by-name branch) are legacy, and the
+                        // headless server registers routes through AnnotationScanner
+                        // instead. An unlabelled C-returning method sitting ready to
+                        // be wired up is the hole pre-dug — the next person to route
+                        // it inherits unlabelled pseudocode and no test fails.
+                        ServiceUtils.putLanguageSelection(out, program);
                         out.put("decompiled", result.getDecompiledFunction().getC());
                         return Response.ok(out);
                     } else {
