@@ -156,7 +156,7 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. Every response is stamped with language_id + variant, so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) the response also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and the wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. Bulk mode returns the per-function results under a functions object, with the language stamp beside it. Every response is stamped with language_id + variant, so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) the response also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and the wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
     public Response decompileFunctionByAddress(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
@@ -377,14 +377,19 @@ public class FunctionService {
     /**
      * Bulk decompile against an already-resolved program.
      *
-     * <p>The response stays a flat map of function reference to C, because that
-     * is the shape callers iterate; the language stamp is added as reserved keys
-     * ({@code language_id}, {@code variant}, and the advisory fields on an
-     * ambiguous processor) rather than by nesting the map one level deeper. The
-     * stamp is written first and function entries after, so a caller that
-     * genuinely asks to decompile a function named {@code language_id} gets its
-     * code rather than silently losing the result it asked for — the label is
-     * best-effort in that one pathological case, the data is not.
+     * <p>The per-function results live under {@code functions}; the language
+     * stamp sits beside it at the top level. The first cut put both in one flat
+     * map, which does not work: the keys of that map are function references the
+     * <em>caller</em> chose, so the stamp's reserved names sit in the same
+     * namespace as user input. Two ways that breaks. A caller iterating
+     * {@code ref -> code} sees up to five entries that are not functions, one of
+     * which ({@code variant_candidates}) is a list rather than a string. And a
+     * function genuinely named {@code language_id} collides with the stamp, so
+     * exactly the pseudocode this work exists to label travels unlabelled.
+     *
+     * <p>Nesting costs nothing here: bulk mode is itself the 7.0.0 consolidation
+     * of {@code batch_decompile} and 7.0.0 is unreleased, so no shipped caller
+     * depends on the flat shape.
      */
     private Response batchDecompileAt(Program program, String functionsParam) {
         if (functionsParam == null || functionsParam.trim().isEmpty()) {
@@ -394,10 +399,6 @@ public class FunctionService {
         try {
             String[] functionRefs = functionsParam.split(",");
             Map<String, Object> resultMap = new LinkedHashMap<>();
-            // Bulk output used to be the one decompile path that handed back C
-            // with nothing saying which dialect produced it — the single-function
-            // path was stamped and functions= was the way around it.
-            ServiceUtils.putLanguageSelection(resultMap, program);
             final int MAX_FUNCTIONS = 20; // Limit to prevent overload
 
             for (int i = 0; i < functionRefs.length && i < MAX_FUNCTIONS; i++) {
@@ -432,7 +433,13 @@ public class FunctionService {
                 }
             }
 
-            return Response.ok(resultMap);
+            Map<String, Object> out = new LinkedHashMap<>();
+            // Bulk output used to be the one decompile path that handed back C
+            // with nothing saying which dialect produced it — the single-function
+            // path was stamped and functions= was the way around it.
+            ServiceUtils.putLanguageSelection(out, program);
+            out.put("functions", resultMap);
+            return Response.ok(out);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }

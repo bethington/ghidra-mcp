@@ -1142,8 +1142,12 @@ class TestDecompileVariantLabelling:
         data = response.json()
         assert data.get("language_id") == language_metadata.get("language_id"), data
         assert data.get("variant") == language_metadata.get("variant"), data
-        # The flat ref -> code shape is preserved; the stamp is added beside it.
-        assert data.get(sample_function), data
+        # Results are nested so the stamp's reserved names never share a
+        # namespace with caller-chosen function references.
+        functions = data.get("functions")
+        assert isinstance(functions, dict), data
+        assert functions.get(sample_function), data
+        assert "language_id" not in functions, functions
 
     def test_bulk_mode_is_refused_on_a_contradicted_variant(
         self, http_client, sample_function, language_metadata

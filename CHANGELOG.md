@@ -1046,6 +1046,14 @@ This server never exposed that choice at all. Now:
   decompile path handing back C with nothing on it while the single-function
   path was labelled. Pseudocode can now be audited after the fact for the
   dialect that produced it.
+- **Bulk mode nests its results under `functions`.** The stamp cannot share a
+  map with the per-function results, because the keys of that map are function
+  references the *caller* chose: a flat shape puts up to five reserved names
+  into the same namespace as user input, so a caller iterating `ref -> code`
+  sees entries that are not functions (one of them a list), and a function
+  genuinely named `language_id` collides with the stamp and travels unlabelled.
+  Bulk mode is itself this release's consolidation of `batch_decompile`, so no
+  shipped caller depends on the flat shape.
 - **A processor whose variants load more than one SLEIGH *decoder* also gets an
   advisory**: `variant_ambiguous`, `variant_candidates`, and a `variant_notice`
   sentence built from that processor's own candidates, saying the loader guessed

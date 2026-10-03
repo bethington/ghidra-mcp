@@ -59,6 +59,15 @@ so ordinary PE and ELF work never sees the advisory. PowerPC/BE/32 (eleven
 variants, ten decoders), both ARM/32 buckets, PIC-16, PIC-24, MIPS/32, SuperH,
 68000, AARCH64 and Dalvik do.
 
+Bulk mode nests its results, so the stamp never shares a namespace with the
+function references you chose:
+
+```python
+decompile_function(functions="calc_crc16,compute_gcd")
+# -> {"language_id": ..., "variant": ...,
+#     "functions": {"calc_crc16": "...", "compute_gcd": "..."}}
+```
+
 ### Asserting the variant
 
 `variant=` is **optional everywhere**. Pass it when you have established which
