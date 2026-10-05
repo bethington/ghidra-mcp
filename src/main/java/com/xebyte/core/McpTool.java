@@ -9,7 +9,7 @@ import java.lang.annotation.*;
  *
  * <p>Example:
  * <pre>{@code
- * @McpTool(path = "/list_methods", method = "GET",
+ * @McpTool(path = "/find_functions", method = "GET",
  *          description = "List all function names with pagination", access = ToolAccess.READ_ONLY)
  * public Response getAllFunctionNames(
  *     @Param(value = "offset", defaultValue = "0") int offset,
@@ -24,7 +24,7 @@ import java.lang.annotation.*;
 @Documented
 public @interface McpTool {
 
-    /** HTTP path for this endpoint (e.g., "/list_methods"). */
+    /** HTTP path for this endpoint (e.g., "/find_functions"). */
     String path();
 
     /** HTTP method: "GET" or "POST". */

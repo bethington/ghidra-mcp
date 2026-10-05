@@ -100,11 +100,11 @@ tool_cases:
     assert:
       no_error: true
 
-  - tool: get_function_tags
+  - tool: get_functions
     name: readback_tag
     tier: write
     snapshot: false
-    args: { function: "0x10001000" }
+    args: { function: "0x10001000", fields: "tags" }
     assert:
       contains: ["CONFORMANCE_TAG"]
 
@@ -116,11 +116,11 @@ tool_cases:
     assert:
       no_error: true
 
-  - tool: get_function_tags
+  - tool: get_functions
     name: readback_tag_removed
     tier: write
     snapshot: false
-    args: { function: "0x10001000" }
+    args: { function: "0x10001000", fields: "tags" }
     assert:
       not_contains: ["CONFORMANCE_TAG"]
 
@@ -137,7 +137,10 @@ tool_cases:
     name: readback_label
     tier: write
     snapshot: false
-    args: { name: "0x10001000" }
+    args:
+      name: "0x10001000"
+      fields: labels
+      include_call_context: false
     assert:
       contains: ["conformance_probe_label"]
 

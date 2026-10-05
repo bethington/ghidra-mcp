@@ -39,7 +39,7 @@ def test_java_sources_are_where_we_think():
 def test_scan_finds_most_of_the_catalog():
     """A parser that quietly matched nothing would satisfy every other test."""
     routes = load_param_aliases()
-    assert len(routes) > 200, f"only {len(routes)} @McpTool routes parsed"
+    assert len(routes) > 150, f"only {len(routes)} @McpTool routes parsed"
 
 
 @pytest.mark.parametrize(
@@ -89,8 +89,7 @@ def test_endpoints_without_aliases_report_none():
     became a function reference, `address` is a real alias of it.)
     """
     assert aliases_for("/get_xrefs_to", "GET") == {}
-    assert aliases_for("/list_functions", "GET") == {}
-    assert aliases_for("/search_functions_enhanced", "GET") == {}
+    assert aliases_for("/get_entry_points", "GET") == {}
 
 
 def test_every_alias_target_is_a_real_declared_parameter():

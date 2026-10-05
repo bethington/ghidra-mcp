@@ -21,7 +21,7 @@ import static org.mockito.Mockito.*;
  * Verifies that get_address_spaces also lists overlay spaces (marked is_overlay
  * with overlayed_space = the physical base space name), in addition to the
  * physical RAM/CODE spaces. The physical-only buildAddressSpacesList — shared with
- * get_current_program_info's has_multiple_address_spaces flag — must remain
+ * program-info's has_multiple_address_spaces flag — must remain
  * unchanged; overlays are appended only in the endpoint method.
  */
 public class AddressSpacesOverlayTest {

@@ -104,7 +104,7 @@ public final class ManualToolDescriptors {
             "goto", "True navigates the CodeBrowser to address before anything else. Must be a JSON boolean: any other type is read as FALSE. Default false.",
             "score", "True (the default) appends a compact completeness score. Must be a JSON boolean: any other type falls back to the default and is read as TRUE, so the string false does not switch it off.",
             "program", "Accepted but not read by this route: every step runs against the active program. Use the individual tools when you need to target a specific one.");
-        add(m, "/check_connection", "GET", "utility", "Health check endpoint", ToolAccess.READ_ONLY);
+        add(m, "/check_connection", "GET", "utility", "Liveness probe: is the server up, and which one is it", ToolAccess.READ_ONLY);
         add(m, "/configure_analyzer", "POST", "analysis", "Configure an analysis plugin", ToolAccess.WRITE,
             "name", "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.",
             "enabled", "True enables the analyzer, false disables it. Omitting the key entirely leaves the current setting alone.",
@@ -112,10 +112,6 @@ public final class ManualToolDescriptors {
         add(m, "/delete_project", "POST", "project", "Delete a Ghidra project", ToolAccess.DESTRUCTIVE,
             "projectPath", "Filesystem path of the project to delete: its .gpr file or the project directory. Headless mode only; the GUI plugin does not register this route.");
         add(m, "/exit_ghidra", "POST", "program", "Save and exit Ghidra", ToolAccess.DESTRUCTIVE);
-        add(m, "/get_current_address", "GET", "getter", "Get cursor address (GUI only)", ToolAccess.READ_ONLY);
-        add(m, "/get_current_function", "GET", "getter", "Get function at cursor (GUI only)", ToolAccess.READ_ONLY);
-        add(m, "/get_current_selection", "GET", "getter", "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted.", ToolAccess.READ_ONLY);
-        add(m, "/get_version", "GET", "utility", "Get plugin version", ToolAccess.READ_ONLY);
         add(m, "/health", "GET", "utility", "Health check endpoint for headless server", ToolAccess.READ_ONLY);
         add(m, "/list_projects", "GET", "project", "List available Ghidra projects", ToolAccess.READ_ONLY,
             "searchDir", "Directory to scan for .gpr projects. Headless mode only; the GUI plugin does not register this route.");

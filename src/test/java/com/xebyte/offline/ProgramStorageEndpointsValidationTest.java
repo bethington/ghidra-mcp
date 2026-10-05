@@ -38,11 +38,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Offline coverage for the 11 program-storage MCP endpoints added to
- * {@link ProgramScriptService} in v5.17.0 — {@code list_option_groups},
- * {@code get_program_options}, {@code set_program_option},
- * {@code remove_program_option}, {@code list_property_maps},
- * {@code create_property_map}, {@code delete_property_map}, {@code set_property},
+ * Offline coverage for the 9 program-storage MCP endpoints added to
+ * {@link ProgramScriptService} in v5.17.0 — {@code get_program_options} (which also lists
+ * the option groups), {@code set_program_option},
+ * {@code remove_program_option}, {@code create_property_map}, {@code delete_property_map}, {@code set_property},
  * {@code get_property}, {@code remove_property}, {@code list_properties}.
  *
  * <p>Those ~690 lines shipped with zero Java tests. The existing
@@ -168,16 +167,16 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     }
 
     // ==================================================================
-    // list_option_groups / get_program_options
+    // get_program_options (with no group, it lists the groups)
     // ==================================================================
 
-    public void testListOptionGroupsReportsPerGroupOptionCounts() {
+    public void testGetProgramOptionsWithNoGroupReportsPerGroupOptionCounts() {
         Options analyzers = mock(Options.class);
         when(program.getOptions("Analyzers")).thenReturn(analyzers);
         when(options.getOptionNames()).thenReturn(List.of("Executable Format", "Created With"));
         when(analyzers.getOptionNames()).thenReturn(List.of("Stack"));
 
-        Map<String, Object> data = okOf(svc.listOptionGroups(""));
+        Map<String, Object> data = okOf(svc.getProgramOptions("", ""));
         assertEquals(2, data.get("count"));
 
         @SuppressWarnings("unchecked")
@@ -186,12 +185,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         assertEquals(2, groups.get(0).get("option_count"));
         assertEquals("Analyzers", groups.get(1).get("name"));
         assertEquals(1, groups.get(1).get("option_count"));
-    }
-
-    public void testGetProgramOptionsRequiresGroup() {
-        String err = errOf(svc.getProgramOptions("", ""));
-        assertTrue("should name the missing param and point at the discovery tool: " + err,
-                err.contains("group is required") && err.contains("list_option_groups"));
     }
 
     public void testGetProgramOptionsRejectsUnknownGroup() {
@@ -379,10 +372,10 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     }
 
     // ==================================================================
-    // list_property_maps / create_property_map / delete_property_map
+    // list_properties with no map (lists the maps) / create_property_map / delete_property_map
     // ==================================================================
 
-    public void testListPropertyMapsClassifiesValueTypes() {
+    public void testListPropertiesWithNoMapClassifiesValueTypes() {
         IntPropertyMap intMap = mock(IntPropertyMap.class);
         VoidPropertyMap voidMap = mock(VoidPropertyMap.class);
         when(intMap.getSize()).thenReturn(7);
@@ -391,7 +384,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("counts", intMap);
         stubMap("tags", voidMap);
 
-        Map<String, Object> data = okOf(svc.listPropertyMaps(""));
+        Map<String, Object> data = okOf(svc.listProperties("", "", "", 0, 100, ""));
         assertEquals(2, data.get("count"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> maps = (List<Map<String, Object>>) data.get("property_maps");
@@ -632,10 +625,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // list_properties
     // ==================================================================
 
-    public void testListPropertiesRequiresMap() {
-        assertEquals("map is required", errOf(svc.listProperties("", "", "", 0, 100, "")));
-    }
-
     public void testListPropertiesRejectsUnknownMap() {
         assertTrue(errOf(svc.listProperties("nope", "", "", 0, 100, ""))
                 .contains("No property map named 'nope'"));
@@ -713,11 +702,10 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         ProgramScriptService bare =
                 new ProgramScriptService(ServiceFactory.stubProvider(), new NoopThreadingStrategy());
         Response[] responses = {
-            bare.listOptionGroups(""),
+            bare.getProgramOptions("", ""),
             bare.getProgramOptions(GROUP, ""),
             bare.setProgramOption(GROUP, "k", "v", "string", ""),
             bare.removeProgramOption(GROUP, "k", ""),
-            bare.listPropertyMaps(""),
             bare.createPropertyMap("m", "string", ""),
             bare.deletePropertyMap("m", ""),
             bare.setProperty("m", GOOD_ADDR, "1", ""),
@@ -736,13 +724,11 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // Annotation contract
     // ==================================================================
 
-    /** The 11 storage tools, as (method name, HTTP method, expected tool path). */
+    /** The 9 storage tools, as (method name, HTTP method, expected tool path). */
     private static final String[][] STORAGE_TOOLS = {
-        {"listOptionGroups",    "GET",  "/list_option_groups"},
         {"getProgramOptions",   "GET",  "/get_program_options"},
         {"setProgramOption",    "POST", "/set_program_option"},
         {"removeProgramOption", "POST", "/remove_program_option"},
-        {"listPropertyMaps",    "GET",  "/list_property_maps"},
         {"createPropertyMap",   "POST", "/create_property_map"},
         {"deletePropertyMap",   "POST", "/delete_property_map"},
         {"setProperty",         "POST", "/set_property"},
@@ -762,7 +748,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         return matches.get(0);
     }
 
-    public void testAllElevenStorageToolsAreRegistered() {
+    public void testAllNineStorageToolsAreRegistered() {
         for (String[] tool : STORAGE_TOOLS) {
             McpTool ann = storageMethod(tool[0]).getAnnotation(McpTool.class);
             assertEquals(tool[0] + " path", tool[2], ann.path());

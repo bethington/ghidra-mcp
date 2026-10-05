@@ -24,7 +24,6 @@ import ghidra.program.model.pcode.HighFunctionDBUtil.ReturnCommitOption;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.PluginCategoryNames;
-import ghidra.app.services.CodeViewerService;
 import ghidra.app.services.DebuggerTraceManagerService;
 import ghidra.app.services.GoToService;
 
@@ -39,7 +38,6 @@ import ghidra.program.model.data.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.util.PluginStatus;
-import ghidra.program.util.ProgramLocation;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.trace.model.Trace;
@@ -166,7 +164,7 @@ class VersionInfo {
 
     /**
      * Update the live endpoint count after the AnnotationScanner has
-     * enumerated everything. Keeps {@code /get_version.endpoint_count}
+     * enumerated everything. Keeps {@code /mcp/health.version.endpoint_count}
      * in sync with {@code /mcp/schema} so version-banner output and
      * release smoke tests don't drift from reality.
      */
@@ -185,7 +183,7 @@ class VersionInfo {
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 231 endpoints for reverse engineering automation. " +
+                  "Provides 201 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -676,8 +674,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // path could reach them. Found via a live-schema-vs-catalog diff (v6.0.0).
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
             "/batch_apply_documentation", "/check_connection",
-            "/exit_ghidra", "/get_current_address", "/get_current_function",
-            "/get_current_selection", "/get_version",
+            "/exit_ghidra",
             "/mcp/health", "/mcp/schema", "/open_project", "/project/info",
             "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
             "/server/admin/terminate_checkout", "/server/admin/users", "/server/authenticate",
@@ -687,7 +684,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "/server/version_control/checkin", "/server/version_control/checkout",
             "/server/version_control/undo_checkout", "/server/version_history",
             "/tool/goto_address", "/tool/launch_codebrowser", "/tool/running_tools");
-        // Reflect the live count so /get_version.endpoint_count matches
+        // Reflect the live count so /mcp/health.version.endpoint_count matches
         // what /mcp/schema actually serves. Includes both the dispatch-table
         // (@McpTool-scanned) endpoints and the manually-registered routes just
         // added to the schema above.
@@ -748,6 +745,23 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             StringBuilder sb = new StringBuilder();
             sb.append("{");
             sb.append("\"status\": \"ok\",");
+            sb.append("\"connected\": true,");
+            Program current = getCurrentProgram();
+            if (current != null) {
+                sb.append("\"program\": \"").append(escapeJson(current.getName())).append("\",");
+            } else {
+                sb.append("\"program\": null,");
+            }
+            sb.append("\"version\": {");
+            sb.append("\"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",");
+            sb.append("\"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",");
+            sb.append("\"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",");
+            sb.append("\"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",");
+            sb.append("\"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",");
+            sb.append("\"ghidra_version\": \"").append(VersionInfo.getGhidraVersion()).append("\",");
+            sb.append("\"java_version\": \"").append(System.getProperty("java.version")).append("\",");
+            sb.append("\"endpoint_count\": ").append(VersionInfo.getEndpointCount());
+            sb.append("},");
             sb.append("\"uptime_seconds\": ").append(uptimeSec).append(",");
             sb.append("\"active_requests\": ").append(active).append(",");
             sb.append("\"http_pool\": {");
@@ -772,33 +786,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/check_connection", safeHandler(exchange -> {
             sendResponse(exchange, checkConnection());
-        }));
-
-        server.createContext("/get_version", safeHandler(exchange -> {
-            sendResponse(exchange, getVersion());
-        }));
-
-        // ==========================================================================
-        // GUI-ONLY ENDPOINTS (require PluginTool/CodeBrowser/Swing context)
-        // ==========================================================================
-
-        server.createContext("/get_current_address", safeHandler(exchange -> {
-            sendResponse(exchange, getCurrentAddress());
-        }));
-
-        server.createContext("/get_current_function", safeHandler(exchange -> {
-            sendResponse(exchange, getCurrentFunction());
-        }));
-
-        // /get_current_selection — filed by @I-Knight-I on issue #153 as
-        // the third "where am I?" tool an AI client expects, alongside
-        // /get_current_address and /get_current_function. Returns the
-        // address ranges the user has highlighted in the CodeBrowser
-        // listing, or an empty-selection payload when nothing is
-        // highlighted. GUI-only (no equivalent on the headless server
-        // — selection is a UI concept that has no meaning there).
-        server.createContext("/get_current_selection", safeHandler(exchange -> {
-            sendResponse(exchange, getCurrentSelection());
         }));
 
         // /open_project — open (or switch to) a Ghidra project from the
@@ -1058,83 +1045,19 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     // ----------------------------------------------------------------------------------
-    // Pagination-aware listing methods
+    // Pagination-aware listing (consolidated under listProgramItems)
     // ----------------------------------------------------------------------------------
 
-    private String getAllFunctionNames(int offset, int limit, String programName) {
-        return listingService.getAllFunctionNames(offset, limit, programName).toJson();
+    private String listProgramItems(String kind, int offset, int limit, String programName) {
+        return listingService.listProgramItems(kind, offset, limit, programName).toJson();
     }
 
-    // Backward compatible overload
-    private String getAllFunctionNames(int offset, int limit) {
-        return listingService.getAllFunctionNames(offset, limit, null).toJson();
-    }
-
-    private String getAllClassNames(int offset, int limit, String programName) {
-        return listingService.getAllClassNames(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String getAllClassNames(int offset, int limit) {
-        return listingService.getAllClassNames(offset, limit, null).toJson();
-    }
-
-    private String listSegments(int offset, int limit, String programName) {
-        return listingService.listSegments(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String listSegments(int offset, int limit) {
-        return listingService.listSegments(offset, limit, null).toJson();
-    }
-
-    private String listImports(int offset, int limit, String programName) {
-        return listingService.listImports(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String listImports(int offset, int limit) {
-        return listingService.listImports(offset, limit, null).toJson();
-    }
-
-    private String listExports(int offset, int limit, String programName) {
-        return listingService.listExports(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String listExports(int offset, int limit) {
-        return listingService.listExports(offset, limit, null).toJson();
-    }
-
-    private String listNamespaces(int offset, int limit, String programName) {
-        return listingService.listNamespaces(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String listNamespaces(int offset, int limit) {
-        return listingService.listNamespaces(offset, limit, null).toJson();
-    }
-
-    private String listDefinedData(int offset, int limit, String programName) {
-        return listingService.listDefinedData(offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String listDefinedData(int offset, int limit) {
-        return listingService.listDefinedData(offset, limit, null).toJson();
+    private String listProgramItems(String kind, int offset, int limit) {
+        return listingService.listProgramItems(kind, offset, limit, null).toJson();
     }
 
     private String listDataItemsByXrefs(int offset, int limit, String format, String programName) {
         return listingService.listDataItemsByXrefs(offset, limit, format, programName).toJson();
-    }
-
-    private String searchFunctionsByName(String searchTerm, int offset, int limit, String programName) {
-        return listingService.searchFunctionsByName(searchTerm, offset, limit, programName).toJson();
-    }
-
-    // Backward compatible overload
-    private String searchFunctionsByName(String searchTerm, int offset, int limit) {
-        return listingService.searchFunctionsByName(searchTerm, offset, limit, null).toJson();
     }
 
     // ----------------------------------------------------------------------------------
@@ -1171,147 +1094,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // Backward compatibility overload
     private String getFunctionByAddress(String addressStr) {
         return functionService.getFunctionByAddress(addressStr).toJson();
-    }
-
-    /**
-     * Get current address selected in Ghidra GUI
-     */
-    private String getCurrentAddress() {
-        CodeViewerService service = findCodeViewerService();
-        if (service == null) return "Code viewer service not available";
-
-        ProgramLocation location = service.getCurrentLocation();
-        if (location == null) return "No current location";
-
-        Program program = location.getProgram();
-        String programPath = (program != null && program.getDomainFile() != null)
-                ? program.getDomainFile().getPathname() : null;
-        if (programPath != null) {
-            return JsonHelper.toJson(JsonHelper.mapOf(
-                    "address", location.getAddress().toString(),
-                    "program", programPath));
-        }
-        return location.getAddress().toString();
-    }
-
-    /**
-     * Get current function selected in Ghidra GUI
-     */
-    private String getCurrentFunction() {
-        CodeViewerService service = findCodeViewerService();
-        if (service == null) return "Code viewer service not available";
-
-        ProgramLocation location = service.getCurrentLocation();
-        if (location == null) return "No current location";
-
-        // Use the program from the location (not getCurrentProgram which may differ)
-        Program program = location.getProgram();
-        if (program == null) {
-            program = getCurrentProgram();
-        }
-        if (program == null) return "No program loaded";
-
-        Function func = program.getFunctionManager().getFunctionContaining(location.getAddress());
-        if (func == null) return "No function at current location: " + location.getAddress();
-
-        // Return JSON with program path for reliable parsing
-        String programPath = program.getDomainFile() != null
-                ? program.getDomainFile().getPathname() : program.getName();
-        return JsonHelper.toJson(JsonHelper.mapOf(
-                "function_name", func.getName(),
-                "address", func.getEntryPoint().toString(),
-                "program", programPath,
-                "signature", func.getSignature().getPrototypeString()));
-    }
-
-    /**
-     * Get the current selection (highlighted address ranges) from the
-     * CodeBrowser listing. Returns a payload shape that matches the
-     * other GUI-only ``/get_current_*`` tools and that AI clients can
-     * consume directly without scraping prose.
-     *
-     * <p>Shapes:
-     * <ul>
-     *   <li>No CodeBrowser available → ``"Code viewer service not available"``
-     *       (same prose the other current_* tools use, so clients can
-     *       fall through with one error path).</li>
-     *   <li>CodeBrowser running but selection is empty → JSON
-     *       ``{"program": "...", "is_empty": true, "ranges": []}``.</li>
-     *   <li>Selection present → JSON with the program path, an
-     *       ``is_empty: false`` marker, every contiguous range with its
-     *       start/end/length, plus the overall bounds + total address
-     *       count for convenience.</li>
-     * </ul>
-     */
-    private String getCurrentSelection() {
-        CodeViewerService service = findCodeViewerService();
-        if (service == null) return "Code viewer service not available";
-
-        ghidra.program.util.ProgramSelection selection = service.getCurrentSelection();
-        ghidra.program.util.ProgramLocation location = service.getCurrentLocation();
-        Program program = location != null ? location.getProgram() : getCurrentProgram();
-        String programPath = (program != null && program.getDomainFile() != null)
-                ? program.getDomainFile().getPathname()
-                : (program != null ? program.getName() : null);
-
-        if (selection == null || selection.isEmpty()) {
-            return JsonHelper.toJson(JsonHelper.mapOf(
-                    "program", programPath,
-                    "is_empty", true,
-                    "ranges", new java.util.ArrayList<>()));
-        }
-
-        java.util.List<Map<String, Object>> ranges = new java.util.ArrayList<>();
-        for (ghidra.program.model.address.AddressRange range : selection.getAddressRanges()) {
-            ranges.add(JsonHelper.mapOf(
-                    "start", range.getMinAddress().toString(),
-                    "end", range.getMaxAddress().toString(),
-                    "length", range.getLength()));
-        }
-
-        return JsonHelper.toJson(JsonHelper.mapOf(
-                "program", programPath,
-                "is_empty", false,
-                "ranges", ranges,
-                "min_address", selection.getMinAddress().toString(),
-                "max_address", selection.getMaxAddress().toString(),
-                "num_addresses", selection.getNumAddresses()));
-    }
-
-    /**
-     * Find CodeViewerService from any running CodeBrowser instance.
-     * The FrontEnd tool doesn't have this service — only CodeBrowser does.
-     */
-    private CodeViewerService findCodeViewerService() {
-        // Try the plugin's own tool first (works if plugin is in CodeBrowser)
-        CodeViewerService service = tool.getService(CodeViewerService.class);
-        if (service != null) return service;
-
-        // Search running CodeBrowser instances via ToolManager
-        try {
-            Project project = tool.getProject();
-            if (project == null) return null;
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            if (tm == null) return null;
-            for (ghidra.framework.plugintool.PluginTool runningTool : tm.getRunningTools()) {
-                service = runningTool.getService(CodeViewerService.class);
-                if (service != null) return service;
-            }
-        } catch (Exception e) {
-            // ToolManager may not be available in all contexts
-        }
-        return null;
-    }
-
-    /**
-     * List all functions in the database
-     */
-    private String listFunctions(String programName) {
-        return listingService.listFunctions(programName).toJson();
-    }
-
-    private String listFunctionsEnhanced(int offset, int limit, String programName) {
-        return listingService.listFunctionsEnhanced(offset, limit, programName).toJson();
     }
 
     /**
@@ -1460,7 +1242,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Get all references to a specific address (xref to)
      */
     private String getXrefsTo(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsTo(addressStr, offset, limit, programName).toJson();
+        return xrefCallGraphService.getXrefsTo(addressStr, null, offset, limit, programName).toJson();
     }
 
     /**
@@ -2093,13 +1875,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * Get detailed information about the currently active program
-     */
-    private String getCurrentProgramInfo() {
-        return programScriptService.getCurrentProgramInfo().toJson();
-    }
-
-    /**
      * Switch MCP context to a different open program by name
      */
     private String switchProgram(String programName) {
@@ -2127,33 +1902,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // ====================================================================================
     // FUNCTION HASH INDEX - Cross-binary documentation propagation
     // ====================================================================================
-
-    /**
-     * Compute a normalized opcode hash for a function.
-     * The hash normalizes:
-     * - Absolute addresses (call targets, jump targets, data refs) are replaced with placeholders
-     * - Register-based operations are preserved
-     * - Instruction mnemonics and operand types are included
-     *
-     * This allows matching identical functions that are located at different addresses.
-     */
-    private String getFunctionHash(String functionAddress, String programName) {
-        return documentationHashService.getFunctionHash(functionAddress, programName).toJson();
-    }
-
-    // Backward compatibility overload
-    private String getFunctionHash(String functionAddress) {
-        return documentationHashService.getFunctionHash(functionAddress).toJson();
-    }
-
-    private String getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
-        return documentationHashService.getBulkFunctionHashes(offset, limit, filter, programName).toJson();
-    }
-
-    // Backward compatibility overload
-    private String getBulkFunctionHashes(int offset, int limit, String filter) {
-        return documentationHashService.getBulkFunctionHashes(offset, limit, filter).toJson();
-    }
 
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
@@ -2385,18 +2133,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * List all data types available in the program with optional category filtering
-     */
-    public String listDataTypes(String category, int offset, int limit, String programName) {
-        return dataTypeService.listDataTypes(category, offset, limit, programName).toJson();
-    }
-
-    // Backward compatibility overload
-    public String listDataTypes(String category, int offset, int limit) {
-        return dataTypeService.listDataTypes(category, offset, limit).toJson();
-    }
-
-    /**
      * Create a new structure data type with specified fields
      */
     public String createStruct(String name, String fieldsJson) {
@@ -2497,24 +2233,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * Get version information about the plugin and Ghidra (v1.7.0)
-     */
-    private String getVersion() {
-        StringBuilder version = new StringBuilder();
-        version.append("{\n");
-        version.append("  \"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",\n");
-        version.append("  \"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",\n");
-        version.append("  \"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",\n");
-        version.append("  \"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",\n");
-        version.append("  \"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",\n");
-        version.append("  \"ghidra_version\": \"").append(VersionInfo.getGhidraVersion()).append("\",\n");
-        version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
-        version.append("  \"endpoint_count\": ").append(VersionInfo.getEndpointCount()).append("\n");
-        version.append("}");
-        return version.toString();
-    }
-
-    /**
      * Get metadata about the current program
      */
     private String getMetadata() {
@@ -2575,24 +2293,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * Search for data types by pattern
-     */
-    private String searchDataTypes(String pattern, int offset, int limit) {
-        return dataTypeService.searchDataTypes(pattern, offset, limit).toJson();
-    }
-
-    /**
      * Get all values in an enumeration
      */
     private String getEnumValues(String enumName) {
         return dataTypeService.getEnumValues(enumName).toJson();
-    }
-
-    /**
-     * Create a typedef (type alias)
-     */
-    private String createTypedef(String name, String baseType) {
-        return dataTypeService.createTypedef(name, baseType).toJson();
     }
 
     /**
@@ -2676,20 +2380,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * Create an array data type
-     */
-    private String createArrayType(String baseType, int length, String name) {
-        return dataTypeService.createArrayType(baseType, length, name).toJson();
-    }
-
-    /**
-     * Create a pointer data type
-     */
-    private String createPointerType(String baseType, String name) {
-        return dataTypeService.createPointerType(baseType, name).toJson();
-    }
-
-    /**
      * Create a new data type category
      */
     private String createDataTypeCategory(String categoryPath) {
@@ -2701,13 +2391,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private String moveDataTypeToCategory(String typeName, String categoryPath) {
         return dataTypeService.moveDataTypeToCategory(typeName, categoryPath).toJson();
-    }
-
-    /**
-     * List all data type categories
-     */
-    private String listDataTypeCategories(int offset, int limit) {
-        return dataTypeService.listDataTypeCategories(offset, limit).toJson();
     }
 
     /**
@@ -2755,10 +2438,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * 1. GET_BULK_XREFS - Retrieve xrefs for multiple addresses in one call
      */
-    private String getBulkXrefs(Object addressesObj) {
-        return xrefCallGraphService.getBulkXrefs(addressesObj).toJson();
-    }
-
     /**
      * 2. ANALYZE_DATA_REGION - Comprehensive single-call data analysis
      */
@@ -3344,16 +3023,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
-     * NEW v1.6.0: Enhanced function search with filtering and sorting
-     */
-    private String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          String callingConvention, Boolean hasCustomName,
-                                          Boolean isThunk, Boolean isExternal, boolean regex,
-                                          String sortBy, int offset, int limit, String programName) {
-        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, callingConvention, hasCustomName, isThunk, isExternal, regex, sortBy, offset, limit, programName).toJson();
-    }
-
-    /**
      * NEW v1.7.1: Disassemble a range of bytes
      */
     private String disassembleBytes(String startAddress, String endAddress, Integer length,
@@ -3422,12 +3091,12 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * List all external locations (imports, ordinal imports, etc.)
      */
     private String listExternalLocations(int offset, int limit, String programName) {
-        return listingService.listExternalLocations(offset, limit, programName).toJson();
+        return listProgramItems("external_locations", offset, limit, programName);
     }
 
     // Backward compatibility overload
     private String listExternalLocations(int offset, int limit) {
-        return listingService.listExternalLocations(offset, limit, null).toJson();
+        return listProgramItems("external_locations", offset, limit);
     }
 
     /**
@@ -3476,10 +3145,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // ==========================================================================
     // FUZZY MATCHING & DIFF HANDLERS
     // ==========================================================================
-
-    private String handleGetFunctionSignature(String addressStr, String programName) {
-        return documentationHashService.handleGetFunctionSignature(addressStr, programName).toJson();
-    }
 
     private String handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
             String targetProgramName, double threshold, int limit) {

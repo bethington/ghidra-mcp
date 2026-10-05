@@ -38,15 +38,15 @@ tool_cases:
         endian: "little"
         address_size_bits: 32
 
-  - tool: list_segments
-    name: curated
+  - tool: list_program_items
+    name: curated_segments
     tier: read
     snapshot: false
-    args: {}
+    args: { kind: segments }
     assert:
-      json_keys: ["segments", "count", "total"]
+      json_keys: ["kind", "items", "count", "total"]
+      json_equals: { kind: "segments" }
       contains: [".text", ".rdata", ".data", "Headers"]
-      # Executability is a real property the pre-7.0.0 text form never carried.
       not_contains: ['"executable":true,"initialized":false']
 
   - tool: get_function_count
@@ -76,13 +76,14 @@ tool_cases:
     name: curated_calc_crc16_signature
     tier: read
     snapshot: false
-    args: { address: "0x10001000" }
+    args:
+      address: "0x10001000"
+      fields: signature
+      include_call_context: false
     assert:
       json_equals:
-        function_name: "calc_crc16"
-        param_count: 2
-        basic_block_count: 5
-        cyclomatic_complexity: 3
+        name: "calc_crc16"
+      contains: ["ushort"]
 
   - tool: get_functions
     name: curated_calc_crc16_decompile
@@ -161,13 +162,14 @@ tool_cases:
       json_equals: { exists: false }
 
   # ---- symbols and xrefs ---------------------------------------------------
-  - tool: list_exports
-    name: curated
+  - tool: list_program_items
+    name: curated_exports
     tier: read
     snapshot: false
-    args: {}
+    args: { kind: exports }
     assert:
-      json_keys: ["exports", "count", "total"]
+      json_keys: ["kind", "items", "count", "total"]
+      json_equals: { kind: "exports" }
       contains: ["calc_crc16", "compute_gcd", "compute_str_len"]
 
   - tool: get_entry_points

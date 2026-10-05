@@ -24,24 +24,18 @@ public class FunctionTagEndpointsOfflineTest extends TestCase {
     /** path -> expected (method, category, required params in any order). */
     private static final Map<String, Expected> EXPECTED = new LinkedHashMap<>();
     static {
-        EXPECTED.put("/get_function_tags",
-            new Expected("GET",  "function", "function", "program"));
         // 7.0.0: batch_add_function_tags / batch_remove_function_tags folded into the
         // singular tools, which now take `function`+`tags` OR `assignments=[{function,tags}]`.
         EXPECTED.put("/add_function_tag",
-            new Expected("POST", "function", "function", "tags", "assignments", "program"));
+            new Expected("POST", "function", "function", "tags", "tag_comments", "assignments", "program"));
         EXPECTED.put("/remove_function_tag",
             new Expected("POST", "function", "function", "tags", "assignments", "program"));
         EXPECTED.put("/list_function_tags",
             new Expected("GET",  "function", "offset", "limit", "program"));
-        EXPECTED.put("/create_function_tag",
-            new Expected("POST", "function", "name", "comment", "program"));
         EXPECTED.put("/delete_function_tag",
             new Expected("POST", "function", "name", "program"));
         EXPECTED.put("/set_function_tag_comment",
             new Expected("POST", "function", "name", "comment", "program"));
-        EXPECTED.put("/search_functions_by_tag",
-            new Expected("GET",  "function", "tag", "offset", "limit", "program"));
     }
 
     private AnnotationScanner scanner;

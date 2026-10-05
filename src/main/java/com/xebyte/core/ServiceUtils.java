@@ -263,6 +263,27 @@ public final class ServiceUtils {
     }
 
     /**
+     * Paged envelope for {@code /list_program_items}: one {@code items} array
+     * regardless of kind, so agents learn one shape instead of eight.
+     */
+    public static Response pagedProgramItems(String kind, List<?> all, int offset, int limit) {
+        int start = Math.max(0, offset);
+        int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
+        List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("kind", kind);
+        out.put("items", page);
+        out.put("count", page.size());
+        out.put("offset", start);
+        if (limit > 0) {
+            out.put("limit", limit);
+        }
+        out.put("total", all.size());
+        return Response.ok(out);
+    }
+
+    /**
      * List envelope for tools that do not paginate.
      *
      * <pre>{@code {"entry_points": [...], "count": 12}}</pre>

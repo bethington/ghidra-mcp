@@ -304,13 +304,6 @@ class TestJavaArchitecture(unittest.TestCase):
 
         gui_only_expected = {
             "/batch_apply_documentation",
-            # /get_current_selection — added 2026-05-23 (@I-Knight-I, #153).
-            # Selection is the CodeBrowser listing's highlight state — a UI
-            # concept with no equivalent in headless mode, so it lives only
-            # on the GUI plugin alongside the other current_* sibling tools
-            # (which DO have headless equivalents because address + function
-            # generalize to "currentProgram-relative" outside a UI context).
-            "/get_current_selection",
             "/mcp/health",
             "/mcp/instance_info",
             "/project/info",

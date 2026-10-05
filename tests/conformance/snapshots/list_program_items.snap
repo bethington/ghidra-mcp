@@ -1,58 +1,60 @@
 {
   "count": 5,
-  "limit": 5,
-  "offset": 0,
-  "segments": [
+  "items": [
     {
-      "end": "100003ff",
+      "end": "100001ff",
       "executable": false,
       "initialized": true,
       "name": "Headers",
       "readable": true,
-      "size": 1024,
+      "size": 512,
       "start": "10000000",
       "writable": false
     },
     {
-      "end": "1000d9ff",
+      "end": "100013ff",
       "executable": true,
       "initialized": true,
       "name": ".text",
       "readable": true,
-      "size": 51712,
+      "size": 1024,
       "start": "10001000",
       "writable": false
     },
     {
-      "end": "100141ff",
+      "end": "10002fff",
       "executable": false,
       "initialized": true,
       "name": ".rdata",
       "readable": true,
-      "size": 25088,
-      "start": "1000e000",
+      "size": 4096,
+      "start": "10002000",
       "writable": false
     },
     {
-      "end": "100162db",
+      "end": "100031ff",
       "executable": false,
       "initialized": true,
       "name": ".data",
       "readable": true,
-      "size": 4828,
-      "start": "10015000",
+      "size": 512,
+      "start": "10003000",
       "writable": true
     },
     {
-      "end": "100171ff",
+      "end": "ffdfffff",
       "executable": false,
       "initialized": true,
-      "name": ".fptable",
+      "name": "tdb",
       "readable": true,
-      "size": 512,
-      "start": "10017000",
+      "size": 4096,
+      "start": "ffdff000",
       "writable": true
     }
   ],
-  "total": 7
+  "kind": "segments",
+  "limit": 100,
+  "offset": 0,
+  "program": "Benchmark.dll",
+  "total": 5
 }

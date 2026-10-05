@@ -30,14 +30,67 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref", access = ToolAccess.READ_ONLY)
+    /**
+     * The many-at-once form of {@link #getXrefsTo}: a map from each requested address to its
+     * references. Was a separate POST tool (get_bulk_xrefs) answering the exact same question
+     * with getReferencesTo, which meant a caller had to know two tools and two response shapes
+     * to ask "who references this" about one address versus five.
+     *
+     * <p>An address that fails to resolve yields an empty list rather than failing the call —
+     * the batch is the point, and one bad entry should not lose the other ninety-nine.
+     */
+    private Response xrefsToMany(Program program, String addressesCsv) {
+        ReferenceManager refMgr = program.getReferenceManager();
+        boolean qualify = ServiceUtils.getPhysicalSpaceCount(program) > 1;
+        Map<String, Object> byAddress = new LinkedHashMap<>();
+        for (String raw : addressesCsv.split(",")) {
+            String addrStr = raw.trim();
+            if (addrStr.isEmpty()) continue;
+            List<Map<String, Object>> refs = new ArrayList<>();
+            Address addr = ServiceUtils.parseAddress(program, addrStr);
+            if (addr != null) {
+                ReferenceIterator it = refMgr.getReferencesTo(addr);
+                while (it.hasNext()) {
+                    Reference ref = it.next();
+                    Address from = ref.getFromAddress();
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("from_address", from.toString(false));
+                    if (qualify) {
+                        entry.put("from_address_full", from.toString());
+                        entry.put("from_address_space", from.getAddressSpace().getName());
+                    }
+                    entry.put("type", ref.getReferenceType().getName());
+                    Function fromFunc = program.getFunctionManager().getFunctionContaining(from);
+                    if (fromFunc != null) {
+                        entry.put("from_function", fromFunc.getName());
+                    }
+                    refs.add(entry);
+                }
+            }
+            byAddress.put(addrStr, refs);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("references_by_address", byAddress);
+        out.put("count", byAddress.size());
+        return Response.ok(out);
+    }
+
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to ONE address, or to MANY at once "
+        + "(addresses=comma-separated), which returns a map keyed by the address you asked for. "
+        + "Replaces the former get_bulk_xrefs. On programs with multiple address spaces (e.g., embedded "
+        + "targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+        category = "xref", access = ToolAccess.READ_ONLY)
     public Response getXrefsTo(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
+            @Param(value = "addresses", defaultValue = "",
+                   description = "Comma-separated addresses for the many-at-once form. The result is a "
+                               + "map of address to its reference list, and an address that does not "
+                               + "resolve gets an empty list rather than failing the whole call.") String addressesCsv,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -50,7 +103,12 @@ public class XrefCallGraphService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (addressesCsv != null && !addressesCsv.isEmpty()) {
+            return xrefsToMany(program, addressesCsv);
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address (one) or addresses (comma-separated) is required");
+        }
 
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
@@ -1249,88 +1307,6 @@ public class XrefCallGraphService {
             if (!visited.contains(neighbor)) {
                 dfsCollect(neighbor, graph, visited, component);
             }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Bulk Xref Methods
-    // -----------------------------------------------------------------------
-
-    /**
-     * Retrieve xrefs for multiple addresses in one call
-     */
-    public Response getBulkXrefs(Object addressesObj) {
-        return getBulkXrefs(addressesObj, null);
-    }
-
-    @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref", access = ToolAccess.READ_ONLY)
-    public Response getBulkXrefs(
-            @Param(value = "addresses", source = ParamSource.BODY,
-                   description = "Addresses to fetch references TO. Accepts a JSON array of address "
-                               + "strings or one comma-separated string, each entry in the usual 0x<hex> "
-                               + "or <space>:<hex> form. The result is keyed by the exact string you sent. "
-                               + "Beware: an entry that does not parse comes back as an EMPTY array, which "
-                               + "is indistinguishable from an address that genuinely has no "
-                               + "references.") Object addressesObj,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            List<String> addresses = new ArrayList<>();
-
-            // Parse addresses array
-            if (addressesObj instanceof List) {
-                for (Object addr : (List<?>) addressesObj) {
-                    if (addr != null) {
-                        addresses.add(addr.toString());
-                    }
-                }
-            } else if (addressesObj instanceof String) {
-                // Handle comma-separated string
-                String[] parts = ((String) addressesObj).split(",");
-                for (String part : parts) {
-                    addresses.add(part.trim());
-                }
-            }
-
-            ReferenceManager refMgr = program.getReferenceManager();
-            Map<String, Object> resultMap = new LinkedHashMap<>();
-
-            for (String addrStr : addresses) {
-                List<Map<String, Object>> refsList = new ArrayList<>();
-
-                try {
-                    Address addr = ServiceUtils.parseAddress(program, addrStr);
-                    if (addr != null) {
-                        ReferenceIterator refIter = refMgr.getReferencesTo(addr);
-
-                        while (refIter.hasNext()) {
-                            Reference ref = refIter.next();
-                            Address fromAddr = ref.getFromAddress();
-                            Map<String, Object> refItem = new LinkedHashMap<>();
-                            refItem.put("from", fromAddr.toString(false));
-                            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
-                                refItem.put("from_full", fromAddr.toString());
-                                refItem.put("from_space", fromAddr.getAddressSpace().getName());
-                            }
-                            refItem.put("type", ref.getReferenceType().getName());
-                            refsList.add(refItem);
-                        }
-                    }
-                } catch (Exception e) {
-                    // Address parsing failed, return empty array
-                }
-
-                resultMap.put(addrStr, refsList);
-            }
-
-            return Response.ok(resultMap);
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
         }
     }
 

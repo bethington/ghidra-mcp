@@ -92,17 +92,25 @@ public class DataTypeService {
     // -----------------------------------------------------------------------
 
     /**
-     * List all data types available in the program with optional category filtering
+     * Find data types: by name or path, by category, by kind; or list the categories.
      */
-    @McpTool(path = "/list_data_types", description = "List all data types with optional category filter", category = "datatype", access = ToolAccess.READ_ONLY)
-    public Response listDataTypes(
-            // Optional, as the tool description has always claimed. Without a
-            // default this was REQUIRED, so there was no way to list every data
-            // type. search_data_types defaults its filter to empty and is the
-            // model here; the body already treats empty as "no filter", so only
-            // the declaration was wrong.
+    @McpTool(path = "/find_data_types", description = "Find data types by name or path pattern, category and "
+            + "kind, one record per type (name, kind, category, size, path). With categories=true, list the "
+            + "category paths instead. With no filter it lists every type.",
+            category = "datatype", access = ToolAccess.READ_ONLY)
+    public Response findDataTypes(
+            @Param(value = "pattern", defaultValue = "",
+                   description = "Case-insensitive substring of the type's name or full path; omit for no "
+                               + "name filter.") String pattern,
             @Param(value = "category", defaultValue = "",
-                   description = "Category filter; omit to list all types") String category,
+                   description = "Case-insensitive substring of the category path (e.g. Windows, /D2); omit "
+                               + "for any category.") String category,
+            @Param(value = "kind", defaultValue = "",
+                   description = "Only this kind: struct, union, enum, typedef, pointer, array, function or "
+                               + "primitive. Omit for all kinds.") String kind,
+            @Param(value = "categories", defaultValue = "false",
+                   description = "True lists the category paths (filtered by pattern) instead of types; "
+                               + "category and kind do not apply.") boolean categories,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -114,50 +122,44 @@ public class DataTypeService {
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+        DataTypeManager dtm = pe.program().getDataTypeManager();
+        String needle = pattern == null ? "" : pattern.toLowerCase();
 
-        DataTypeManager dtm = program.getDataTypeManager();
-        List<String> dataTypes = new ArrayList<>();
+        if (categories) {
+            List<String> paths = new ArrayList<>();
+            addCategoriesRecursively(dtm.getRootCategory(), paths, "");
+            paths.removeIf(path -> !path.toLowerCase().contains(needle));
+            return ServiceUtils.paged("categories", paths, offset, limit);
+        }
 
-        // Get all data types from the manager
+        String categoryNeedle = category == null ? "" : category.toLowerCase();
+        String wantedKind = kind == null ? "" : kind.trim().toLowerCase();
+        List<Map<String, Object>> found = new ArrayList<>();
         Iterator<DataType> allTypes = dtm.getAllDataTypes();
         while (allTypes.hasNext()) {
             DataType dt = allTypes.next();
-
-            // Apply category/type filter if specified
-            if (category != null && !category.isEmpty()) {
-                String dtCategory = getCategoryName(dt);
-                String dtTypeName = getDataTypeName(dt);
-
-                // Check both category path AND data type name
-                boolean matches = dtCategory.toLowerCase().contains(category.toLowerCase()) ||
-                                dtTypeName.toLowerCase().contains(category.toLowerCase());
-
-                if (!matches) {
-                    continue;
-                }
+            String path = dt.getPathName();
+            String typeKind = getDataTypeName(dt);
+            if (!needle.isEmpty() && !dt.getName().toLowerCase().contains(needle)
+                    && !path.toLowerCase().contains(needle)) {
+                continue;
             }
-
-            // Format: name | category | size | path
-            String categoryName = getCategoryName(dt);
-            int size = dt.getLength();
-            String sizeStr = (size > 0) ? String.valueOf(size) : "variable";
-
-            dataTypes.add(String.format("%s | %s | %s bytes | %s",
-                dt.getName(), categoryName, sizeStr, dt.getPathName()));
+            if (!categoryNeedle.isEmpty() && !dt.getCategoryPath().getPath().toLowerCase().contains(categoryNeedle)) {
+                continue;
+            }
+            if (!wantedKind.isEmpty() && !typeKind.equals(wantedKind)) {
+                continue;
+            }
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("name", dt.getName());
+            record.put("kind", typeKind);
+            record.put("category", dt.getCategoryPath().getPath());
+            record.put("size", dt.getLength());
+            record.put("path", path);
+            found.add(record);
         }
-
-        // An empty result is a normal outcome (a filter that matched nothing),
-        // not an error -- callers read count==0 instead of parsing prose.
-        // TODO(response-contract): entries are still preformatted
-        // "name | category | size | path" strings; structure them into records
-        // in a follow-up. The envelope is contract-correct today.
-        return ServiceUtils.paged("data_types", dataTypes, offset, limit);
-    }
-
-    // Backward compatibility overload
-    public Response listDataTypes(String category, int offset, int limit) {
-        return listDataTypes(category, offset, limit, null);
+        found.sort(Comparator.comparing(r -> (String) r.get("path")));
+        return ServiceUtils.paged("data_types", found, offset, limit);
     }
 
     /**
@@ -199,51 +201,6 @@ public class DataTypeService {
         } else {
             return "primitive";
         }
-    }
-
-    /**
-     * Search for data types by pattern
-     */
-    @McpTool(path = "/search_data_types", description = "Search data types by pattern", category = "datatype", access = ToolAccess.READ_ONLY)
-    public Response searchDataTypes(
-            @Param(value = "pattern", description = "Search pattern") String pattern,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (pattern == null || pattern.isEmpty()) return Response.err("Search pattern is required");
-
-        List<String> matches = new ArrayList<>();
-        DataTypeManager dtm = program.getDataTypeManager();
-
-        Iterator<DataType> allTypes = dtm.getAllDataTypes();
-        while (allTypes.hasNext()) {
-            DataType dt = allTypes.next();
-            String name = dt.getName();
-            String path = dt.getPathName();
-
-            if (name.toLowerCase().contains(pattern.toLowerCase()) ||
-                path.toLowerCase().contains(pattern.toLowerCase())) {
-                matches.add(String.format("%s | Size: %d | Path: %s",
-                           name, dt.getLength(), path));
-            }
-        }
-
-        Collections.sort(matches);
-        return ServiceUtils.paged("matches", matches, offset, limit);
-    }
-
-    // Backward compatibility overload
-    public Response searchDataTypes(String pattern, int offset, int limit) {
-        return searchDataTypes(pattern, offset, limit, null);
     }
 
     /**
@@ -776,65 +733,6 @@ public class DataTypeService {
     }
 
     /**
-     * Create a typedef (type alias)
-     */
-    @McpTool(path = "/create_typedef", method = "POST", description = "Create a typedef alias", category = "datatype", access = ToolAccess.WRITE)
-    public Response createTypedef(
-            @Param(value = "name", source = ParamSource.BODY,
-                   description = "New typedef (alias) name. An existing same-named type is replaced.") String name,
-            @Param(value = "base_type", source = ParamSource.BODY,
-                   description = "Type the alias resolves to. Resolution is recursive, so pointer chains "
-                               + "(int**), array syntax (dword[16]), well-known C types and existing "
-                               + "struct/enum names all work.") String baseType,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (name == null || name.isEmpty()) return Response.err("Typedef name is required");
-        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-
-        try {
-            threadingStrategy.executeWrite(program, "Create typedef", () -> {
-                DataTypeManager dtm = program.getDataTypeManager();
-                DataType base = null;
-
-                // Delegate to resolveDataType which handles pointer chains (int**),
-                // arrays (type[N]), well-known C types, and DTM lookups recursively.
-                base = ServiceUtils.resolveDataType(dtm, baseType);
-                if (base == null) {
-                    errorMessage.set("Could not resolve base type: " + baseType);
-                    return null;
-                }
-
-                TypedefDataType typedef = new TypedefDataType(name, base);
-                dtm.addDataType(typedef, DataTypeConflictHandler.REPLACE_HANDLER);
-
-                success.set(true);
-                return null;
-            });
-        } catch (Exception e) {
-            errorMessage.set("Error creating typedef: " + e.getMessage());
-        }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Typedef '" + name + "' created as alias for '" + baseType + "'",
-                "name", name,
-                "base_type", baseType));
-    }
-
-    // Backward compatibility overload
-    public Response createTypedef(String name, String baseType) {
-        return createTypedef(name, baseType, null);
-    }
-
-    /**
      * Clone/copy a data type with a new name
      */
     @McpTool(path = "/clone_data_type", method = "POST", description = "Clone a data type with new name", category = "datatype", access = ToolAccess.WRITE)
@@ -892,143 +790,81 @@ public class DataTypeService {
     }
 
     /**
-     * Create an array data type
+     * Create a typedef, an array or a pointer over an existing type.
      */
-    @McpTool(path = "/create_array_type", method = "POST", description = "Create an array data type", category = "datatype", access = ToolAccess.WRITE)
-    public Response createArrayType(
+    @McpTool(path = "/create_derived_type", method = "POST",
+            description = "Create a type built on another: a typedef alias, an array or a pointer. An "
+                + "existing same-named type is replaced.",
+            category = "datatype", access = ToolAccess.WRITE)
+    public Response createDerivedType(
+            @Param(value = "kind", source = ParamSource.BODY,
+                   description = "What to build: typedef (an alias, needs name), array (needs length) or "
+                               + "pointer.") String kind,
             @Param(value = "base_type", source = ParamSource.BODY,
-                   description = "Element type. Resolution is recursive, so pointer chains (int**), "
-                               + "nested array syntax and existing struct/enum names all work.") String baseType,
+                   description = "Type the new one is built on: what a typedef resolves to, the array's "
+                               + "element type, or the pointee. Resolution is recursive, so pointer "
+                               + "chains (int**), array syntax (dword[16]), well-known C types and "
+                               + "existing struct/enum names all work; `void` is Ghidra's void type.") String baseType,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Name for the type. Required for a typedef. For an array or pointer, omit "
+                               + "to let Ghidra name it after the base type (dword[16], UnitAny *); the "
+                               + "response reports the name actually used.") String name,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
-                   description = "Number of ELEMENTS, not bytes — total size is length x "
-                               + "sizeof(base_type). Must be positive; default 1.") int length,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
-                   description = "Optional name for the array type. Omit to let Ghidra name it after the "
-                               + "element type (e.g. dword[16]); the response reports the name actually "
-                               + "used.") String name,
+                   description = "Array only: number of ELEMENTS, not bytes — total size is length x "
+                               + "sizeof(base_type). Must be positive.") int length,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        String derived = kind == null ? "" : kind.trim().toLowerCase();
+        if (!List.of("typedef", "array", "pointer").contains(derived)) {
+            return Response.err("kind must be typedef, array or pointer");
+        }
+        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
+        boolean named = name != null && !name.isEmpty();
+        if (derived.equals("typedef") && !named) return Response.err("Typedef name is required");
+        if (derived.equals("array") && length <= 0) return Response.err("Array length must be positive");
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
-        if (length <= 0) return Response.err("Array length must be positive");
 
-        AtomicBoolean success = new AtomicBoolean(false);
         AtomicReference<String> errorMessage = new AtomicReference<>();
         AtomicReference<String> createdName = new AtomicReference<>();
 
         try {
-            threadingStrategy.executeWrite(program, "Create array type", () -> {
+            threadingStrategy.executeWrite(program, "Create " + derived + " type", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType baseDataType = ServiceUtils.resolveDataType(dtm, baseType);
-
-                if (baseDataType == null) {
-                    errorMessage.set("Base data type not found: " + baseType);
+                DataType base = "void".equals(baseType) && derived.equals("pointer")
+                    ? VoidDataType.dataType : ServiceUtils.resolveDataType(dtm, baseType);
+                if (base == null) {
+                    errorMessage.set("Could not resolve base type: " + baseType);
                     return null;
                 }
-
-                ArrayDataType arrayType = new ArrayDataType(baseDataType, length, baseDataType.getLength());
-
-                if (name != null && !name.isEmpty()) {
-                    arrayType.setName(name);
+                DataType built = switch (derived) {
+                    case "typedef" -> new TypedefDataType(name, base);
+                    case "array" -> new ArrayDataType(base, length, base.getLength());
+                    default -> new PointerDataType(base);
+                };
+                if (named && !derived.equals("typedef")) {
+                    built.setName(name);
                 }
-
-                DataType addedType = dtm.addDataType(arrayType, DataTypeConflictHandler.REPLACE_HANDLER);
-                createdName.set(addedType.getName());
-                success.set(true);
+                createdName.set(dtm.addDataType(built, DataTypeConflictHandler.REPLACE_HANDLER).getName());
                 return null;
             });
         } catch (Exception e) {
-            errorMessage.set("Error creating array type: " + e.getMessage());
+            errorMessage.set("Error creating " + derived + " type: " + e.getMessage());
         }
 
-        if (!success.get()) {
+        if (errorMessage.get() != null || createdName.get() == null) {
             return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
         }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully created array type: " + createdName.get()
-                        + " (" + baseType + "[" + length + "])",
-                "name", createdName.get(),
-                "base_type", baseType,
-                "length", length));
-    }
-
-    // Backward compatibility overload
-    public Response createArrayType(String baseType, int length, String name) {
-        return createArrayType(baseType, length, name, null);
-    }
-
-    /**
-     * Create a pointer data type
-     */
-    @McpTool(path = "/create_pointer_type", method = "POST", description = "Create a pointer data type", category = "datatype", access = ToolAccess.WRITE)
-    public Response createPointerType(
-            @Param(value = "base_type", source = ParamSource.BODY,
-                   description = "Type pointed at. `void` is special-cased to Ghidra's void type; "
-                               + "everything else resolves recursively, so int**, dword[16] and existing "
-                               + "struct/enum names all work.") String baseType,
-            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
-                   description = "Optional name for the pointer type. Omit to let Ghidra name it after "
-                               + "the pointee (e.g. UnitAny *); the response reports the name actually "
-                               + "used.") String name,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-        AtomicReference<String> createdName = new AtomicReference<>();
-
-        try {
-            threadingStrategy.executeWrite(program, "Create pointer type", () -> {
-                DataTypeManager dtm = program.getDataTypeManager();
-                DataType baseDataType = null;
-
-                if ("void".equals(baseType)) {
-                    baseDataType = dtm.getDataType("/void");
-                    if (baseDataType == null) {
-                        baseDataType = VoidDataType.dataType;
-                    }
-                } else {
-                    baseDataType = ServiceUtils.resolveDataType(dtm, baseType);
-                }
-
-                if (baseDataType == null) {
-                    errorMessage.set("Base data type not found: " + baseType);
-                    return null;
-                }
-
-                PointerDataType pointerType = new PointerDataType(baseDataType);
-
-                if (name != null && !name.isEmpty()) {
-                    pointerType.setName(name);
-                }
-
-                DataType addedType = dtm.addDataType(pointerType, DataTypeConflictHandler.REPLACE_HANDLER);
-                createdName.set(addedType.getName());
-                success.set(true);
-                return null;
-            });
-        } catch (Exception e) {
-            errorMessage.set("Error creating pointer type: " + e.getMessage());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "success");
+        out.put("kind", derived);
+        out.put("name", createdName.get());
+        out.put("base_type", baseType);
+        if (derived.equals("array")) {
+            out.put("length", length);
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully created pointer type: " + createdName.get() + " (" + baseType + "*)",
-                "name", createdName.get(),
-                "base_type", baseType));
-    }
-
-    // Backward compatibility overload
-    public Response createPointerType(String baseType, String name) {
-        return createPointerType(baseType, name, null);
+        out.put("message", "Created " + derived + " type '" + createdName.get() + "' on '" + baseType + "'");
+        return Response.ok(out);
     }
 
     /**
@@ -1154,7 +990,7 @@ public class DataTypeService {
                    description = "Type to apply at the address. Any name the resolver understands: a "
                                + "built-in (uint, char *), an existing struct/enum/typedef name, a pointer "
                                + "chain (int**), or array syntax basetype[count] such as dword[10]. Create "
-                               + "the type first with create_struct / create_enum / create_array_type if it "
+                               + "the type first with create_struct / create_enum / create_derived_type if it "
                                + "does not exist yet.") String typeName,
             @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) clears whatever code or data occupies the FULL target "
@@ -1191,7 +1027,7 @@ public class DataTypeService {
             if (dataType == null) {
                 return Response.err("ERROR: Unknown data type: " + typeName + ". " +
                        "For arrays, use syntax 'basetype[count]' (e.g., 'dword[10]'). " +
-                       "Or create the type first using create_struct, create_enum, or mcp_ghidra_create_array_type.");
+                       "Or create the type first using create_struct, create_enum, or create_derived_type.");
             }
 
             Listing listing = program.getListing();
@@ -1408,7 +1244,7 @@ public class DataTypeService {
     /**
      * Modify a field in an existing structure
      */
-    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype", access = ToolAccess.WRITE)
+    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure: retype it (new_type, which also embeds a struct by value, e.g. Rectangle inside LayoutNode), rename it (new_name), or both. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype", access = ToolAccess.WRITE)
     public Response modifyStructField(
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to edit, matched across every "
@@ -1527,51 +1363,6 @@ public class DataTypeService {
     // Backward compatibility overload
     public Response modifyStructField(String structName, String fieldName, String newType, String newName) {
         return modifyStructField(structName, fieldName, newType, newName, null);
-    }
-
-    /**
-     * Alias for {@link #modifyStructField} when only the field type changes.
-     */
-    @McpTool(path = "/modify_struct_field_type", method = "POST",
-            description = "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only.",
-            category = "datatype", access = ToolAccess.WRITE)
-    public Response modifyStructFieldType(
-            @Param(value = "struct_name", source = ParamSource.BODY,
-                   description = "Simple name of the existing structure to edit, matched across every "
-                               + "category (no /path prefix needed).") String structName,
-            @Param(value = "field_name", source = ParamSource.BODY,
-                   description = "Field name or offset:N (e.g. offset:0x88).") String fieldName,
-            @Param(value = "new_type", source = ParamSource.BODY,
-                   description = "Replacement type for the field, resolved recursively (pointer chains, "
-                               + "array syntax, struct names). Required here — use modify_struct_field if "
-                               + "you also want to rename.") String newType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        return modifyStructField(structName, fieldName, newType, "", programName);
-    }
-
-    /**
-     * Embed a structure by value at a field offset (not a pointer). Common for nested MSVC-style subobjects.
-     */
-    @McpTool(path = "/embed_struct_field", method = "POST",
-            description = "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally.",
-            category = "datatype", access = ToolAccess.WRITE)
-    public Response embedStructField(
-            @Param(value = "parent_struct", source = ParamSource.BODY,
-                   description = "Simple name of the structure that CONTAINS the field being replaced — "
-                               + "the outer type, not the one being embedded.") String parentStruct,
-            @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
-                   description = "Field name or offset:N.") String fieldName,
-            @Param(value = "embedded_struct", source = ParamSource.BODY,
-                   description = "Existing structure type to embed by value.") String embeddedStruct,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        if (embeddedStruct == null || embeddedStruct.isEmpty()) {
-            return Response.err("embedded_struct is required");
-        }
-        return modifyStructField(parentStruct, fieldName, embeddedStruct, "", programName);
     }
 
     /**
@@ -2656,42 +2447,6 @@ public class DataTypeService {
     // Backward compatibility overload
     public Response createDataTypeCategory(String categoryPath) {
         return createDataTypeCategory(categoryPath, null);
-    }
-
-    /**
-     * List all data type categories
-     */
-    @McpTool(path = "/list_data_type_categories", description = "List all data type categories", category = "datatype", access = ToolAccess.READ_ONLY)
-    public Response listDataTypeCategories(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            DataTypeManager dtm = program.getDataTypeManager();
-            List<String> categories = new ArrayList<>();
-
-            // Get all categories recursively
-            addCategoriesRecursively(dtm.getRootCategory(), categories, "");
-
-            return ServiceUtils.paged("categories", categories, offset, limit);
-        } catch (Exception e) {
-            return Response.err("Error listing categories: " + e.getMessage());
-        }
-    }
-
-    // Backward compatibility overload
-    public Response listDataTypeCategories(int offset, int limit) {
-        return listDataTypeCategories(offset, limit, null);
     }
 
     /**
@@ -4646,7 +4401,7 @@ public class DataTypeService {
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New name. Must follow g_ + Hungarian + descriptor convention (e.g., g_dwActiveQuestState, g_pUnitList).") String newName,
             @Param(value = "type_name", source = ParamSource.BODY,
-                   description = "Ghidra data type to apply (e.g., uint, byte, UnitAny *, char *, MyStruct). Use create_struct/create_array_type first if the type doesn't exist. Pass empty to leave type unchanged.") String typeName,
+                   description = "Ghidra data type to apply (e.g., uint, byte, UnitAny *, char *, MyStruct). Use create_struct/create_derived_type first if the type doesn't exist. Pass empty to leave type unchanged.") String typeName,
             @Param(value = "array_length", source = ParamSource.BODY, defaultValue = "0",
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
@@ -4732,10 +4487,10 @@ public class DataTypeService {
                 //   1. Array shorthand baked into type_name ("double[0x100]")
                 //      — should be split into type_name="double" + array_length=256.
                 //   2. Function-pointer literal ("void (__cdecl **)()")
-                //      — needs a typedef created via create_typedef first,
+                //      — needs a typedef created via create_derived_type first,
                 //      or use a simpler "void *" for opaque pointers.
                 String suggestion = "Use create_struct, create_enum, or "
-                        + "create_array_type to define the type first; or use an "
+                        + "create_derived_type to define the type first; or use an "
                         + "existing builtin (uint, byte, char *, etc.).";
                 if (typeName.matches(".+\\[\\s*0?[xX]?[0-9a-fA-F]+\\s*\\]")) {
                     int lb = typeName.indexOf('[');
@@ -4753,7 +4508,7 @@ public class DataTypeService {
                     suggestion = "Type '" + typeName + "' looks like a function-pointer "
                             + "literal. The DataTypeManager doesn't accept inline function "
                             + "signatures; create a named typedef first via "
-                            + "create_typedef(name=\"PFnSomething\", base_type=\"void *\") "
+                            + "create_derived_type(kind=\"typedef\", name=\"PFnSomething\", base_type=\"void *\") "
                             + "(or a more specific signature via create_function_signature), "
                             + "then pass that name as type_name. For opaque function "
                             + "pointers, \"void *\" is acceptable.";

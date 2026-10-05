@@ -250,7 +250,7 @@ public class GhidraMCPPluginTest extends TestCase {
     public void testCurrentStateEndpoints() throws Exception {
         if (!serverAvailable) return;
         String[] stateEndpoints = {
-            "get_current_address", "get_current_function"
+            "get_ui_cursor"
         };
 
         for (String endpoint : stateEndpoints) {
@@ -379,9 +379,9 @@ public class GhidraMCPPluginTest extends TestCase {
         HttpResponse<String> segmentsResponse = makeGetRequest("segments");
         assertEquals("Should get segments list", 200, segmentsResponse.statusCode());
 
-        // Get current address
-        HttpResponse<String> addressResponse = makeGetRequest("get_current_address");
-        assertEquals("Should get current address", 200, addressResponse.statusCode());
+        // Get UI cursor
+        HttpResponse<String> addressResponse = makeGetRequest("get_ui_cursor");
+        assertEquals("Should get UI cursor", 200, addressResponse.statusCode());
 
         // All responses should be non-empty
         assertFalse("Functions response should not be empty", functionsResponse.body().trim().isEmpty());
@@ -403,7 +403,7 @@ public class GhidraMCPPluginTest extends TestCase {
             // Cross-references
             "xrefs_to", "xrefs_from", "function_xrefs",
             // Current state
-            "get_current_address", "get_current_function",
+            "get_ui_cursor",
             // Advanced features (may be missing)
             "all_labels", "program_stats", "find_byte_patterns", "function_callgraph",
             "search_labels", "string_references"

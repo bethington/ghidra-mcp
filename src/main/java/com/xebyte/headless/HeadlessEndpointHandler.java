@@ -128,16 +128,6 @@ public class HeadlessEndpointHandler {
     // VERSION AND METADATA
     // ==========================================================================
 
-    public String getVersion() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        sb.append("\"plugin_version\": \"").append(VERSION).append("\",");
-        sb.append("\"plugin_name\": \"GhidraMCP Headless\",");
-        sb.append("\"mode\": \"headless\"");
-        sb.append("}");
-        return sb.toString();
-    }
-
     /**
      * Health check endpoint for container orchestration (Docker, Kubernetes).
      * Returns JSON with status, version, and program information.
@@ -146,7 +136,11 @@ public class HeadlessEndpointHandler {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
         sb.append("\"status\": \"healthy\",");
+        // Absorbs the former /get_version: one endpoint answers who and what you are.
         sb.append("\"version\": \"").append(VERSION).append("\",");
+        sb.append("\"plugin_name\": \"GhidraMCP Headless\",");
+        sb.append("\"mode\": \"headless\",");
+        sb.append("\"connected\": true,");
 
         // Check if any program is loaded
         Program program = getProgram(null);
@@ -185,44 +179,47 @@ public class HeadlessEndpointHandler {
     // LISTING ENDPOINTS
     // ==========================================================================
 
+    public String listProgramItems(String kind, int offset, int limit, String programName) {
+        return listingService.listProgramItems(kind, offset, limit, programName).toJson();
+    }
+
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listMethods(int offset, int limit, String programName) {
-        return listingService.getAllFunctionNames(offset, limit, programName).toJson();
+        return listProgramItems("methods", offset, limit, programName);
     }
 
-    public String listFunctions(String programName) {
-        return listingService.listFunctions(programName).toJson();
-    }
-
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listClasses(int offset, int limit, String programName) {
-        return listingService.getAllClassNames(offset, limit, programName).toJson();
+        return listProgramItems("classes", offset, limit, programName);
     }
 
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listSegments(int offset, int limit, String programName) {
-        return listingService.listSegments(offset, limit, programName).toJson();
+        return listProgramItems("segments", offset, limit, programName);
     }
 
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listImports(int offset, int limit, String programName) {
-        return listingService.listImports(offset, limit, programName).toJson();
+        return listProgramItems("imports", offset, limit, programName);
     }
 
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listExports(int offset, int limit, String programName) {
-        return listingService.listExports(offset, limit, programName).toJson();
+        return listProgramItems("exports", offset, limit, programName);
     }
 
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listNamespaces(int offset, int limit, String programName) {
-        return listingService.listNamespaces(offset, limit, programName).toJson();
+        return listProgramItems("namespaces", offset, limit, programName);
     }
 
+    /** @deprecated legacy name — delegates to {@link #listProgramItems}. */
     public String listDataItems(int offset, int limit, String programName) {
-        return listingService.listDefinedData(offset, limit, programName).toJson();
+        return listProgramItems("data_items", offset, limit, programName);
     }
 
     public String listStrings(int offset, int limit, String filter, String programName) {
         return listingService.listDefinedStrings(offset, limit, filter, programName).toJson();
-    }
-
-    public String listDataTypes(int offset, int limit, String category, String programName) {
-        return dataTypeService.listDataTypes(category, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -254,7 +251,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getXrefsTo(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsTo(addressStr, offset, limit, programName).toJson();
+        return xrefCallGraphService.getXrefsTo(addressStr, null, offset, limit, programName).toJson();
     }
 
     public String getXrefsFrom(String addressStr, int offset, int limit, String programName) {
@@ -268,10 +265,6 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
     // SEARCH ENDPOINTS
     // ==========================================================================
-
-    public String searchFunctions(String query, int offset, int limit, String programName) {
-        return listingService.searchFunctionsByName(query, offset, limit, programName).toJson();
-    }
 
     // ==========================================================================
     // RENAME ENDPOINTS
@@ -329,10 +322,6 @@ public class HeadlessEndpointHandler {
 
     public String listOpenPrograms() {
         return programScriptService.listOpenPrograms().toJson();
-    }
-
-    public String getCurrentProgramInfo() {
-        return programScriptService.getCurrentProgramInfo().toJson();
     }
 
     public String switchProgram(String name) {
@@ -1165,16 +1154,6 @@ public class HeadlessEndpointHandler {
     }
 
     /**
-     * Enhanced function search with multiple filter options.
-     */
-    public String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          Boolean hasCustomName, Boolean isThunk, Boolean isExternal,
-                                          boolean regex, String sortBy,
-                                          int offset, int limit, String programName) {
-        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, null, hasCustomName, isThunk, isExternal, regex, sortBy, offset, limit, programName).toJson();
-    }
-
-    /**
      * Comprehensive function analysis in a single call.
      */
     public String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
@@ -1186,10 +1165,6 @@ public class HeadlessEndpointHandler {
     /**
      * Get cross-references for multiple addresses in bulk.
      */
-    public String getBulkXrefs(String addressesJson, String programName) {
-        return xrefCallGraphService.getBulkXrefs(addressesJson, programName).toJson();
-    }
-
     /**
      * List global variables with optional filtering.
      */
@@ -1310,27 +1285,6 @@ public class HeadlessEndpointHandler {
     }
 
     /**
-     * Create a typedef (type alias)
-     */
-    public String createTypedef(String name, String baseType, String programName) {
-        return dataTypeService.createTypedef(name, baseType, programName).toJson();
-    }
-
-    /**
-     * Create an array data type
-     */
-    public String createArrayType(String baseType, int length, String name, String programName) {
-        return dataTypeService.createArrayType(baseType, length, name, programName).toJson();
-    }
-
-    /**
-     * Create a pointer data type
-     */
-    public String createPointerType(String baseType, String name, String programName) {
-        return dataTypeService.createPointerType(baseType, name, programName).toJson();
-    }
-
-    /**
      * Add a field to an existing structure
      */
     public String addStructField(String structName, String fieldName, String fieldType, int offset, String programName) {
@@ -1356,13 +1310,6 @@ public class HeadlessEndpointHandler {
      */
     public String deleteDataType(String typeName, String programName) {
         return dataTypeService.deleteDataType(typeName, programName).toJson();
-    }
-
-    /**
-     * Search for data types by pattern
-     */
-    public String searchDataTypes(String pattern, int offset, int limit, String programName) {
-        return dataTypeService.searchDataTypes(pattern, offset, limit, programName).toJson();
     }
 
     /**
@@ -1542,20 +1489,6 @@ public class HeadlessEndpointHandler {
                                     boolean includeXrefMap,
                                     boolean includeBoundaryDetection, String programName) {
         return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, programName).toJson();
-    }
-
-    /**
-     * Compute a normalized hash for a function
-     */
-    public String getFunctionHash(String addressStr, String programName) {
-        return documentationHashService.getFunctionHash(addressStr, programName).toJson();
-    }
-
-    /**
-     * Get hashes for multiple functions
-     */
-    public String getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
-        return documentationHashService.getBulkFunctionHashes(offset, limit, filter, programName).toJson();
     }
 
     /**
@@ -1853,10 +1786,6 @@ public class HeadlessEndpointHandler {
         return listingService.listDataItemsByXrefs(offset, limit, format, programName).toJson();
     }
 
-    public String listFunctionsEnhanced(int offset, int limit, String programName) {
-        return listingService.listFunctionsEnhanced(offset, limit, programName).toJson();
-    }
-
     public String getValidDataTypes(String category, String programName) {
         return dataTypeService.getValidDataTypes(category, programName).toJson();
     }
@@ -1943,10 +1872,6 @@ public class HeadlessEndpointHandler {
 
     public String moveDataTypeToCategory(String typeName, String targetCategory, String programName) {
         return dataTypeService.moveDataTypeToCategory(typeName, targetCategory, programName).toJson();
-    }
-
-    public String listDataTypeCategories(int offset, int limit, String programName) {
-        return dataTypeService.listDataTypeCategories(offset, limit, programName).toJson();
     }
 
     public String importDataTypes(String source, String format, String programName) {

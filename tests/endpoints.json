@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 245,
+  "total_endpoints": 215,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -34,6 +34,7 @@
         "function_address",
         "function_name",
         "tags",
+        "tag_comments",
         "assignments",
         "program"
       ],
@@ -416,21 +417,6 @@
       "description": "Apply all documentation to a function in one call"
     },
     {
-      "path": "/batch_get_comments",
-      "method": "GET",
-      "category": "comment",
-      "params": [
-        "addresses",
-        "only_with_comments",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
-    },
-    {
       "path": "/batch_rename_function_components",
       "method": "POST",
       "category": "function",
@@ -669,22 +655,6 @@
       "description": "Convert number between bases"
     },
     {
-      "path": "/create_array_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "base_type",
-        "length",
-        "name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Create array type"
-    },
-    {
       "path": "/create_data_type_category",
       "method": "POST",
       "category": "datatype",
@@ -697,6 +667,23 @@
         "headless"
       ],
       "description": "Create data type category"
+    },
+    {
+      "path": "/create_derived_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "kind",
+        "base_type",
+        "name",
+        "length",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Create a type built on another: a typedef alias, an array or a pointer. An existing same-named type is replaced."
     },
     {
       "path": "/create_enum",
@@ -761,21 +748,6 @@
       "description": "Create function signature type"
     },
     {
-      "path": "/create_function_tag",
-      "method": "POST",
-      "category": "function",
-      "params": [
-        "name",
-        "comment",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Create a program-wide function tag definition with an optional comment. Use add_function_tag to attach it to functions."
-    },
-    {
       "path": "/create_label",
       "method": "POST",
       "category": "symbol",
@@ -816,21 +788,6 @@
         "headless"
       ],
       "description": "Create memory block, optionally initialized with byte contents (hex or base64)"
-    },
-    {
-      "path": "/create_pointer_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "base_type",
-        "name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Create pointer type"
     },
     {
       "path": "/create_project",
@@ -875,21 +832,6 @@
         "headless"
       ],
       "description": "Create structure. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name."
-    },
-    {
-      "path": "/create_typedef",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "name",
-        "base_type",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Create typedef"
     },
     {
       "path": "/create_union",
@@ -1072,34 +1014,16 @@
       "description": "Get debugger status: active trace, thread, execution state, module count"
     },
     {
-      "path": "/debugger/step_into",
+      "path": "/debugger/step",
       "method": "POST",
       "category": "debugger",
-      "params": [],
+      "params": [
+        "kind"
+      ],
       "servers": [
         "gui"
       ],
-      "description": "Single-step into the next instruction (follows calls)"
-    },
-    {
-      "path": "/debugger/step_out",
-      "method": "POST",
-      "category": "debugger",
-      "params": [],
-      "servers": [
-        "gui"
-      ],
-      "description": "Step out of the current function (run to return)"
-    },
-    {
-      "path": "/debugger/step_over",
-      "method": "POST",
-      "category": "debugger",
-      "params": [],
-      "servers": [
-        "gui"
-      ],
-      "description": "Step over the next instruction (does not follow calls)"
+      "description": "Single-step the debugged process: into the next instruction (follows calls), over it (does not follow calls), or out of the current function (run to return)."
     },
     {
       "path": "/debugger/traces",
@@ -1319,22 +1243,6 @@
       "description": "Disassemble function"
     },
     {
-      "path": "/embed_struct_field",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "parent_struct",
-        "field_name",
-        "embedded_struct",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally."
-    },
-    {
       "path": "/emulate_function",
       "method": "POST",
       "category": "emulation",
@@ -1445,6 +1353,25 @@
       "description": "Find gaps of undefined bytes between functions in executable memory"
     },
     {
+      "path": "/find_data_types",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "pattern",
+        "category",
+        "kind",
+        "categories",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path). With categories=true, list the category paths instead. With no filter it lists every type."
+    },
+    {
       "path": "/find_dead_code",
       "method": "GET",
       "category": "analysis",
@@ -1457,6 +1384,34 @@
         "headless"
       ],
       "description": "Find dead code"
+    },
+    {
+      "path": "/find_functions",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "name_pattern",
+        "pattern",
+        "query",
+        "name",
+        "regex",
+        "min_xrefs",
+        "max_xrefs",
+        "calling_convention",
+        "has_custom_name",
+        "is_thunk",
+        "is_external",
+        "tag",
+        "sort_by",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Find functions: every filter is optional, so with none it lists the whole program a page at a time. Filter by name (substring or regex=true), xref count, calling convention, whether the name is user-given, thunk or external, or by tag (tag=a,b keeps functions carrying ANY of them); each result lists its tags; sort by address, name or xref_count. Replaces list_functions, list_functions_enhanced, search_functions and search_functions_enhanced, which returned four different shapes for the same question."
     },
     {
       "path": "/find_next_undefined_function",
@@ -1572,41 +1527,13 @@
       "description": "Get assembly context"
     },
     {
-      "path": "/get_bulk_function_hashes",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "offset",
-        "limit",
-        "filter",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get bulk function hashes"
-    },
-    {
-      "path": "/get_bulk_xrefs",
-      "method": "POST",
-      "category": "xref",
-      "params": [
-        "addresses",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get xrefs for multiple addresses"
-    },
-    {
       "path": "/get_comment",
       "method": "GET",
       "category": "comment",
       "params": [
         "address",
+        "addresses",
+        "only_with_comments",
         "program"
       ],
       "servers": [
@@ -1614,51 +1541,6 @@
         "headless"
       ],
       "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
-    },
-    {
-      "path": "/get_current_address",
-      "method": "GET",
-      "category": "getter",
-      "params": [],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get cursor address (GUI only)"
-    },
-    {
-      "path": "/get_current_function",
-      "method": "GET",
-      "category": "getter",
-      "params": [],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get function at cursor (GUI only)"
-    },
-    {
-      "path": "/get_current_program_info",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get current program info"
-    },
-    {
-      "path": "/get_current_selection",
-      "method": "GET",
-      "category": "getter",
-      "params": [],
-      "servers": [
-        "gui"
-      ],
-      "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
     },
     {
       "path": "/get_entry_points",
@@ -1794,6 +1676,9 @@
         "name",
         "function_address",
         "function_name",
+        "offset",
+        "limit",
+        "filter",
         "program"
       ],
       "servers": [
@@ -1820,24 +1705,6 @@
         "headless"
       ],
       "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers."
-    },
-    {
-      "path": "/get_function_tags",
-      "method": "GET",
-      "category": "function",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List all tags assigned to a specific function. Accepts either a function address or a function name."
     },
     {
       "path": "/get_functions",
@@ -1960,6 +1827,19 @@
       "description": "Get data type size and info"
     },
     {
+      "path": "/get_ui_cursor",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "type"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program — one call instead of four. type=address|function|selection|program|all (default all). Takes no program parameter: the focused program is an answer this reports, not an input. Headless has no analyst and no cursor, so every facet reports null with a reason there — use the program parameter on a data endpoint instead. Replaces get_current_address, get_current_function, get_current_selection and get_current_program_info."
+    },
+    {
       "path": "/get_valid_data_types",
       "method": "GET",
       "category": "datatype",
@@ -1972,17 +1852,6 @@
         "headless"
       ],
       "description": "Get valid data type names"
-    },
-    {
-      "path": "/get_version",
-      "method": "GET",
-      "category": "utility",
-      "params": [],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get plugin version"
     },
     {
       "path": "/get_xrefs_from",
@@ -2006,6 +1875,7 @@
       "category": "xref",
       "params": [
         "address",
+        "addresses",
         "offset",
         "limit",
         "program"
@@ -2147,36 +2017,6 @@
       "description": "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow."
     },
     {
-      "path": "/list_classes",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List namespace/class names"
-    },
-    {
-      "path": "/list_data_items",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List defined data"
-    },
-    {
       "path": "/list_data_items_by_xrefs",
       "method": "GET",
       "category": "listing",
@@ -2197,67 +2037,6 @@
       "description": "List data sorted by xref count"
     },
     {
-      "path": "/list_data_type_categories",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List data type categories"
-    },
-    {
-      "path": "/list_data_types",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "category",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List data types"
-    },
-    {
-      "path": "/list_exports",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List exported symbols"
-    },
-    {
-      "path": "/list_external_locations",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List external locations"
-    },
-    {
       "path": "/list_function_tags",
       "method": "GET",
       "category": "function",
@@ -2271,34 +2050,6 @@
         "headless"
       ],
       "description": "List all program-wide function tag definitions with their use counts."
-    },
-    {
-      "path": "/list_functions",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List functions with addresses"
-    },
-    {
-      "path": "/list_functions_enhanced",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List functions with metadata"
     },
     {
       "path": "/list_globals",
@@ -2321,51 +2072,6 @@
       "description": "List global variables"
     },
     {
-      "path": "/list_imports",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List imported symbols"
-    },
-    {
-      "path": "/list_methods",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List all function names with pagination"
-    },
-    {
-      "path": "/list_namespaces",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List all namespaces"
-    },
-    {
       "path": "/list_open_programs",
       "method": "GET",
       "category": "program",
@@ -2377,17 +2083,20 @@
       "description": "List open programs"
     },
     {
-      "path": "/list_option_groups",
+      "path": "/list_program_items",
       "method": "GET",
-      "category": "program",
+      "category": "listing",
       "params": [
+        "kind",
+        "offset",
+        "limit",
         "program"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed keyâ†’value settings; use get_program_options to read a group's entries."
+      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values."
     },
     {
       "path": "/list_project_files",
@@ -2433,19 +2142,6 @@
       "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end."
     },
     {
-      "path": "/list_property_maps",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List user-defined property maps â€” typed per-address keyâ†’value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value."
-    },
-    {
       "path": "/list_scripts",
       "method": "GET",
       "category": "program",
@@ -2457,21 +2153,6 @@
         "headless"
       ],
       "description": "List available Ghidra scripts"
-    },
-    {
-      "path": "/list_segments",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List memory segments"
     },
     {
       "path": "/list_shadowed_globals",
@@ -2583,22 +2264,6 @@
         "headless"
       ],
       "description": "Modify struct field"
-    },
-    {
-      "path": "/modify_struct_field_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "struct_name",
-        "field_name",
-        "new_type",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only."
     },
     {
       "path": "/move_data_type_to_category",
@@ -3025,78 +2690,6 @@
         "headless"
       ],
       "description": "Search for byte patterns"
-    },
-    {
-      "path": "/search_data_types",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "pattern",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Search data types"
-    },
-    {
-      "path": "/search_functions",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "name_pattern",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Search functions by name"
-    },
-    {
-      "path": "/search_functions_by_tag",
-      "method": "GET",
-      "category": "function",
-      "params": [
-        "tag",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List all functions that have a specified tag attached. Returns name + entry address."
-    },
-    {
-      "path": "/search_functions_enhanced",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "name_pattern",
-        "min_xrefs",
-        "max_xrefs",
-        "calling_convention",
-        "has_custom_name",
-        "is_thunk",
-        "is_external",
-        "regex",
-        "sort_by",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Advanced function search"
     },
     {
       "path": "/search_instructions",
