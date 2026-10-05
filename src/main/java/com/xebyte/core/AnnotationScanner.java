@@ -710,8 +710,27 @@ public class AnnotationScanner {
     /** Package-private so AnnotationScannerParamSourceTest can build one directly. */
     record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
         ParamBinding(Param param, Class<?> javaType) {
-            this(param, javaType, param.aliases());
+            this(param, javaType, effectiveAliases(param));
         }
+    }
+
+    /** The spellings a {@link Param#FUNCTION_REF} parameter accepts besides its own name. */
+    private static final List<String> FUNCTION_REF_ALIASES =
+        List.of("address", "name", "function_address", "function_name", "function");
+
+    /**
+     * The alias spellings of a parameter: those it declares, plus, for a function
+     * reference, the standard set. Declared once here instead of on the 26 endpoints that
+     * used to repeat the list, in two different orders.
+     */
+    static String[] effectiveAliases(Param param) {
+        if (!Param.FUNCTION_REF.equals(param.paramType())) {
+            return param.aliases();
+        }
+        Set<String> all = new LinkedHashSet<>(List.of(param.aliases()));
+        all.addAll(FUNCTION_REF_ALIASES);
+        all.remove(param.value());
+        return all.toArray(new String[0]);
     }
 }
 

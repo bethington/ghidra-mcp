@@ -19,6 +19,38 @@ the same cycle.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Changed — one parameter, and one meaning, for "which function"
+
+Function-scoped tools spelled the same locator four ways (`address`, `name`,
+`function_name`, `function_address`), five carried two of them at once, and two
+resolvers disagreed about what a reference meant.
+
+- **One parameter.** Every tool that identifies a function takes `function`, a name or an
+  address. The old spellings stay accepted as aliases, published once in `/mcp/schema`
+  and `tests/endpoints.json`. Tools that only ever parsed an address now also accept a
+  name, through `ServiceUtils.resolveFunctionAddress`; an address behaves exactly as
+  before. `audit_globals_in_function` parsed its argument as an address before resolving
+  it, so a name was rejected.
+- **One rule.** `FunctionRef` had a case-insensitive fallback and
+  `ServiceUtils.resolveFunction` did not, so a name in the wrong case worked in the
+  call-graph tools and failed in the function tools; neither noticed a name two functions
+  share; an address-first order sent a function named `add` or `dead` to whatever sat at
+  `0xadd`; and a miss said one of seven things. `ServiceUtils.getFunctionOrError` is now
+  the only resolver: an `0x` or `space:offset` value is an address; a bare token that
+  exactly names a function is that function; otherwise an address; otherwise a
+  case-insensitive name, only when nothing matched exactly. A shared name is an error
+  listing the addresses (a non-thunk beats a thunk), and a miss says what was tried.
+  `FunctionRef` is gone.
+- **Declared once.** `paramType = Param.FUNCTION_REF` marks a name-or-address parameter
+  and implies the standard aliases in one order; 25 endpoints had repeated the list by
+  hand, in two orders. `batch_rename_function_components` keeps only `address` and
+  `function_address`, because its own `function_name` parameter is the new name.
+- **The bridge leaves names alone.** It normalises only `paramType = address`; a name
+  passed where an address was also accepted used to reach the server as `0x<name>`.
+- Also: `batch_rename_function_components` looked the return type up by exact path, so
+  `int` or `char*` was skipped while the call reported success; it now refuses an unknown
+  type before writing anything.
+
 ### Added
 
 - **Transport-aware doctor mode** for `tools/ghidra_server_health_check.py`.

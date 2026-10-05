@@ -93,7 +93,7 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
         when(caller.getEntryPoint()).thenReturn(entry);
         when(entry.toString()).thenReturn("00100000");
 
-        Response r = service.getFunctionCallers("target", "", 0, 10, "");
+        Response r = service.getFunctionCallers("target", 0, 10, "");
 
         // 7.0.0 response contract: list-shaped results are JSON with a named
         // plural key plus count/total, not a formatted "name @ addr" listing.

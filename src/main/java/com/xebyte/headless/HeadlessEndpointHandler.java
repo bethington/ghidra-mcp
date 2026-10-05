@@ -235,14 +235,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String decompileFunction(String addressStr, String name, String programName) {
-        // Route to address-based or name-based decompilation
-        if (addressStr != null && !addressStr.isEmpty()) {
-            return functionService.decompileFunctionByAddress(addressStr, programName).toJson();
+        String ref = addressStr != null && !addressStr.isEmpty() ? addressStr : name;
+        if (ref == null || ref.isEmpty()) {
+            return "Error: Function not found";
         }
-        if (name != null && !name.isEmpty()) {
-            return functionService.decompileFunctionByName(name, programName).toJson();
-        }
-        return "Error: Function not found";
+        return functionService.decompileFunctionByAddress(ref, programName).toJson();
     }
 
     public String disassembleFunction(String addressStr, String programName) {
@@ -262,7 +259,7 @@ public class HeadlessEndpointHandler {
     }
 
     public String getFunctionXrefs(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionXrefs(functionName, null, offset, limit, programName).toJson();
+        return xrefCallGraphService.getFunctionXrefs(functionName, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -557,14 +554,14 @@ public class HeadlessEndpointHandler {
      * Get all functions called by the specified function (callees).
      */
     public String getFunctionCallees(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallees(functionName, null, offset, limit, programName).toJson();
+        return xrefCallGraphService.getFunctionCallees(functionName, offset, limit, programName).toJson();
     }
 
     /**
      * Get all functions that call the specified function (callers).
      */
     public String getFunctionCallers(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallers(functionName, null, offset, limit, programName).toJson();
+        return xrefCallGraphService.getFunctionCallers(functionName, offset, limit, programName).toJson();
     }
 
     /**
@@ -1958,7 +1955,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionCallGraph(String functionAddress, int depth, String direction, String programName) {
-        return xrefCallGraphService.getFunctionCallGraph(functionAddress, null, depth, direction, programName).toJson();
+        return xrefCallGraphService.getFunctionCallGraph(functionAddress, depth, direction, programName).toJson();
     }
 
     public String getFullCallGraph(int limit, String format, String programName) {
@@ -1970,7 +1967,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionJumpTargets(String functionAddress, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionJumpTargets(functionAddress, null, offset, limit, programName).toJson();
+        return xrefCallGraphService.getFunctionJumpTargets(functionAddress, offset, limit, programName).toJson();
     }
 
     public String getFunctionLabels(String functionAddress, int offset, int limit, String programName) {

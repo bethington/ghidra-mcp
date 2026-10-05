@@ -521,40 +521,209 @@ public final class ServiceUtils {
         return func;
     }
 
-    /**
-     * Resolve a function by either address or name.
-     * Resolution order:
-     * 1. Try parsing as an address → getFunctionAt → getFunctionContaining
-     * 2. If address resolution fails, try exact name match via SymbolTable
-     * Returns null if no function is found.
-     */
-    public static Function resolveFunction(Program program, String functionRef) {
-        if (functionRef == null || functionRef.trim().isEmpty()) return null;
-        functionRef = functionRef.trim();
+    /** A function reference resolved, or the reason it was not (and the message to say so). */
+    public record FunctionOrError(Function function, String message) {
+        public boolean hasError() { return function == null; }
 
-        // Try as address first (parseAddress never throws)
-        Address addr = parseAddress(program, functionRef);
+        /** The failure as a response. Only meaningful when {@link #hasError()}. */
+        public Response error() { return Response.err(message); }
+    }
+
+    /** How many candidate functions an ambiguity message lists. */
+    private static final int MAX_LISTED_CANDIDATES = 8;
+
+    /**
+     * Whether a reference is unmistakably an address: a {@code 0x} prefix or a
+     * {@code space:offset} form. Anything else, bare hex included, may also be a name.
+     */
+    private static boolean looksLikeExplicitAddress(String ref) {
+        return ref.startsWith("0x") || ref.startsWith("0X") || ref.indexOf(':') >= 0;
+    }
+
+    /**
+     * The one function a reference names: an address, or a function name.
+     *
+     * <p>This is the only place that decides what a function reference means; every endpoint
+     * that takes one goes through it, so the same text resolves the same way everywhere
+     * and fails with the same message. Before it there were two resolvers, and a name typed
+     * in the wrong case worked in some tools and not others.
+     *
+     * <p>Order:
+     * <ol>
+     *   <li>A bare token (no {@code 0x}, no {@code :}) that exactly names a function is that
+     *       function. A function called {@code add} or {@code dead} must not resolve to
+     *       whatever lives at {@code 0xadd}.</li>
+     *   <li>An address: the function at it, else the function containing it.</li>
+     *   <li>A case-insensitive name, only when nothing matched exactly.</li>
+     * </ol>
+     * A name several functions share (two namespaces, a thunk and its target) is an error
+     * listing their addresses, never the first hit: a non-thunk beats a thunk, and if that
+     * still leaves more than one, the caller must pass the address. That matches what
+     * {@code ProjectProgramProvider.match} does for programs.
+     */
+    public static FunctionOrError getFunctionOrError(Program program, String ref) {
+        if (ref == null || ref.isBlank()) {
+            return functionError("Function name or address is required");
+        }
+        String s = ref.trim();
+        boolean explicit = looksLikeExplicitAddress(s);
+
+        if (!explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+
+        Address addr = parseAddress(program, s);
         if (addr != null) {
             Function func = getFunctionForAddress(program, addr);
-            if (func != null) return func;
+            if (func != null) {
+                return new FunctionOrError(func, null);
+            }
         }
-        // Clear lastParseError before the name-lookup path so a failed address parse
-        // doesn't leave a misleading error on the thread-local if name lookup also fails.
+        String parseError = getLastParseError();
         lastParseError.remove();
 
-        // Try as exact function name via symbol table
-        FunctionManager funcManager = program.getFunctionManager();
+        if (explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+        List<Function> anyCase = functionsNamedIgnoreCase(program, s);
+        if (!anyCase.isEmpty()) {
+            return pickFunction(anyCase, s);
+        }
+
+        String why;
+        if (addr != null) {
+            why = "no function at or containing that address, and no function has that name";
+        } else if (explicit && parseError != null && !parseError.isEmpty()) {
+            why = parseError;
+        } else {
+            why = "not a function name, and not an address";
+        }
+        return functionError("Function not found: '" + s + "' (" + why + ")");
+    }
+
+    /**
+     * The entry point of the function a reference names, for call sites that need an
+     * {@code Address} rather than a {@link Function}. On failure returns null and leaves
+     * the reason in {@link #getLastParseError()}, which every caller already reports.
+     *
+     * <p>An address argument behaves exactly as {@link #parseAddress}, including an
+     * interior address, which stays interior so a following {@code getFunctionAt} still
+     * rejects it. A name resolves as in {@link #getFunctionOrError}.
+     *
+     * <p>That asymmetry is why a dozen tools advertised "function address" and meant it
+     * literally, even though the resolver behind them took either form.
+     */
+    public static Address resolveFunctionAddress(Program program, String ref) {
+        String s = ref == null ? "" : ref.trim();
+        if (!s.isEmpty() && !looksLikeExplicitAddress(s)) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                FunctionOrError picked = pickFunction(exact, s);
+                if (picked.hasError()) {
+                    lastParseError.set(picked.message());
+                    return null;
+                }
+                return picked.function().getEntryPoint();
+            }
+        }
+        Address parsed = parseAddress(program, s);
+        if (parsed != null) {
+            return parsed;
+        }
+        FunctionOrError byName = getFunctionOrError(program, s);
+        if (!byName.hasError()) {
+            return byName.function().getEntryPoint();
+        }
+        lastParseError.set(byName.message());
+        return null;
+    }
+
+    /** The function a reference names, or null; for callers with nothing to say about a miss. */
+    public static Function resolveFunction(Program program, String functionRef) {
+        return getFunctionOrError(program, functionRef).function();
+    }
+
+    /**
+     * The symbol a global name refers to, or null: a symbol in the global namespace, else
+     * the first non-function symbol under that name in any namespace. The lookup
+     * {@code rename_symbol} runs twice (its naming-rule check, then the rename itself),
+     * which used to be two copies that had to agree.
+     */
+    public static Symbol findGlobalSymbol(Program program, String name) {
         SymbolTable symbolTable = program.getSymbolTable();
-        SymbolIterator symbols = symbolTable.getSymbols(functionRef);
+        List<Symbol> inGlobalNamespace = symbolTable.getSymbols(name, program.getGlobalNamespace());
+        if (!inGlobalNamespace.isEmpty()) {
+            return inGlobalNamespace.get(0);
+        }
+        SymbolIterator anywhere = symbolTable.getSymbols(name);
+        while (anywhere.hasNext()) {
+            Symbol symbol = anywhere.next();
+            if (symbol.getSymbolType() != SymbolType.FUNCTION) {
+                return symbol;
+            }
+        }
+        return null;
+    }
+
+    private static FunctionOrError functionError(String message) {
+        return new FunctionOrError(null, message);
+    }
+
+    /** Functions whose name is exactly {@code name}, by entry point. */
+    private static List<Function> functionsNamed(Program program, String name) {
+        FunctionManager funcManager = program.getFunctionManager();
+        Map<Address, Function> found = new LinkedHashMap<>();
+        SymbolIterator symbols = program.getSymbolTable().getSymbols(name);
         while (symbols.hasNext()) {
             Symbol symbol = symbols.next();
             if (symbol.getSymbolType() == SymbolType.FUNCTION) {
                 Function func = funcManager.getFunctionAt(symbol.getAddress());
-                if (func != null) return func;
+                if (func != null) {
+                    found.putIfAbsent(func.getEntryPoint(), func);
+                }
             }
         }
+        return new ArrayList<>(found.values());
+    }
 
-        return null;
+    /** Functions whose name matches ignoring case: a linear scan, so a last resort. */
+    private static List<Function> functionsNamedIgnoreCase(Program program, String name) {
+        List<Function> found = new ArrayList<>();
+        for (Function func : program.getFunctionManager().getFunctions(true)) {
+            if (func.getName().equalsIgnoreCase(name)) {
+                found.add(func);
+            }
+        }
+        return found;
+    }
+
+    private static FunctionOrError pickFunction(List<Function> candidates, String ref) {
+        if (candidates.size() == 1) {
+            return new FunctionOrError(candidates.get(0), null);
+        }
+        List<Function> real = candidates.stream().filter(f -> !f.isThunk()).toList();
+        if (real.size() == 1) {
+            return new FunctionOrError(real.get(0), null);
+        }
+        List<String> listed = new ArrayList<>();
+        for (Function f : candidates) {
+            if (listed.size() == MAX_LISTED_CANDIDATES) {
+                break;
+            }
+            listed.add(f.getEntryPoint() + (f.isThunk() ? " (thunk)" : "")
+                + (f.getParentNamespace() != null && !f.getParentNamespace().isGlobal()
+                    ? " in " + f.getParentNamespace().getName(true) : ""));
+        }
+        return functionError("Function name '" + ref + "' is ambiguous: it matches "
+            + candidates.size() + " functions (" + String.join(", ", listed)
+            + (candidates.size() > listed.size() ? ", ..." : "")
+            + "). Pass the address of the one you mean.");
     }
 
     // ========================================================================

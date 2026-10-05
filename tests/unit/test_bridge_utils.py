@@ -1430,7 +1430,7 @@ class TestBuildToolFunction(unittest.TestCase):
         with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_dispatch_post:
             mock_dispatch_post.return_value = "ok"
             result = fn(
-                function_address="6FA26FD0",
+                function_address="0x6FA26FD0",
                 prototype="undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
                 program="/Vanilla/1.13d/D2MCPClient.dll",
             )
@@ -1649,9 +1649,54 @@ class TestParamAliases(unittest.TestCase):
         )
         with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
             mock_post.return_value = "ok"
-            fn(function_address="6FA26FD0", new_name="DrawFrame")
+            fn(function_address="0x6FA26FD0", new_name="DrawFrame")
         _, kwargs = mock_post.call_args
         self.assertEqual("0x6fa26fd0", kwargs["data"]["target"])
+
+    def test_a_function_name_through_an_address_alias_reaches_the_server_intact(self):
+        """A name passed through an address alias used to arrive as "0xsyna_..." and miss."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/analyze_function_completeness",
+            "GET",
+            {
+                "properties": {
+                    "function": {
+                        "type": "string",
+                        "source": "query",
+                        "param_type": "function_ref",
+                        "aliases": ["address", "name", "function_address", "function_name"],
+                    },
+                },
+                "required": [],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(name="syna_helper_180001000")
+        _, kwargs = mock_get.call_args
+        self.assertEqual("syna_helper_180001000", kwargs["params"]["function"])
+
+    def test_a_function_ref_is_not_rewritten_even_when_it_looks_like_an_address(self):
+        """function_ref values reach the server exactly as given; only param_type=address is normalised."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/analyze_function_completeness",
+            "GET",
+            {
+                "properties": {
+                    "function": {"type": "string", "source": "query", "param_type": "function_ref"},
+                },
+                "required": [],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(function="0xABCDEF")
+        _, kwargs = mock_get.call_args
+        self.assertEqual("0xABCDEF", kwargs["params"]["function"])
 
     def test_tools_without_aliases_are_untouched(self):
         from bridge_mcp_ghidra import _build_tool_function

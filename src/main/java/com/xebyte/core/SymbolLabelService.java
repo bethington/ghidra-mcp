@@ -40,7 +40,7 @@ public class SymbolLabelService {
 
     @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response getFunctionLabels(
-            @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of labels to skip before this page starts; 0 begins at the "
@@ -62,10 +62,9 @@ public class SymbolLabelService {
 
         SymbolTable symbolTable = program.getSymbolTable();
 
-        Function function = ServiceUtils.resolveFunction(program, functionName);
-        if (function == null) {
-            return Response.err("Function not found: " + functionName);
-        }
+        ServiceUtils.FunctionOrError functionLookup = ServiceUtils.getFunctionOrError(program, functionName);
+        if (functionLookup.hasError()) return functionLookup.error();
+        Function function = functionLookup.function();
 
         AddressSetView functionBody = function.getBody();
         SymbolIterator symbols = symbolTable.getSymbolIterator();
@@ -849,22 +848,10 @@ public class SymbolLabelService {
         // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
         // naming rules. Look up the symbol's existing data type for the
         // Hungarian-vs-type check.
-        SymbolTable symTableForCheck = program.getSymbolTable();
-        Namespace globalNsForCheck = program.getGlobalNamespace();
-        List<Symbol> initialSymbols = symTableForCheck.getSymbols(oldName, globalNsForCheck);
-        if (initialSymbols.isEmpty()) {
-            SymbolIterator allSymbols = symTableForCheck.getSymbols(oldName);
-            while (allSymbols.hasNext()) {
-                Symbol s = allSymbols.next();
-                if (s.getSymbolType() != SymbolType.FUNCTION) {
-                    initialSymbols.add(s);
-                    break;
-                }
-            }
-        }
+        Symbol existingSymbol = ServiceUtils.findGlobalSymbol(program, oldName);
         String existingTypeName = null;
-        if (!initialSymbols.isEmpty()) {
-            Address sa = initialSymbols.get(0).getAddress();
+        if (existingSymbol != null) {
+            Address sa = existingSymbol.getAddress();
             Data d = program.getListing().getDefinedDataAt(sa);
             if (d != null && d.getDataType() != null) existingTypeName = d.getDataType().getName();
         }
@@ -872,8 +859,8 @@ public class SymbolLabelService {
                 NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
         List<String> enforcementWarnings = new ArrayList<>();
         if (!quality.ok) {
-            String addrHint = !initialSymbols.isEmpty()
-                    ? "0x" + initialSymbols.get(0).getAddress().toString()
+            String addrHint = existingSymbol != null
+                    ? "0x" + existingSymbol.getAddress().toString()
                     : "<global address>";
             String enrichedSuggestion = quality.suggestion
                     + " For globals, prefer set_global("
@@ -899,27 +886,10 @@ public class SymbolLabelService {
         int txId = program.startTransaction("Rename Global Variable");
         boolean success = false;
         try {
-            SymbolTable symbolTable = program.getSymbolTable();
-
-            Namespace globalNamespace = program.getGlobalNamespace();
-            List<Symbol> symbols = symbolTable.getSymbols(oldName, globalNamespace);
-
-            if (symbols.isEmpty()) {
-                SymbolIterator allSymbols = symbolTable.getSymbols(oldName);
-                while (allSymbols.hasNext()) {
-                    Symbol symbol = allSymbols.next();
-                    if (symbol.getSymbolType() != SymbolType.FUNCTION) {
-                        symbols.add(symbol);
-                        break;
-                    }
-                }
-            }
-
-            if (symbols.isEmpty()) {
+            Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
+            if (symbol == null) {
                 return Response.err("Global variable '" + oldName + "' not found");
             }
-
-            Symbol symbol = symbols.get(0);
             Address symbolAddr = symbol.getAddress();
             // Idempotent: oldName == newName is a no-op success rather than
             // a DuplicateNameException. Workers re-running rename_symbol
