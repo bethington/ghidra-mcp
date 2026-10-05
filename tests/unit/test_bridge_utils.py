@@ -1289,12 +1289,12 @@ class TestGetTimeout(unittest.TestCase):
     def test_decompile_timeout(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function"), 75)
+        self.assertEqual(get_timeout("/get_functions"), 75)
 
     def test_requested_decompile_timeout_includes_transport_grace(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function", {"timeout": "120"}), 135)
+        self.assertEqual(get_timeout("/get_functions", {"timeout": "120"}), 135)
 
     def test_timeout_seconds_alias_uses_same_grace(self):
         from bridge_mcp_ghidra import get_timeout
@@ -1304,7 +1304,7 @@ class TestGetTimeout(unittest.TestCase):
     def test_requested_timeout_is_capped_with_grace_preserved(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function", {"timeout": "1800"}), 1815)
+        self.assertEqual(get_timeout("/get_functions", {"timeout": "1800"}), 1815)
 
     def test_script_timeout(self):
         from bridge_mcp_ghidra import get_timeout
@@ -1342,7 +1342,7 @@ class TestBuildToolFunction(unittest.TestCase):
             },
             "required": ["address"],
         }
-        fn = _build_tool_function("/decompile_function", "GET", schema)
+        fn = _build_tool_function("/get_functions", "GET", schema)
         self.assertTrue(callable(fn))
 
     def test_signature_has_correct_params(self):

@@ -208,7 +208,7 @@ class TestSafeRoundTripSmoke:
 
     def test_prototype_round_trip(self, http_client, first_function_address):
         get_response = http_client.get(
-            "/get_function_by_address", params={"address": first_function_address}
+            "/get_functions", params={"address": first_function_address}
         )
         if get_response.status_code != 200:
             pytest.skip("Function details unavailable")
@@ -262,7 +262,7 @@ class TestSafeRoundTripSmoke:
 
     def test_no_return_round_trip(self, http_client, first_function_address):
         get_response = http_client.get(
-            "/get_function_by_address", params={"address": first_function_address}
+            "/get_functions", params={"address": first_function_address}
         )
         if get_response.status_code != 200:
             pytest.skip("Function details unavailable")

@@ -348,7 +348,7 @@ For each approved candidate:
 
 ```text
 1. create_function(address)
-2. decompile_function(address) — quick sanity check
+2. get_functions(function=address) — quick sanity check
 3. set_comment(type='plate') with triage metadata:
 ```
 

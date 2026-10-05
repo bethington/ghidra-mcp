@@ -91,7 +91,7 @@ tool_cases:
   # ---- function detail -----------------------------------------------------
   # `limit` here was declared String while 36 sibling tools declared int, so
   # passing a number failed on this tool alone. Pinned at the protocol level.
-  - tool: get_function_variables
+  - tool: get_functions
     name: curated_limit_is_numeric
     tier: read
     snapshot: false
@@ -100,24 +100,24 @@ tool_cases:
       no_error: true
       not_contains: ["validation error", "should be a valid string"]
 
-  - tool: get_function_callees
-    name: curated
+  - tool: get_functions
+    name: curated_callees
     tier: read
     snapshot: false
     args: { name: "advance_parser_state" }
     assert:
       json_keys: ["callees", "count", "total"]
 
-  - tool: get_function_callers
-    name: curated
+  - tool: get_functions
+    name: curated_callers
     tier: read
     snapshot: false
     args: { name: "calc_crc16" }
     assert:
       json_keys: ["callers", "count", "total"]
 
-  - tool: get_function_labels
-    name: curated
+  - tool: get_functions
+    name: curated_labels
     tier: read
     snapshot: false
     args: { name: "0x10001000" }
@@ -175,7 +175,7 @@ tool_cases:
       json_keys: ["address_spaces", "count"]
 
   # ---- error shape on a missing required argument -------------------------
-  - tool: get_function_callees
+  - tool: get_functions
     name: curated_missing_target
     tier: read
     snapshot: false

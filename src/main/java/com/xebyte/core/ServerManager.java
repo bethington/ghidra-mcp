@@ -71,11 +71,13 @@ public class ServerManager {
             AnalysisService analysisService = new AnalysisService(programProvider, ts, functionService);
             MalwareSecurityService malwareSecurityService = new MalwareSecurityService(programProvider, ts);
             ProgramScriptService programScriptService = new ProgramScriptService(programProvider, ts);
+            FunctionBundleService functionBundleService = new FunctionBundleService(programProvider, ts, functionService);
 
             AnnotationScanner scanner = new AnnotationScanner(programProvider, ts,
                 listingService, functionService, commentService, symbolLabelService,
                 xrefCallGraphService, dataTypeService, analysisService,
-                documentationHashService, malwareSecurityService, programScriptService);
+                documentationHashService, malwareSecurityService, programScriptService,
+                functionBundleService);
 
             startServer(scanner, guiEndpoints);
         }

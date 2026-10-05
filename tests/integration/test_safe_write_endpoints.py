@@ -63,7 +63,8 @@ def first_function(http_client):
 
     # Get function details
     details_response = http_client.get(
-        "/get_function_by_address", params={"address": address}
+        "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
     )
     if details_response.status_code != 200:
         pytest.skip("Cannot get function details")
@@ -122,7 +123,12 @@ def first_data_item(http_client):
 def first_label(http_client, first_function):
     """Get the first label in the first function."""
     response = http_client.get(
-        "/get_function_labels", params={"address": first_function["address"]}
+        "/get_functions",
+        params={
+            "address": first_function["address"],
+            "fields": "labels",
+            "include_call_context": "false",
+        },
     )
     if response.status_code != 200:
         pytest.skip("Cannot get function labels")
@@ -252,7 +258,8 @@ class TestSafeFunctionPrototype:
 
         # Get function details which includes prototype
         response = http_client.get(
-            "/get_function_by_address", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
         )
 
         if response.status_code != 200:
@@ -293,19 +300,19 @@ class TestSafeVariableOperations:
         address = first_function["address"]
 
         response = http_client.get(
-            "/get_function_variables", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "parameters,locals"},
         )
 
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
     def test_rename_variable_same_name(self, http_client, first_function):
         """Attempt to rename a variable to its current name."""
         address = first_function["address"]
 
-        # Get variables
         var_response = http_client.get(
-            "/get_function_variables", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "parameters,locals"},
         )
 
         if var_response.status_code != 200:
@@ -448,7 +455,8 @@ class TestSafeNoReturnAttribute:
 
         # Get function details to find no-return status
         response = http_client.get(
-            "/get_function_by_address", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
         )
 
         if response.status_code != 200:

@@ -6,10 +6,10 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**253 tools** — 239 served by the GUI plugin, 226 by the headless server, 212
+**245 tools** — 231 served by the GUI plugin, 218 by the headless server, 204
 by both. The consolidation pass below took the advertised surface from 272 to
 251; `/list_shadowed_globals` and `/batch_get_comments` landed afterwards in
-the same cycle.
+the same cycle, and `/get_functions` replaced nine function readers.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -18,6 +18,59 @@ the same cycle.
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Changed — one call reads a function: `/get_functions` replaces nine readers
+
+Reviewing a function took five round trips (`decompile_function`,
+`get_function_variables`, `get_function_callers`, `get_comment`, `get_function_xrefs`),
+each paying for its own lookup, and most for their own decompile. `/get_functions`
+returns the whole picture in one call, for one function (`function=`, a name or an
+address) or up to 20 (`functions=`, comma-separated).
+
+- **`fields=` picks what comes back, and what it costs.** signature, classification,
+  return type, entry point and body range, decompiled code, plate comment (with the
+  structural issues `NamingConventions` finds in it), comments of every kind, labels,
+  tags, parameters, locals, callers, callees, call context, xrefs, disassembly, jump
+  targets and `refs`. Omitted or empty returns everything. A selection that needs no
+  decompiled text (callers, parameters, labels, …) does not decompile at all.
+- **Decompiled code shows EOL comments** (`// note` above the statement), so a note
+  written with `set_comment(type=eol)` appears in the code read back. Scoped to this
+  endpoint through a new options hook on `ServiceUtils.createConfiguredDecompiler` /
+  `FunctionService.decompileFunctionNoRetry`: `analyze_function_completeness` counts
+  comment lines in the shared path's output, and its scores are unchanged.
+- **Call context is a window**, `call_context_lines` (3 by default, 1 to 21) centred on
+  each call site, with indentation kept, because the guard and the use of the result are
+  on the neighbouring lines. It costs no extra decompilation.
+- **Storage names the register.** Locals printed the raw varnode address
+  (`register:00001200:8`); they now read `RDI:8`, and p-code temporaries omit the field.
+- **`refs`** lists the absolute addresses a function uses: data references, the values of
+  literal-pool words (`value<word`, with the word they were loaded from), and the memory
+  the decompiled code reads and writes, so a register reached as base + offset is listed
+  by its own address.
+- **Addresses outside the default space are `space:hex`** (`OVL:00001000`) in every field,
+  so two functions at one offset in different spaces stay distinct; the default space
+  stays bare hex (`AddressKeys`).
+- A decompile failure carries its reason (`decompile_error`); `revision` reports the
+  program's change token (`ProgramRevision`: saved time, a per-open epoch and the
+  modification counter, so it differs across a reopen even when the counter does not).
+
+Removed, each a slice of the same payload:
+
+| Tool | Now |
+| --- | --- |
+| `decompile_function` | `get_functions(fields=decompiled_code)`; `functions=` for many |
+| `get_function_by_address` | `get_functions(fields=signature,entry_point,body_start,body_end)` |
+| `get_function_variables` | `get_functions(fields=parameters,locals)` |
+| `get_function_xrefs` | `get_functions(fields=xrefs)` |
+| `get_function_callers` / `get_function_callees` | `get_functions(fields=callers)` / `(fields=callees)` |
+| `get_function_labels` | `get_functions(fields=labels)` |
+| `get_function_signature` | `get_functions(fields=signature)` for the prototype |
+| `get_function_jump_targets` | `get_functions(fields=jump_targets)` |
+
+The deploy-regression benchmark reads functions through `/get_functions` too. The
+structural metrics only `/get_function_signature` returned (`basic_block_count`,
+`cyclomatic_complexity`, instruction count, immediate values, string constants) are no
+longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
 
 ### Changed — one parameter, and one meaning, for "which function"
 

@@ -48,7 +48,7 @@ def repair(http_client, start, end=None):
 
 def function_body(http_client, address):
     """Return (body_min, body_max) parsed from /get_function_by_address, prefixes preserved."""
-    r = http_client.get("/get_function_by_address", params={"address": address})
+    r = http_client.get("/get_functions", params={"function": address})
     m = re.search(r"Body:\s*(\S+)\s*-\s*(\S+)", r.text)
     if not m:
         pytest.skip(f"Cannot parse function body from: {r.text[:200]}")

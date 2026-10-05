@@ -2181,7 +2181,7 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis", access = ToolAccess.READ_ONLY)
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
             @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") String name,
             @Param(value = "include_xrefs", defaultValue = "true",
@@ -3092,7 +3092,7 @@ public class AnalysisService {
             recommendations.add("   - undefined1[N] -> byte[N] (byte array for XMM spills, buffers)");
             recommendations.add("2. Use set_variable_type() with lowercase builtin types (uint, ushort, byte) NOT uppercase Windows types (UINT, USHORT, BYTE)");
             recommendations.add("3. CRITICAL: Check disassembly with disassemble_function() for assembly-only undefined types:");
-            recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_function_variables()");
+            recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_functions(fields=locals)");
             recommendations.add("   - XMM register spills: undefined1[16] at stack locations");
             recommendations.add("   - Intermediate calculation results not appearing in decompiled view");
             recommendations.add("4. After resolving ALL undefined types, rename variables with Hungarian notation using rename_variables()");

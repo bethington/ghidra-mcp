@@ -107,7 +107,7 @@ def test_non_member_function_not_reparented(http_client):
     addr = _first_function_address(http_client)
 
     # Snapshot the function's current namespace/signature so we can prove no move.
-    before = http_client.get("/get_function_by_address", params={"address": addr})
+    before = http_client.get("/get_functions", params={"function": addr})
     if before.status_code != 200:
         pytest.skip("Cannot read function details")
     before_text = before.text
@@ -131,7 +131,7 @@ def test_non_member_function_not_reparented(http_client):
         # assert the invariant when it was rejected for lacking 'this'.
         if "no implicit 'this'" in r.text or "has no implicit" in r.text:
             after = http_client.get(
-                "/get_function_by_address", params={"address": addr}
+                "/get_functions", params={"function": addr}
             )
             assert after.status_code == 200
             # The function must not have been re-parented into the probe class.

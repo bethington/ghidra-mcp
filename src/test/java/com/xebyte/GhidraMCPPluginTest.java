@@ -399,7 +399,7 @@ public class GhidraMCPPluginTest extends TestCase {
             "list_functions", "methods", "classes", "segments", "imports", "exports",
             "namespaces", "data", "strings",
             // Search and analysis
-            "searchFunctions", "decompile", "get_function_by_address", "disassemble_function",
+            "searchFunctions", "decompile", "get_functions", "disassemble_function",
             // Cross-references
             "xrefs_to", "xrefs_from", "function_xrefs",
             // Current state

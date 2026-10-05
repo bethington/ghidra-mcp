@@ -118,8 +118,9 @@ public class FunctionService {
     /**
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
+     * Agent-visible surface is {@code /get_functions?fields=decompiled_code}; kept as an
+     * internal/benchmark helper.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function", access = ToolAccess.READ_ONLY)
     public Response decompileFunctionByAddress(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
@@ -208,9 +209,15 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
      * timeout. No retry.
      */
     public DecompileResults decompileFunctionNoRetry(Function func, Program program) {
+        return decompileFunctionNoRetry(func, program, null);
+    }
+
+    /** As above, with a hook to adjust decompiler options for this call only. */
+    public DecompileResults decompileFunctionNoRetry(Function func, Program program,
+            java.util.function.Consumer<ghidra.app.decompiler.DecompileOptions> tune) {
         DecompInterface decomp = null;
         try {
-            decomp = ServiceUtils.createConfiguredDecompiler(program);
+            decomp = ServiceUtils.createConfiguredDecompiler(program, tune);
             return decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
         } catch (Exception e) {
             Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + e.getMessage());
@@ -712,8 +719,8 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
 
     /**
      * Get function by address.
+     * Agent-visible surface is {@code /get_functions?fields=signature,entry_point,body_start,body_end}.
      */
-    @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionByAddress(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1668,7 +1675,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                 .append("' from '").append(oldType).append("' to '")
                                 .append(dataType.getName()).append("'")
                                 .append(". WARNING: Type changes trigger re-decompilation which may create new SSA variables. ")
-                                .append("Call get_function_variables after all type changes to discover any new variables.");
+                                .append("Call get_functions(fields=parameters,locals) after all type changes to discover any new variables.");
                     } else {
                         // Provide detailed error message including storage location
                         String storageInfo = "unknown";
@@ -1888,7 +1895,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "address-space-agnostic.") String functionAddress,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"},
                    description = "Local or parameter to retype, named exactly as the decompiler shows it "
-                               + "(get_function_variables lists them). The literal value 'this' is "
+                               + "(get_functions fields=parameters,locals lists them). The literal value 'this' is "
                                + "special-cased and routes to set_function_this_type.") String variableName,
             @Param(value = "new_type", source = ParamSource.BODY,
                    description = "New data type, resolved recursively (pointer chains, array syntax such "
@@ -2679,8 +2686,8 @@ Map<String, Object> out = new LinkedHashMap<>();
 
     /**
      * Get detailed information about a function's variables (parameters and locals).
+     * Agent-visible surface is {@code /get_functions?fields=parameters,locals}.
      */
-    @McpTool(path = "/get_function_variables", description = "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
@@ -3812,7 +3819,7 @@ Map<String, Object> out = new LinkedHashMap<>();
 @Param(value = "variable_renames", source = ParamSource.BODY,
                    description = "JSON object mapping each variable's CURRENT decompiler name to its new "
                                + "name. Matching happens against the decompiler's high-level symbols, so "
-                               + "use the names get_function_variables and decompile_function report, not "
+                               + "use the names get_functions reports (parameters, locals, decompiled_code), not "
                                + "the raw listing's.") Map<String, String> variableRenames,
             
 @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false",
@@ -4299,7 +4306,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                             if (requestedNew == null || requestedNew.isEmpty() || requestedNew.equals(oldName)) continue;
                             if (!renamedHere.contains(oldName)) {
                                 errors.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
-                                        + "name unchanged. Re-fetch with get_function_variables before retrying.");
+                                        + "name unchanged. Re-fetch with get_functions(fields=parameters,locals) before retrying.");
                                 failed.incrementAndGet();
                             }
                         }

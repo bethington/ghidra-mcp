@@ -315,7 +315,7 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -979,9 +979,10 @@ public class DocumentationHashService {
     // -----------------------------------------------------------------------
 
     /**
-     * Get the function signature (feature vector) for a function at the given address.
+     * Get the function signature (feature vector) for cross-binary comparison.
+     * Kept for benchmarks; agents use {@code /get_functions?fields=signature}
+     * for the Ghidra signature string, or this method directly for the feature vector.
      */
-    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleGetFunctionSignature(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "

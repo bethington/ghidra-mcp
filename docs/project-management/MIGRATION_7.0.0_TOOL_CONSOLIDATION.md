@@ -8,7 +8,8 @@ survivor.
 
 > **Where it landed.** This table describes the consolidation pass only. Two
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
-> `/batch_get_comments` — so the shipped catalog is **253**, not 251. The
+> `/batch_get_comments` — and `/get_functions` then replaced nine function readers, so
+> the shipped catalog is **245**, not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.
@@ -35,7 +36,7 @@ call site is rewritten.
 | `batch_remove_function_tags(assignments)` | `remove_function_tag` (+ `assignments[]`) | `remove_function_tag(assignments=[...])` |
 | `batch_create_labels(labels)` | `create_label` (+ `labels[]`) | `create_label(labels=[...])` |
 | `batch_delete_labels(labels)` | `delete_label` (+ `labels[]`) | `delete_label(labels=[...])` |
-| `batch_decompile(functions)` | `decompile_function` (+ `functions=`) | `decompile_function(functions="a,b,c")` |
+| `batch_decompile(functions)` | `get_functions` (+ `functions=`, `fields=decompiled_code`) | `get_functions(functions="a,b,c", fields="decompiled_code")` |
 | `batch_analyze_completeness(addresses)` | `analyze_function_completeness` (+ `addresses[]`) | `analyze_function_completeness(addresses=[...])` |
 | `rename_variable(...)` | `rename_variables` (already many; also accepts one) | `rename_variables(function_address, variable_renames=[{old,new}])` |
 | `batch_set_variable_types(function_address, variable_types)` | `set_variables` | `set_variables(function_address, variables=[{name,type}])` |
@@ -105,7 +106,7 @@ fails on a descriptor with no registered route, which is what caught the leftove
    (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`), README API reference
    regenerated (`python -m tools.gen_readme_api_reference --write`) → 251 tools.
 4. **Verification:** offline Java (390 tests), `tests/unit/`, and the offline
-   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 253
+   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 245
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
 
 ## Call-shape changes worth knowing

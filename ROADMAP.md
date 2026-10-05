@@ -32,7 +32,7 @@ preparation. For the tool inventory see
 
 ### 1. Tool-surface size
 
-**The problem.** The server advertises 253 tools. Several MCP clients cannot
+**The problem.** The server advertises 245 tools. Several MCP clients cannot
 accept a `tools/list` that large. Gemini rejects it outright with HTTP 400
 `INVALID_ARGUMENT` — "too many states for serving" — before a single tool is
 called (#440). Even where it works, the schema consumes context that the model
@@ -43,7 +43,7 @@ should be spending on the binary.
 tools it has not loaded; `check_tools`; a `--lazy` / `--no-lazy` startup flag and
 `--default-groups`; and the 7.0.0 consolidation pass, which folded 272 tools
 down to 251 by merging redundant ones into "one-or-many" survivors, without
-removing any capability. The catalog stands at 253 today. See `CHANGELOG.md` and
+removing any capability. The catalog stands at 245 today. See `CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.
 

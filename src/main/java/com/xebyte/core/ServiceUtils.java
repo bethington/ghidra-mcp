@@ -750,9 +750,22 @@ public final class ServiceUtils {
      * {@link DecompInterface#dispose()} when finished.
      */
     public static DecompInterface createConfiguredDecompiler(Program program) {
+        return createConfiguredDecompiler(program, null);
+    }
+
+    /**
+     * As above, but with a hook to adjust the options before they are applied.
+     *
+     * <p>Exists so one endpoint can deviate without moving the default for the ten call
+     * sites that share {@code decompileFunctionNoRetry}: {@code analyze_function_completeness}
+     * counts comment lines in this text, so a change here is a change to a scoring input.
+     */
+    public static DecompInterface createConfiguredDecompiler(Program program,
+            java.util.function.Consumer<DecompileOptions> tune) {
         DecompInterface decomp = new DecompInterface();
         DecompileOptions opts = new DecompileOptions();
         opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+        if (tune != null) tune.accept(opts);
         decomp.setOptions(opts);
         decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
         decomp.openProgram(program);                // openProgram AFTER setOptions

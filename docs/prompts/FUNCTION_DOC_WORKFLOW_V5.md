@@ -48,19 +48,19 @@ Call `rename_function` and `set_function_prototype` in **parallel**.
 
 ## Step 3: Type Audit + Variable Renaming (1-2 turns)
 
-**IMPORTANT**: Always call `get_function_variables` explicitly — do NOT rely on `analyze_for_documentation` for variable types. Only `get_function_variables` reveals actual storage types.
+**IMPORTANT**: Always call `get_functions(fields=parameters,locals)` explicitly — do NOT rely on `analyze_for_documentation` for variable types. Only `get_functions(fields=parameters,locals)` reveals actual storage types.
 
-**Skip condition**: `get_function_variables` shows all variables have custom names AND resolved storage types (no `undefined` in type field) -> skip to Step 4.
+**Skip condition**: `get_functions(fields=parameters,locals)` shows all variables have custom names AND resolved storage types (no `undefined` in type field) -> skip to Step 4.
 
 **Type audit checklist** — walk EVERY parameter and local variable:
 
-1. Call `get_function_variables` to get the full variable list with storage types
+1. Call `get_functions(fields=parameters,locals)` to get the full variable list with storage types
 2. For each variable where type contains `undefined`: call `set_variable_type` with the correct type based on usage context. Skip phantoms (`extraout_*`, `in_*`) on first failure.
 3. For each parameter where the name has a pointer prefix (`p`, `pp`, `lpsz`) but type is `int` or `uint`: fix the type to a pointer (`void *`, or a specific struct pointer if identifiable)
 4. For `__thiscall` functions with `void *` this pointer: identify the class/struct and set the correct this type via `set_function_prototype`
-5. Call `get_function_variables` again to discover new SSA variables from type changes
+5. Call `get_functions(fields=parameters,locals)` again to discover new SSA variables from type changes
 6. Issue a single `rename_variables` call covering ALL variables with Hungarian names matching their NOW-RESOLVED types
-7. Call `get_function_variables` once more to confirm no `undefined` storage types remain
+7. Call `get_functions(fields=parameters,locals)` once more to confirm no `undefined` storage types remain
 
 **Struct access patterns** — for raw pointer+offset access (`*(ptr + 0x10)`, `ptr[4]`, `param_1[0x2C]`):
 

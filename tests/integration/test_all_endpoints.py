@@ -151,10 +151,11 @@ class TestGetterEndpoints:
     """Test getter endpoints."""
 
     @pytest.mark.requires_program
-    def test_get_function_by_address(self, http_client, sample_address):
-        """get_function_by_address should return function info."""
+    def test_get_functions_signature(self, http_client, sample_address):
+        """get_functions fields= should return function identity."""
         response = http_client.get(
-            "/get_function_by_address", params={"address": sample_address}
+            "/get_functions",
+            params={"address": sample_address, "fields": "signature,entry_point"},
         )
         assert response.status_code == 200
 
@@ -185,10 +186,10 @@ class TestDecompilationEndpoints:
     @pytest.mark.requires_program
     @pytest.mark.slow
     def test_decompile_by_address(self, http_client, sample_address):
-        """decompile_function should return C code."""
+        """get_functions fields=decompiled_code should return C code."""
         response = http_client.get(
-            "/decompile_function",
-            params={"address": sample_address},
+            "/get_functions",
+            params={"address": sample_address, "fields": "decompiled_code"},
             timeout=120,  # Decompilation can be slow
         )
         assert response.status_code == 200
