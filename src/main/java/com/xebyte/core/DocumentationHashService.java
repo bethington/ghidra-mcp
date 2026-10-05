@@ -61,18 +61,36 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/get_function_hash", description = "Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=). On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionHash(
-            @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+            @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
+                   description = "Function to hash: a name, or an address as 0x<hex> (default space) or "
+                               + "<space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous. Omit to hash many functions (offset, limit, "
+                               + "filter).") String functionAddress,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Bulk mode: number of matching functions to skip before this page "
+                               + "starts; 0 begins at the first. The filter is applied before the skip, "
+                               + "so paging is stable only within one filter value.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Bulk mode: maximum functions whose hash is computed and returned in "
+                               + "this page (default 100). The walk still visits every function to "
+                               + "produce total_matching, so 0 returns an EMPTY page rather than "
+                               + "everything.") int limit,
+            @Param(value = "filter", defaultValue = "",
+                   description = "Bulk mode: `documented` keeps functions with a real name, "
+                               + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
+                               + "with `switch`). Omit for all.") String filter,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        if (functionAddress == null || functionAddress.trim().isEmpty()) {
+            return getFunctionHashes(program, offset, limit, filter);
+        }
 
         try {
             Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
@@ -101,11 +119,6 @@ public class DocumentationHashService {
         } catch (Exception e) {
             return Response.err("Failed to compute hash: " + e.getMessage());
         }
-    }
-
-    // Backward compatibility overload
-    public Response getFunctionHash(String functionAddress) {
-        return getFunctionHash(functionAddress, null);
     }
 
     /**
@@ -229,25 +242,11 @@ public class DocumentationHashService {
     // -----------------------------------------------------------------------
 
     /**
-     * Get hashes for multiple functions efficiently
+     * Hashes for many functions, paged, optionally only the documented or undocumented ones.
+     * The walk visits every function to produce total_matching, so limit bounds the hashing
+     * work, not the walk.
      */
-    @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation", access = ToolAccess.READ_ONLY)
-    public Response getBulkFunctionHashes(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of matching functions to skip before this page starts; 0 begins "
-                               + "at the first. The filter is applied before the skip, so paging is stable "
-                               + "only within one filter value.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum functions whose hash is computed and returned in this page "
-                               + "(default 100). The walk still visits every function to produce "
-                               + "total_matching, so 0 returns an EMPTY page rather than "
-                               + "everything.") int limit,
-            @Param(value = "filter", description = "Name filter") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private Response getFunctionHashes(Program program, int offset, int limit, String filter) {
         try {
             FunctionManager funcMgr = program.getFunctionManager();
             int total = 0;
@@ -297,11 +296,6 @@ public class DocumentationHashService {
         } catch (Exception e) {
             return Response.err("Failed to get bulk hashes: " + e.getMessage());
         }
-    }
-
-    // Backward compatibility overload
-    public Response getBulkFunctionHashes(int offset, int limit, String filter) {
-        return getBulkFunctionHashes(offset, limit, filter, null);
     }
 
     // -----------------------------------------------------------------------

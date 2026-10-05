@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import ghidra.app.services.CodeViewerService;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.options.OptionType;
 import ghidra.framework.options.Options;
@@ -18,6 +19,8 @@ import ghidra.program.model.util.PropertyMap;
 import ghidra.program.model.util.PropertyMapManager;
 import ghidra.program.model.util.StringPropertyMap;
 import ghidra.program.model.util.VoidPropertyMap;
+import ghidra.program.util.ProgramLocation;
+import ghidra.program.util.ProgramSelection;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
@@ -334,20 +337,8 @@ public class ProgramScriptService {
           + "use get_address_spaces to discover spaces before assuming a plain hex "
           + "address is unambiguous.";
 
-    /**
-     * List every program option group (e.g. "Program Information", "Analyzers",
-     * "Decompiler", "Disassembler"). Each group is a namespace of typed key→value
-     * settings; use {@code get_program_options} to read a group's entries.
-     */
-    @McpTool(path = "/list_option_groups",
-             description = "List program option groups (e.g. 'Program Information', 'Analyzers', 'Decompiler'). Each group holds typed key→value settings; use get_program_options to read a group's entries.",
-             category = "program", access = ToolAccess.READ_ONLY)
-    public Response listOptionGroups(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    /** Every program option group with its option count. */
+    private Response optionGroups(Program program) {
         try {
             List<Map<String, Object>> groups = new ArrayList<>();
             for (String groupName : program.getOptionsNames()) {
@@ -371,20 +362,20 @@ public class ProgramScriptService {
      * {@link Options#getValueAsString(String)} so every option type is legible.
      */
     @McpTool(path = "/get_program_options",
-             description = "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names.",
+             description = "Read all options in a program option group with types, current values, defaults, and descriptions. Omit group to list the option groups instead (e.g. 'Program Information', 'Analyzers', 'Decompiler'), each with its option count.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProgramOptions(
-            @Param(value = "group", description = "Option group name from list_option_groups (e.g. 'Program Information', 'Analyzers').") String group,
+            @Param(value = "group", defaultValue = "", description = "Option group name (e.g. 'Program Information', 'Analyzers'). Omit to list the groups.") String group,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         if (group == null || group.isEmpty()) {
-            return Response.err("group is required (use list_option_groups to discover group names)");
+            return optionGroups(program);
         }
         if (!program.getOptionsNames().contains(group)) {
-            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+            return Response.err("No such option group: '" + group + "'. Omit group to see the available groups.");
         }
 
         try {
@@ -461,7 +452,7 @@ public class ProgramScriptService {
              description = "Set a typed program option. If the option already exists its type is reused; otherwise pass type (string|int|long|double|float|boolean). New/custom options are created on demand. Call save_program to persist.",
              category = "program", access = ToolAccess.WRITE)
     public Response setProgramOption(
-            @Param(value = "group", source = ParamSource.BODY, description = "Option group name (e.g. 'Program Information'). Use list_option_groups to discover names.") String group,
+            @Param(value = "group", source = ParamSource.BODY, description = "Option group name (e.g. 'Program Information'). Call get_program_options with no group to list them.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name within the group.") String name,
             @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
@@ -477,7 +468,7 @@ public class ProgramScriptService {
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (value == null) return Response.err("value is required");
         if (!program.getOptionsNames().contains(group)) {
-            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+            return Response.err("No such option group: '" + group + "'. Call get_program_options with no group to see the available groups.");
         }
 
         Options opts = program.getOptions(group);
@@ -564,7 +555,7 @@ public class ProgramScriptService {
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (!program.getOptionsNames().contains(group)) {
-            return Response.err("No such option group: '" + group + "'. Use list_option_groups to see available groups.");
+            return Response.err("No such option group: '" + group + "'. Call get_program_options with no group to see the available groups.");
         }
 
         Options opts = program.getOptions(group);
@@ -596,20 +587,8 @@ public class ProgramScriptService {
     // Property Maps (typed per-address key -> value stores)
     // ========================================================================
 
-    /**
-     * List all user-defined property maps. Each map has a name, a value type
-     * (int / long / string / object / void), and the count of addresses that
-     * currently hold a value.
-     */
-    @McpTool(path = "/list_property_maps",
-             description = "List user-defined property maps — typed per-address key→value stores. Each map reports its name, value type (int|long|string|object|void), and the number of addresses holding a value.",
-             category = "program", access = ToolAccess.READ_ONLY)
-    public Response listPropertyMaps(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    /** Every user-defined property map: its name, value type (int / long / string / object / void) and how many addresses hold a value. */
+    private Response propertyMaps(Program program) {
         try {
             PropertyMapManager mgr = program.getUsrPropertyManager();
             List<Map<String, Object>> maps = new ArrayList<>();
@@ -734,7 +713,7 @@ public class ProgramScriptService {
              description = "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist.",
              category = "program", access = ToolAccess.WRITE)
     public Response setProperty(
-            @Param(value = "map", source = ParamSource.BODY, description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "map", source = ParamSource.BODY, description = "Property map name (list them with list_properties and no map).") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
@@ -816,7 +795,7 @@ public class ProgramScriptService {
              description = "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProperty(
-            @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "map", defaultValue = "", description = "Property map name. Omit to list the maps.") String mapName,
             @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
@@ -903,10 +882,10 @@ public class ProgramScriptService {
      * Optionally restrict to an inclusive address range via {@code start}/{@code end}.
      */
     @McpTool(path = "/list_properties",
-             description = "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end.",
+             description = "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end. Omit map to list the property maps instead: each one's name, value type (int|long|string|object|void) and how many addresses hold a value.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response listProperties(
-            @Param(value = "map", description = "Property map name (from list_property_maps).") String mapName,
+            @Param(value = "map", description = "Property map name (list them with list_properties and no map).") String mapName,
             @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") String startStr,
             @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
@@ -918,7 +897,7 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
+        if (mapName == null || mapName.isEmpty()) return propertyMaps(program);
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'.");
@@ -1329,7 +1308,7 @@ public class ProgramScriptService {
     /**
      * Build JSON entries for the program's overlay address spaces, each marked
      * is_overlay=true with the name of the physical space it overlays. Kept
-     * SEPARATE from buildAddressSpacesList so get_current_program_info's
+     * SEPARATE from buildAddressSpacesList so program-info's
      * has_multiple_address_spaces flag continues to reflect PHYSICAL ambiguity only.
      */
     private List<Map<String, Object>> buildOverlaySpacesList(Program program) {
@@ -1356,19 +1335,9 @@ public class ProgramScriptService {
     }
 
     /**
-     * Get detailed information about the currently active program.
+     * Detailed metadata for one program (formerly {@code /get_current_program_info}).
      */
-    public Response getCurrentProgramInfo() {
-        return getCurrentProgramInfo(null);
-    }
-
-    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program. When multiple programs are open, call this first to confirm which program will receive tool calls that omit the program argument.", category = "program", access = ToolAccess.READ_ONLY)
-    public Response getCurrentProgramInfo(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private Map<String, Object> buildProgramInfoMap(Program program) {
         List<Map<String, Object>> addressSpaces = buildAddressSpacesList(program);
         boolean multiSpace = addressSpaces.size() > 1;
         List<Map<String, Object>> overlaySpaces = buildOverlaySpacesList(program);
@@ -1377,7 +1346,7 @@ public class ProgramScriptService {
         // append so it continues to reflect physical ambiguity only.
         addressSpaces.addAll(overlaySpaces);
 
-        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        Map<String, Object> info = new LinkedHashMap<>();
         info.put("name", program.getName());
         info.put("path", program.getDomainFile().getPathname());
         info.put("executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "");
@@ -1409,7 +1378,223 @@ public class ProgramScriptService {
                 + "<overlay>::<hex> (e.g., " + overlaySpaces.get(0).get("name") + "::<hex>) — overlay "
                 + "names are case-sensitive. Plain hex resolves to the default physical space.");
         }
-        return Response.ok(info);
+        return info;
+    }
+
+    private static final String NO_GUI_CURSOR = "Headless mode has no GUI cursor";
+
+    /**
+     * CodeViewerService from this tool or any running CodeBrowser — FrontEnd
+     * alone has none.
+     */
+    private CodeViewerService findCodeViewerService() {
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return null;
+        }
+        CodeViewerService service = tool.getService(CodeViewerService.class);
+        if (service != null) {
+            return service;
+        }
+        try {
+            ghidra.framework.model.Project project = tool.getProject();
+            if (project == null) {
+                return null;
+            }
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm == null) {
+                return null;
+            }
+            for (PluginTool runningTool : tm.getRunningTools()) {
+                service = runningTool.getService(CodeViewerService.class);
+                if (service != null) {
+                    return service;
+                }
+            }
+        } catch (Exception e) {
+            // ToolManager may not be available in all contexts
+        }
+        return null;
+    }
+
+    /** One cursor facet: value when present, else null + reason (never omit the key). */
+    private static final class CursorPart {
+        final Object value;
+        final String unavailable;
+
+        CursorPart(Object value, String unavailable) {
+            this.value = value;
+            this.unavailable = unavailable;
+        }
+
+        static CursorPart ok(Object value) {
+            return new CursorPart(value, null);
+        }
+
+        static CursorPart missing(String reason) {
+            return new CursorPart(null, reason);
+        }
+    }
+
+    private CursorPart cursorAddressPart() {
+        CodeViewerService service = findCodeViewerService();
+        if (service == null) {
+            return CursorPart.missing(getToolFromProvider() == null
+                    ? NO_GUI_CURSOR
+                    : "Code viewer service not available");
+        }
+        ProgramLocation location = service.getCurrentLocation();
+        if (location == null) {
+            return CursorPart.missing("No current location");
+        }
+        Program program = location.getProgram();
+        String programPath = (program != null && program.getDomainFile() != null)
+                ? program.getDomainFile().getPathname() : null;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("address", location.getAddress().toString());
+        body.put("program", programPath);
+        return CursorPart.ok(body);
+    }
+
+    private CursorPart cursorFunctionPart() {
+        CodeViewerService service = findCodeViewerService();
+        if (service == null) {
+            return CursorPart.missing(getToolFromProvider() == null
+                    ? NO_GUI_CURSOR
+                    : "Code viewer service not available");
+        }
+        ProgramLocation location = service.getCurrentLocation();
+        if (location == null) {
+            return CursorPart.missing("No current location");
+        }
+        // Location's program, not provider current — they can disagree.
+        Program program = location.getProgram();
+        if (program == null) {
+            program = programProvider.getCurrentProgram();
+        }
+        if (program == null) {
+            return CursorPart.missing("No program loaded");
+        }
+        Function func = program.getFunctionManager().getFunctionContaining(location.getAddress());
+        if (func == null) {
+            return CursorPart.missing("No function at current location: " + location.getAddress());
+        }
+        String programPath = program.getDomainFile() != null
+                ? program.getDomainFile().getPathname() : program.getName();
+        return CursorPart.ok(JsonHelper.mapOf(
+                "function_name", func.getName(),
+                "address", func.getEntryPoint().toString(),
+                "program", programPath,
+                "signature", func.getSignature().getPrototypeString()));
+    }
+
+    private CursorPart cursorSelectionPart() {
+        CodeViewerService service = findCodeViewerService();
+        if (service == null) {
+            return CursorPart.missing(getToolFromProvider() == null
+                    ? NO_GUI_CURSOR
+                    : "Code viewer service not available");
+        }
+        ProgramSelection selection = service.getCurrentSelection();
+        ProgramLocation location = service.getCurrentLocation();
+        Program program = location != null ? location.getProgram() : programProvider.getCurrentProgram();
+        String programPath = (program != null && program.getDomainFile() != null)
+                ? program.getDomainFile().getPathname()
+                : (program != null ? program.getName() : null);
+
+        if (selection == null || selection.isEmpty()) {
+            return CursorPart.ok(JsonHelper.mapOf(
+                    "program", programPath,
+                    "is_empty", true,
+                    "ranges", new ArrayList<>()));
+        }
+
+        List<Map<String, Object>> ranges = new ArrayList<>();
+        for (ghidra.program.model.address.AddressRange range : selection.getAddressRanges()) {
+            ranges.add(JsonHelper.mapOf(
+                    "start", range.getMinAddress().toString(),
+                    "end", range.getMaxAddress().toString(),
+                    "length", range.getLength()));
+        }
+        return CursorPart.ok(JsonHelper.mapOf(
+                "program", programPath,
+                "is_empty", false,
+                "ranges", ranges,
+                "min_address", selection.getMinAddress().toString(),
+                "max_address", selection.getMaxAddress().toString(),
+                "num_addresses", selection.getNumAddresses()));
+    }
+
+    /**
+     * The program the cursor is in — derived, never supplied.
+     *
+     * <p>This tool answers "what is the analyst looking at", so the program is an
+     * answer, not a question.
+     */
+    private CursorPart cursorProgramPart() {
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return CursorPart.missing("Headless mode has no GUI cursor");
+        }
+        Program focused = programProvider.getCurrentProgram();
+        if (focused == null) {
+            return CursorPart.missing("No program is open in the GUI");
+        }
+        return CursorPart.ok(buildProgramInfoMap(focused));
+    }
+
+    /**
+     * What the analyst is looking at right now — address, function, selection,
+     * and/or active program — in one round trip (replaces the four former
+     * {@code /get_current_*} tools).
+     */
+    @McpTool(path = "/get_ui_cursor",
+            description = "What the analyst is looking at right now: cursor address, the "
+                    + "function under it, the listing selection, and the focused program — one "
+                    + "call instead of four. type=address|function|selection|program|all "
+                    + "(default all). Takes no program parameter: the focused program is an "
+                    + "answer this reports, not an input. Headless has no analyst and no cursor, "
+                    + "so every facet reports null with a reason there — use the program "
+                    + "parameter on a data endpoint instead. Replaces get_current_address, "
+                    + "get_current_function, get_current_selection and get_current_program_info.",
+            category = "getter", access = ToolAccess.READ_ONLY)
+    public Response getUiCursor(
+            @Param(value = "type", defaultValue = "all",
+                    description = "Which facet: address | function | selection | program | all") String type) {
+        String t = (type == null || type.isBlank()) ? "all" : type.trim().toLowerCase();
+        return switch (t) {
+            case "address" -> respondCursorPart(cursorAddressPart());
+            case "function" -> respondCursorPart(cursorFunctionPart());
+            case "selection" -> respondCursorPart(cursorSelectionPart());
+            case "program" -> respondCursorPart(cursorProgramPart());
+            case "all" -> {
+                CursorPart address = cursorAddressPart();
+                CursorPart function = cursorFunctionPart();
+                CursorPart selection = cursorSelectionPart();
+                CursorPart program = cursorProgramPart();
+                Map<String, Object> all = new LinkedHashMap<>();
+                // Unavailable facets stay present as null + reason — omitting
+                // them made clients guess whether the key was unsupported.
+                all.put("address", address.value);
+                all.put("address_unavailable", address.unavailable);
+                all.put("function", function.value);
+                all.put("function_unavailable", function.unavailable);
+                all.put("selection", selection.value);
+                all.put("selection_unavailable", selection.unavailable);
+                all.put("program", program.value);
+                all.put("program_unavailable", program.unavailable);
+                yield Response.ok(all);
+            }
+            default -> Response.err(
+                    "Invalid type '" + type + "'; use address, function, selection, program, or all");
+        };
+    }
+
+    private static Response respondCursorPart(CursorPart part) {
+        if (part.value != null) {
+            return Response.ok(part.value);
+        }
+        return Response.err(part.unavailable != null ? part.unavailable : "Unavailable");
     }
 
     /**

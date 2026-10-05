@@ -1,0 +1,89 @@
+{
+  "count": 10,
+  "functions": [
+    {
+      "address": "10001000",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "calc_crc16",
+      "tags": [],
+      "xref_count": 5
+    },
+    {
+      "address": "10001092",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "compute_gcd",
+      "tags": [],
+      "xref_count": 3
+    },
+    {
+      "address": "100010b6",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "compute_str_len",
+      "tags": [],
+      "xref_count": 3
+    },
+    {
+      "address": "100010d5",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "advance_parser_state",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "100011c5",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "stat_list_add",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "10001203",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "get_stat_list_flags",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "10001227",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "get_stat_list_layer",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "1000124e",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "get_stat_list_owner_guid",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "1000126c",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "get_stat_list_prev_link",
+      "tags": [],
+      "xref_count": 2
+    },
+    {
+      "address": "1000128a",
+      "is_external": false,
+      "is_thunk": false,
+      "name": "benchmark_self_test",
+      "tags": [],
+      "xref_count": 3
+    }
+  ],
+  "limit": 10,
+  "offset": 0,
+  "program": "Benchmark.dll",
+  "total": 12
+}

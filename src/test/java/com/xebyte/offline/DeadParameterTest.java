@@ -80,9 +80,6 @@ public class DeadParameterTest extends TestCase {
         KNOWN_INERT.put("/find_next_undefined_function#criteria",
             "Never implemented. The endpoint scans forward from an address with fixed criteria. "
                 + "Wiring it needs a decision about what the criteria vocabulary is.");
-        KNOWN_INERT.put("/search_functions_enhanced#calling_convention",
-            "Never implemented as a filter, though every sibling filter on this tool is. "
-                + "This one is cheap to wire and should be.");
         KNOWN_INERT.put("/get_valid_data_types#category",
             "Never implemented. The endpoint returns the full built-in type vocabulary unfiltered.");
         KNOWN_INERT.put("/import_data_types#format",

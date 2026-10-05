@@ -16,8 +16,8 @@ from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
 variable-type setters into `set_variable_type`, six `batch_*` tools into their
 one-or-many survivors, and the comment family into `set_comment` / `get_comment`
 with an explicit kind. Two endpoints were added later in the same cycle
-(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 245 tools**
-— 231 served by the GUI plugin, 218 by the headless server, 204 by both. No
+(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 215 tools**
+— 201 served by the GUI plugin, 191 by the headless server, 177 by both. No
 capability is removed — every operation the deleted tools performed is
 reachable through the survivor — and there are no backward-compatibility
 aliases. `tests/unit/test_migration_guide_successors.py` proves that: all 23
@@ -34,7 +34,7 @@ A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
 
-**Lazy tool loading is the default.** Advertising all 245 endpoints in one
+**Lazy tool loading is the default.** Advertising all 215 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
 called. The bridge now loads `listing,function,program` (84 endpoints plus 8
@@ -103,7 +103,7 @@ primitives for driving controlled execution of inlined code fragments.
 
 Minor release. Two new endpoints filed/scoped by community feedback,
 plus a quiet headless parity fix that surfaced while writing the
-parity test. 245 tools.
+parity test. 215 tools.
 
 - **`/get_current_selection` (GUI-only)** — closes the "where am I?"
   family alongside `/get_current_address` and `/get_current_function`.
@@ -483,7 +483,7 @@ Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, pl
 
 Patch release bundling five community-contributed PRs and three post-release bug fixes.
 
-- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 231 → 241.
+- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 205 → 241.
 - **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/177).
 - **Function-name enforcement toggle** (Hummer12007, [#171](https://github.com/bethington/ghidra-mcp/pull/171)) — Ghidra Tool Option to switch verb-tier rejection between hard-reject (default) and warning-only. Power-user escape hatch.
 - **Headless startup crash fix** ([#180](https://github.com/bethington/ghidra-mcp/issues/180), originally diagnosed by @MMOStars) — duplicate route registration of `/create_folder` and `/delete_file` was tripping `HttpServerImpl.createContext` with `IllegalArgumentException`. Removed the manual registrations; the `@McpTool` annotations carry them. Affected every Docker/headless deployment.

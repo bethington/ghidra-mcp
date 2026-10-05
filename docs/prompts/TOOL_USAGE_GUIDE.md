@@ -209,7 +209,7 @@ XREF COUNT: 2 references
 
 - `create_struct(name, fields)` - Create a new structure type
 - `modify_struct_field(struct_name, field_name, new_type, new_name)` - Update fields
-- `search_data_types(pattern)` - Search for structures by name pattern
+- `find_data_types(pattern, kind="struct")` - Search for structures by name pattern
 
 **For analysis:**
 
@@ -233,7 +233,7 @@ Read or write any typed option in any group (Program Information, Analyzers,
 Decompiler, …).
 
 ```text
-list_option_groups(program="")                       -> group names
+get_program_options(program="")                       -> group names (no group given)
 get_program_options(group, program="")               -> {name: value} in that group
 set_program_option(group, name, value, type="", program="")
 remove_program_option(group, name, program="")
@@ -250,7 +250,7 @@ Where a comment is prose, a property is data. Use these when you need
 structured per-address values you can query back exactly.
 
 ```text
-list_property_maps(program="")                       -> existing maps + types
+list_properties(program="")                       -> existing maps + types (no map given)
 create_property_map(name, type, program="")          -> type: int|long|string|void
 set_property(name, address, value, program="")
 get_property(name, address, program="")
@@ -314,8 +314,8 @@ hash_info = get_function_hash("0x6FAB1234")
 # Returns: {"hash": "abc123...", "instruction_count": 63, "has_custom_name": true}
 
 # Get hashes for many functions (paginated)
-result = get_bulk_function_hashes(offset=0, limit=500, filter="documented")
-# filter options: "documented", "undocumented", "all"
+result = get_function_hash(offset=0, limit=500, filter="documented")  # omit `function` for bulk mode
+# filter options: "documented", "undocumented"; omit for all
 ```
 
 ### Documentation Export/Import
@@ -480,8 +480,8 @@ Lightweight per-function labels (program-wide tag definitions, attached to any f
 
 Two layers:
 
-- **Tag definitions** (program-wide): `create_function_tag`, `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`.
-- **Per-function attachment**: `add_function_tag`, `remove_function_tag`, `get_function_tags`, `search_functions_by_tag`. Attaching a tag by name auto-creates the definition if it doesn't already exist.
+- **Tag definitions** (program-wide): `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`. There is no create call: attaching a tag creates its definition, and `tag_comments={"crypto": "..."}` on `add_function_tag` gives a new one a description.
+- **Per-function attachment**: `add_function_tag` and `remove_function_tag`. Read them back with `get_functions(fields=tags)`, and find functions by tag with `find_functions(tag=...)`; every `find_functions` result lists its tags.
 
 Batch variants: `add_function_tag` / `remove_function_tag` take an array of `{function, tags}` objects and run the whole set in one transaction. Use these when tagging a sweep result — single-call instead of N round-trips.
 
@@ -497,11 +497,11 @@ add_function_tag(assignments=[
 ])
 
 # Later, recall the curated list:
-search_functions_by_tag(tag="crypto")
-# → returns {tag, total, functions: [{name, address}, ...]}
+find_functions(tag="crypto")            # any of several: tag="crypto,parser"
+# → returns {functions: [{name, address, tags, ...}, ...], total, ...}
 ```
 
-Tags are case-sensitive; `search_functions_by_tag` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
+Tags are case-sensitive; `find_functions(tag=...)` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
 
 ## Security Environment Variables (v5.4.1+)
 

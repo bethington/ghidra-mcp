@@ -509,7 +509,7 @@ class TestToolAccessAnnotations(unittest.TestCase):
 
     def test_read_only_flags_survive_parsing(self):
         parsed = self._parsed(
-            {"path": "/list_functions", "method": "GET", "params": [],
+            {"path": "/find_functions", "method": "GET", "params": [],
              "read_only": True, "destructive": False}
         )
         self.assertTrue(parsed["read_only"])

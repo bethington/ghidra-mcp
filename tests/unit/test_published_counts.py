@@ -252,6 +252,11 @@ NON_CATALOG_COUNTS: list[tuple[str, int, str]] = [
     ("CLAUDE.md", 5, "REST endpoints on the optional external re-kb archive service"),
     ("CLAUDE.md", 22, "debugger proxy tools in the bridge, not catalog endpoints"),
     ("ROADMAP.md", 272, "the pre-consolidation surface; a statement about the past"),
+    (
+        "CLAUDE.md",
+        27,
+        "tools whose category taxonomy understated them; a measured past figure",
+    ),
 ]
 
 _COUNT_NEAR_NOUN = re.compile(

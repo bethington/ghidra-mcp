@@ -57,7 +57,7 @@ def function_body(http_client, address):
 
 def find_function_by_name(http_client, name):
     """Entry address of a named function from /list_functions, or None."""
-    r = http_client.get("/list_functions")
+    r = http_client.get("/find_functions")
     if r.status_code != 200:
         return None
     m = re.search(rf"\b{re.escape(name)}\b\s+at\s+((?:\w+:)?(?:0x)?[0-9a-fA-F]+)", r.text)
@@ -88,7 +88,7 @@ def _addr_value(addr):
 @pytest.fixture
 def any_function(http_client):
     """Entry address of any function, prefix preserved."""
-    r = http_client.get("/list_functions")
+    r = http_client.get("/find_functions")
     if r.status_code != 200:
         pytest.skip("Cannot list functions")
     m = re.search(r"at\s+((?:\w+:)?(?:0x)?[0-9a-fA-F]{4,})", r.text)

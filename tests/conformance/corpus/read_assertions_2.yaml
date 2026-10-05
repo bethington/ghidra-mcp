@@ -24,22 +24,24 @@ tool_cases:
       json_keys: ["functions", "count"]
       contains: ["calc_crc16", "compute_gcd"]
 
-  - tool: list_methods
-    name: curated
+  - tool: list_program_items
+    name: curated_methods
     tier: read
     snapshot: false
-    args: { limit: 500 }
+    args: { kind: methods, limit: 500 }
     assert:
-      json_keys: ["methods", "count", "offset", "total"]
+      json_keys: ["kind", "items", "count", "offset", "total"]
+      json_equals: { kind: "methods" }
       contains: ["calc_crc16"]
 
-  - tool: list_imports
-    name: curated
+  - tool: list_program_items
+    name: curated_imports
     tier: read
     snapshot: false
-    args: { limit: 50 }
+    args: { kind: imports, limit: 50 }
     assert:
-      json_keys: ["imports", "count", "offset", "total"]
+      json_keys: ["kind", "items", "count", "offset", "total"]
+      json_equals: { kind: "imports" }
 
   - tool: list_strings
     name: curated
@@ -49,17 +51,18 @@ tool_cases:
     assert:
       json_keys: ["strings", "count", "offset", "total"]
 
-  - tool: list_data_items
-    name: curated
+  - tool: list_program_items
+    name: curated_data_items
     tier: read
     snapshot: false
-    args: { limit: 20 }
+    args: { kind: data_items, limit: 20 }
     assert:
-      json_keys: ["data_items", "count", "offset", "total"]
+      json_keys: ["kind", "items", "count", "offset", "total"]
+      json_equals: { kind: "data_items" }
 
   # `category` is a filter and is now optional (it was required, so listing
   # every data type was impossible). Omitting it here is the regression test.
-  - tool: list_data_types
+  - tool: find_data_types
     name: curated_no_filter
     tier: read
     snapshot: false
@@ -79,13 +82,13 @@ tool_cases:
   # Paging must be real: a limit of 1 returns 1 item but reports the full total.
   # That distinction is the entire reason the envelope carries `total`, and a
   # port that returned count == total would look fine to a snapshot.
-  - tool: list_methods
+  - tool: list_program_items
     name: curated_paging_total_vs_count
     tier: read
     snapshot: false
-    args: { limit: 1, offset: 0 }
+    args: { kind: methods, limit: 1, offset: 0 }
     assert:
-      json_equals: { count: 1, offset: 0 }
+      json_equals: { kind: "methods", count: 1, offset: 0 }
       not_contains: ['"total": 1']
 
   # ---- function detail -----------------------------------------------------
@@ -104,25 +107,34 @@ tool_cases:
     name: curated_callees
     tier: read
     snapshot: false
-    args: { name: "advance_parser_state" }
+    args:
+      name: "advance_parser_state"
+      fields: callees
+      include_call_context: false
     assert:
-      json_keys: ["callees", "count", "total"]
+      json_keys: ["callees", "callee_count"]
 
   - tool: get_functions
     name: curated_callers
     tier: read
     snapshot: false
-    args: { name: "calc_crc16" }
+    args:
+      name: "calc_crc16"
+      fields: callers
+      include_call_context: false
     assert:
-      json_keys: ["callers", "count", "total"]
+      json_keys: ["callers", "caller_count"]
 
   - tool: get_functions
     name: curated_labels
     tier: read
     snapshot: false
-    args: { name: "0x10001000" }
+    args:
+      name: "0x10001000"
+      fields: labels
+      include_call_context: false
     assert:
-      json_keys: ["labels", "count", "total"]
+      json_keys: ["labels"]
 
   - tool: get_xrefs_from
     name: curated
@@ -179,6 +191,8 @@ tool_cases:
     name: curated_missing_target
     tier: read
     snapshot: false
-    args: {}
+    args:
+      fields: callees
+      include_call_context: false
     assert:
       error_contains: ["error"]

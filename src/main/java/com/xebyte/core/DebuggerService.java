@@ -810,69 +810,37 @@ public class DebuggerService {
         }
     }
 
-    @McpTool(path = "/debugger/step_into", method = "POST",
-            description = "Single-step into the next instruction (follows calls)", access = ToolAccess.WRITE)
-    public Response stepInto() {
+    @McpTool(path = "/debugger/step", method = "POST",
+            description = "Single-step the debugged process: into the next instruction (follows calls), over "
+                + "it (does not follow calls), or out of the current function (run to return).",
+            access = ToolAccess.WRITE)
+    public Response step(
+            @Param(value = "kind", source = ParamSource.BODY, defaultValue = "into",
+                   description = "into (follow calls), over (do not follow calls) or out (run to the "
+                               + "current function's return).") String kind) {
+        String how = kind == null || kind.isBlank() ? "into" : kind.trim().toLowerCase();
+        ActionName wanted = switch (how) {
+            case "into" -> ActionName.STEP_INTO;
+            case "over" -> ActionName.STEP_OVER;
+            case "out" -> ActionName.STEP_OUT;
+            default -> null;
+        };
+        if (wanted == null) return Response.err("kind must be into, over or out");
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
         Target target = getTarget(ctx);
         if (target == null) return noTarget();
 
         try {
-            Map<String, Target.ActionEntry> actions =
-                    collectTargetActions(target, ActionName.STEP_INTO);
+            Map<String, Target.ActionEntry> actions = collectTargetActions(target, wanted);
             if (actions.isEmpty()) {
-                return Response.err("Step into not available in current state");
+                return Response.err("Step " + how + " not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
             invokeStepAction(ctx, target, action);
-            return Response.ok(Map.of("status", "stepped"));
+            return Response.ok(Map.of("status", how.equals("out") ? "stepped_out" : "stepped"));
         } catch (Exception e) {
-            return Response.err("Step into failed: " + e.getMessage());
-        }
-    }
-
-    @McpTool(path = "/debugger/step_over", method = "POST",
-            description = "Step over the next instruction (does not follow calls)", access = ToolAccess.WRITE)
-    public Response stepOver() {
-        TraceContext ctx = getContext();
-        if (ctx == null) return noTrace();
-        Target target = getTarget(ctx);
-        if (target == null) return noTarget();
-
-        try {
-            Map<String, Target.ActionEntry> actions =
-                    collectTargetActions(target, ActionName.STEP_OVER);
-            if (actions.isEmpty()) {
-                return Response.err("Step over not available in current state");
-            }
-            Target.ActionEntry action = actions.values().iterator().next();
-            invokeStepAction(ctx, target, action);
-            return Response.ok(Map.of("status", "stepped"));
-        } catch (Exception e) {
-            return Response.err("Step over failed: " + e.getMessage());
-        }
-    }
-
-    @McpTool(path = "/debugger/step_out", method = "POST",
-            description = "Step out of the current function (run to return)", access = ToolAccess.WRITE)
-    public Response stepOut() {
-        TraceContext ctx = getContext();
-        if (ctx == null) return noTrace();
-        Target target = getTarget(ctx);
-        if (target == null) return noTarget();
-
-        try {
-            Map<String, Target.ActionEntry> actions =
-                    collectTargetActions(target, ActionName.STEP_OUT);
-            if (actions.isEmpty()) {
-                return Response.err("Step out not available in current state");
-            }
-            Target.ActionEntry action = actions.values().iterator().next();
-            invokeStepAction(ctx, target, action);
-            return Response.ok(Map.of("status", "stepped_out"));
-        } catch (Exception e) {
-            return Response.err("Step out failed: " + e.getMessage());
+            return Response.err("Step " + how + " failed: " + e.getMessage());
         }
     }
 

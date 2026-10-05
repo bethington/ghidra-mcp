@@ -4485,42 +4485,18 @@ Map<String, Object> out = new LinkedHashMap<>();
         return out;
     }
 
-    @McpTool(path = "/get_function_tags", description = "List all tags assigned to a specific function. Accepts either a function address or a function name.", category = "function", access = ToolAccess.READ_ONLY)
-    public Response getFunctionTags(
-            @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Function address (0x<hex> or <space>:<hex>) or function name") String functionRef,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (functionRef == null || functionRef.isEmpty()) {
-            return Response.err("function (address or name) is required");
-        }
-        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (funcLookup.hasError()) return funcLookup.error();
-        Function func = funcLookup.function();
-List<Map<String, Object>> tags = new ArrayList<>();
-        for (FunctionTag tag : func.getTags()) {
-            tags.add(serializeTag(tag, null));
-        }
-        tags.sort(Comparator.comparing(m -> ((String) m.get("name"))));
-        return Response.ok(JsonHelper.mapOf(
-                "function", func.getName(),
-                "address", func.getEntryPoint().toString(),
-                "tag_count", tags.size(),
-                "tags", tags));
-    }
-
     @McpTool(path = "/add_function_tag", method = "POST",
-             description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and auto-created. Replaces batch_add_function_tags.",
+             description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and created on the fly (give a new tag a description with tag_comments). Replaces batch_add_function_tags and create_function_tag.",
              category = "function", access = ToolAccess.WRITE)
     public Response addFunctionTag(
             @Param(value = "function", source = ParamSource.BODY, paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
             @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated tag names to attach (single mode).") String tagsCsv,
+            @Param(value = "tag_comments", source = ParamSource.BODY,
+                   description = "Optional object mapping a tag name to its description. Used only for a "
+                               + "tag this call creates; a tag that already exists keeps its description "
+                               + "(change one with set_function_tag_comment).") Map<String, String> tagComments,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
             @Param(value = "program", defaultValue = "",
@@ -4530,7 +4506,7 @@ List<Map<String, Object>> tags = new ArrayList<>();
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
         if (assignments != null && !assignments.isEmpty()) {
-            return batchAddFunctionTags(assignments, programName);
+            return batchAddFunctionTags(assignments, tagComments, programName);
         }
         if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required (or pass assignments[] for bulk)");
         List<String> tagNames = splitTagList(tagsCsv);
@@ -4541,15 +4517,10 @@ List<Map<String, Object>> tags = new ArrayList<>();
         Function func = funcLookup.function();
 List<String> added = new ArrayList<>();
         List<String> alreadyPresent = new ArrayList<>();
+        List<String> created = new ArrayList<>();
         try {
             threadingStrategy.executeWrite(program, "Add function tags via HTTP", () -> {
-                for (String name : tagNames) {
-                    if (func.addTag(name)) {
-                        added.add(name);
-                    } else {
-                        alreadyPresent.add(name);
-                    }
-                }
+                attachTags(func, tagNames, tagComments, added, alreadyPresent, created);
                 return null;
             });
             program.flushEvents();
@@ -4563,7 +4534,32 @@ List<String> added = new ArrayList<>();
                 "function", func.getName(),
                 "address", func.getEntryPoint().toString(),
                 "added", added,
-                "already_present", alreadyPresent));
+                "already_present", alreadyPresent,
+                "created", created));
+    }
+
+    /**
+     * Attach tags to a function, creating any tag that does not exist yet with the given
+     * description. Runs inside the caller's write transaction. Ghidra's own {@code addTag}
+     * would create the definition too, but with an empty description.
+     */
+    private static void attachTags(Function func, List<String> names, Map<String, String> descriptions,
+            List<String> added, List<String> alreadyPresent, List<String> created) {
+        FunctionTagManager mgr = func.getProgram().getFunctionManager().getFunctionTagManager();
+        for (String name : names) {
+            if (mgr.getFunctionTag(name) == null) {
+                String description = descriptions == null ? null : descriptions.get(name);
+                mgr.createFunctionTag(name, description == null ? "" : description);
+                created.add(name);
+            }
+            // addTag reports success for a tag the function already has, so ask first.
+            if (func.getTags().stream().anyMatch(t -> t.getName().equals(name))) {
+                alreadyPresent.add(name);
+            } else {
+                func.addTag(name);
+                added.add(name);
+            }
+        }
     }
 
     @McpTool(path = "/remove_function_tag", method = "POST",
@@ -4658,50 +4654,6 @@ Set<String> currentBefore = new HashSet<>();
                 "tags", page));
     }
 
-    @McpTool(path = "/create_function_tag", method = "POST",
-             description = "Create a program-wide function tag definition with an optional comment. Use add_function_tag to attach it to functions.",
-             category = "function", access = ToolAccess.WRITE)
-    public Response createFunctionTag(
-            @Param(value = "name", source = ParamSource.BODY,
-                   description = "Tag name (case-sensitive; Ghidra treats whitespace-trimmed names as unique)") String name,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
-                   description = "Optional description for the tag") String comment,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (name == null || name.trim().isEmpty()) return Response.err("name is required");
-        final String tagName = name.trim();
-        final String tagComment = comment != null ? comment : "";
-
-        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
-
-        AtomicReference<FunctionTag> created = new AtomicReference<>();
-        AtomicReference<String> conflict = new AtomicReference<>();
-        try {
-            threadingStrategy.executeWrite(program, "Create function tag via HTTP", () -> {
-                if (mgr.getFunctionTag(tagName) != null) {
-                    conflict.set(tagName);
-                    return null;
-                }
-                created.set(mgr.createFunctionTag(tagName, tagComment));
-                return null;
-            });
-            program.flushEvents();
-        } catch (Exception e) {
-            Msg.error(this, "Failed to create function tag", e);
-            return Response.err("Failed to create tag: " + e.getMessage());
-        }
-        if (conflict.get() != null) return Response.err("Tag already exists: " + conflict.get());
-        FunctionTag tag = created.get();
-        if (tag == null) return Response.err("createFunctionTag returned null");
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "tag", serializeTag(tag, 0)));
-    }
-
     @McpTool(path = "/delete_function_tag", method = "POST",
              description = "Delete a program-wide function tag definition. This detaches the tag from every function that had it.",
              category = "function", access = ToolAccess.DESTRUCTIVE)
@@ -4773,61 +4725,12 @@ Set<String> currentBefore = new HashSet<>();
                 "tag", serializeTag(tag, mgr.getUseCount(tag))));
     }
 
-    @McpTool(path = "/search_functions_by_tag",
-             description = "List all functions that have a specified tag attached. Returns name + entry address.",
-             category = "function", access = ToolAccess.READ_ONLY)
-    public Response searchFunctionsByTag(
-            @Param(value = "tag", description = "Tag name to search for") String tagName,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of matching functions to skip before this page starts; 0 begins "
-                               + "at the first. Negative values are clamped to 0.") int offset,
-            @Param(value = "limit", defaultValue = "1000",
-                   description = "Maximum functions returned in this page (default 1000). 0 returns an "
-                               + "EMPTY page rather than everything — page with offset against the `total` "
-                               + "the response reports.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (tagName == null || tagName.isEmpty()) return Response.err("tag is required");
-
-        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
-        if (mgr.getFunctionTag(tagName) == null) {
-            return Response.err("Tag not found: " + tagName);
-        }
-
-        List<Map<String, Object>> matches = new ArrayList<>();
-        for (Function func : program.getFunctionManager().getFunctions(true)) {
-            for (FunctionTag t : func.getTags()) {
-                if (t.getName().equals(tagName)) {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("name", func.getName());
-                    row.put("address", func.getEntryPoint().toString());
-                    matches.add(row);
-                    break;
-                }
-            }
-        }
-        matches.sort(Comparator.comparing(m -> ((String) m.get("address"))));
-        int total = matches.size();
-        int from = Math.max(0, offset);
-        int to = Math.min(total, from + Math.max(0, limit));
-        List<Map<String, Object>> page = from < to ? matches.subList(from, to) : List.of();
-        return Response.ok(JsonHelper.mapOf(
-                "tag", tagName,
-                "total", total,
-                "offset", from,
-                "limit", limit,
-                "functions", page));
-    }
-
     // Bulk helper for add_function_tag(assignments=[...]). Merged into add_function_tag in
     // 7.0.0; no longer a standalone @McpTool.
     public Response batchAddFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
+            Map<String, String> tagComments,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -4869,16 +4772,15 @@ Set<String> currentBefore = new HashSet<>();
                     }
                     List<String> added = new ArrayList<>();
                     List<String> already = new ArrayList<>();
-                    for (String n : names) {
-                        if (func.addTag(n)) added.add(n);
-                        else already.add(n);
-                    }
+                    List<String> made = new ArrayList<>();
+                    attachTags(func, names, tagComments, added, already, made);
                     tagsAdded.addAndGet(added.size());
                     if (!added.isEmpty()) funcsTouched.incrementAndGet();
                     row.put("status", "success");
                     row.put("address", func.getEntryPoint().toString());
                     row.put("added", added);
                     row.put("already_present", already);
+                    row.put("created", made);
                     results.add(row);
                 }
                 return null;

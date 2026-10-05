@@ -9,7 +9,7 @@ survivor.
 > **Where it landed.** This table describes the consolidation pass only. Two
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
 > `/batch_get_comments` — and `/get_functions` then replaced nine function readers, so
-> the shipped catalog is **245**, not 251. The
+> the shipped catalog is **215**, not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.
@@ -106,8 +106,35 @@ fails on a descriptor with no registered route, which is what caught the leftove
    (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`), README API reference
    regenerated (`python -m tools.gen_readme_api_reference --write`) → 251 tools.
 4. **Verification:** offline Java (390 tests), `tests/unit/`, and the offline
-   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 245
+   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 215
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
+
+## Folds after the consolidation
+
+Fifteen more tools folded into a sibling, still within one permission tier. Each survivor
+keeps its own single-item call unchanged and gains the removed tool's job.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `modify_struct_field_type(struct_name, field_name, new_type)` | `modify_struct_field` | `modify_struct_field(struct_name, field_name, new_type=...)` |
+| `embed_struct_field(parent_struct, field_name, embedded_struct)` | `modify_struct_field` | `modify_struct_field(struct_name=parent_struct, field_name, new_type=embedded_struct)` |
+| `create_typedef(name, base_type)` | `create_derived_type` | `create_derived_type(kind="typedef", name, base_type)` |
+| `create_array_type(base_type, length, name)` | `create_derived_type` | `create_derived_type(kind="array", base_type, length, name)` |
+| `create_pointer_type(base_type, name)` | `create_derived_type` | `create_derived_type(kind="pointer", base_type, name)` |
+| `list_data_types(category)` | `find_data_types` | `find_data_types(category=...)`; entries are now records (`name`, `kind`, `category`, `size`, `path`) under `data_types`, not `name \| category \| size \| path` strings |
+| `search_data_types(pattern)` | `find_data_types` | `find_data_types(pattern=...)`; same record shape, sorted by path |
+| `list_data_type_categories()` | `find_data_types` | `find_data_types(categories=true)` |
+| `batch_get_comments(addresses, only_with_comments)` | `get_comment` | `get_comment(addresses="a,b,c", only_with_comments=...)` |
+| `get_bulk_function_hashes(offset, limit, filter)` | `get_function_hash` | `get_function_hash(offset, limit, filter)`, omitting `function` |
+| `list_option_groups()` | `get_program_options` | `get_program_options()`, omitting `group` |
+| `list_property_maps()` | `list_properties` | `list_properties()`, omitting `map` |
+| `debugger_step_into()` | `debugger_step` | `debugger_step(kind="into")` |
+| `debugger_step_over()` | `debugger_step` | `debugger_step(kind="over")` |
+| `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
+
+The bridge's own `debugger_step_into` / `debugger_step_over` proxies, which forward to the
+external debugger server, are unaffected: only the GUI plugin's `/debugger/step_*` routes
+folded.
 
 ## Call-shape changes worth knowing
 

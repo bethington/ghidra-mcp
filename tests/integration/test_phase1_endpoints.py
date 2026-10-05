@@ -30,7 +30,6 @@ class TestFunctionCallGraph:
             },
         )
         assert response.status_code == 200
-        # Should return list of functions or empty (valid either way)
 
     @pytest.mark.requires_program
     def test_get_functions_callees_truncation(self, http_client, sample_function):
@@ -56,7 +55,6 @@ class TestFunctionCallGraph:
                 "include_call_context": "false",
             },
         )
-        # Accept 200 with error, 404 (not found), or 500 (server error)
         assert response.status_code in [200, 404, 500]
         if response.status_code == 200:
             assert (
@@ -100,7 +98,6 @@ class TestFunctionCallGraph:
                 "include_call_context": "false",
             },
         )
-        # Accept 200 with error, 404 (not found), or 500 (server error)
         assert response.status_code in [200, 404, 500]
         if response.status_code == 200:
             assert (

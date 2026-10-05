@@ -71,7 +71,9 @@ endpoint_smoke:
       type: "lines"
       contains: ["ExitProcess", "GetCommandLineA"]
 
-  - endpoint: "/list_segments"
+  - endpoint: "/list_program_items"
+    params:
+      kind: segments
     assert:
       type: "lines"
       min_lines: 4

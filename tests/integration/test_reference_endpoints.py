@@ -92,13 +92,8 @@ def endpoint_available(http_client, require_server_and_program):
 
 @pytest.fixture
 def two_addresses(http_client, require_server_and_program):
-    """Return two distinct, mapped function-entry addresses from the program.
-
-    /list_functions takes no `limit` -- it lists every function -- so the
-    `limit=50` this used to send was dropped and the regex below has always
-    scanned the whole listing. Only the first two matches are used.
-    """
-    resp = http_client.get("/list_functions")
+    """Return two distinct, mapped function-entry addresses from the program."""
+    resp = http_client.get("/find_functions", params={"limit": 50})
     if resp.status_code != 200:
         pytest.skip("Cannot list functions")
     addrs = re.findall(r"at\s+(?:0x)?([0-9a-fA-F]+)", resp.text)

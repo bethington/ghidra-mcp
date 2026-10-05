@@ -128,7 +128,7 @@ SMOKE_REQUIRED_TOOLS = {
     "save_all_programs",
     "set_function_prototype",
     "rename_function",
-    "search_data_types",
+    "find_data_types",
     "create_struct",
     "get_struct_layout",
     "list_open_programs",
@@ -143,8 +143,7 @@ RELEASE_CONTRACT_TOOLS = SMOKE_REQUIRED_TOOLS | {
     "list_functions",
     "search_functions",
     "get_address_spaces",
-    "list_imports",
-    "list_exports",
+    "list_program_items",
     "list_strings",
     "debugger/launch",
     "debugger/status",
@@ -1237,15 +1236,13 @@ def _list_benchmark_exports(repo_root: Path, mcp_url: str) -> list[tuple[str, st
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/list_exports",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM},
-        timeout=60,
+        "/list_program_items",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "kind": "exports"},
     )
-    _ensure_mcp_ok("/list_exports", payload)
+    _ensure_mcp_ok("/list_program_items", payload)
     exports: list[tuple[str, str]] = []
     if isinstance(payload, dict):
-        # 7.0.0 response contract: {"exports": [{"name", "address"}], "count", ...}
-        for export in payload.get("exports") or []:
+        for export in payload.get("items") or []:
             if not isinstance(export, dict):
                 continue
             name = str(export.get("name") or "")
@@ -1374,7 +1371,7 @@ def run_benchmark_read_test(repo_root: Path, mcp_url: str) -> None:
     address = _find_benchmark_function(repo_root, mcp_url)
     read_calls = [
         ("/list_open_programs", {"program": DEFAULT_BENCHMARK_PROGRAM}),
-        ("/search_data_types", {"program": DEFAULT_BENCHMARK_PROGRAM, "pattern": "int", "limit": 5}),
+        ("/find_data_types", {"program": DEFAULT_BENCHMARK_PROGRAM, "pattern": "int", "limit": 5}),
         ("/get_functions", {
             "program": DEFAULT_BENCHMARK_PROGRAM,
             "address": address,
@@ -1428,8 +1425,8 @@ def run_benchmark_extended_read_test(repo_root: Path, mcp_url: str) -> None:
             {"program": DEFAULT_BENCHMARK_PROGRAM, "name_pattern": "FUN_", "limit": 10},
         ),
         ("/get_address_spaces", {"program": DEFAULT_BENCHMARK_PROGRAM}),
-        ("/list_imports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
-        ("/list_exports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/list_program_items", {"program": DEFAULT_BENCHMARK_PROGRAM, "kind": "imports"}),
+        ("/list_program_items", {"program": DEFAULT_BENCHMARK_PROGRAM, "kind": "exports"}),
         ("/list_strings", {"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 10}),
         ("/get_functions", {
             "program": DEFAULT_BENCHMARK_PROGRAM,
@@ -1968,7 +1965,7 @@ def _bench_lines(parsed: object) -> list[str]:
 
 def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str,
                                  prog: dict, failures: list[str]) -> None:
-    """Assert binary-level fields against /get_metadata, /list_segments etc."""
+    """Assert binary-level fields against /get_metadata, /list_program_items etc."""
     p_query = {"program": program_path}
 
     _, meta = _bench_get(repo_root, mcp_url, "/get_metadata", p_query)
@@ -1996,7 +1993,9 @@ def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str
             failures.append(f"program.string_count_min: expected >={prog['string_count_min']}; got {n}")
 
     if "segments" in prog:
-        _, segs = _bench_get(repo_root, mcp_url, "/list_segments", p_query)
+        _, segs = _bench_get(
+            repo_root, mcp_url, "/list_program_items",
+            {**p_query, "kind": "segments"})
         seg_names = {
             item.get("name") for item in (_bench_envelope_items(segs) or [])
             if isinstance(item, dict)
@@ -2116,7 +2115,7 @@ def _bench_assert_endpoint_smoke(repo_root: Path, mcp_url: str, program_path: st
     # Auto-add program= for endpoints that take a target program (most do).
     # Skip for genuinely program-less endpoints.
     program_less = {"/check_connection", "/list_open_programs", "/list_calling_conventions",
-                    "/list_scripts", "/check_tools", "/list_data_type_categories"}
+                    "/list_scripts", "/check_tools"}
     if endpoint not in program_less and "program" not in params:
         params["program"] = program_path
 

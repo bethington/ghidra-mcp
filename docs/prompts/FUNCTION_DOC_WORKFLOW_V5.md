@@ -64,7 +64,7 @@ Call `rename_function` and `set_function_prototype` in **parallel**.
 
 **Struct access patterns** — for raw pointer+offset access (`*(ptr + 0x10)`, `ptr[4]`, `param_1[0x2C]`):
 
-- If a matching struct type exists (use `search_data_types`): apply it with `set_variable_type`
+- If a matching struct type exists (use `find_data_types`): apply it with `set_variable_type`
 - Otherwise: add EOL comment at each struct access instruction documenting the offset (e.g., `/* +0x10: flags */`). This satisfies the scorer without requiring struct creation.
 
 > **Register/ECX variables:** When `set_variable_type()` fails for a register variable, document the type via `PRE_COMMENT`: `set_comment(addr, "nIterator: int - loop counter (register-only, type='pre')")`. The completeness scorer excludes these from penalty scoring.

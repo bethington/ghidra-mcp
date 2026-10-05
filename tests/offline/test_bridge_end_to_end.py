@@ -116,7 +116,7 @@ class TestSchemaRegistration:
         count = registry._fetch_and_register_schema(load_all=True)
         # Static bridge tools (list_instances, import_file, ...) win any name
         # collision, so a handful of schema tools are deliberately skipped.
-        assert count > 200
+        assert count >= 195
         assert count == len(state._dynamic_tool_names)
         assert "get_xrefs_to" in mcp._tool_manager._tools
 

@@ -82,7 +82,7 @@ parameter *name* to a value globally and that has two blind spots a schema
 cannot close: cross-parameter constraints (`/search_instructions` declares
 `mnemonic` and `operand_pattern` both optional but rejects the call when both
 are empty), and one name meaning different things in different tools (`pattern`
-is a type name for `/search_data_types`, a hex byte string for
+is a type name for `/find_data_types`, a hex byte string for
 `/search_byte_patterns`).
 
 ### `mcp_schema.snap` records a JAR, not a branch

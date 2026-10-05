@@ -6,10 +6,13 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**245 tools** — 231 served by the GUI plugin, 218 by the headless server, 204
-by both. The consolidation pass below took the advertised surface from 272 to
-251; `/list_shadowed_globals` and `/batch_get_comments` landed afterwards in
-the same cycle, and `/get_functions` replaced nine function readers.
+**215 tools** — 201 served by the GUI plugin, 191 by the headless server, 177
+by both. Stacked on #567 (`/get_functions` replaced nine function readers);
+this pass folds listing, xref, tag, utility, and GUI-cursor tools. The
+advertised surface went from 272 → 251 in the first consolidation cycle, then
+245 after `/list_shadowed_globals` and `/batch_get_comments`, then 219 after
+`/get_functions`, then **215** after the folds below (including `/get_ui_cursor`
+and folding `/get_version` into `/mcp/health`).
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -103,6 +106,58 @@ resolvers disagreed about what a reference meant.
 - Also: `batch_rename_function_components` looked the return type up by exact path, so
   `int` or `char*` was skipped while the call reported success; it now refuses an unknown
   type before writing anything.
+
+### Changed — fewer listing, xref, tag, and utility tools (stacked on #567)
+
+Further consolidation on the same 7.0.0 line: one search tool, one program
+listing tool, bulk xrefs as a parameter, tags carried on function reads, seventeen
+small tools folded into siblings, version identity on `/mcp/health`, and one GUI
+cursor tool.
+
+- **`/find_functions`** replaces four listing/search tools (`list_functions`,
+  `search_functions`, `search_functions_by_name`, `search_functions_by_tag`). Tag
+  filters and name patterns share one surface; results include each function's
+  `tags` when present.
+- **`/list_program_items`** with `kind=` replaces eight list-* endpoints (methods,
+  data, segments, memory blocks, imports, exports, namespaces, strings).
+- **`/get_xrefs_to`** accepts `addresses=` (comma-separated) for the old bulk xref
+  scan; `get_bulk_xrefs` is gone.
+- **Function tags** are a field on `/get_functions` (`fields=tags`) and a filter on
+  `/find_functions` (`tag=`); `get_function_tags`, `search_functions_by_tag`, and
+  `create_function_tag` as a standalone attach path are removed (definitions still
+  via `list_function_tags` / `add_function_tag`).
+- **Seventeen tools** folded into siblings (struct/type helpers, `find_data_types`,
+  comment/hash bulk modes, debugger step kinds, program options/properties) — see
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` "Folds after the
+  consolidation".
+- **`/mcp/health`** (GUI) and **`/health`** (headless) now carry the nested
+  `version` block and `endpoint_count` formerly on `/get_version`. `/check_connection`
+  stays a separate liveness route on both servers.
+- **`/get_ui_cursor`** (`type=address|function|selection|program|all`) replaces the
+  four `get_current_*` tools; headless reports unavailable facets with reasons instead
+  of faking a GUI cursor.
+
+| Removed | Use instead |
+| --- | --- |
+| `list_functions`, `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`, `search_functions_by_tag` | `find_functions` (`tag=` for the last) |
+| `list_classes`, `list_methods`, `list_namespaces`, `list_imports`, `list_exports`, `list_segments`, `list_data_items`, `list_external_locations` | `list_program_items(kind=…)` |
+| `get_bulk_xrefs` | `get_xrefs_to(addresses=…)` |
+| `get_function_tags` | `get_functions(fields=tags)` |
+| `create_function_tag` | `add_function_tag` (attaching creates the tag; `tag_comments` describes a new one) |
+| `get_version` | `version` in `/mcp/health` (GUI) or `/health` (headless) |
+| `get_current_address`, `get_current_function`, `get_current_selection`, `get_current_program_info` | `get_ui_cursor(type=…)` |
+| `batch_get_comments` | `get_comment(addresses=…)` |
+| `create_array_type`, `create_pointer_type`, `create_typedef` | `create_derived_type(kind=…)` |
+| `embed_struct_field`, `modify_struct_field_type` | `modify_struct_field` |
+| `get_bulk_function_hashes` | `get_function_hash` (omit `function` for all) |
+| `list_data_types`, `list_data_type_categories`, `search_data_types` | `find_data_types` |
+| `list_option_groups` | `get_program_options` |
+| `list_property_maps` | `list_properties` |
+| `debugger/step_into`, `debugger/step_over`, `debugger/step_out` | `debugger/step(kind=…)` |
+
+`apply_documentation` (replacing `apply_function_documentation` and
+`batch_apply_documentation`) is **not** in this PR — it depends on the server-model
+refactor (`DocumentationBatchService` shared wiring) landing separately.
 
 ### Added
 

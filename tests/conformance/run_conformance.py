@@ -59,7 +59,7 @@ def probe_facts(transport, program: str, second: str) -> ProgramFacts:
     listing = transport.call_tool("list_functions_enhanced",
                                   {"program": program, "limit": 40}, timeout=90)
     functions = (listing.json() or {}).get("functions") or []
-    real = [f for f in functions if not f.get("isThunk") and not f.get("isExternal")]
+    real = [f for f in functions if not f.get("is_thunk") and not f.get("is_external")]
     if not real:
         raise SystemExit(f"no non-thunk functions found in {program}; cannot generate cases")
     first = real[0]
@@ -70,11 +70,11 @@ def probe_facts(transport, program: str, second: str) -> ProgramFacts:
         return a if a.startswith("0x") else f"0x{a}"
 
     struct_name = None
-    types = transport.call_tool("search_data_types",
-                                {"program": program, "pattern": "_s", "limit": 5}, timeout=60)
+    types = transport.call_tool("find_data_types",
+                                {"program": program, "kind": "struct", "limit": 5}, timeout=60)
     parsed = types.json()
     if isinstance(parsed, dict):
-        for entry in (parsed.get("types") or parsed.get("results") or [])[:1]:
+        for entry in (parsed.get("data_types") or [])[:1]:
             if isinstance(entry, dict):
                 struct_name = entry.get("name")
 

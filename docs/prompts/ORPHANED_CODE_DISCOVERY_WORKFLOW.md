@@ -7,7 +7,7 @@ You are scanning Ghidra binaries for orphaned code — valid instructions that e
 1. **Never auto-create without review**: The scanner finds candidates. You classify and confirm each one before calling `create_function`.
 2. **Iterative**: After creating functions, re-run the scanner — new gaps appear as existing function boundaries shift.
 3. **Minimal intervention**: Create functions and set a triage plate comment. Full documentation is a separate task (use FUNCTION_DOC_WORKFLOW_V5.md later).
-4. **Multi-binary safe**: Always confirm program context before writing. Use `get_current_program_info()` to verify.
+4. **Multi-binary safe**: Always confirm program context before writing. Use `get_ui_cursor(type="program")` to verify.
 
 ## Step 0: Select Scope
 
