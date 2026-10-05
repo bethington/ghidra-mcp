@@ -72,11 +72,20 @@ public class ServerManager {
             MalwareSecurityService malwareSecurityService = new MalwareSecurityService(programProvider, ts);
             ProgramScriptService programScriptService = new ProgramScriptService(programProvider, ts);
             FunctionBundleService functionBundleService = new FunctionBundleService(programProvider, ts, functionService);
+            // These three existed only on GhidraMCPPlugin's own legacy server, so P-code
+            // emulation, the debugger and the modal-prompt policy were unreachable over
+            // the Unix socket the bridge prefers. DebuggerService needs a PluginTool for
+            // TraceRmi; the tool that first registered is the one the plugin would have
+            // handed it.
+            EmulationService emulationService = new EmulationService(programProvider, ts);
+            DebuggerService debuggerService = new DebuggerService(programProvider, ts, tool);
+            PromptPolicyService promptPolicyService = new PromptPolicyService();
 
             AnnotationScanner scanner = new AnnotationScanner(programProvider, ts,
                 listingService, functionService, commentService, symbolLabelService,
                 xrefCallGraphService, dataTypeService, analysisService,
                 documentationHashService, malwareSecurityService, programScriptService,
+                emulationService, debuggerService, promptPolicyService,
                 functionBundleService);
 
             startServer(scanner, guiEndpoints);
