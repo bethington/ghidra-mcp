@@ -159,6 +159,46 @@ cursor tool.
 `batch_apply_documentation`) is **not** in this PR — it depends on the server-model
 refactor (`DocumentationBatchService` shared wiring) landing separately.
 
+### Fixed — writes that lost work or reported success for what did not happen
+
+- **A nested write no longer rolls back the enclosing transaction.** Ghidra nests by
+  counting entries on one transaction, so an inner `commit=false` aborted everything the
+  outer owner had done. Endpoints nest by design (`apply_function_documentation` drives the
+  rename and comment paths) and every script runs inside the script manager's transaction;
+  a probe script that rolled back its own write discarded a rename, two comments and a
+  struct made before it. All write sites go through `WriteTx`, which joins an open
+  transaction instead of nesting one. `dry_run` inside an open transaction is refused,
+  since it cannot undo only its own part.
+- **A failed transaction end no longer leaks the headless write lock.** An exception from
+  `endTransaction` skipped the unlock, so every later write that takes the lock
+  (`rename_function`, `batch_rename_function_components`, …) waited forever.
+- **`dry_run` is refused where a rollback cannot undo the effect.** It is implemented as a
+  rolled-back program transaction, but was offered to every write tool:
+  `checkin_program(dry_run=true)` checked in for real. `@McpTool(dryRun = false)` marks the
+  35 tools whose effect is elsewhere (save, close, open, check-in, project and file
+  operations, scripts, analysis, the debugger, archive posts); the scanner refuses before
+  anything runs.
+- **Headless saves before it closes.** Closing a modified program on shutdown or project
+  switch discarded its edits; it now saves to the local working copy first (check-in stays
+  explicit), and the shutdown hook runs before Ghidra disposes its databases, so the save
+  has something to write to.
+- **`import_program(overwrite=true)` deleted the new import.** `setName` returns the renamed
+  file and the old handle names the path the import then takes; deleting through it removed
+  the import, kept the backup, and reported success.
+- **Opening or saving an unedited program no longer writes it.** `open_program` stored the
+  "do not ask to analyze" flag on every open and `save_program` saved with nothing to save,
+  so a checked-out file with no edits read `modified_since_checkout=true`. `save_program`
+  reports `saved: false`; `save_all_programs` lists them as `unchanged`.
+- **Clearing a comment removes it** instead of storing an empty record that the decompiler
+  rendered as a bare `//` line.
+- **`exit_ghidra` exits Ghidra.** It saved and closed every tool but left the front end
+  and the JVM running, with the servers stopped.
+- **Emulation, the debugger and `/prompt_policy` are served on the Unix socket**, which the
+  bridge prefers; they were only on the plugin's TCP server.
+- **`rename_symbol` takes `strict_mode`** (`enforce`/`warn`/`off`) per call, like
+  `rename_function`, so a deliberate name outside the convention (a datasheet register
+  name) can be applied; a refusal names the override.
+
 ### Added
 
 - **Transport-aware doctor mode** for `tools/ghidra_server_health_check.py`.
