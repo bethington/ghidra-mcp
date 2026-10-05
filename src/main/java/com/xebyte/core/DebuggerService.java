@@ -419,7 +419,7 @@ public class DebuggerService {
         return false;
     }
 
-    @McpTool(path = "/debugger/launch", method = "POST",
+    @McpTool(path = "/debugger/launch", dryRun = false, method = "POST",
             description = "Launch an executable through Ghidra's Trace RMI debugger launcher", access = ToolAccess.WRITE)
     public Response launch(
             @Param(value = "executable_path", source = ParamSource.BODY,
@@ -765,7 +765,7 @@ public class DebuggerService {
     // Execution control
     // ========================================================================
 
-    @McpTool(path = "/debugger/resume", method = "POST",
+    @McpTool(path = "/debugger/resume", dryRun = false, method = "POST",
             description = "Resume execution of the debugged process", access = ToolAccess.WRITE)
     public Response resume() {
         TraceContext ctx = getContext();
@@ -788,7 +788,7 @@ public class DebuggerService {
         }
     }
 
-    @McpTool(path = "/debugger/interrupt", method = "POST",
+    @McpTool(path = "/debugger/interrupt", dryRun = false, method = "POST",
             description = "Interrupt (break into) the running target", access = ToolAccess.WRITE)
     public Response interrupt() {
         TraceContext ctx = getContext();
@@ -810,7 +810,7 @@ public class DebuggerService {
         }
     }
 
-    @McpTool(path = "/debugger/step", method = "POST",
+    @McpTool(path = "/debugger/step", dryRun = false, method = "POST",
             description = "Single-step the debugged process: into the next instruction (follows calls), over "
                 + "it (does not follow calls), or out of the current function (run to return).",
             access = ToolAccess.WRITE)
@@ -848,7 +848,7 @@ public class DebuggerService {
     // Breakpoints
     // ========================================================================
 
-    @McpTool(path = "/debugger/set_breakpoint", method = "POST",
+    @McpTool(path = "/debugger/set_breakpoint", dryRun = false, method = "POST",
             description = "Set a software execution breakpoint at an address in the trace", access = ToolAccess.WRITE)
     public Response setBreakpoint(
             @Param(value = "address", paramType = "address",
@@ -877,7 +877,7 @@ public class DebuggerService {
         }
     }
 
-    @McpTool(path = "/debugger/remove_breakpoint", method = "POST",
+    @McpTool(path = "/debugger/remove_breakpoint", dryRun = false, method = "POST",
             description = "Remove a breakpoint at an address", access = ToolAccess.DESTRUCTIVE)
     public Response removeBreakpoint(
             @Param(value = "address", paramType = "address",

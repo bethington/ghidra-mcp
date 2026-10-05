@@ -1002,7 +1002,7 @@ public class ProgramScriptService {
         return saveCurrentProgram(null);
     }
 
-    @McpTool(path = "/save_program", description = "Save current program", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/save_program", dryRun = false, description = "Save current program", category = "program", access = ToolAccess.WRITE)
     public Response saveCurrentProgram(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1061,7 +1061,7 @@ public class ProgramScriptService {
      * such as deploy shutdown where Ghidra would otherwise prompt for each
      * modified domain object on exit.
      */
-    @McpTool(path = "/save_all_programs", description = "Save all open programs", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/save_all_programs", dryRun = false, description = "Save all open programs", category = "program", access = ToolAccess.WRITE)
     public Response saveAllOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -1189,7 +1189,7 @@ public class ProgramScriptService {
         ));
     }
 
-    @McpTool(path = "/close_program", method = "POST",
+    @McpTool(path = "/close_program", dryRun = false, method = "POST",
              description = "Close an open program by project path or name. Never prompts interactively: "
                          + "unsaved changes are saved first by default (save=true) or silently discarded "
                          + "(save=false) before closing, so this cannot block the caller on a GUI "
@@ -1631,7 +1631,7 @@ public class ProgramScriptService {
     /**
      * Switch MCP context to a different open program by name.
      */
-    @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/switch_program", dryRun = false, description = "Switch MCP context to a different program", category = "program", access = ToolAccess.WRITE)
     public Response switchProgram(
             @Param(value = "program", description = "Program name to switch to") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
@@ -1743,7 +1743,7 @@ public class ProgramScriptService {
         ));
     }
 
-    @McpTool(path = "/create_folder", method = "POST", description = "Create a folder in the project", category = "project", access = ToolAccess.WRITE)
+    @McpTool(path = "/create_folder", dryRun = false, method = "POST", description = "Create a folder in the project", category = "project", access = ToolAccess.WRITE)
     public Response createFolder(
             @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
@@ -1777,7 +1777,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/delete_file", method = "POST", description = "Delete a file from the project", category = "project", access = ToolAccess.DESTRUCTIVE)
+    @McpTool(path = "/delete_file", dryRun = false, method = "POST", description = "Delete a file from the project", category = "project", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFile(
             @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
         ghidra.framework.model.Project project = resolveProject();
@@ -1835,7 +1835,7 @@ public class ProgramScriptService {
         return false;
     }
 
-    @McpTool(path = "/move_file", method = "POST",
+    @McpTool(path = "/move_file", dryRun = false, method = "POST",
              description = "Move a program file to a different folder in the project, preserving all "
                          + "analysis and documentation. Refuses when the program has unsaved changes "
                          + "-- call save_program first -- rather than discarding them. A program that "
@@ -1928,7 +1928,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/move_folder", method = "POST",
+    @McpTool(path = "/move_folder", dryRun = false, method = "POST",
              description = "Move a project folder (and everything under it) into another folder. "
                          + "Refuses to move a folder into itself or into its own descendant, which "
                          + "would orphan the subtree.",
@@ -2044,7 +2044,7 @@ public class ProgramScriptService {
         return openProgramFromProject(path, false);
     }
 
-    @McpTool(path = "/open_program", description = "Open a program from the current project", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/open_program", dryRun = false, description = "Open a program from the current project", category = "program", access = ToolAccess.WRITE)
     public Response openProgramFromProject(
             @Param(value = "path", description = "Program path in project") String path,
             @Param(value = "auto_analyze", defaultValue = "false", description = "Run auto-analysis") boolean autoAnalyze) {
@@ -2192,7 +2192,7 @@ public class ProgramScriptService {
     // ========================================================================
     // Import & Analysis
 
-    @McpTool(path = "/import_file", method = "POST",
+    @McpTool(path = "/import_file", dryRun = false, method = "POST",
             description = "Import a binary file from disk into the current Ghidra project and open it. "
                 + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
             category = "program", access = ToolAccess.WRITE)
@@ -2351,7 +2351,7 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/reanalyze", dryRun = false, method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
     public Response reanalyze(
             @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2828,7 +2828,7 @@ public class ProgramScriptService {
                 "console_output", resultMsg.toString()));
     }
 
-    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/run_script_inline", dryRun = false, method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY,
                    description = "Complete Java source for a GhidraScript, as one string — not a bare "
@@ -3771,7 +3771,7 @@ public class ProgramScriptService {
         return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
     }
 
-    @McpTool(path = "/run_ghidra_script", method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/run_ghidra_script", dryRun = false, method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runGhidraScriptWithCapture(
 @Param(value = "script_name", source = ParamSource.BODY,
                    description = "Script to run. Searched in ~/ghidra_scripts, <cwd>/ghidra_scripts and "

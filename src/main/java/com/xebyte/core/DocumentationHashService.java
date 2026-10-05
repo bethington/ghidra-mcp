@@ -1666,7 +1666,7 @@ public class DocumentationHashService {
         return "unknown";
     }
 
-    @McpTool(path = "/archive_ingest_function", method = "POST",
+    @McpTool(path = "/archive_ingest_function", dryRun = false, method = "POST",
         description = "Ingest a single function's documentation into the cross-version "
             + "archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge "
             + "resolution happens on the archive side. Use archive_ingest_program for bulk.",
@@ -1718,7 +1718,7 @@ public class DocumentationHashService {
         }
     }
 
-    @McpTool(path = "/archive_ingest_program", method = "POST",
+    @McpTool(path = "/archive_ingest_program", dryRun = false, method = "POST",
         description = "Bulk-ingest every function in a program into the cross-version "
             + "documentation archive. Posts each to /v1/doc_archive/upsert. Returns "
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
