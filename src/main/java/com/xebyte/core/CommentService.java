@@ -472,7 +472,7 @@ public class CommentService {
      */
     @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.DESTRUCTIVE)
     public Response clearFunctionComments(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -497,7 +497,7 @@ public class CommentService {
         }
 
         // Resolve address before entering SwingUtilities lambda
-        Address resolvedAddr = ServiceUtils.parseAddress(program, functionAddress);
+        Address resolvedAddr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicBoolean success = new AtomicBoolean(false);

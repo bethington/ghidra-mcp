@@ -94,6 +94,9 @@ public class RegenerateEndpointsJson extends TestCase {
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (AnnotationScanner.ParamDescriptor p : tool.params()) {
             names.add(p.name());
+            // Aliases are accepted argument names, so they belong in the catalog; a
+            // function reference implies the standard set.
+            names.addAll(p.aliases());
         }
         List<String> retained = new ArrayList<>();
         if (existing != null && existing.has("params")) {

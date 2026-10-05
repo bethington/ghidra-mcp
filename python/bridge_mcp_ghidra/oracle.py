@@ -220,6 +220,18 @@ def oracle_modules() -> str:
     return _oracle_request("GET", "/modules")
 
 
+
+def _parse_rva(rva: object) -> tuple[int, str | None]:
+    """A module offset from ``0x``-hex or decimal text: ``(value, None)``, or ``(0, error_json)``."""
+    text = str(rva)
+    try:
+        value = int(text, 16) if text.lower().startswith("0x") else int(text, 0)
+    except (TypeError, ValueError):
+        return 0, json.dumps({"error": f"Invalid rva: {rva!r} (use 0x-hex or decimal)"})
+    if value < 0:
+        return 0, json.dumps({"error": f"Invalid rva: {rva!r} (must be non-negative)"})
+    return value, None
+
 @_oracle_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def oracle_read_memory(module: str, rva: str, length: int = 256) -> str:
     """Read raw bytes out of the LIVE game process (no elevation, no suspend).
@@ -242,12 +254,9 @@ def oracle_read_memory(module: str, rva: str, length: int = 256) -> str:
     ``requested``. A short ``got`` is not an error — it means the read ran into
     an unmapped page, and the readable prefix is returned.
     """
-    try:
-        rva_int = int(str(rva), 16) if str(rva).lower().startswith("0x") else int(str(rva), 0)
-    except (TypeError, ValueError):
-        return json.dumps({"error": f"Invalid rva: {rva!r} (use 0x-hex or decimal)"})
-    if rva_int < 0:
-        return json.dumps({"error": f"Invalid rva: {rva!r} (must be non-negative)"})
+    rva_int, rva_error = _parse_rva(rva)
+    if rva_error:
+        return rva_error
     try:
         want = int(length)
     except (TypeError, ValueError):
@@ -389,12 +398,9 @@ def oracle_call_function(
         return json.dumps({"error": f"too many args ({len(parsed_args)}); the oracle allows 8 slots"})
     if not module:
         return json.dumps({"error": "module is required (see oracle_modules)"})
-    try:
-        rva_int = int(str(rva), 16) if str(rva).lower().startswith("0x") else int(str(rva), 0)
-    except (TypeError, ValueError):
-        return json.dumps({"error": f"Invalid rva: {rva!r} (use 0x-hex or decimal)"})
-    if rva_int < 0:
-        return json.dumps({"error": f"Invalid rva: {rva!r} (must be non-negative)"})
+    rva_int, rva_error = _parse_rva(rva)
+    if rva_error:
+        return rva_error
     # A Ghidra image base arriving here means the caller passed an ABSOLUTE
     # address. Several D2 modules relocate, so that address is wrong in the live
     # process -- refuse rather than call into whatever happens to be mapped there.

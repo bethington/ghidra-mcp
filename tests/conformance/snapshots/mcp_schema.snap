@@ -8,10 +8,16 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "default": "",
           "description": "Function address or name (single mode). Omit when using assignments[].",
           "name": "function",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": false,
           "source": "body",
           "type": "string"
@@ -347,9 +353,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -372,8 +384,14 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_address",
+            "function_name"
+          ],
           "description": "Function reference (name or address)",
-          "name": "name",
+          "name": "function",
           "required": true,
           "source": "query",
           "type": "string"
@@ -444,10 +462,16 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "default": "",
           "description": "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": false,
           "source": "query",
           "type": "string"
@@ -686,9 +710,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Function entry-point address (Ghidra hex form)",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -801,9 +831,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -950,8 +986,12 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "function_address"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function_address",
+          "name": "function",
           "param_type": "address",
           "required": true,
           "source": "body",
@@ -981,7 +1021,7 @@
         },
         {
           "default": "",
-          "description": "Optional new return type. It is looked up by exact data-type-manager PATH (/uint), not through the recursive resolver the other tools use, so a bare name or a pointer chain does not resolve — and a failed lookup is IGNORED SILENTLY, leaving the return type unchanged while the call still reports success. Prefer set_function_prototype when the return type matters.",
+          "description": "Optional new return type: a type name, a pointer (char*) or an array (int[4]), resolved like every other tool's type argument. A type that cannot be resolved refuses the whole call before anything is renamed.",
           "name": "return_type",
           "required": false,
           "source": "body",
@@ -1199,9 +1239,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -2221,10 +2267,16 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "default": "",
           "description": "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": false,
           "source": "query",
           "type": "string"
@@ -2344,9 +2396,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -2695,9 +2753,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Entry point address of the function to emulate",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -3012,9 +3076,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3084,9 +3154,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3433,9 +3509,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3458,17 +3540,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_name",
+            "function_address"
+          ],
           "default": "",
-          "description": "Function name",
-          "name": "name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function entry-point address (hex) — alternative to name",
-          "name": "address",
+          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "name": "function",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3507,17 +3587,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_name",
+            "function_address"
+          ],
           "default": "",
-          "description": "Function name",
-          "name": "name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function entry-point address (hex) — alternative to name",
-          "name": "address",
+          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "name": "function",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3556,17 +3634,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_name",
+            "function_address"
+          ],
           "default": "",
-          "description": "Function name",
-          "name": "name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function entry-point address (hex) — alternative to name",
-          "name": "address",
+          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "name": "function",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3622,9 +3698,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3647,9 +3729,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3672,17 +3760,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_name",
+            "function_address"
+          ],
           "default": "",
-          "description": "Function name",
-          "name": "name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function entry-point address (hex) — alternative to name",
-          "name": "address",
+          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "name": "function",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3722,13 +3808,14 @@
       "params": [
         {
           "aliases": [
-            "function",
             "address",
-            "function_address"
+            "name",
+            "function_address",
+            "function_name"
           ],
           "description": "Function name or address (0x<hex> / <space>:<hex>).",
-          "name": "name",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3767,9 +3854,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Function entry address (0x<hex> or <space>:<hex>).",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3800,9 +3893,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3825,9 +3924,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Function address (0x<hex> or <space>:<hex>) or function name",
           "name": "function",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -3899,17 +4004,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "name",
+            "address",
+            "function_name",
+            "function_address"
+          ],
           "default": "",
-          "description": "Function name",
-          "name": "name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function entry-point address (hex) — alternative to name",
-          "name": "address",
+          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "name": "function",
           "required": false,
           "source": "query",
           "type": "string"
@@ -5631,10 +5734,16 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "default": "",
           "description": "Function address or name (single mode). Omit when using assignments[].",
           "name": "function",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": false,
           "source": "body",
           "type": "string"
@@ -5935,9 +6044,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -7298,9 +7413,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -7379,9 +7500,15 @@
       "method": "POST",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Function entry point address",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -7529,9 +7656,15 @@
       "method": "GET",
       "params": [
         {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function_address",
-          "param_type": "address",
+          "name": "function",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"

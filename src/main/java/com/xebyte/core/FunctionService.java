@@ -116,49 +116,12 @@ public class FunctionService {
     // ========================================================================
 
     /**
-     * Decompile a function by its name.
-     */
-    public Response decompileFunctionByName(String name, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        DecompInterface decomp = null;
-        try {
-            decomp = ServiceUtils.createConfiguredDecompiler(program);
-            for (Function func : program.getFunctionManager().getFunctions(true)) {
-                if (func.getName().equals(name)) {
-                    DecompileResults result =
-                        decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                    if (result != null && result.decompileCompleted()) {
-                        Map<String, Object> out = new LinkedHashMap<>();
-                        out.put("name", func.getName());
-                        out.put("address", func.getEntryPoint().toString(false));
-                        out.put("decompiled", result.getDecompiledFunction().getC());
-                        return Response.ok(out);
-                    } else {
-                        return Response.err("Decompilation failed");
-                    }
-                }
-            }
-        } finally {
-            if (decomp != null) {
-                try { decomp.dispose(); } catch (Exception ignored) {}
-            }
-        }
-        return Response.err("Function not found");
-    }
-
-    public Response decompileFunctionByName(String name) {
-        return decompileFunctionByName(name, null);
-    }
-
-    /**
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
     @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function", access = ToolAccess.READ_ONLY)
     public Response decompileFunctionByAddress(
-            @Param(value = "address", paramType = "address", defaultValue = "",
+            @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
             @Param(value = "functions", defaultValue = "",
                    description = "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.") String functionsParam,
@@ -180,10 +143,10 @@ public class FunctionService {
 
         DecompInterface decomp = null;
         try {
-            Function func = ServiceUtils.resolveFunction(program, addressStr);
-            if (func == null) return Response.err("No function found for " + addressStr);
-
-            decomp = ServiceUtils.createConfiguredDecompiler(program);
+            ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
+            if (funcLookup.hasError()) return funcLookup.error();
+            Function func = funcLookup.function();
+decomp = ServiceUtils.createConfiguredDecompiler(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
@@ -351,12 +314,12 @@ public class FunctionService {
                 String funcRef = functionRefs[i].trim();
                 if (funcRef.isEmpty()) continue;
 
-                Function function = ServiceUtils.resolveFunction(program, funcRef);
-
-                if (function == null) {
-                    resultMap.put(funcRef, "Error: Function not found");
+                ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, funcRef);
+                if (lookup.hasError()) {
+                    resultMap.put(funcRef, "Error: " + lookup.message());
                     continue;
                 }
+                Function function = lookup.function();
 
                 // Decompile the function
                 DecompInterface decompiler = null;
@@ -394,7 +357,7 @@ public class FunctionService {
      */
     @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response forceDecompile(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -417,7 +380,7 @@ public class FunctionService {
         final AtomicReference<String> decompiledCode = new AtomicReference<>();
 
         // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         try {
@@ -425,7 +388,7 @@ public class FunctionService {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
-                        errorMessage.set("No function found at address " + functionAddrStr);
+                        errorMessage.set("No function at address: " + functionAddrStr);
                         return null;
                     }
 
@@ -752,7 +715,7 @@ public class FunctionService {
      */
     @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionByAddress(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -767,10 +730,10 @@ public class FunctionService {
         }
 
         try {
-            Function func = ServiceUtils.resolveFunction(program, addressStr);
-            if (func == null) return Response.err("No function found for " + addressStr);
-
-            Map<String, Object> out = new LinkedHashMap<>();
+            ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
+            if (funcLookup.hasError()) return funcLookup.error();
+            Function func = funcLookup.function();
+Map<String, Object> out = new LinkedHashMap<>();
             out.put("name", func.getName());
             out.put("address", func.getEntryPoint().toString(false));
             out.put("signature", func.getSignature().getPrototypeString());
@@ -816,10 +779,9 @@ public class FunctionService {
         DecompInterface decomp = ServiceUtils.createConfiguredDecompiler(program);
         try {
             String functionRef = (functionAddress != null && !functionAddress.isEmpty()) ? functionAddress : functionName;
-            Function func = ServiceUtils.resolveFunction(program, functionRef);
-            if (func == null) {
-                return Response.err("Function not found: " + functionRef);
-            }
+            ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
+            if (funcLookup.hasError()) return funcLookup.error();
+            Function func = funcLookup.function();
 
             DecompileResults result = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
             if (result == null || !result.decompileCompleted()) {
@@ -977,10 +939,9 @@ public class FunctionService {
             return Response.err("New function name is required");
         }
 
-        Function targetFunc = ServiceUtils.resolveFunction(program, functionAddrStr);
-        if (targetFunc == null) {
-            return Response.err("No function found for " + functionAddrStr);
-        }
+        ServiceUtils.FunctionOrError targetFuncLookup = ServiceUtils.getFunctionOrError(program, functionAddrStr);
+        if (targetFuncLookup.hasError()) return targetFuncLookup.error();
+        Function targetFunc = targetFuncLookup.function();
 
         // Per-call strict_mode override. The AutoCloseable returned by
         // scopedRequestMode() clears the override on close — even if the
@@ -1611,7 +1572,7 @@ public class FunctionService {
                     // Find the function
                     Function func = ServiceUtils.getFunctionForAddress(program, addr);
                     if (func == null) {
-                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        resultMsg.append("Error: No function at address: ").append(functionAddrStr);
                         return null;
                     }
 
@@ -1810,7 +1771,7 @@ public class FunctionService {
             threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
                 Function func = ServiceUtils.getFunctionForAddress(program, addr);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at ").append(functionAddrStr);
+                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
                     return null;
                 }
 
@@ -2242,7 +2203,7 @@ public class FunctionService {
 
                 Function func = ServiceUtils.getFunctionForAddress(program, addr);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
                     return null;
                 }
 
@@ -2398,7 +2359,7 @@ public class FunctionService {
      */
     @McpTool(path = "/set_variable_storage", method = "POST", description = "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setVariableStorage(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -2429,7 +2390,7 @@ public class FunctionService {
         }
 
         // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -2445,7 +2406,7 @@ public class FunctionService {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMessage.set("No function found at address " + functionAddrStr);
+                    errorMessage.set("No function at address: " + functionAddrStr);
                     return null;
                 }
                 functionName.set(func.getName());
@@ -2745,30 +2706,14 @@ public class FunctionService {
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    // Find function — address lookup takes precedence over name scan
-                    Function func = null;
-                    if (address != null && !address.isEmpty()) {
-                        Address addr = ServiceUtils.parseAddress(finalProgram, address);
-                        if (addr != null) {
-                            func = ServiceUtils.getFunctionForAddress(finalProgram, addr);
-                        }
-                        if (func == null) {
-                            errorMsg.set("No function at address: " + address);
-                            return null;
-                        }
-                    } else {
-                        for (Function f : finalProgram.getFunctionManager().getFunctions(true)) {
-                            if (f.getName().equals(functionName)) {
-                                func = f;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (func == null) {
-                        errorMsg.set("Function not found: " + functionName);
+                    // The address, when given, overrides the name
+                    String ref = (address != null && !address.isEmpty()) ? address : functionName;
+                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(finalProgram, ref);
+                    if (lookup.hasError()) {
+                        errorMsg.set(lookup.message());
                         return null;
                     }
+                    Function func = lookup.function();
 
                     // Use shared decompileFunction (uses existing cache, no forced flush)
                     // The old forced cache flush + re-decompile added 5-30s latency per call.
@@ -2951,7 +2896,12 @@ public class FunctionService {
      */
     @McpTool(path = "/batch_rename_function_components", method = "POST", description = "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response batchRenameFunctionComponents(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            // Neither "function_name" nor "name" is an alias here, unlike every other
+            // function-scoped tool. This route already has a `function_name` parameter
+            // meaning the NEW name, so aliasing it to the selector would bind one request
+            // value to two parameters; "name" goes with it because on a rename tool it
+            // reads as the new name too.
+            @Param(value = "function", aliases = {"address", "function_address"}, paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -2971,12 +2921,10 @@ public class FunctionService {
                                + "same rules as parameter_renames; locals_renamed reports how many "
                                + "landed.") Map<String, String> localRenames,
             @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "",
-                   description = "Optional new return type. It is looked up by exact data-type-manager "
-                               + "PATH (/uint), not through the recursive resolver the other tools use, so "
-                               + "a bare name or a pointer chain does not resolve — and a failed lookup is "
-                               + "IGNORED SILENTLY, leaving the return type unchanged while the call still "
-                               + "reports success. Prefer set_function_prototype when the return type "
-                               + "matters.") String returnType,
+                   description = "Optional new return type: a type name, a pointer (char*) or an "
+                               + "array (int[4]), resolved like every other tool's type argument. A type "
+                               + "that cannot be resolved refuses the whole call before anything is "
+                               + "renamed.") String returnType,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
                                + "when multiple programs are open)") String programName) {
@@ -2985,8 +2933,20 @@ public class FunctionService {
         Program program = pe.program();
 
         // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        // Resolve the type before anything is written. It used to be an exact-path lookup
+        // that ignored a miss, so "int" or "char*" silently left the return type unchanged
+        // while the call reported success.
+        DataType newReturnType = null;
+        if (returnType != null && !returnType.isEmpty()) {
+            newReturnType = ServiceUtils.resolveDataType(program.getDataTypeManager(), returnType);
+            if (newReturnType == null) {
+                return Response.err("Return type not found: '" + returnType + "'. Nothing was changed.");
+            }
+        }
+        final DataType finalReturnType = newReturnType;
 
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicInteger paramsRenamed = new AtomicInteger(0);
@@ -3031,13 +2991,8 @@ public class FunctionService {
                     }
                 }
 
-                // Set return type if provided
-                if (returnType != null && !returnType.isEmpty()) {
-                    DataTypeManager dtm = program.getDataTypeManager();
-                    DataType dt = dtm.getDataType(returnType);
-                    if (dt != null) {
-                        func.setReturnType(dt, SourceType.USER_DEFINED);
-                    }
+                if (finalReturnType != null) {
+                    func.setReturnType(finalReturnType, SourceType.USER_DEFINED);
                 }
 
                 success.set(true);
@@ -3079,7 +3034,7 @@ public class FunctionService {
      */
     @McpTool(path = "/delete_function", method = "POST", description = "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFunctionAtAddress(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -3096,7 +3051,7 @@ public class FunctionService {
         }
 
         // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
@@ -3107,7 +3062,7 @@ public class FunctionService {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMsg.set("No function found at address " + addressStr);
+                    errorMsg.set("No function at address: " + addressStr);
                     return null;
                 }
 
@@ -3848,7 +3803,7 @@ public class FunctionService {
      */
     @McpTool(path = "/rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response batchRenameVariables(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -3875,7 +3830,7 @@ public class FunctionService {
         Program program = pe.program();
 
         // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         // force_individual asks for exactly the routine the batch path falls back
@@ -4098,7 +4053,7 @@ public class FunctionService {
                         + "On programs with multiple address spaces, prefix addresses with the space name.",
             category = "function", access = ToolAccess.WRITE)
     public Response setVariables(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Function entry point address") String functionAddress,
             @Param(value = "variables", source = ParamSource.BODY,
                    description = "JSON object mapping old variable names to {name, type} objects. "
@@ -4111,7 +4066,7 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         // Parse the variables JSON into a map of oldName -> {name?, type?}.
@@ -4494,124 +4449,6 @@ public class FunctionService {
         return batchRenameVariablesIndividual(functionAddress, variableRenames, null);
     }
 
-    /**
-     * Validate that batch operations actually persisted by checking current state.
-     */
-    public Response validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorRef.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    int renamesValidated = 0;
-                    int typesValidated = 0;
-                    List<String> validationErrors = new ArrayList<>();
-
-                    // Validate renames
-                    if (expectedRenames != null) {
-                        for (Parameter param : func.getParameters()) {
-                            String expectedName = expectedRenames.get(param.getName());
-                            if (expectedName != null) {
-                                validationErrors.add("Parameter rename not persisted: expected '" + expectedName + "', found '" + param.getName() + "'");
-                            } else if (expectedRenames.containsValue(param.getName())) {
-                                renamesValidated++;
-                            }
-                        }
-
-                        for (Variable local : func.getLocalVariables()) {
-                            String expectedName = expectedRenames.get(local.getName());
-                            if (expectedName != null) {
-                                validationErrors.add("Local variable rename not persisted: expected '" + expectedName + "', found '" + local.getName() + "'");
-                            } else if (expectedRenames.containsValue(local.getName())) {
-                                renamesValidated++;
-                            }
-                        }
-                    }
-
-                    // Validate types
-                    if (expectedTypes != null) {
-                        DataTypeManager dtm = program.getDataTypeManager();
-
-                        for (Parameter param : func.getParameters()) {
-                            String expectedType = expectedTypes.get(param.getName());
-                            if (expectedType != null) {
-                                DataType currentType = param.getDataType();
-                                DataType expectedDataType = dtm.getDataType(expectedType);
-                                if (expectedDataType != null && currentType != null &&
-                                    currentType.getName().equals(expectedDataType.getName())) {
-                                    typesValidated++;
-                                } else {
-                                    validationErrors.add("Parameter type not persisted for '" + param.getName() +
-                                                       "': expected '" + expectedType + "', found '" +
-                                                       (currentType != null ? currentType.getName() : "null") + "'");
-                                }
-                            }
-                        }
-
-                        for (Variable local : func.getLocalVariables()) {
-                            String expectedType = expectedTypes.get(local.getName());
-                            if (expectedType != null) {
-                                DataType currentType = local.getDataType();
-                                DataType expectedDataType = dtm.getDataType(expectedType);
-                                if (expectedDataType != null && currentType != null &&
-                                    currentType.getName().equals(expectedDataType.getName())) {
-                                    typesValidated++;
-                                } else {
-                                    validationErrors.add("Local variable type not persisted for '" + local.getName() +
-                                                       "': expected '" + expectedType + "', found '" +
-                                                       (currentType != null ? currentType.getName() : "null") + "'");
-                                }
-                            }
-                        }
-                    }
-
-                    Map<String, Object> data = new LinkedHashMap<>();
-                    data.put("success", true);
-                    data.put("renames_validated", renamesValidated);
-                    data.put("types_validated", typesValidated);
-                    if (!validationErrors.isEmpty()) {
-                        data.put("validation_errors", validationErrors);
-                    }
-                    resultData.set(data);
-
-                } catch (Exception e) {
-                    errorRef.set(e.getMessage());
-                    Msg.error(this, "Error validating batch operations", e);
-                }
-            });
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        if (errorRef.get() != null) {
-            return Response.err(errorRef.get());
-        }
-        if (resultData.get() != null) {
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown failure");
-    }
-
-    public Response validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
-        return validateBatchOperationResults(functionAddress, expectedRenames, expectedTypes, null);
-    }
-
     // ========================================================================
     // Function tag methods
     //
@@ -4643,7 +4480,7 @@ public class FunctionService {
 
     @McpTool(path = "/get_function_tags", description = "List all tags assigned to a specific function. Accepts either a function address or a function name.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionTags(
-            @Param(value = "function", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Function address (0x<hex> or <space>:<hex>) or function name") String functionRef,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
@@ -4654,10 +4491,10 @@ public class FunctionService {
         if (functionRef == null || functionRef.isEmpty()) {
             return Response.err("function (address or name) is required");
         }
-        Function func = ServiceUtils.resolveFunction(program, functionRef);
-        if (func == null) return Response.err("No function found for " + functionRef);
-
-        List<Map<String, Object>> tags = new ArrayList<>();
+        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (funcLookup.hasError()) return funcLookup.error();
+        Function func = funcLookup.function();
+List<Map<String, Object>> tags = new ArrayList<>();
         for (FunctionTag tag : func.getTags()) {
             tags.add(serializeTag(tag, null));
         }
@@ -4673,7 +4510,7 @@ public class FunctionService {
              description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and auto-created. Replaces batch_add_function_tags.",
              category = "function", access = ToolAccess.WRITE)
     public Response addFunctionTag(
-            @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
+            @Param(value = "function", source = ParamSource.BODY, paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
             @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated tag names to attach (single mode).") String tagsCsv,
@@ -4692,10 +4529,10 @@ public class FunctionService {
         List<String> tagNames = splitTagList(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
-        Function func = ServiceUtils.resolveFunction(program, functionRef);
-        if (func == null) return Response.err("No function found for " + functionRef);
-
-        List<String> added = new ArrayList<>();
+        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (funcLookup.hasError()) return funcLookup.error();
+        Function func = funcLookup.function();
+List<String> added = new ArrayList<>();
         List<String> alreadyPresent = new ArrayList<>();
         try {
             threadingStrategy.executeWrite(program, "Add function tags via HTTP", () -> {
@@ -4726,7 +4563,7 @@ public class FunctionService {
              description = "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition — use delete_function_tag for that. Replaces batch_remove_function_tags.",
              category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response removeFunctionTag(
-            @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
+            @Param(value = "function", source = ParamSource.BODY, paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
             @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated tag names to detach (single mode).") String tagsCsv,
@@ -4745,10 +4582,10 @@ public class FunctionService {
         List<String> tagNames = splitTagList(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
-        Function func = ServiceUtils.resolveFunction(program, functionRef);
-        if (func == null) return Response.err("No function found for " + functionRef);
-
-        Set<String> currentBefore = new HashSet<>();
+        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (funcLookup.hasError()) return funcLookup.error();
+        Function func = funcLookup.function();
+Set<String> currentBefore = new HashSet<>();
         for (FunctionTag t : func.getTags()) currentBefore.add(t.getName());
 
         List<String> removed = new ArrayList<>();
@@ -5008,13 +4845,14 @@ public class FunctionService {
                         results.add(row);
                         continue;
                     }
-                    Function func = ServiceUtils.resolveFunction(program, ref);
-                    if (func == null) {
+                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, ref);
+                    if (lookup.hasError()) {
                         row.put("status", "error");
-                        row.put("error", "function not found");
+                        row.put("error", lookup.message());
                         results.add(row);
                         continue;
                     }
+                    Function func = lookup.function();
                     List<String> names = splitTagList(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");
@@ -5079,13 +4917,14 @@ public class FunctionService {
                         results.add(row);
                         continue;
                     }
-                    Function func = ServiceUtils.resolveFunction(program, ref);
-                    if (func == null) {
+                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, ref);
+                    if (lookup.hasError()) {
                         row.put("status", "error");
-                        row.put("error", "function not found");
+                        row.put("error", lookup.message());
                         results.add(row);
                         continue;
                     }
+                    Function func = lookup.function();
                     List<String> names = splitTagList(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");

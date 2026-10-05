@@ -45,10 +45,17 @@ def test_scan_finds_most_of_the_catalog():
 @pytest.mark.parametrize(
     "path,method,expected",
     [
+        # A FUNCTION_REF parameter: the scanner adds the standard spellings
+        # (AnnotationScanner.FUNCTION_REF_ALIASES) without the annotation listing them.
         (
-            "/get_function_labels",
+            "/analyze_function_completeness",
             "GET",
-            {"function": "name", "address": "name", "function_address": "name"},
+            {
+                "address": "function",
+                "name": "function",
+                "function_address": "function",
+                "function_name": "function",
+            },
         ),
         (
             "/rename_function",
@@ -74,13 +81,14 @@ def test_known_alias_sets_exactly(path, method, expected):
 
 
 def test_endpoints_without_aliases_report_none():
-    """The discriminator that makes the ten breaches real.
+    """The discriminator that keeps a breach a breach.
 
-    /analyze_function_completeness declares `function_address` and no alias
-    for `address`, so a call sending `address` really is dropped. If this ever
-    returns a mapping, the contract checks would start excusing it.
+    These declare no alias, so a call sending another spelling really is dropped.
+    If this ever returns a mapping, the contract checks would start excusing it.
+    (/analyze_function_completeness used to be the example; since its parameter
+    became a function reference, `address` is a real alias of it.)
     """
-    assert aliases_for("/analyze_function_completeness", "GET") == {}
+    assert aliases_for("/get_xrefs_to", "GET") == {}
     assert aliases_for("/list_functions", "GET") == {}
     assert aliases_for("/search_functions_enhanced", "GET") == {}
 

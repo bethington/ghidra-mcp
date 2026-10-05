@@ -401,7 +401,7 @@ def test_catalog_lookups_are_not_reported_as_breaches():
 @pytest.mark.parametrize(
     "path,method,alias,canonical",
     [
-        ("/get_function_labels", "GET", "address", "name"),
+        ("/analyze_function_completeness", "GET", "address", "function"),
         ("/rename_function", "POST", "function_address", "old_name"),
         ("/rename_symbol", "POST", "address", "target"),
     ],

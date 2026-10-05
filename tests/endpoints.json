@@ -29,6 +29,10 @@
       "category": "function",
       "params": [
         "function",
+        "address",
+        "name",
+        "function_address",
+        "function_name",
         "tags",
         "assignments",
         "program"
@@ -169,7 +173,11 @@
       "method": "GET",
       "category": "analysis",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -183,7 +191,11 @@
       "method": "GET",
       "category": "analysis",
       "params": [
+        "function",
         "name",
+        "address",
+        "function_address",
+        "function_name",
         "include_xrefs",
         "include_callees",
         "include_callers",
@@ -203,7 +215,11 @@
       "method": "GET",
       "category": "analysis",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "compact",
         "addresses",
         "program"
@@ -299,7 +315,11 @@
       "method": "POST",
       "category": "documentation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program",
         "version_override",
         "dry_run"
@@ -359,7 +379,11 @@
       "method": "GET",
       "category": "datatype",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -411,6 +435,8 @@
       "method": "POST",
       "category": "function",
       "params": [
+        "function",
+        "address",
         "function_address",
         "function_name",
         "parameter_renames",
@@ -532,7 +558,11 @@
       "method": "POST",
       "category": "comment",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "clear_plate",
         "clear_pre",
         "clear_eol",
@@ -1086,7 +1116,11 @@
       "method": "GET",
       "category": "function",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "functions",
         "program",
         "timeout"
@@ -1145,7 +1179,11 @@
       "method": "POST",
       "category": "function",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1321,7 +1359,11 @@
       "method": "POST",
       "category": "emulation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "registers",
         "memory",
         "max_steps",
@@ -1473,7 +1515,11 @@
       "method": "GET",
       "category": "documentation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "source_program",
         "target_program",
         "threshold",
@@ -1504,7 +1550,11 @@
       "method": "GET",
       "category": "function",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1708,7 +1758,11 @@
       "method": "GET",
       "category": "function",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1722,8 +1776,11 @@
       "method": "GET",
       "category": "xref",
       "params": [
+        "function",
         "name",
         "address",
+        "function_name",
+        "function_address",
         "depth",
         "direction",
         "program"
@@ -1739,8 +1796,11 @@
       "method": "GET",
       "category": "xref",
       "params": [
+        "function",
         "name",
         "address",
+        "function_name",
+        "function_address",
         "offset",
         "limit",
         "program"
@@ -1756,8 +1816,11 @@
       "method": "GET",
       "category": "xref",
       "params": [
+        "function",
         "name",
         "address",
+        "function_name",
+        "function_address",
         "offset",
         "limit",
         "program"
@@ -1786,7 +1849,11 @@
       "method": "GET",
       "category": "documentation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1800,7 +1867,11 @@
       "method": "GET",
       "category": "documentation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1814,8 +1885,11 @@
       "method": "GET",
       "category": "xref",
       "params": [
+        "function",
         "name",
         "address",
+        "function_name",
+        "function_address",
         "offset",
         "limit",
         "program"
@@ -1831,7 +1905,11 @@
       "method": "GET",
       "category": "symbol",
       "params": [
+        "function",
+        "address",
         "name",
+        "function_address",
+        "function_name",
         "offset",
         "limit",
         "program"
@@ -1847,7 +1925,11 @@
       "method": "GET",
       "category": "analysis",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "granularity",
         "program"
       ],
@@ -1862,7 +1944,11 @@
       "method": "GET",
       "category": "documentation",
       "params": [
+        "function",
         "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1877,6 +1963,10 @@
       "category": "function",
       "params": [
         "function",
+        "address",
+        "name",
+        "function_address",
+        "function_name",
         "program"
       ],
       "servers": [
@@ -1907,8 +1997,11 @@
       "method": "GET",
       "category": "xref",
       "params": [
+        "function",
         "name",
         "address",
+        "function_name",
+        "function_address",
         "offset",
         "limit",
         "program"
@@ -2803,6 +2896,10 @@
       "category": "function",
       "params": [
         "function",
+        "address",
+        "name",
+        "function_address",
+        "function_name",
         "tags",
         "assignments",
         "program"
@@ -2895,6 +2992,9 @@
       "category": "function",
       "params": [
         "old_name",
+        "function_address",
+        "function",
+        "oldName",
         "new_name",
         "program",
         "strict_mode"
@@ -2911,6 +3011,8 @@
       "category": "symbol",
       "params": [
         "target",
+        "address",
+        "function_address",
         "new_name",
         "kind",
         "old_name",
@@ -2927,7 +3029,11 @@
       "method": "POST",
       "category": "function",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "variable_renames",
         "force_individual",
         "program"
@@ -3455,6 +3561,7 @@
       "params": [
         "function_address",
         "no_return",
+        "noReturn",
         "program"
       ],
       "servers": [
@@ -3501,6 +3608,7 @@
       "params": [
         "function_address",
         "this_type",
+        "thisType",
         "program"
       ],
       "servers": [
@@ -3581,7 +3689,11 @@
       "method": "POST",
       "category": "function",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "variable_name",
         "storage",
         "program"
@@ -3599,6 +3711,7 @@
       "params": [
         "function_address",
         "variable_name",
+        "parameter_name",
         "new_type",
         "program"
       ],
@@ -3613,7 +3726,11 @@
       "method": "POST",
       "category": "function",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "variables",
         "program"
       ],
@@ -3705,7 +3822,11 @@
       "method": "GET",
       "category": "datatype",
       "params": [
+        "function",
+        "address",
+        "name",
         "function_address",
+        "function_name",
         "prototype",
         "calling_convention",
         "program"

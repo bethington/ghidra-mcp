@@ -2460,7 +2460,7 @@ public class DataTypeService {
      */
     @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response validateFunctionPrototype(
-            @Param(value = "function_address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -2474,7 +2474,7 @@ public class DataTypeService {
         Program program = pe.program();
 
         // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
@@ -4556,7 +4556,8 @@ public class DataTypeService {
             description = "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response auditGlobalsInFunction(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function",
+                   paramType = Param.FUNCTION_REF,
                    description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -4564,15 +4565,14 @@ public class DataTypeService {
         Program program = pe.program();
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("address is required");
+            return Response.err("function is required (name or entry-point address)");
         }
-        Address funcAddr = ServiceUtils.parseAddress(program, addressStr);
-        if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Function func = ServiceUtils.resolveFunction(program, addressStr);
-        if (func == null) {
-            return Response.err("No function found at " + addressStr);
-        }
+        // resolveFunction takes a name OR an address; parsing an address first would
+        // reject every name before the resolver ever ran.
+        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
+        if (funcLookup.hasError()) return funcLookup.error();
+        Function func = funcLookup.function();
+        Address funcAddr = func.getEntryPoint();
 
         // Walk instructions, gather unique data-reference targets.
         // Skip targets that resolve to other functions (those are call/jump
