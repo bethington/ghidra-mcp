@@ -3,6 +3,23 @@
 import logging
 import os
 
+from mcp.types import ToolAnnotations
+
+# ==========================================================================
+# MCP tool annotations
+# ==========================================================================
+# The hints clients act on. Claude Code derives read-only-ness solely from
+# readOnlyHint (absent ⇒ false) and, in plan mode, forces a permission prompt
+# for every MCP tool that is not read-only — a prompt no allow-rule can
+# suppress. It gates parallel execution on the same flag. Every statically
+# defined tool therefore declares one of these three.
+#
+# openWorldHint is left unset throughout: it would be false for nearly every
+# tool but not all of them, and no client gates behaviour on it.
+READ_ONLY_TOOL = ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+WRITE_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+DESTRUCTIVE_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+
 # ==========================================================================
 # Request timeouts
 # ==========================================================================

@@ -156,7 +156,7 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function", access = ToolAccess.READ_ONLY)
     public Response decompileFunctionByAddress(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
@@ -392,7 +392,7 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response forceDecompile(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -503,7 +503,7 @@ public class FunctionService {
      * Get assembly code for a function.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.", category = "function")
+    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.", category = "function", access = ToolAccess.READ_ONLY)
     public Response disassembleFunction(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -750,7 +750,7 @@ public class FunctionService {
     /**
      * Get function by address.
      */
-    @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionByAddress(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -941,7 +941,7 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    @McpTool(path = "/rename_function", method = "POST", description = "Rename a function identified by name OR address. Runs the full naming-quality gate (verb-tier specificity + token-subset collision) with an optional strict_mode override. Replaces rename_function_by_address.", category = "function")
+    @McpTool(path = "/rename_function", method = "POST", description = "Rename a function identified by name OR address. Runs the full naming-quality gate (verb-tier specificity + token-subset collision) with an optional strict_mode override. Replaces rename_function_by_address.", category = "function", access = ToolAccess.WRITE)
     public Response renameFunctionByAddress(
             @Param(value = "old_name", source = ParamSource.BODY,
                    aliases = {"function_address", "function", "oldName"},
@@ -1262,7 +1262,7 @@ public class FunctionService {
     /**
      * Endpoint wrapper for setFunctionPrototype that converts PrototypeResult to Response.
      */
-    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setFunctionPrototypeEndpoint(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1778,7 +1778,7 @@ public class FunctionService {
      */
     @McpTool(path = "/set_function_this_type", method = "POST",
             description = "Type the implicit 'this' of a __thiscall/__fastcall member function by associating the function with its class. Ghidra's auto-'this' (ECX on x86) is an immutable auto-parameter; with auto-storage it derives its type from the function's parent Class namespace, matched by name to a same-named structure. This tool finds/creates a class namespace for the struct and moves the function into it (no custom storage). Pass 'MyClass *' or 'MyClass'; the structure MyClass must already exist (create_struct). On programs with multiple address spaces, prefix function_address with the space name (mem:1000).",
-            category = "function")
+            category = "function", access = ToolAccess.WRITE)
     public Response setFunctionThisType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddrStr,
@@ -1918,7 +1918,7 @@ public class FunctionService {
      */
     @McpTool(path = "/set_variable_type", method = "POST",
             description = "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type.",
-            category = "function")
+            category = "function", access = ToolAccess.WRITE)
     public Response setDecompilerVariableType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Entry address of the function that owns the variable. Accepts 0x<hex> "
@@ -1960,7 +1960,7 @@ public class FunctionService {
 
     @McpTool(path = "/list_class_members", method = "GET",
             description = "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow.",
-            category = "function")
+            category = "function", access = ToolAccess.READ_ONLY)
     public Response listClassMembers(
             @Param(value = "class_name",
                    description = "Class / struct name, e.g. 'UnitAny'.") String className,
@@ -2204,7 +2204,7 @@ public class FunctionService {
      * @param noReturn true to mark as non-returning, false to mark as returning
      * @return Success or error message
      */
-    @McpTool(path = "/set_function_no_return", method = "POST", description = "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_function_no_return", method = "POST", description = "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setFunctionNoReturn(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2300,7 +2300,7 @@ public class FunctionService {
      * @param instructionAddrStr The instruction address in hex format (e.g., "0x6fb5c8b9")
      * @return Success or error message
      */
-    @McpTool(path = "/clear_instruction_flow_override", method = "POST", description = "Clear flow override at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/clear_instruction_flow_override", method = "POST", description = "Clear flow override at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response clearInstructionFlowOverride(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2396,7 +2396,7 @@ public class FunctionService {
      * @return The storage read back off the variable, or an error explaining
      *         why the requested location was refused
      */
-    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setVariableStorage(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2719,7 +2719,7 @@ public class FunctionService {
     /**
      * Get detailed information about a function's variables (parameters and locals).
      */
-    @McpTool(path = "/get_function_variables", description = "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.", category = "function")
+    @McpTool(path = "/get_function_variables", description = "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
@@ -2949,7 +2949,7 @@ public class FunctionService {
     /**
      * v1.5.0: Batch rename function and all its components atomically.
      */
-    @McpTool(path = "/batch_rename_function_components", method = "POST", description = "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/batch_rename_function_components", method = "POST", description = "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response batchRenameFunctionComponents(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3077,7 +3077,7 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    @McpTool(path = "/delete_function", method = "POST", description = "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/delete_function", method = "POST", description = "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFunctionAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3165,7 +3165,7 @@ public class FunctionService {
     /**
      * Create a function at the given address.
      */
-    @McpTool(path = "/create_function", method = "POST", description = "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/create_function", method = "POST", description = "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response createFunctionAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3298,7 +3298,7 @@ public class FunctionService {
      * @param restrictToExecuteMemory If true, restricts disassembly to executable memory (default: true)
      * @return JSON result with disassembly status
      */
-    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. Returns the disassembled instruction text (mnemonic + operands + bytes) when `include_instructions` is true (default), so callers working on custom processor definitions (#205) can read back what Ghidra produced without a follow-up call.", category = "function")
+    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. Returns the disassembled instruction text (mnemonic + operands + bytes) when `include_instructions` is true (default), so callers working on custom processor definitions (#205) can read back what Ghidra produced without a follow-up call.", category = "function", access = ToolAccess.WRITE)
     public Response disassembleBytes(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3560,7 +3560,7 @@ public class FunctionService {
 
     @McpTool(path = "/clear_flow_and_repair", method = "POST",
              description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
-             category = "function")
+             category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response clearFlowAndRepair(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
                    description = "Seed start. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000). "
@@ -3846,7 +3846,7 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    @McpTool(path = "/rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response batchRenameVariables(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -4096,7 +4096,7 @@ public class FunctionService {
             description = "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. "
                         + "Hungarian prefix validation is enforced: the new name's prefix must match the type. "
                         + "On programs with multiple address spaces, prefix addresses with the space name.",
-            category = "function")
+            category = "function", access = ToolAccess.WRITE)
     public Response setVariables(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Function entry point address") String functionAddress,
@@ -4641,7 +4641,7 @@ public class FunctionService {
         return out;
     }
 
-    @McpTool(path = "/get_function_tags", description = "List all tags assigned to a specific function. Accepts either a function address or a function name.", category = "function")
+    @McpTool(path = "/get_function_tags", description = "List all tags assigned to a specific function. Accepts either a function address or a function name.", category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctionTags(
             @Param(value = "function", paramType = "address",
                    description = "Function address (0x<hex> or <space>:<hex>) or function name") String functionRef,
@@ -4671,7 +4671,7 @@ public class FunctionService {
 
     @McpTool(path = "/add_function_tag", method = "POST",
              description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and auto-created. Replaces batch_add_function_tags.",
-             category = "function")
+             category = "function", access = ToolAccess.WRITE)
     public Response addFunctionTag(
             @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
@@ -4724,7 +4724,7 @@ public class FunctionService {
 
     @McpTool(path = "/remove_function_tag", method = "POST",
              description = "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition — use delete_function_tag for that. Replaces batch_remove_function_tags.",
-             category = "function")
+             category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response removeFunctionTag(
             @Param(value = "function", source = ParamSource.BODY, paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
@@ -4781,7 +4781,7 @@ public class FunctionService {
 
     @McpTool(path = "/list_function_tags",
              description = "List all program-wide function tag definitions with their use counts.",
-             category = "function")
+             category = "function", access = ToolAccess.READ_ONLY)
     public Response listFunctionTags(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of tag definitions to skip before this page starts; 0 begins at "
@@ -4816,7 +4816,7 @@ public class FunctionService {
 
     @McpTool(path = "/create_function_tag", method = "POST",
              description = "Create a program-wide function tag definition with an optional comment. Use add_function_tag to attach it to functions.",
-             category = "function")
+             category = "function", access = ToolAccess.WRITE)
     public Response createFunctionTag(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name (case-sensitive; Ghidra treats whitespace-trimmed names as unique)") String name,
@@ -4860,7 +4860,7 @@ public class FunctionService {
 
     @McpTool(path = "/delete_function_tag", method = "POST",
              description = "Delete a program-wide function tag definition. This detaches the tag from every function that had it.",
-             category = "function")
+             category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFunctionTag(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name to delete program-wide") String name,
@@ -4895,7 +4895,7 @@ public class FunctionService {
 
     @McpTool(path = "/set_function_tag_comment", method = "POST",
              description = "Update the comment/description on an existing program-wide function tag.",
-             category = "function")
+             category = "function", access = ToolAccess.WRITE)
     public Response setFunctionTagComment(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name") String name,
@@ -4931,7 +4931,7 @@ public class FunctionService {
 
     @McpTool(path = "/search_functions_by_tag",
              description = "List all functions that have a specified tag attached. Returns name + entry address.",
-             category = "function")
+             category = "function", access = ToolAccess.READ_ONLY)
     public Response searchFunctionsByTag(
             @Param(value = "tag", description = "Tag name to search for") String tagName,
             @Param(value = "offset", defaultValue = "0",

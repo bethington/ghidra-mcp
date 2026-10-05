@@ -61,7 +61,7 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionHash(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -231,7 +231,7 @@ public class DocumentationHashService {
     /**
      * Get hashes for multiple functions efficiently
      */
-    @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation")
+    @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getBulkFunctionHashes(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of matching functions to skip before this page starts; 0 begins "
@@ -315,7 +315,7 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -477,7 +477,7 @@ public class DocumentationHashService {
         return applyFunctionDocumentation(jsonBody, null);
     }
 
-    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.WRITE)
     public Response applyFunctionDocumentation(
             @Param(value = "json_body", source = ParamSource.BODY,
                    description = "The whole payload as one JSON STRING, in the shape "
@@ -747,7 +747,7 @@ public class DocumentationHashService {
         return compareProgramsDocumentation(null);
     }
 
-    @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation")
+    @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response compareProgramsDocumentation(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         try {
@@ -802,7 +802,7 @@ public class DocumentationHashService {
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response findUndocumentedByString(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -881,7 +881,7 @@ public class DocumentationHashService {
      * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
      * This helps identify undocumented functions that can be matched using string anchors.
      */
-    @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation")
+    @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response batchStringAnchorReport(
             @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -981,7 +981,7 @@ public class DocumentationHashService {
     /**
      * Get the function signature (feature vector) for a function at the given address.
      */
-    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleGetFunctionSignature(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1012,7 +1012,7 @@ public class DocumentationHashService {
     /**
      * Find functions in target program similar to the source function.
      */
-    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleFindSimilarFunctionsFuzzy(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1057,7 +1057,7 @@ public class DocumentationHashService {
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation")
+    @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleBulkFuzzyMatch(
             @Param(value = "source_program", description = "Source program name") String sourceProgramName,
             @Param(value = "target_program", description = "Target program name") String targetProgramName,
@@ -1097,7 +1097,7 @@ public class DocumentationHashService {
     /**
      * Compute a structured diff between two functions.
      */
-    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleDiffFunctions(
             @Param(value = "address_a", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1169,7 +1169,7 @@ public class DocumentationHashService {
             + "the orphan-rescue workflow: source is typically '<name>_recovered', target is the original "
             + "'<name>.dll'. Idempotent — re-running on an already-merged target only fills gaps. Set "
             + "dry_run=true to count without writing.",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response mergeProgramDocumentation(
             @Param(value = "source", source = ParamSource.BODY,
                 description = "Source program path or name (read-only — the rescued copy)") String sourceName,
@@ -1675,7 +1675,7 @@ public class DocumentationHashService {
         description = "Ingest a single function's documentation into the cross-version "
             + "archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge "
             + "resolution happens on the archive side. Use archive_ingest_program for bulk.",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestFunction(
             @Param(value = "address", paramType = "address",
                 description = "Function entry-point address (Ghidra hex form)") String functionAddress,
@@ -1727,7 +1727,7 @@ public class DocumentationHashService {
         description = "Bulk-ingest every function in a program into the cross-version "
             + "documentation archive. Posts each to /v1/doc_archive/upsert. Returns "
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestProgram(
             @Param(value = "program",
                 description = "Target program path/name", defaultValue = "") String programName,

@@ -38,7 +38,7 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol")
+    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response getFunctionLabels(
             @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
                    description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
@@ -124,7 +124,7 @@ public class SymbolLabelService {
 
     @McpTool(path = "/rename_symbol", method = "POST",
              description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
-             category = "symbol")
+             category = "symbol", access = ToolAccess.WRITE)
     public Response renameSymbol(
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
                    aliases = {"address", "function_address"},
@@ -244,7 +244,7 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null, programName);
     }
 
-    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol")
+    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.WRITE)
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -511,7 +511,7 @@ public class SymbolLabelService {
         return deleteLabel(addressStr, labelName, null, programName);
     }
 
-    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol", access = ToolAccess.DESTRUCTIVE)
     public Response deleteLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -1065,7 +1065,7 @@ public class SymbolLabelService {
         return canRenameAtAddress(addressStr, null);
     }
 
-    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response canRenameAtAddress(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "

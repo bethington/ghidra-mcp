@@ -30,7 +30,7 @@ public class ListingService {
     // Listing endpoints
     // ========================================================================
 
-    @McpTool(path = "/list_methods", description = "List all function names with pagination", category = "listing")
+    @McpTool(path = "/list_methods", description = "List all function names with pagination", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getAllFunctionNames(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -52,7 +52,7 @@ public class ListingService {
         return ServiceUtils.paged("methods", names, offset, limit);
     }
 
-    @McpTool(path = "/list_classes", description = "List class and namespace names with pagination", category = "listing")
+    @McpTool(path = "/list_classes", description = "List class and namespace names with pagination", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getAllClassNames(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -79,7 +79,7 @@ public class ListingService {
         return ServiceUtils.paged("classes", sorted, offset, limit);
     }
 
-    @McpTool(path = "/list_segments", description = "List memory blocks/segments", category = "listing")
+    @McpTool(path = "/list_segments", description = "List memory blocks/segments", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listSegments(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -110,7 +110,7 @@ public class ListingService {
         return ServiceUtils.paged("segments", segments, offset, limit);
     }
 
-    @McpTool(path = "/list_imports", description = "List external/imported symbols", category = "listing")
+    @McpTool(path = "/list_imports", description = "List external/imported symbols", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listImports(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -143,7 +143,7 @@ public class ListingService {
         return ServiceUtils.paged("imports", all, offset, limit);
     }
 
-    @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing")
+    @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listExports(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -174,7 +174,7 @@ public class ListingService {
         return ServiceUtils.paged("exports", exports, offset, limit);
     }
 
-    @McpTool(path = "/list_namespaces", description = "List namespace hierarchy", category = "listing")
+    @McpTool(path = "/list_namespaces", description = "List namespace hierarchy", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listNamespaces(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -201,7 +201,7 @@ public class ListingService {
         return ServiceUtils.paged("namespaces", sorted, offset, limit);
     }
 
-    @McpTool(path = "/list_data_items", description = "List defined data items", category = "listing")
+    @McpTool(path = "/list_data_items", description = "List defined data items", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDefinedData(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -238,7 +238,7 @@ public class ListingService {
         return ServiceUtils.paged("data_items", items, offset, limit);
     }
 
-    @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.", category = "listing")
+    @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDataItemsByXrefs(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -344,7 +344,7 @@ public class ListingService {
                 "defined", "all", 1, false, programName);
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response searchFunctionsByName(
             @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0",
@@ -375,7 +375,7 @@ public class ListingService {
         return ServiceUtils.paged("functions", matches, offset, limit);
     }
 
-    @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
+    @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listFunctions(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -392,7 +392,7 @@ public class ListingService {
         return ServiceUtils.listed("functions", functions);
     }
 
-    @McpTool(path = "/list_functions_enhanced", description = "List functions with thunk/external flags as JSON", category = "listing")
+    @McpTool(path = "/list_functions_enhanced", description = "List functions with thunk/external flags as JSON", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listFunctionsEnhanced(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -436,7 +436,7 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing")
+    @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listCallingConventions(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -457,7 +457,7 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing")
+    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDefinedStrings(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -501,7 +501,7 @@ public class ListingService {
         return ServiceUtils.paged("strings", strings, offset, limit);
     }
 
-    @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing")
+    @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getFunctionCount(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -515,7 +515,7 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing")
+    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response searchStrings(
             @Param(value = "search_term", description = "Regex search pattern") String query,
             @Param(value = "min_length", defaultValue = "4",
@@ -574,7 +574,7 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/list_globals", description = "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.", category = "listing")
+    @McpTool(path = "/list_globals", description = "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listGlobals(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -710,7 +710,7 @@ public class ListingService {
 
     @McpTool(path = "/list_shadowed_globals",
             description = "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals — it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
-            category = "listing")
+            category = "listing", access = ToolAccess.READ_ONLY)
     public Response listShadowedGlobals(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -809,7 +809,7 @@ public class ListingService {
         return block != null && isDataBlock(block);
     }
 
-    @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing")
+    @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1024,7 +1024,7 @@ public class ListingService {
     // External Location Listing
     // ========================================================================
 
-    @McpTool(path = "/list_external_locations", description = "List external symbol locations", category = "listing")
+    @McpTool(path = "/list_external_locations", description = "List external symbol locations", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listExternalLocations(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of external locations to skip before this page starts; 0 begins "
@@ -1077,7 +1077,7 @@ public class ListingService {
         return listExternalLocations(offset, limit, null);
     }
 
-    @McpTool(path = "/get_external_location", description = "Get external location details by address or DLL name", category = "listing")
+    @McpTool(path = "/get_external_location", description = "Get external location details by address or DLL name", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getExternalLocationDetails(
             @Param(value = "address", paramType = "address",
                    description = "Address of the external location, as 0x<hex> (default space) or "
@@ -1161,7 +1161,7 @@ public class ListingService {
     // Utility endpoints (not program-scoped)
     // ======================================================================
 
-    @McpTool(path = "/convert_number", description = "Convert number between hex/decimal/binary formats", category = "listing")
+    @McpTool(path = "/convert_number", description = "Convert number between hex/decimal/binary formats", category = "listing", access = ToolAccess.READ_ONLY)
     public Response convertNumber(
             @Param(value = "text", description = "Number to convert") String text,
             @Param(value = "size", defaultValue = "4", description = "Size in bytes") int size) {

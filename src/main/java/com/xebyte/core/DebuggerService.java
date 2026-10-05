@@ -420,7 +420,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/launch", method = "POST",
-            description = "Launch an executable through Ghidra's Trace RMI debugger launcher")
+            description = "Launch an executable through Ghidra's Trace RMI debugger launcher", access = ToolAccess.WRITE)
     public Response launch(
             @Param(value = "executable_path", source = ParamSource.BODY,
                     description = "Absolute path to the executable to launch") String executablePath,
@@ -670,7 +670,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/status",
-            description = "Get debugger status: active trace, thread, execution state, module count")
+            description = "Get debugger status: active trace, thread, execution state, module count", access = ToolAccess.READ_ONLY)
     public Response getStatus() {
         PluginTool tool = getDebuggerTool();
         if (tool == null) return noDebugger();
@@ -733,7 +733,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/traces",
-            description = "List all open debug traces")
+            description = "List all open debug traces", access = ToolAccess.READ_ONLY)
     public Response listTraces() {
         PluginTool tool = getDebuggerTool();
         if (tool == null) return noDebugger();
@@ -766,7 +766,7 @@ public class DebuggerService {
     // ========================================================================
 
     @McpTool(path = "/debugger/resume", method = "POST",
-            description = "Resume execution of the debugged process")
+            description = "Resume execution of the debugged process", access = ToolAccess.WRITE)
     public Response resume() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -789,7 +789,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/interrupt", method = "POST",
-            description = "Interrupt (break into) the running target")
+            description = "Interrupt (break into) the running target", access = ToolAccess.WRITE)
     public Response interrupt() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -811,7 +811,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/step_into", method = "POST",
-            description = "Single-step into the next instruction (follows calls)")
+            description = "Single-step into the next instruction (follows calls)", access = ToolAccess.WRITE)
     public Response stepInto() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -833,7 +833,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/step_over", method = "POST",
-            description = "Step over the next instruction (does not follow calls)")
+            description = "Step over the next instruction (does not follow calls)", access = ToolAccess.WRITE)
     public Response stepOver() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -855,7 +855,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/step_out", method = "POST",
-            description = "Step out of the current function (run to return)")
+            description = "Step out of the current function (run to return)", access = ToolAccess.WRITE)
     public Response stepOut() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -881,7 +881,7 @@ public class DebuggerService {
     // ========================================================================
 
     @McpTool(path = "/debugger/set_breakpoint", method = "POST",
-            description = "Set a software execution breakpoint at an address in the trace")
+            description = "Set a software execution breakpoint at an address in the trace", access = ToolAccess.WRITE)
     public Response setBreakpoint(
             @Param(value = "address", paramType = "address",
                     description = "Address to break at (in trace address space)") String addressStr) {
@@ -910,7 +910,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/remove_breakpoint", method = "POST",
-            description = "Remove a breakpoint at an address")
+            description = "Remove a breakpoint at an address", access = ToolAccess.DESTRUCTIVE)
     public Response removeBreakpoint(
             @Param(value = "address", paramType = "address",
                     description = "Address of breakpoint to remove") String addressStr) {
@@ -953,7 +953,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/list_breakpoints",
-            description = "List all breakpoints in the current trace")
+            description = "List all breakpoints in the current trace", access = ToolAccess.READ_ONLY)
     public Response listBreakpoints() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -992,7 +992,7 @@ public class DebuggerService {
 
     @McpTool(path = "/debugger/registers",
             description = "Read CPU registers from the current debug trace snapshot. " +
-                    "Shows general-purpose registers (EAX-EDI, EIP, ESP, EFLAGS for x86)")
+                    "Shows general-purpose registers (EAX-EDI, EIP, ESP, EFLAGS for x86)", access = ToolAccess.READ_ONLY)
     public Response getRegisters() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -1051,7 +1051,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/read_memory",
-            description = "Read memory from the debugged process. Returns hex dump and DWORD interpretation.")
+            description = "Read memory from the debugged process. Returns hex dump and DWORD interpretation.", access = ToolAccess.READ_ONLY)
     public Response readMemory(
             @Param(value = "address", paramType = "address",
                     description = "Start address to read from") String addressStr,
@@ -1112,7 +1112,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/stack_trace",
-            description = "Get the call stack backtrace for the current thread")
+            description = "Get the call stack backtrace for the current thread", access = ToolAccess.READ_ONLY)
     public Response getStackTrace(
             @Param(value = "depth", defaultValue = "20",
                     description = "Maximum stack frames to return") int depth) {
@@ -1167,7 +1167,7 @@ public class DebuggerService {
     }
 
     @McpTool(path = "/debugger/modules",
-            description = "List modules (DLLs/EXEs) loaded in the debugged process")
+            description = "List modules (DLLs/EXEs) loaded in the debugged process", access = ToolAccess.READ_ONLY)
     public Response listModules() {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
@@ -1207,7 +1207,7 @@ public class DebuggerService {
 
     @McpTool(path = "/debugger/static_to_dynamic",
             description = "Translate a static Ghidra program address to a runtime " +
-                    "dynamic address in the current trace")
+                    "dynamic address in the current trace", access = ToolAccess.READ_ONLY)
     public Response staticToDynamic(
             @Param(value = "address", paramType = "address",
                     description = "Static address from a Ghidra program") String addressStr,
@@ -1265,7 +1265,7 @@ public class DebuggerService {
 
     @McpTool(path = "/debugger/dynamic_to_static",
             description = "Translate a runtime dynamic address from the current trace " +
-                    "back to a static Ghidra program address")
+                    "back to a static Ghidra program address", access = ToolAccess.READ_ONLY)
     public Response dynamicToStatic(
             @Param(value = "address", paramType = "address",
                     description = "Dynamic address from the trace") String addressStr) {
@@ -1318,7 +1318,7 @@ public class DebuggerService {
     // ========================================================================
 
     @McpTool(path = "/debugger/launch_offers",
-            description = "List available debugger launch/attach options for the current program")
+            description = "List available debugger launch/attach options for the current program", access = ToolAccess.READ_ONLY)
     public Response listLaunchOffers(
             @Param(value = "program", defaultValue = "",
                     description = "Program to get offers for") String programName) {
