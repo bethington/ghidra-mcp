@@ -93,6 +93,62 @@ public interface ProgramProvider {
     }
 
     /**
+     * The PluginTool this provider works through, when there is one.
+     *
+     * <p>Only a seed: callers that need a specific service (a CodeViewer, a
+     * ProgramManager) walk {@code ToolManager.getRunningTools()} from this
+     * tool's project, so the FrontEnd tool is enough even though it carries
+     * neither. Headless has no tool at all and returns null, which is how
+     * GUI-only operations detect that they cannot run.
+     *
+     * @return The tool, or null when running headless
+     */
+    default ghidra.framework.plugintool.PluginTool getTool() {
+        return null;
+    }
+
+    /**
+     * A ProgramManager from an open CodeBrowser, when one is running.
+     *
+     * <p>Distinct from walking the tool's own services: the FrontEnd tool has
+     * no ProgramManager, so a provider that can see CodeBrowsers answers here
+     * and spares the caller a second discovery pass.
+     *
+     * @return A ProgramManager, or null when none is reachable
+     */
+    default ghidra.app.services.ProgramManager findProgramManager() {
+        return null;
+    }
+
+    /**
+     * Close whatever is open for this project path, in whichever window holds it.
+     *
+     * <p>By project path rather than name on purpose — the caller is about to
+     * move or delete that DomainFile, and a name match would also close its
+     * namesakes.
+     *
+     * @param path The DomainFile path to close
+     * @return true if something was closed
+     */
+    default boolean closeProgramByPath(String path) {
+        return false;
+    }
+
+    /**
+     * Drop any handle this provider is holding for {@code nameOrPath}.
+     *
+     * <p>For providers that cache programs they opened themselves. A cached
+     * handle outlives the window that showed it, so closing in the GUI is not
+     * enough to release the file.
+     *
+     * @param nameOrPath Program name or project path
+     * @return true if a cached handle was released
+     */
+    default boolean releaseCachedProgram(String nameOrPath) {
+        return false;
+    }
+
+    /**
      * Get a program by name, falling back to current program if name is null or empty.
      *
      * @param name The program name (may be null)

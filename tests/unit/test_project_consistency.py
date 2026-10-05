@@ -294,14 +294,10 @@ class TestJavaArchitecture(unittest.TestCase):
         """Manual createContext registrations need explicit GUI/headless parity."""
         gui_file = JAVA_SRC / "GhidraMCPPlugin.java"
         headless_file = JAVA_SRC / "headless" / "GhidraMCPHeadlessServer.java"
-        # Hand-coded GUI routes register through a registrar so they reach every
-        # transport (not just the Sun TCP server), so both spellings count.
-        gui = set(
-            re.findall(
-                r'(?:server\.createContext|reg\.add)\("([^"]+)"', gui_file.read_text()
-            )
-        )
-        headless = set(re.findall(r'safeContext\("([^"]+)"', headless_file.read_text()))
+        # Both servers register hand-coded routes on McpHttpServer as http.route("/x", ...).
+        route = re.compile(r'http\.route\("([^"]+)"')
+        gui = set(route.findall(gui_file.read_text()))
+        headless = set(route.findall(headless_file.read_text()))
         annotated = set()
         for java_file in list(CORE_SRC.glob("*Service.java")) + list((JAVA_SRC / "headless").glob("*Service.java")):
             annotated.update(
@@ -311,7 +307,6 @@ class TestJavaArchitecture(unittest.TestCase):
         gui_only_expected = {
             "/batch_apply_documentation",
             "/mcp/health",
-            "/mcp/instance_info",
             "/project/info",
             "/server/authenticate",
             "/tool/goto_address",

@@ -30,36 +30,25 @@ public class HardeningWiringTest extends TestCase {
         return ProjectSource.readMainSource(parts);
     }
 
-    /** The TCP request wrapper must invoke the cross-origin guard. */
-    public void testTcpSafeHandlerCallsCrossOriginGuard() throws IOException {
-        String src = read("GhidraMCPPlugin.java");
-        assertTrue("safeHandler must call rejectCrossOriginRequest",
-                src.contains("rejectCrossOriginRequest("));
-    }
-
-    /** The headless request wrapper must invoke the cross-origin guard. */
-    public void testHeadlessSafeContextCallsCrossOriginGuard() throws IOException {
-        String src = read("headless", "GhidraMCPHeadlessServer.java");
-        assertTrue("safeContext must call rejectCrossOriginRequest",
-                src.contains("rejectCrossOriginRequest("));
-    }
-
     /**
-     * The UDS dispatch loop must enforce the bearer token before invoking the
-     * handler — otherwise a configured token silently doesn't apply on the
-     * socket transport.
+     * McpHttpServer's guard -- which every route on every transport of both the
+     * headless server and the GUI plugin goes through -- must apply the
+     * cross-origin guard (on TCP) and the bearer token before the handler runs.
      */
-    public void testUdsDispatchEnforcesBearerAuth() throws IOException {
-        String src = read("core", "UdsHttpServer.java");
-        assertTrue("UDS dispatch must check matchesBearerAuth",
+    public void testMcpHttpServerGuardsEveryRoute() throws IOException {
+        String src = read("core", "McpHttpServer.java");
+        assertTrue("guard must call rejectCrossOriginRequest",
+                src.contains("rejectCrossOriginRequest("));
+        assertTrue("guard must check matchesBearerAuth",
                 src.contains("matchesBearerAuth("));
-        assertTrue("UDS dispatch must exempt only health paths",
-                src.contains("isAuthExemptPath("));
-        // The auth check must sit before the handler is invoked, not after.
         int authIdx = src.indexOf("matchesBearerAuth(");
         int handleIdx = src.indexOf("handler.handle(exchange)");
         assertTrue("Bearer check must precede handler.handle()",
                 authIdx > 0 && handleIdx > 0 && authIdx < handleIdx);
+        assertTrue("UDS routes must be registered through the guard",
+                src.contains("uds.createContext(path, guard(handler, false))"));
+        assertTrue("TCP routes must be registered through the guard",
+                src.contains("guard(handler, true)"));
     }
 
     /** Destructive project ops must honor the project-scope containment guard. */
@@ -156,9 +145,10 @@ public class HardeningWiringTest extends TestCase {
     public void testRequestBodiesAreBounded() throws IOException {
         assertTrue("JsonHelper.parseBody must bound the read via readNBytes",
                 read("core", "JsonHelper.java").contains("readNBytes"));
-        assertTrue("TCP parsePostParams must bound the read",
-                read("GhidraMCPPlugin.java").contains("readNBytes")
-                        && read("GhidraMCPPlugin.java").contains("exceedsMaxBody"));
+        assertTrue("GUI parsePostParams must bound the read",
+                read("GhidraMCPPlugin.java").contains("readNBytes"));
+        assertTrue("McpHttpServer must reject an oversized Content-Length (413)",
+                read("core", "McpHttpServer.java").contains("exceedsMaxBody"));
         assertTrue("UDS must reject oversized Content-Length (413)",
                 read("core", "UdsHttpServer.java").contains("MAX_REQUEST_BODY_BYTES"));
     }
@@ -169,14 +159,8 @@ public class HardeningWiringTest extends TestCase {
      * validation messages are unaffected.
      */
     public void testTopLevelErrorsAreGeneric() throws IOException {
-        String plugin = read("GhidraMCPPlugin.java");
-        assertTrue("safeHandler catch must return a generic message",
-                plugin.contains("Internal server error. See the Ghidra application log"));
-        assertTrue("headless catch must return a generic message",
-                read("headless", "GhidraMCPHeadlessServer.java")
-                        .contains("Internal server error. See the Ghidra application log"));
-        assertTrue("UDS handler catch must return a generic message",
-                read("core", "ServerManager.java")
+        assertTrue("McpHttpServer guard catch must return a generic message",
+                read("core", "McpHttpServer.java")
                         .contains("Internal server error. See the Ghidra application log"));
     }
 
