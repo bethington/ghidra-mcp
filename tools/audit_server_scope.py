@@ -83,6 +83,11 @@ _ADD_ALL_RE = re.compile(
     r"(?:com\.xebyte\.core\.)?ManualToolDescriptors\.addAll\s*\("
 )
 
+# `public static final List<String> SHARED_ROUTES = List.of("/a", "/b", ...)`
+_MANUAL_PATH_LIST_RE = re.compile(
+    r"\bpublic\s+static\s+final\s+List\s*<\s*String\s*>\s+([A-Z_][A-Z0-9_]*)\s*=\s*List\.of\s*\("
+)
+
 # Literal route registration, for the "registered but not catalogued" report.
 # The GUI uses `server.createContext("/x", ...)`; headless wraps it in
 # `safeContext("/x", ...)`. Mirrors ManualToolDescriptorsParityTest's patterns.
@@ -370,6 +375,28 @@ def _resolve_arg(
     return None
 
 
+def _manual_path_lists(repo: Path) -> dict[str, list[str]]:
+    """Resolve named ManualToolDescriptors `List.of("...")` path lists."""
+    path = repo / "src" / "main" / "java" / "com" / "xebyte" / "core" / "ManualToolDescriptors.java"
+    if not path.exists():
+        return {}
+    text = _strip_comments(path.read_text(encoding="utf-8"))
+    out: dict[str, list[str]] = {}
+    pos = 0
+    while True:
+        m = _MANUAL_PATH_LIST_RE.search(text, pos)
+        if m is None:
+            break
+        name = m.group(1)
+        body, pos = _balanced(text, m.end() - 1)
+        out[name] = [
+            a[1:-1]
+            for a in _split_args(body)
+            if len(a) >= 2 and a.startswith('"') and a.endswith('"')
+        ]
+    return out
+
+
 def server_manual_paths(repo: Path, server_rel: str) -> list[str]:
     """The literal path list one server passes to ``ManualToolDescriptors.addAll``."""
     text = _strip_comments((repo / server_rel).read_text(encoding="utf-8"))
@@ -377,12 +404,27 @@ def server_manual_paths(repo: Path, server_rel: str) -> list[str]:
     if m is None:
         return []
     body, _ = _balanced(text, m.end() - 1)
-    # First argument is the scanner; the rest are string literals.
-    return [
-        a[1:-1]
-        for a in _split_args(body)[1:]
-        if len(a) >= 2 and a.startswith('"') and a.endswith('"')
-    ]
+    named_lists = _manual_path_lists(repo)
+    paths: list[str] = []
+    # First argument is the scanner.
+    for arg in _split_args(body)[1:]:
+        a = arg.strip()
+        if len(a) >= 2 and a.startswith('"') and a.endswith('"'):
+            paths.append(a[1:-1])
+            continue
+        # Allow either `SHARED_ROUTES` or `ManualToolDescriptors.SHARED_ROUTES`
+        # (with or without package qualification).
+        ref = re.fullmatch(r"(?:[A-Za-z_][\w.]*\.)?([A-Z_][A-Z0-9_]*)", a)
+        if ref and ref.group(1) in named_lists:
+            paths.extend(named_lists[ref.group(1)])
+            continue
+        raise ValueError(
+            f"{server_rel}: unresolved ManualToolDescriptors.addAll argument {a!r}. "
+            "Use string literals or a ManualToolDescriptors List<String> constant so "
+            "tools/audit_server_scope can derive route scope."
+        )
+    # Preserve declaration order while dropping accidental duplicates.
+    return list(dict.fromkeys(paths))
 
 
 def server_literal_contexts(repo: Path, server_rel: str) -> list[str]:
