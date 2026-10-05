@@ -141,6 +141,28 @@ public class AnnotationScanner {
      * dynamic tool discovery) instead of being live-but-invisible.
      */
     public void addManualDescriptor(ToolDescriptor descriptor) {
+        // A path is advertised once. Adding the same manual list twice listed every
+        // hand-coded route twice in /mcp/schema. Where a route is both annotated and
+        // hand-described -- the catalog regenerator scans both servers' services in one
+        // bag, and /open_project is annotated headless but hand-coded with two extra
+        // GUI parameters -- the annotated descriptor stays and gains whatever
+        // parameters only the other one declares, so neither server's are lost.
+        for (int i = 0; i < descriptors.size(); i++) {
+            ToolDescriptor existing = descriptors.get(i);
+            if (!existing.path().equals(descriptor.path())) {
+                continue;
+            }
+            List<ParamDescriptor> merged = new ArrayList<>(existing.params());
+            Set<String> names = new HashSet<>();
+            for (ParamDescriptor p : merged) names.add(p.name());
+            for (ParamDescriptor p : descriptor.params()) {
+                if (names.add(p.name())) merged.add(p);
+            }
+            descriptors.set(i, new ToolDescriptor(existing.path(), existing.method(),
+                existing.description(), existing.category(), existing.categoryDescription(),
+                existing.access(), merged));
+            return;
+        }
         descriptors.add(descriptor);
         descriptors.sort(Comparator.comparing(ToolDescriptor::path));
     }

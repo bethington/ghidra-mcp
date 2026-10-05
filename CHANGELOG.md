@@ -22,6 +22,18 @@ and folding `/get_version` into `/mcp/health`).
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Changed — one HTTP server for every transport
+
+The GUI plugin ran two HTTP stacks, TCP and the Unix socket, each wiring its own services,
+so a route could exist on one and not the other: emulation, the debugger, `/prompt_policy`
+and the hand-coded GUI routes were missing from the socket the bridge prefers, and the GUI
+schema listed every hand-coded route twice. The headless server had no Unix socket.
+
+`McpHttpServer` now serves GUI TCP, GUI UDS, headless TCP and headless UDS from one service
+set per server, so both transports of a server give the same answer. Services ask the
+`ProgramProvider` instead of checking which provider they were given. The unused transport
+abstraction is deleted.
+
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
 Reviewing a function took five round trips (`decompile_function`,

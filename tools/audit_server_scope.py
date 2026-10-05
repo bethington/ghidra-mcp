@@ -40,7 +40,7 @@ Derivation, mirroring what each server does at startup
    in that set is served by that server.
 2. **Hand-registered routes.** Parse each server's
    ``ManualToolDescriptors.addAll(scanner, ...)`` path list. Those routes are
-   registered directly via ``createContext``/``safeContext``.
+   registered directly via ``createContext``/``server.route``.
 
 A route's scope is the union of both mechanisms — ``/open_project`` and
 ``/server/status`` are GUI-hand-registered *and* ``@McpTool`` methods on
@@ -64,6 +64,7 @@ from pathlib import Path
 GUI_SERVER = "src/main/java/com/xebyte/GhidraMCPPlugin.java"
 HEADLESS_SERVER = "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java"
 HEADLESS_HANDLER = "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java"
+MANUAL_DESCRIPTORS = "src/main/java/com/xebyte/core/ManualToolDescriptors.java"
 
 #: Scope values written into ``tests/endpoints.json``. Ordered so the emitted
 #: array is stable regardless of discovery order.
@@ -83,16 +84,12 @@ _ADD_ALL_RE = re.compile(
     r"(?:com\.xebyte\.core\.)?ManualToolDescriptors\.addAll\s*\("
 )
 
-# `public static final List<String> SHARED_ROUTES = List.of("/a", "/b", ...)`
-_MANUAL_PATH_LIST_RE = re.compile(
-    r"\bpublic\s+static\s+final\s+List\s*<\s*String\s*>\s+([A-Z_][A-Z0-9_]*)\s*=\s*List\.of\s*\("
-)
-
 # Literal route registration, for the "registered but not catalogued" report.
-# The GUI uses `server.createContext("/x", ...)`; headless wraps it in
-# `safeContext("/x", ...)`. Mirrors ManualToolDescriptorsParityTest's patterns.
+# Both servers register hand-coded routes on McpHttpServer as `http.route("/x", ...)`.
+# Mirrors ManualToolDescriptorsParityTest's patterns -- keep the two in step,
+# or a route registered in one idiom reads here as registered nowhere.
 _LITERAL_CONTEXT_RE = re.compile(
-    r"(?:(?:server|httpServer)\.createContext|safeContext)\s*\(\s*\"([^\"]+)\""
+    r"http\.route\s*\(\s*\"([^\"]+)\""
 )
 
 # A field declaration: `private final com.xebyte.core.ListingService listingService;`
@@ -375,28 +372,6 @@ def _resolve_arg(
     return None
 
 
-def _manual_path_lists(repo: Path) -> dict[str, list[str]]:
-    """Resolve named ManualToolDescriptors `List.of("...")` path lists."""
-    path = repo / "src" / "main" / "java" / "com" / "xebyte" / "core" / "ManualToolDescriptors.java"
-    if not path.exists():
-        return {}
-    text = _strip_comments(path.read_text(encoding="utf-8"))
-    out: dict[str, list[str]] = {}
-    pos = 0
-    while True:
-        m = _MANUAL_PATH_LIST_RE.search(text, pos)
-        if m is None:
-            break
-        name = m.group(1)
-        body, pos = _balanced(text, m.end() - 1)
-        out[name] = [
-            a[1:-1]
-            for a in _split_args(body)
-            if len(a) >= 2 and a.startswith('"') and a.endswith('"')
-        ]
-    return out
-
-
 def server_manual_paths(repo: Path, server_rel: str) -> list[str]:
     """The literal path list one server passes to ``ManualToolDescriptors.addAll``."""
     text = _strip_comments((repo / server_rel).read_text(encoding="utf-8"))
@@ -404,31 +379,39 @@ def server_manual_paths(repo: Path, server_rel: str) -> list[str]:
     if m is None:
         return []
     body, _ = _balanced(text, m.end() - 1)
-    named_lists = _manual_path_lists(repo)
-    paths: list[str] = []
-    # First argument is the scanner.
-    for arg in _split_args(body)[1:]:
-        a = arg.strip()
-        if len(a) >= 2 and a.startswith('"') and a.endswith('"'):
-            paths.append(a[1:-1])
-            continue
-        # Allow either `SHARED_ROUTES` or `ManualToolDescriptors.SHARED_ROUTES`
-        # (with or without package qualification).
-        ref = re.fullmatch(r"(?:[A-Za-z_][\w.]*\.)?([A-Z_][A-Z0-9_]*)", a)
-        if ref and ref.group(1) in named_lists:
-            paths.extend(named_lists[ref.group(1)])
-            continue
-        raise ValueError(
-            f"{server_rel}: unresolved ManualToolDescriptors.addAll argument {a!r}. "
-            "Use string literals or a ManualToolDescriptors List<String> constant so "
-            "tools/audit_server_scope can derive route scope."
-        )
-    # Preserve declaration order while dropping accidental duplicates.
-    return list(dict.fromkeys(paths))
+    # First argument is the scanner; the rest are either string literals or a
+    # single named constant. The GUI passes ManualToolDescriptors.SHARED_ROUTES
+    # (one list, shared by every transport) rather than repeating the paths, so
+    # resolve that constant instead of reading it as "no routes registered" --
+    # which silently drops every hand-coded GUI route out of the derivation.
+    args = _split_args(body)[1:]
+    literals = [
+        a[1:-1] for a in args
+        if len(a) >= 2 and a.startswith('"') and a.endswith('"')
+    ]
+    if literals:
+        return literals
+    for a in args:
+        const = a.rsplit(".", 1)[-1]
+        if const.isupper() or "_" in const:
+            resolved = _manual_route_constant(repo, const)
+            if resolved:
+                return resolved
+    return []
+
+
+def _manual_route_constant(repo: Path, name: str) -> list[str]:
+    """Read a ``List.of("/a", "/b", ...)`` constant out of ManualToolDescriptors."""
+    text = _strip_comments((repo / MANUAL_DESCRIPTORS).read_text(encoding="utf-8"))
+    m = re.search(rf"\b{re.escape(name)}\s*=\s*List\.of\s*\(", text)
+    if m is None:
+        return []
+    body, _ = _balanced(text, m.end() - 1)
+    return re.findall(r'"([^"]+)"', body)
 
 
 def server_literal_contexts(repo: Path, server_rel: str) -> list[str]:
-    """Routes one server registers with a literal path via createContext/safeContext.
+    """Routes one server registers with a literal path via http.route.
 
     Not the same question as :func:`server_manual_paths`: ``addAll`` says what the
     server *publishes in /mcp/schema*, this says what it will actually *answer*.

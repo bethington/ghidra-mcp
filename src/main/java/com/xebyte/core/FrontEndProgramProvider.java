@@ -621,6 +621,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
      * @param nameOrPath Program name or project path
      * @return true if a cached program reference was released
      */
+    @Override
     public boolean releaseCachedProgram(String nameOrPath) {
         if (nameOrPath == null || nameOrPath.trim().isEmpty()) {
             return false;
@@ -673,6 +674,49 @@ public class FrontEndProgramProvider implements ProgramProvider {
      *
      * @return The PluginTool
      */
+    /**
+     * A ProgramManager from any running CodeBrowser.
+     *
+     * <p>The FrontEnd tool has none of its own — it shows a project tree, not a
+     * listing — so this answers from the windows that do.
+     */
+    @Override
+    public ProgramManager findProgramManager() {
+        List<ProgramManager> managers = findAllCodeBrowserProgramManagers();
+        return managers.isEmpty() ? null : managers.get(0);
+    }
+
+    /**
+     * Close every open instance of the program at the given project path.
+     *
+     * <p>Exact pathname, not name: callers are clearing the way for a move or a
+     * delete, and a name match would take the file's namesakes with it.
+     */
+    @Override
+    public boolean closeProgramByPath(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return false;
+        }
+        String wanted = path.trim();
+        boolean closed = false;
+        for (ProgramManager pm : findAllCodeBrowserProgramManagers()) {
+            for (Program prog : pm.getAllOpenPrograms()) {
+                DomainFile df = prog.getDomainFile();
+                if (df != null && df.getPathname().equalsIgnoreCase(wanted)) {
+                    // ignoreChanges=true: this makes way for a delete, so there is
+                    // nothing to save for. false would let Ghidra raise its own
+                    // interactive "Save changes?" dialog, which blocks the Swing
+                    // thread -- and every other MCP request behind it -- until a
+                    // human clicks something.
+                    pm.closeProgram(prog, true);
+                    closed = true;
+                }
+            }
+        }
+        return closed;
+    }
+
+    @Override
     public PluginTool getTool() {
         return tool;
     }
