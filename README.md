@@ -22,13 +22,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **253 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **245 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **253 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **245 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -59,7 +59,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Core MCP Integration
 
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **253 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
+- **245 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -444,7 +444,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 #### Lazy tool loading is the default (issue #440)
 
-Advertising all 253 endpoints in a single `tools/list` is over a hard limit for
+Advertising all 245 endpoints in a single `tools/list` is over a hard limit for
 at least one major provider. Gemini compiles function declarations into a
 constrained-decoding state machine and rejects the whole request before any tool
 is ever called:
@@ -531,15 +531,16 @@ allowlist has to be small *and* self-sufficient.
 | `get_metadata` | `program` | Which binary is loaded — name, architecture, image base, function count. Orientation, and it confirms the bridge reached Ghidra at all. |
 | `list_methods` | `listing` | Paginated function-name enumeration (`offset`, `limit`). **This is the discovery tool** — without it the agent cannot answer "what is in this binary". |
 | `get_entry_points` | `listing` | Where execution starts, so analysis has a root to work down from. |
-| `decompile_function` | `function` | The payload. Takes `address` **or** `functions=` (comma-separated names *or* addresses), so one call can pull several bodies. |
+| `get_functions` | `function` | The payload. Takes `function=` (a name or an address) **or** `functions=` (comma-separated names *or* addresses), so one call can pull several bodies; `fields=` picks what comes back (decompiled code, callers, callees, comments, tags…). |
 
 That set is genuinely closed: `get_entry_points` and `list_methods` supply the
-addresses and names that `decompile_function` consumes, and a decompiled body
-names its callees, which feed straight back into `decompile_function`.
+addresses and names that `get_functions` consumes, and a decompiled body
+names its callees, which feed straight back into `get_functions`.
 
 The three tools suggested in [#441](https://github.com/bethington/ghidra-mcp/issues/441)
-— `get_metadata`, `get_entry_points`, `decompile_function` — all exist under
-exactly those names and are a workable floor. `list_methods` is the one addition
+— `get_metadata`, `get_entry_points`, `decompile_function` — were a workable floor.
+`decompile_function` is now `get_functions` (which also took over eight other function
+readers). `list_methods` is the one addition
 worth making: without it the agent can only reach code that is reachable by name
 from something it already decompiled, so anything not referenced from an entry
 point is invisible.
@@ -548,7 +549,7 @@ point is invisible.
 
 | Tool | Group | Why |
 | --- | --- | --- |
-| `get_function_callers` / `get_function_callees` | `xref` | Walk the call graph without decompiling every body to find edges. |
+| `get_functions` with `fields=callers,callees` | `function` | Walk the call graph without decompiling every body to find edges (no decompile happens unless `decompiled_code` is requested). |
 | `get_xrefs_to` | `xref` | Who touches this address — the standard question about a global. |
 | `list_strings` | `listing` | Strings are the cheapest orientation signal in an unknown binary. |
 | `search_functions` | `listing` | Name search, once the agent knows what it is hunting for. |
@@ -860,7 +861,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 253 tools fully implemented (the whole catalog; the GUI plugin serves 239 of them and the headless server 226)
+- **MCP Tools**: 245 tools fully implemented (the whole catalog; the GUI plugin serves 231 of them and the headless server 218)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -871,9 +872,9 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-253 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+245 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
-212 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (27) or **(headless only)** (14) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
+204 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (27) or **(headless only)** (14) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
 
 ### Program & Session Management
 
@@ -978,15 +979,13 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `clear_instruction_flow_override` - Clear flow override
 - `create_function` - Create function at address
 - `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `decompile_function` - Decompile function
 - `delete_function` - Delete function at address
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
 - `force_decompile` - Force fresh decompilation
-- `get_function_by_address` - Get function at address
 - `get_function_tags` - List all tags assigned to a specific function
-- `get_function_variables` - List all variables in a function
+- `get_functions` - Everything about one or many functions in a single call
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
@@ -1006,7 +1005,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `can_rename_at_address` - Check if address can be renamed
 - `create_label` - Create label
 - `delete_label` - Delete label at address
-- `get_function_labels` - Get labels in function
 - `rename_symbol` - Rename a symbol of any kind
 
 ### Cross-References & Call Graphs
@@ -1017,10 +1015,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `get_bulk_xrefs` - Get xrefs for multiple addresses
 - `get_full_call_graph` - Get full call graph
 - `get_function_call_graph` - Get call graph
-- `get_function_callees` - Get functions called
-- `get_function_callers` - Get calling functions
-- `get_function_jump_targets` - Get jump targets
-- `get_function_xrefs` - Get function cross-references
 - `get_xrefs_from` - Get references from address
 - `get_xrefs_to` - Get references to address
 - `remove_reference` - Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference
@@ -1120,7 +1114,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `get_bulk_function_hashes` - Get bulk function hashes
 - `get_function_documentation` - Export function documentation
 - `get_function_hash` - Get function hash
-- `get_function_signature` - Get function feature signature
 - `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
 
 ### Health, Schema & Tool Control
@@ -1218,9 +1211,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (253 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (239 endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 226 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (245 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (231 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 218 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -1300,11 +1293,11 @@ python -m tools.setup --help
 ```text
 ghidra-mcp/
 ├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 253 catalog entries)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 245 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (239 endpoints)
-│       ├── headless/                    # Headless server (226 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (231 endpoints)
+│       ├── headless/                    # Headless server (218 endpoints)
 │       └── core/                        # Shared service layer (14 services)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
@@ -1441,7 +1434,7 @@ curl -X POST http://localhost:8089/run_analysis
 curl "http://localhost:8089/list_functions?limit=20"
 
 # 4. Decompile a function
-curl "http://localhost:8089/decompile_function?address=0x401000"
+curl "http://localhost:8089/get_functions?function=0x401000&fields=decompiled_code"
 
 # 5. Get metadata
 curl http://localhost:8089/get_metadata
@@ -1456,7 +1449,7 @@ curl http://localhost:8089/get_metadata
 | `/list_functions` | GET | List all discovered functions |
 | `/list_exports` | GET | List exported symbols |
 | `/list_imports` | GET | List imported symbols |
-| `/decompile_function` | GET | Decompile function to C code |
+| `/get_functions` | GET | One or many functions: decompiled code, signature, callers, callees, comments, tags |
 | `/create_function` | POST | Create function at address |
 | `/get_metadata` | GET | Get program metadata |
 | `/create_project` | POST | Create a Ghidra project |
@@ -1494,9 +1487,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 | Metric | Value |
 | -------- | ------- |
 | **Version** | 7.0.0 |
-| **MCP Tools** | 253 fully implemented |
-| **GUI Endpoints** | 239 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 226 (GhidraMCPHeadlessServer) |
+| **MCP Tools** | 245 fully implemented |
+| **GUI Endpoints** | 231 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 218 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |

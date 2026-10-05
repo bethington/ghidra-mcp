@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 253,
+  "total_endpoints": 245,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1112,26 +1112,6 @@
       "description": "List all open debug traces"
     },
     {
-      "path": "/decompile_function",
-      "method": "GET",
-      "category": "function",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "functions",
-        "program",
-        "timeout"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Decompile function"
-    },
-    {
       "path": "/delete_bookmark",
       "method": "POST",
       "category": "program",
@@ -1754,24 +1734,6 @@
       "description": "Get full call graph"
     },
     {
-      "path": "/get_function_by_address",
-      "method": "GET",
-      "category": "function",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get function at address"
-    },
-    {
       "path": "/get_function_call_graph",
       "method": "GET",
       "category": "xref",
@@ -1790,46 +1752,6 @@
         "headless"
       ],
       "description": "Get call graph"
-    },
-    {
-      "path": "/get_function_callees",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "function",
-        "name",
-        "address",
-        "function_name",
-        "function_address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get functions called"
-    },
-    {
-      "path": "/get_function_callers",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "function",
-        "name",
-        "address",
-        "function_name",
-        "function_address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get calling functions"
     },
     {
       "path": "/get_function_count",
@@ -1881,46 +1803,6 @@
       "description": "Get function hash"
     },
     {
-      "path": "/get_function_jump_targets",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "function",
-        "name",
-        "address",
-        "function_name",
-        "function_address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get jump targets"
-    },
-    {
-      "path": "/get_function_labels",
-      "method": "GET",
-      "category": "symbol",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get labels in function"
-    },
-    {
       "path": "/get_function_pcode",
       "method": "GET",
       "category": "analysis",
@@ -1938,24 +1820,6 @@
         "headless"
       ],
       "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers."
-    },
-    {
-      "path": "/get_function_signature",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Get function feature signature"
     },
     {
       "path": "/get_function_tags",
@@ -1976,41 +1840,29 @@
       "description": "List all tags assigned to a specific function. Accepts either a function address or a function name."
     },
     {
-      "path": "/get_function_variables",
+      "path": "/get_functions",
       "method": "GET",
       "category": "function",
       "params": [
-        "function_name",
-        "address",
-        "program",
-        "limit",
-        "filter"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "List all variables in a function. Accepts function_name or address (address takes precedence). Use address to avoid name-lookup issues after a recent rename."
-    },
-    {
-      "path": "/get_function_xrefs",
-      "method": "GET",
-      "category": "xref",
-      "params": [
         "function",
-        "name",
         "address",
-        "function_name",
+        "name",
         "function_address",
-        "offset",
-        "limit",
+        "function_name",
+        "functions",
+        "fields",
+        "include_call_context",
+        "call_context_limit",
+        "call_context_lines",
+        "call_context_window",
+        "include_disasm",
         "program"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Get function cross-references"
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that."
     },
     {
       "path": "/get_language_metadata",

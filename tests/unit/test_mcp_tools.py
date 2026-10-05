@@ -474,7 +474,7 @@ class TestSchemaFormat(unittest.TestCase):
             },
             "required": ["address"],
         }
-        fn = _build_tool_function("/decompile_function", "GET", schema)
+        fn = _build_tool_function("/get_functions", "GET", schema)
         self.assertTrue(callable(fn))
 
     def test_parsed_schema_tool_names_match_capi_regex(self):

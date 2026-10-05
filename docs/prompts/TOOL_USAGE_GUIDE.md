@@ -412,7 +412,7 @@ Brute-force API-hash resolution. Iterates a candidate list through a hash functi
 - Returns `{function, target_hash, total_candidates, tested, matches: [{api_name, computed_hash, iteration}], resolved, best_match}`
 - `matches` lists **all** collisions. When two or more names hash to the target, check the full array; `best_match` is only the first in iteration order.
 
-Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `search_functions`), identify input/output registers (`get_function_variables` or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
+Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `search_functions`), identify input/output registers (`get_functions` with `fields=parameters,locals`, or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
 
 ### `debugger_*` families (GUI-only)
 

@@ -52,6 +52,7 @@ public class HeadlessEndpointHandler {
     private final com.xebyte.core.CommentService commentService;
     private final com.xebyte.core.SymbolLabelService symbolLabelService;
     private final com.xebyte.core.FunctionService functionService;
+    private final com.xebyte.core.FunctionBundleService functionBundleService;
     private final com.xebyte.core.XrefCallGraphService xrefCallGraphService;
     private final com.xebyte.core.DataTypeService dataTypeService;
     private final com.xebyte.core.AnalysisService analysisService;
@@ -70,6 +71,7 @@ public class HeadlessEndpointHandler {
         this.commentService = new com.xebyte.core.CommentService(programProvider, threadingStrategy);
         this.symbolLabelService = new com.xebyte.core.SymbolLabelService(programProvider, threadingStrategy);
         this.functionService = new com.xebyte.core.FunctionService(programProvider, threadingStrategy);
+        this.functionBundleService = new com.xebyte.core.FunctionBundleService(programProvider, threadingStrategy, this.functionService);
         this.xrefCallGraphService = new com.xebyte.core.XrefCallGraphService(programProvider, threadingStrategy);
         this.dataTypeService = new com.xebyte.core.DataTypeService(programProvider, threadingStrategy);
         this.analysisService = new com.xebyte.core.AnalysisService(programProvider, threadingStrategy, this.functionService);
@@ -86,6 +88,7 @@ public class HeadlessEndpointHandler {
 
     public com.xebyte.core.ListingService getListingService() { return listingService; }
     public com.xebyte.core.FunctionService getFunctionService() { return functionService; }
+    public com.xebyte.core.FunctionBundleService getFunctionBundleService() { return functionBundleService; }
     public com.xebyte.core.CommentService getCommentService() { return commentService; }
     public com.xebyte.core.SymbolLabelService getSymbolLabelService() { return symbolLabelService; }
     public com.xebyte.core.XrefCallGraphService getXrefCallGraphService() { return xrefCallGraphService; }
@@ -1965,11 +1968,6 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
     // JUMP TARGET AND LABEL ENDPOINTS
     // ==========================================================================
-
-    public String getFunctionJumpTargets(String functionAddress, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionJumpTargets(functionAddress, offset, limit, programName).toJson();
-    }
-
     public String getFunctionLabels(String functionAddress, int offset, int limit, String programName) {
         return symbolLabelService.getFunctionLabels(functionAddress, offset, limit, programName).toJson();
     }

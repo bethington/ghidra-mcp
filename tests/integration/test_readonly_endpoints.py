@@ -435,17 +435,22 @@ class TestFunctionAnalysis:
             pytest.skip("No functions found in program")
         return f"0x{match.group(1)}"
 
-    def test_get_function_by_address(self, http_client, first_function_address):
-        """Get function details by address."""
+    def test_get_functions_signature(self, http_client, first_function_address):
+        """Get function identity via get_functions fields= (replaces get_function_by_address)."""
         response = http_client.get(
-            "/get_function_by_address", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "address": first_function_address,
+                "fields": "signature,entry_point,body_start,body_end",
+            },
         )
         assert response.status_code == 200
 
-    def test_decompile_function(self, http_client, first_function_address):
-        """Decompile a function (read-only)."""
+    def test_get_functions_decompiled_code(self, http_client, first_function_address):
+        """Decompile via get_functions fields= (replaces decompile_function)."""
         response = http_client.get(
-            "/decompile_function", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "decompiled_code"},
         )
         assert response.status_code == 200
 
@@ -465,47 +470,58 @@ class TestFunctionAnalysis:
     # the test accepted [200, 404]. /disassemble_function is the real route,
     # covered by test_disassemble_function directly above.
 
-    def test_get_function_variables(self, http_client, first_function_address):
-        """Get function variables."""
+    def test_get_functions_variables(self, http_client, first_function_address):
+        """Get function variables via get_functions fields=."""
         response = http_client.get(
-            "/get_function_variables", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "parameters,locals"},
         )
         assert response.status_code in [200, 404]
 
-    def test_get_function_labels(self, http_client, first_function_address):
-        """Get function labels.
-
-        The declared selector is `name` (which accepts a function name OR an
-        address). `address` is a back-compat alias the resolver still honors,
-        but /mcp/schema advertises only the canonical spelling, so that is
-        what a test should exercise.
-        """
+    def test_get_functions_labels(self, http_client, first_function_address):
+        """Get function labels via get_functions fields=."""
         response = http_client.get(
-            "/get_function_labels", params={"name": first_function_address}
-        )
-        # May not exist in all versions
-        assert response.status_code in [200, 404]
-
-    def test_get_function_callers(self, http_client, first_function_address):
-        """Get function callers (xrefs to)."""
-        response = http_client.get(
-            "/get_function_callers", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "labels",
+                "include_call_context": "false",
+            },
         )
         # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_callees(self, http_client, first_function_address):
-        """Get function callees (xrefs from)."""
+    def test_get_functions_callers(self, http_client, first_function_address):
+        """Get function callers via get_functions fields=."""
         response = http_client.get(
-            "/get_function_callees", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
         # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_xrefs(self, http_client, first_function_address):
-        """Get function cross-references."""
+    def test_get_functions_callees(self, http_client, first_function_address):
+        """Get function callees via get_functions fields=."""
         response = http_client.get(
-            "/get_function_xrefs", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
+        )
+        # May not exist in all versions
+        assert response.status_code in [200, 404]
+
+    def test_get_functions_xrefs(self, http_client, first_function_address):
+        """Get function cross-references via get_functions fields=."""
+        response = http_client.get(
+            "/get_functions",
+            params={"address": first_function_address, "fields": "xrefs"},
         )
         assert response.status_code in [200, 404]
 

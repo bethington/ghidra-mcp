@@ -118,8 +118,7 @@ BENCHMARK_DEPLOY_TEST_MODES = {
     "multi-program",
 }
 SMOKE_REQUIRED_TOOLS = {
-    "decompile_function",
-    "get_function_variables",
+    "get_functions",
     "analyze_function_completeness",
     "batch_set_comments",
     "set_variable_type",
@@ -1265,8 +1264,12 @@ def _ensure_benchmark_function(repo_root: Path, mcp_url: str, address: str, name
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/get_function_by_address",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        "/get_functions",
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "signature,entry_point",
+        },
         timeout=30,
     )
     if isinstance(payload, dict) and "error" not in payload:
@@ -1291,19 +1294,27 @@ def _has_editable_variable(repo_root: Path, mcp_url: str, address: str) -> bool:
     _status, decompile_payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/decompile_function",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        "/get_functions",
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "decompiled_code",
+        },
         timeout=60,
     )
-    _ensure_mcp_ok("/decompile_function", decompile_payload)
+    _ensure_mcp_ok("/get_functions", decompile_payload)
     _status, variables = _mcp_request(
         repo_root,
         mcp_url,
-        "/get_function_variables",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        "/get_functions",
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "parameters,locals",
+        },
         timeout=30,
     )
-    _ensure_mcp_ok("/get_function_variables", variables)
+    _ensure_mcp_ok("/get_functions", variables)
     if not isinstance(variables, dict):
         return False
     for variable in (variables.get("locals") or []) + (variables.get("parameters") or []):
@@ -1364,8 +1375,16 @@ def run_benchmark_read_test(repo_root: Path, mcp_url: str) -> None:
     read_calls = [
         ("/list_open_programs", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/search_data_types", {"program": DEFAULT_BENCHMARK_PROGRAM, "pattern": "int", "limit": 5}),
-        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
-        ("/get_function_variables", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/get_functions", {
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "decompiled_code",
+        }),
+        ("/get_functions", {
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "parameters,locals",
+        }),
         ("/analyze_function_completeness", {"program": DEFAULT_BENCHMARK_PROGRAM, "function_address": address}),
         ("/get_comment", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
         ("/save_program", {"program": DEFAULT_BENCHMARK_PROGRAM}),
@@ -1412,7 +1431,11 @@ def run_benchmark_extended_read_test(repo_root: Path, mcp_url: str) -> None:
         ("/list_imports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/list_exports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
         ("/list_strings", {"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 10}),
-        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/get_functions", {
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "signature",
+        }),
     ]
     for path, params in read_calls:
         _status, payload = _mcp_request(repo_root, mcp_url, path, params=params, timeout=60)
@@ -1425,11 +1448,15 @@ def run_benchmark_write_test(repo_root: Path, mcp_url: str) -> None:
     _status, variables = _mcp_request(
         repo_root,
         mcp_url,
-        "/get_function_variables",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        "/get_functions",
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "address": address,
+            "fields": "parameters,locals",
+        },
         timeout=30,
     )
-    _ensure_mcp_ok("/get_function_variables", variables)
+    _ensure_mcp_ok("/get_functions", variables)
     variable_name = None
     if isinstance(variables, dict):
         for variable in (variables.get("locals") or []) + (variables.get("parameters") or []):
@@ -1498,20 +1525,20 @@ def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/get_function_variables",
+        "/get_functions",
         params={"program": "/testing/benchmark/Missing.dll", "address": address},
         timeout=30,
     )
-    _expect_mcp_error("/get_function_variables", payload, ("program not found", "available"))
+    _expect_mcp_error("/get_functions", payload, ("program not found", "available"))
 
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/decompile_function",
+        "/get_functions",
         params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": "not-an-address"},
         timeout=30,
     )
-    _expect_mcp_error("/decompile_function", payload, ("address",))
+    _expect_mcp_error("/get_functions", payload, ("address",))
 
     _status, payload = _mcp_request(
         repo_root,
@@ -1552,11 +1579,11 @@ def run_multi_program_targeting_test(repo_root: Path, mcp_url: str) -> None:
     _status, by_path = _mcp_request(
         repo_root,
         mcp_url,
-        "/get_function_variables",
+        "/get_functions",
         params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
         timeout=30,
     )
-    _ensure_mcp_ok("/get_function_variables", by_path)
+    _ensure_mcp_ok("/get_functions", by_path)
     if not isinstance(by_path, dict) or by_path.get("function_address") != address:
         raise RuntimeError("Program path targeting returned the wrong benchmark function")
 
@@ -1991,11 +2018,15 @@ def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str
 def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
                             entry: dict, failures: list[str]) -> None:
     addr = entry["address"]
-    p_query = {"program": program_path, "address": addr}
+    p_query = {
+        "program": program_path,
+        "address": addr,
+        "fields": "signature,entry_point,body_start,body_end",
+    }
 
-    # /get_function_by_address returns a record: {name, address, signature,
+    # /get_functions returns a record: {name, address, signature,
     # entry_point, body_start, body_end}.
-    _, by_addr = _bench_get(repo_root, mcp_url, "/get_function_by_address", p_query)
+    _, by_addr = _bench_get(repo_root, mcp_url, "/get_functions", p_query)
     by_addr_fields = by_addr if isinstance(by_addr, dict) else {}
     resolved = bool(by_addr_fields.get("name")) and "error" not in by_addr_fields
     if "name" in entry:
@@ -2003,59 +2034,57 @@ def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
         if actual_name != entry["name"]:
             failures.append(
                 f"function@{addr}.name: expected {entry['name']!r} from "
-                f"/get_function_by_address.name; got {actual_name!r}")
+                f"/get_functions.name; got {actual_name!r}")
 
-    # /get_function_signature returns JSON with structural fields.
-    _, sig = _bench_get(repo_root, mcp_url, "/get_function_signature", p_query)
-    if not isinstance(sig, dict):
-        failures.append(f"function@{addr}.signature: /get_function_signature did not return JSON")
-        return
+    # Structural metrics that lived on the deleted /get_function_signature are
+    # no longer asserted here; param/callee checks use /get_functions.
+    bundle_query = {
+        **p_query,
+        "fields": "parameters,callees",
+        "include_call_context": "false",
+    }
+    _, bundle = _bench_get(repo_root, mcp_url, "/get_functions", bundle_query)
+    bundle_fields = bundle if isinstance(bundle, dict) else {}
 
-    if "param_count" in entry and sig.get("param_count") != entry["param_count"]:
-        failures.append(f"function@{addr}.param_count: expected {entry['param_count']}; got {sig.get('param_count')}")
-    if "basic_block_count" in entry and sig.get("basic_block_count") != entry["basic_block_count"]:
-        failures.append(f"function@{addr}.basic_block_count: expected {entry['basic_block_count']}; got {sig.get('basic_block_count')}")
-    if "cyclomatic_complexity" in entry and sig.get("cyclomatic_complexity") != entry["cyclomatic_complexity"]:
-        failures.append(f"function@{addr}.cyclomatic_complexity: expected {entry['cyclomatic_complexity']}; got {sig.get('cyclomatic_complexity')}")
-    if "instruction_count_min" in entry:
-        ic = sig.get("instruction_count")
-        if not isinstance(ic, int) or ic < entry["instruction_count_min"]:
-            failures.append(f"function@{addr}.instruction_count_min: expected >={entry['instruction_count_min']}; got {ic}")
-    if "immediate_values_contains" in entry:
-        actual_imm = set(sig.get("immediate_values") or [])
-        for v in entry["immediate_values_contains"]:
-            if v not in actual_imm:
-                failures.append(f"function@{addr}.immediate_values_contains: expected {v} (0x{v:x}) in /get_function_signature.immediate_values; got {sorted(actual_imm)}")
-    if "string_constants_contains" in entry:
-        actual = set(sig.get("string_constants") or [])
-        for s in entry["string_constants_contains"]:
-            if s not in actual:
-                failures.append(f"function@{addr}.string_constants_contains: expected {s!r} in /get_function_signature.string_constants")
+    if "param_count" in entry:
+        params = bundle_fields.get("parameters")
+        actual = len(params) if isinstance(params, list) else None
+        if actual != entry["param_count"]:
+            failures.append(
+                f"function@{addr}.param_count: expected {entry['param_count']}; "
+                f"got {actual} from /get_functions.parameters")
     if "callee_names_contains" in entry:
-        actual = set(sig.get("callee_names") or [])
+        callees = bundle_fields.get("callees")
+        actual = {
+            str(c.get("name"))
+            for c in (callees or [])
+            if isinstance(c, dict) and c.get("name")
+        }
         for s in entry["callee_names_contains"]:
             if s not in actual:
-                failures.append(f"function@{addr}.callee_names_contains: expected {s!r} in /get_function_signature.callee_names")
+                failures.append(
+                    f"function@{addr}.callee_names_contains: expected {s!r} in "
+                    f"/get_functions.callees; got {sorted(actual)}")
     if "return_type_contains" in entry:
         signature = str(by_addr_fields.get("signature", ""))
         if entry["return_type_contains"] not in signature:
             failures.append(
                 f"function@{addr}.return_type_contains: expected "
-                f"{entry['return_type_contains']!r} in /get_function_by_address.signature; "
+                f"{entry['return_type_contains']!r} in /get_functions.signature; "
                 f"got {signature!r}")
     if "is_thunk" in entry:
         # The record has no explicit thunk flag; "did it resolve at all" is the
         # same proxy the text form used, just read from a field instead of a
         # line prefix.
         if entry["is_thunk"] is False and not resolved:
-            failures.append(f"function@{addr}.is_thunk=false: function did not resolve via /get_function_by_address")
+            failures.append(f"function@{addr}.is_thunk=false: function did not resolve via /get_functions")
     if "signature_contains" in entry:
         signature = str(by_addr_fields.get("signature", ""))
         for needle in entry["signature_contains"]:
             if needle not in signature:
                 failures.append(
                     f"function@{addr}.signature_contains: expected {needle!r} in "
-                    f"/get_function_by_address.signature; got {signature!r}")
+                    f"/get_functions.signature; got {signature!r}")
 
     if entry.get("xref_count_to_min", 0) > 0:
         _, xrefs = _bench_get(repo_root, mcp_url, "/get_xrefs_to", p_query)
@@ -2064,13 +2093,15 @@ def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
             failures.append(f"function@{addr}.xref_count_to_min: expected >={entry['xref_count_to_min']}; got {n}")
 
     if entry.get("decompile_must_be_nonempty") or entry.get("decompile_contains"):
-        _, dec = _bench_get(repo_root, mcp_url, "/decompile_function", p_query, timeout=60)
-        dec_text = _bench_text(dec)
+        dec_query = {**p_query, "fields": "decompiled_code"}
+        _, dec = _bench_get(repo_root, mcp_url, "/get_functions", dec_query, timeout=60)
+        dec_fields = dec if isinstance(dec, dict) else {}
+        dec_text = str(dec_fields.get("decompiled_code") or "")
         if entry.get("decompile_must_be_nonempty") and not dec_text.strip():
-            failures.append(f"function@{addr}.decompile_must_be_nonempty: /decompile_function returned empty")
+            failures.append(f"function@{addr}.decompile_must_be_nonempty: /get_functions returned empty")
         for needle in entry.get("decompile_contains", []):
             if needle not in dec_text:
-                failures.append(f"function@{addr}.decompile_contains: expected {needle!r} in /decompile_function output")
+                failures.append(f"function@{addr}.decompile_contains: expected {needle!r} in /get_functions output")
 
 
 def _bench_assert_endpoint_smoke(repo_root: Path, mcp_url: str, program_path: str,

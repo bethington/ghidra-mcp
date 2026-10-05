@@ -1,5 +1,5 @@
 {
-  "count": 239,
+  "count": 231,
   "tools": [
     {
       "category": "function",
@@ -380,7 +380,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.",
       "method": "GET",
       "params": [
         {
@@ -2261,54 +2261,6 @@
       "path": "/debugger/traces"
     },
     {
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "default": "",
-          "description": "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.",
-          "name": "functions",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "60",
-          "description": "Decompile timeout in seconds",
-          "name": "timeout",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        }
-      ],
-      "path": "/decompile_function"
-    },
-    {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -3503,37 +3455,6 @@
       "path": "/get_full_call_graph"
     },
     {
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_by_address"
-    },
-    {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Traverse call graph from a function. Accepts function name or address.",
@@ -3581,100 +3502,6 @@
       "path": "/get_function_call_graph"
     },
     {
-      "category": "xref",
-      "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
-      "description": "Get functions called by a function. Accepts function name or address.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "name",
-            "address",
-            "function_name",
-            "function_address"
-          ],
-          "default": "",
-          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
-          "name": "function",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "0",
-          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
-          "name": "offset",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "100",
-          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_callees"
-    },
-    {
-      "category": "xref",
-      "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
-      "description": "Get functions calling a function. Accepts function name or address.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "name",
-            "address",
-            "function_name",
-            "function_address"
-          ],
-          "default": "",
-          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
-          "name": "function",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "0",
-          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
-          "name": "offset",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "100",
-          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_callers"
-    },
-    {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Get total function count",
@@ -3694,7 +3521,7 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
@@ -3754,100 +3581,6 @@
       "path": "/get_function_hash"
     },
     {
-      "category": "xref",
-      "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
-      "description": "Get jump targets within a function. Accepts function name or address.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "name",
-            "address",
-            "function_name",
-            "function_address"
-          ],
-          "default": "",
-          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
-          "name": "function",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "0",
-          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
-          "name": "offset",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "100",
-          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_jump_targets"
-    },
-    {
-      "category": "symbol",
-      "category_description": "Create/rename/delete labels, rename data, globals, external locations",
-      "description": "Get labels within a function body. Accepts a function name OR address.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Function name or address (0x<hex> / <space>:<hex>).",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "0",
-          "description": "Number of labels to skip before this page starts; 0 begins at the first.",
-          "name": "offset",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "20",
-          "description": "Maximum labels returned in this page (default 20). Pass 0 or a negative value for no limit; `total` in the response always reports the full count for the function.",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_labels"
-    },
-    {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
@@ -3887,37 +3620,6 @@
       "path": "/get_function_pcode"
     },
     {
-      "category": "documentation",
-      "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_signature"
-    },
-    {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "List all tags assigned to a specific function. Accepts either a function address or a function name.",
@@ -3950,88 +3652,75 @@
     },
     {
       "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.",
-      "method": "GET",
-      "params": [
-        {
-          "default": "",
-          "description": "Function name (ignored if address is provided)",
-          "name": "function_name",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.",
-          "name": "address",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "200",
-          "description": "Max local variables to return (default 200, 0 = unlimited)",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "all",
-          "description": "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)",
-          "name": "filter",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_function_variables"
-    },
-    {
-      "category": "xref",
-      "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
-      "description": "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
           "aliases": [
-            "name",
             "address",
-            "function_name",
-            "function_address"
+            "name",
+            "function_address",
+            "function_name"
           ],
           "default": "",
-          "description": "Function name or entry-point address (0x<hex> or <space>:<hex>). One parameter for both: the resolver tries the address form first, then an exact function name.",
+          "description": "Single mode: function name or address (0x<hex> or <space>:<hex>). Ignored when functions= is set.",
           "name": "function",
+          "param_type": "function_ref",
           "required": false,
           "source": "query",
           "type": "string"
         },
         {
-          "default": "0",
-          "description": "Number of entries to skip before this page starts; 0 begins at the first entry. Page by adding `limit` each call until offset reaches the `total` the response reports.",
-          "name": "offset",
+          "default": "",
+          "description": "Bulk mode: comma-separated function references (names or addresses). When set, function= is ignored. Returns a map keyed by the reference asked for.",
+          "name": "functions",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
+          "name": "fields",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "true",
+          "description": "Include each caller's decompiled call-site line. Costs one decompilation per unique caller (~43ms); set false for the cheapest possible bundle. Ignored unless call_context is requested (explicitly or via an empty fields=).",
+          "name": "include_call_context",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
+        },
+        {
+          "default": "6",
+          "description": "Maximum number of UNIQUE callers to decompile for call context.",
+          "name": "call_context_limit",
           "required": false,
           "source": "query",
           "type": "integer"
         },
         {
-          "default": "100",
-          "description": "Maximum entries returned in this page (default 100). Pass 0 or a negative value for no limit; `total` in the response always reports the full unpaged count.",
-          "name": "limit",
+          "aliases": [
+            "call_context_window"
+          ],
+          "default": "3",
+          "description": "Lines of the caller's decompilation to return per call site, centred on the call. 1 is the call line alone; the default 3 adds the line above and below, which is usually where the guard and the use of the result live. Clamped to 1-21; costs no extra decompilation.",
+          "name": "call_context_lines",
           "required": false,
           "source": "query",
           "type": "integer"
+        },
+        {
+          "default": "false",
+          "description": "Include the raw instruction listing. Off by default: it roughly doubles the payload and agents rarely read it.",
+          "name": "include_disasm",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
         },
         {
           "default": "",
@@ -4042,7 +3731,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_function_xrefs"
+      "path": "/get_functions",
+      "read_only": true
     },
     {
       "category": "program",
@@ -6058,7 +5748,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_function_variables and decompile_function report, not the raw listing's.",
+          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_functions reports (parameters, locals, decompiled_code), not the raw listing's.",
           "name": "variable_renames",
           "required": true,
           "source": "body",
@@ -7469,7 +7159,7 @@
           "aliases": [
             "parameter_name"
           ],
-          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_function_variables lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
+          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_functions fields=parameters,locals lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
           "name": "variable_name",
           "required": true,
           "source": "body",

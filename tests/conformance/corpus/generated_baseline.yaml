@@ -444,15 +444,6 @@ tool_cases:
   tier: read
   snapshot: false
   skip: needs a live TraceRmi debug session (Phase 2 fixture)
-- tool: decompile_function
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: delete_bookmark
   tier: write
   args:
@@ -735,45 +726,12 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_function_by_address
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_function_call_graph
   tier: read
   args:
     name: calc_crc16
     address: '0x10001000'
     direction: both
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_callees
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_callers
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
     program: Benchmark.dll
   assert:
     is_error: false
@@ -805,29 +763,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_function_jump_targets
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_labels
-  tier: read
-  args:
-    name: calc_crc16
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_function_pcode
   tier: read
   args:
@@ -837,42 +772,10 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_function_signature
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_function_tags
   tier: read
   args:
     function: calc_crc16
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_variables
-  tier: read
-  args:
-    function_name: calc_crc16
-    address: '0x10001000'
-    program: Benchmark.dll
-    limit: 5
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_xrefs
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
     program: Benchmark.dll
   assert:
     is_error: false

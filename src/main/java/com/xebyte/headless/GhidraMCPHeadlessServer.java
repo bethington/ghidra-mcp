@@ -400,7 +400,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
             endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
             endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService(),
-            endpointHandler.getEmulationService(), managementService);
+            endpointHandler.getEmulationService(), endpointHandler.getFunctionBundleService(),
+            managementService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
             safeContext(ep.path(), exchange -> {
@@ -463,7 +464,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         safeContext("/get_current_function", exchange -> {
-            sendResponse(exchange, "{\"error\": \"Headless mode - use get_function_by_address\"}");
+            sendResponse(exchange, "{\"error\": \"Headless mode - use get_functions with a function name or address\"}");
         });
 
         // --- Program Management --- (registered via HeadlessManagementService)

@@ -59,20 +59,21 @@ tool_cases:
       json_equals: { program: "Benchmark.dll" }
 
   # ---- a known function, end to end ---------------------------------------
-  - tool: get_function_by_address
+  - tool: get_functions
     name: curated_calc_crc16
     tier: read
     snapshot: false
-    args: { address: "0x10001000" }
+    args:
+      address: "0x10001000"
+      fields: entry_point,signature
     assert:
       json_equals:
         name: "calc_crc16"
-        address: "10001000"
         entry_point: "10001000"
-      contains: ["ushort"]          # return type, from the C source
+      contains: ["ushort"]
 
-  - tool: get_function_signature
-    name: curated_calc_crc16
+  - tool: get_functions
+    name: curated_calc_crc16_signature
     tier: read
     snapshot: false
     args: { address: "0x10001000" }
@@ -83,13 +84,15 @@ tool_cases:
         basic_block_count: 5
         cyclomatic_complexity: 3
 
-  - tool: decompile_function
-    name: curated_calc_crc16
+  - tool: get_functions
+    name: curated_calc_crc16_decompile
     tier: read
     snapshot: false
-    args: { address: "0x10001000" }
+    args:
+      address: "0x10001000"
+      fields: decompiled_code
     assert:
-      json_keys: ["name", "address", "decompiled"]
+      json_keys: ["name", "address", "decompiled_code"]
       json_equals: { name: "calc_crc16" }
       # The CRC-16/CCITT polynomial must survive decompilation.
       contains: ["0x1021"]
@@ -104,7 +107,7 @@ tool_cases:
       contains: ["10001000"]
 
   # ---- bulk mode must agree with single mode ------------------------------
-  - tool: decompile_function
+  - tool: get_functions
     name: curated_bulk_two
     tier: read
     snapshot: false
@@ -195,7 +198,7 @@ tool_cases:
       not_contains: ["calc_crc16"]   # the filter must actually filter
 
   # ---- error shapes are part of the contract ------------------------------
-  - tool: get_function_by_address
+  - tool: get_functions
     name: curated_bad_address
     tier: read
     snapshot: false

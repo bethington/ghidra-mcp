@@ -50,10 +50,6 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
         assertNoProgram(xref.getXrefsFrom("0x401000", 0, 100, ""));
     }
 
-    public void testGetFunctionJumpTargetsDegradesGracefully() {
-        assertNoProgram(xref.getFunctionJumpTargets("FUN_00401000", 0, 100));
-    }
-
     public void testProgramNotFoundWhenNamedProgramMissing() {
         Response r = xref.getXrefsTo("0x401000", 0, 100, "Nonexistent.dll");
         assertTrue("expected program-not-found error, got: " + r.toJson(),

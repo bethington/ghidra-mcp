@@ -169,9 +169,8 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 
 ### Analysis
 
-- `GET /decompile_function` - Decompile function
+- `GET /get_functions` - One or many functions: decompiled code, signature, callers, callees, comments
 - `GET /disassemble_function` - Disassemble function
-- `GET /get_function_by_address` - Get function info
 - `GET /get_xrefs_to` - Get cross-references to address
 - `GET /get_xrefs_from` - Get cross-references from address
 - `GET /search_functions` - Search functions by name

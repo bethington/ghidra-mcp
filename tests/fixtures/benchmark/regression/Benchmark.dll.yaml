@@ -214,8 +214,8 @@ endpoint_smoke:
       contains_keys: ["name"]
 
   # decompile -- the bulk form, which absorbed batch_decompile in 7.0.0
-  - endpoint: "/decompile_function"
-    params: { functions: "0x10001000,0x10001092" }
+  - endpoint: "/get_functions"
+    params: { functions: "0x10001000,0x10001092", fields: "decompiled_code", include_call_context: "false" }
     assert:
       type: "nonempty"
 
@@ -262,8 +262,8 @@ endpoint_smoke:
       contains_keys: ["analyzed", "analyzing"]
 
   # function -- benchmark_self_test, the one function here with real callees
-  - endpoint: "/get_function_callees"
-    params: { address: "0x1000128a" }
+  - endpoint: "/get_functions"
+    params: { function: "0x1000128a", fields: "callees", include_call_context: "false" }
     assert:
       type: "nonempty"
 

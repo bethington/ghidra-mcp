@@ -185,7 +185,7 @@ class VersionInfo {
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 239 endpoints for reverse engineering automation. " +
+                  "Provides 231 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -287,6 +287,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private final com.xebyte.core.EmulationService emulationService;
     private final com.xebyte.core.DebuggerService debuggerService;
     private final com.xebyte.core.PromptPolicyService promptPolicyService;
+    private final com.xebyte.core.FunctionBundleService functionBundleService;
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -310,6 +311,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.emulationService = new com.xebyte.core.EmulationService(programProvider, threadingStrategy);
         this.debuggerService = new com.xebyte.core.DebuggerService(programProvider, threadingStrategy, tool);
         this.promptPolicyService = new com.xebyte.core.PromptPolicyService();
+        this.functionBundleService = new com.xebyte.core.FunctionBundleService(programProvider, threadingStrategy, this.functionService);
         Msg.info(this, "============================================");
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
@@ -650,7 +652,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService,
-            emulationService, debuggerService, promptPolicyService);
+            emulationService, debuggerService, promptPolicyService, functionBundleService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
             server.createContext(ep.path(), safeHandler(exchange -> {
@@ -2306,22 +2308,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     public String renameLabel(String addressStr, String oldName, String newName, String programName) {
         return symbolLabelService.renameLabel(addressStr, oldName, newName, programName).toJson();
     }
-
-    public String renameLabel(String addressStr, String oldName, String newName) {
-        return symbolLabelService.renameLabel(addressStr, oldName, newName).toJson();
-    }
-
-    /**
-     * Get all jump target addresses from a function's disassembly
-     */
-    public String getFunctionJumpTargets(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionJumpTargets(functionName, offset, limit, programName).toJson();
-    }
-
-    public String getFunctionJumpTargets(String functionName, int offset, int limit) {
-        return xrefCallGraphService.getFunctionJumpTargets(functionName, offset, limit, null).toJson();
-    }
-
     public String createLabel(String addressStr, String labelName, String programName) {
         return symbolLabelService.createLabel(addressStr, labelName, programName).toJson();
     }

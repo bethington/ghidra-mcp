@@ -325,9 +325,9 @@ public class XrefCallGraphService {
     }
 
     /**
-     * Get all references to a specific function by name
+     * Get all references to a specific function by name.
+     * Agent-visible surface is {@code /get_functions?fields=xrefs}.
      */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionXrefs(
             @Param(value = "function", defaultValue = "",
                    aliases = {"name", "address", "function_name", "function_address"},
@@ -381,109 +381,13 @@ public class XrefCallGraphService {
     }
 
     // -----------------------------------------------------------------------
-    // Jump Target Methods
-    // -----------------------------------------------------------------------
-
-    /**
-     * Get all jump target addresses from a function's disassembly
-     */
-    public Response getFunctionJumpTargets(String functionName, int offset, int limit) {
-        return getFunctionJumpTargets(functionName, offset, limit, null);
-    }
-
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
-    public Response getFunctionJumpTargets(
-            @Param(value = "function", defaultValue = "",
-                   aliases = {"name", "address", "function_name", "function_address"},
-                   description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
-                               + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        StringBuilder sb = new StringBuilder();
-        FunctionManager functionManager = program.getFunctionManager();
-
-        ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (lookup.hasError()) return lookup.error();
-        Function function = lookup.function();
-
-        AddressSetView functionBody = function.getBody();
-        Listing listing = program.getListing();
-        Set<Address> jumpTargets = new HashSet<>();
-
-        // Iterate through all instructions in the function
-        InstructionIterator instructions = listing.getInstructions(functionBody, true);
-        while (instructions.hasNext()) {
-            Instruction instr = instructions.next();
-
-            // Check if this is a jump instruction
-            if (instr.getFlowType().isJump()) {
-                // Get all reference addresses from this instruction
-                Reference[] references = instr.getReferencesFrom();
-                for (Reference ref : references) {
-                    Address targetAddr = ref.getToAddress();
-                    // Only include targets within the function or program space
-                    if (targetAddr != null && program.getMemory().contains(targetAddr)) {
-                        jumpTargets.add(targetAddr);
-                    }
-                }
-
-                // Also check for fall-through addresses for conditional jumps
-                if (instr.getFlowType().isConditional()) {
-                    Address fallThroughAddr = instr.getFallThrough();
-                    if (fallThroughAddr != null) {
-                        jumpTargets.add(fallThroughAddr);
-                    }
-                }
-            }
-        }
-
-        // Convert to sorted list and apply pagination
-        List<Address> sortedTargets = new ArrayList<>(jumpTargets);
-        Collections.sort(sortedTargets);
-
-        // Build the full result set and let the envelope do the paging, so
-        // `total` reports every target rather than just this page.
-        List<Map<String, Object>> targets = new ArrayList<>();
-        for (Address target : sortedTargets) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("address", target.toString(false));
-            Function targetFunc = functionManager.getFunctionContaining(target);
-            if (targetFunc != null) {
-                entry.put("in_function", targetFunc.getName());
-            } else {
-                Symbol symbol = program.getSymbolTable().getPrimarySymbol(target);
-                if (symbol != null) {
-                    entry.put("label", symbol.getName());
-                }
-            }
-            targets.add(entry);
-        }
-
-        return ServiceUtils.paged("jump_targets", targets, offset, limit);
-    }
-
-    // -----------------------------------------------------------------------
     // Callee/Caller Methods
     // -----------------------------------------------------------------------
 
     /**
-     * Get all functions called by the specified function (callees)
+     * Get all functions called by the specified function (callees).
+     * Kept for internal callers; agents use {@code /get_functions?fields=callees}.
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallees(
             @Param(value = "function", defaultValue = "",
                    aliases = {"name", "address", "function_name", "function_address"},
@@ -555,9 +459,9 @@ public class XrefCallGraphService {
     }
 
     /**
-     * Get all functions that call the specified function (callers)
+     * Get all functions that call the specified function (callers).
+     * Kept for internal callers; agents use {@code /get_functions?fields=callers}.
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallers(
             @Param(value = "function", defaultValue = "",
                    aliases = {"name", "address", "function_name", "function_address"},

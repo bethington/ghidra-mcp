@@ -235,7 +235,7 @@ Default fallback                        -> szGame_ or szStr_
 | `create_label` | Apply labels efficiently in batches |
 | `create_label` | Apply single label |
 | `get_xrefs_to` | Analyze string usage context |
-| `decompile_function` | Understand how string is used |
+| `get_functions` | Understand how string is used |
 
 ---
 

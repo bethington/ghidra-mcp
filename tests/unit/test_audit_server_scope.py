@@ -287,7 +287,8 @@ def test_the_asymmetry_is_wiring_not_per_tool_annotation(live):
     headless = set(live["headless_service_classes"])
     assert gui - headless == {"DebuggerService", "PromptPolicyService"}
     assert headless - gui == {"HeadlessManagementService"}
-    assert len(gui & headless) == 11
+    # FunctionBundleService takes a ThreadingStrategy like the other shared services.
+    assert len(gui & headless) == 12
 
 
 # --------------------------------------------------------------------------

@@ -25,12 +25,12 @@ Task(
   Skip get_current_selection() — the address is provided above.
   Apply all changes directly in Ghidra using MCP tools.
 
-  CRITICAL: In Step 3, you MUST call get_function_variables to check actual
+  CRITICAL: In Step 3, you MUST call get_functions(fields=parameters,locals) to check actual
   storage types. The decompiler may display 'int' or 'short *' while storage
   is still 'undefined4'. Call set_local_variable_type for EVERY variable with
   undefined storage BEFORE renaming. If a variable is used as a pointer
   (dereferenced, offset arithmetic), type it as 'int *' not 'int'.
-  After typing, call get_function_variables again to verify no undefined
+  After typing, call get_functions(fields=parameters,locals) again to verify no undefined
   storage remains, then rename all variables in a single rename_variables call.
 
   THUNK HANDLING: If the function is a single JMP instruction (thunk/forwarding
@@ -88,7 +88,7 @@ Task(
 
 These issues come up repeatedly when running V5 at scale:
 
-- **`get_function_variables` returns empty after prototype changes**: Register-only variables lose Ghidra symbols. Call `force_decompile` first to refresh, then retry. Even if still empty, `rename_variables` works by matching names from decompiled output.
+- **`get_functions(fields=parameters,locals)` returns empty after prototype changes**: Register-only variables lose Ghidra symbols. Call `force_decompile` first to refresh, then retry. Even if still empty, `rename_variables` works by matching names from decompiled output.
 - **`set_local_variable_type` "No HighVariable found"**: Common for stack arrays (e.g., `ushort[6]`) and decompiler-inferred composites. Skip on first failure — note in plate comment Special Cases. Do not retry.
 - **Storage still `undefined4` despite resolved display type**: The decompiler shows `int`/`dword`/`FILE*` but storage remains `undefined4`. Explicitly calling `set_local_variable_type` with the same type resolves it. Critical for reaching 100%.
 - **Unfixable deductions** (do not retry or flag for manual review):

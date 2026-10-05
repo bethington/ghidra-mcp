@@ -59,20 +59,20 @@ never pass however many strings the binary has.
 ```yaml
 functions:
   - address: "0x10001000"            # required; hex with 0x prefix
-    name: "calc_crc16"               # exact; /get_function_by_address.name
+    name: "calc_crc16"               # exact; /get_functions .name
     signature_contains: ["uint"]     # all substrings; .signature
     return_type_contains: "uint"     # substring; .signature
-    param_count: 2                   # exact; /get_function_signature
-    basic_block_count: 10            # exact; /get_function_signature
-    cyclomatic_complexity: 5         # exact; edge_count - block_count + 2
-    instruction_count_min: 30        # >=
+    param_count: 2                   # exact; /get_functions .parameters
+    basic_block_count: 10            # not asserted since /get_function_signature was retired
+    cyclomatic_complexity: 5         # not asserted (as above)
+    instruction_count_min: 30        # not asserted (as above)
     xref_count_to_min: 2             # >=; item count from /get_xrefs_to
     is_thunk: false                  # only `false` is checked, as "did it resolve"
     decompile_must_be_nonempty: true
-    decompile_contains: ["0x1021"]   # all substrings of /decompile_function
-    immediate_values_contains: [4129, 65535]
-    string_constants_contains: []
-    callee_names_contains: ["compute_gcd"]
+    decompile_contains: ["0x1021"]   # all substrings of /get_functions .decompiled_code
+    immediate_values_contains: [4129, 65535]   # not asserted (as above)
+    string_constants_contains: []    # not asserted (as above)
+    callee_names_contains: ["compute_gcd"]   # all; /get_functions .callees names
 ```
 
 `immediate_values` is collected by `BinaryComparisonService` from scalar

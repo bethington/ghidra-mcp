@@ -44,7 +44,7 @@ ENDPOINT_TIMEOUTS = {
     # Ghidra's default decompile cap is 60s. The bridge must outlive it so the
     # plugin can return a structured timeout instead of writing into a closed
     # socket after the client has already gone away.
-    "decompile_function": 75,
+    "get_functions": 75,
     "set_function_prototype": 45,
     "rename_function": 45,
     "consolidate_duplicate_types": 60,
