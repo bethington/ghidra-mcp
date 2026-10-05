@@ -224,7 +224,7 @@ public class AnalysisService {
     /**
      * Trigger auto-analysis on the current or named program.
      */
-    @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
+    @McpTool(path = "/run_analysis", dryRun = false, method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
     public Response runAnalysis(
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "

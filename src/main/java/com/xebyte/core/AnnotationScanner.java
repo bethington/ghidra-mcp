@@ -233,6 +233,13 @@ public class AnnotationScanner {
                 // rollback branch never ran and every dry_run body param fell through to
                 // method.invoke(...) unguarded. Confirmed live 2026-08-09 on /batch_set_comments
                 // (see reference_dry_run_silently_writes.md).
+                if (isWrite && isDryRunRequested(query, body) && !tool.dryRun()
+                        && !declaresParam(bindings, "dry_run")) {
+                    return Response.err("dry_run is not supported by " + tool.path() + ": its effect "
+                        + "is not a change to the program database (it saves, closes, checks in, or "
+                        + "works on files, the server or another service), so a rollback could not undo "
+                        + "it. Nothing was done.");
+                }
                 if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
                     Program program = resolveProgramForDryRun(bindings, query, body);
                     if (program != null) {
@@ -284,6 +291,16 @@ public class AnnotationScanner {
                 return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
             }
         };
+    }
+
+    /** A tool that takes {@code dry_run} itself implements its own preview. */
+    private static boolean declaresParam(ParamBinding[] bindings, String name) {
+        for (ParamBinding b : bindings) {
+            if (b != null && b.param != null && name.equals(b.param.value())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

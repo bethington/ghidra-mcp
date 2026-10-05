@@ -44,4 +44,14 @@ public @interface McpTool {
      * {@link ToolAccess#UNSPECIFIED} no hints are emitted at all.
      */
     ToolAccess access() default ToolAccess.UNSPECIFIED;
+
+    /**
+     * Whether {@code dry_run} can preview this tool. The scanner implements a dry run as
+     * "call the tool inside a program transaction, then roll it back", which only undoes
+     * changes to the program database. A tool whose effect is elsewhere (saving, closing,
+     * checking in, files on disk, the server, an external service, a debugger) declares
+     * false: a dry run is refused before anything happens. Found when
+     * {@code checkin_program(dry_run=true)} saved, closed and checked in for real.
+     */
+    boolean dryRun() default true;
 }
