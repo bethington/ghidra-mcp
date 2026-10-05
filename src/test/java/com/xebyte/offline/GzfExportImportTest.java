@@ -3,6 +3,10 @@ package com.xebyte.offline;
 import com.xebyte.headless.HeadlessProgramProvider;
 import com.xebyte.headless.HeadlessProgramProvider.ExportResult;
 import com.xebyte.headless.HeadlessProgramProvider.ImportResult;
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
+import ghidra.framework.model.Project;
+import ghidra.framework.model.ProjectData;
 import ghidra.program.model.listing.Program;
 import org.junit.Test;
 
@@ -14,7 +18,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -113,5 +122,39 @@ public class GzfExportImportTest {
         assertNotNull(res.error);
         assertTrue("empty name must bypass validation and hit the project guard: " + res.error,
             res.error.contains("No project open"));
+    }
+
+    /**
+     * Found re-importing a firmware copy: overwrite=true reported success and left only the
+     * backup. setName returns the renamed file, and the handle it is called on keeps naming
+     * the old path, which the new import then occupies, so deleting through it deleted the
+     * import.
+     */
+    @Test
+    public void anOverwriteDeletesTheBackupNotTheNewImport() throws Exception {
+        Project project = mock(Project.class);
+        ProjectData data = mock(ProjectData.class);
+        DomainFolder folder = mock(DomainFolder.class);
+        DomainFile existing = mock(DomainFile.class);
+        DomainFile renamed = mock(DomainFile.class);
+        DomainFile created = mock(DomainFile.class);
+        when(project.getProjectData()).thenReturn(data);
+        when(data.getFolder("/mg")).thenReturn(folder);
+        when(folder.getPathname()).thenReturn("/mg");
+        when(folder.getFile("fw")).thenReturn(existing);
+        when(existing.setName(anyString())).thenReturn(renamed);
+        when(folder.createFile(eq("fw"), any(File.class), any())).thenReturn(created);
+        when(created.getName()).thenReturn("fw");
+        when(created.getContentType()).thenReturn("Program");
+
+        Path dir = Files.createTempDirectory("gzf-overwrite");
+        File gzf = Files.createFile(dir.resolve("fw.gzf")).toFile();
+        ImportResult res = new HeadlessProgramProvider(project)
+            .importProgramFromGzf(gzf, "/mg", "fw", true);
+
+        assertTrue(res.error, res.success);
+        verify(renamed).delete();
+        verify(existing, never()).delete();
+        verify(created, never()).delete();
     }
 }
