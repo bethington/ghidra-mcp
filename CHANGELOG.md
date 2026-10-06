@@ -6,13 +6,14 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**215 tools** — 201 served by the GUI plugin, 191 by the headless server, 177
+**222 tools** — 208 served by the GUI plugin, 198 by the headless server, 184
 by both. Stacked on #567 (`/get_functions` replaced nine function readers);
 this pass folds listing, xref, tag, utility, and GUI-cursor tools. The
 advertised surface went from 272 → 251 in the first consolidation cycle, then
 245 after `/list_shadowed_globals` and `/batch_get_comments`, then 219 after
 `/get_functions`, then **215** after the folds below (including `/get_ui_cursor`
 and folding `/get_version` into `/mcp/health`).
+Six decompiler-override tools and `/clear_data` bring the current catalog to 222.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -21,6 +22,55 @@ and folding `/get_version` into `/mcp/health`).
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Added — localized decompiler overrides
+
+- Added shared GUI/headless tools to read, set and remove explicit stack-depth
+  overrides, read/set per-call-site prototype overrides, and change only a
+  function's calling convention without rebuilding its prototype or discarding
+  custom storage.
+
+### Changed — type editing preserves layouts and references
+
+- Type creators accept a category path; struct/union members retain comments,
+  validate explicit sizes, and accept array/pointer types. A union member with an
+  unknown type fails the call instead of being skipped. Enum creation also accepts
+  an array of `{name,value}` objects.
+- `add_struct_field` now accepts atomic bulk `fields`, rejects defined-field
+  overlaps unless `overwrite=true`, and reuses undefined padding. Field removal
+  defaults to preserving layout (`shrink=true` explicitly shifts fields).
+- Function signatures retain named parameters and calling conventions and update
+  in place; invalid parameters roll back. Identical typedef creation is a no-op
+  and conflicting typedefs are rejected.
+- Type deletion checks users and applied data (including typedef/pointer
+  wrappers and function variables/returns) and refuses unless `force=true`.
+- Type resolution honors target ABI sizes and qualified category paths, rejects
+  unknown C pointer targets, and preserves placeholders if replacement fails.
+- `search_data_types` gains an optional kind filter and accepts an empty pattern;
+  `get_type_size` reports members, signatures and base types.
+
+### Added — atomic batches for editing tools, and `clear_data`
+
+- `rename_function` (`renames`) and `create_function` (`items`) gain batch modes;
+  a batch rolls back entirely when any item fails or is rejected by a naming gate.
+  Creating a function at an existing entry with a different name renames it
+  through `rename_function`'s naming-quality gate.
+- `rename_symbol` gains a `renames` batch mode and `kind=namespace|class`, which
+  renames the namespace symbol rather than a similarly named structure or function.
+  `create_label` gains `namespace` (created if missing) and `primary` (replaces
+  user-defined labels at the address) options, in single and bulk mode.
+- `apply_data_type` gains an `items` batch mode and an optional `label` created in
+  the same transaction; the existing type and eviction safeguards still apply.
+- Added `clear_data`, which undefines data without changing memory bytes and clears
+  the complete containing item when no size is given. `inspect_memory_content` now
+  reports the containing data item's type, size, label, value and offset.
+- `batch_set_comments` accepts generic `comments` of any of the five listing kinds
+  (`comment_type`), including null/empty clearing and the existing global
+  plate-comment checks.
+- Symbol helpers dispatch through the injected threading strategy, so GUI batches
+  no longer call `invokeAndWait` recursively on the EDT.
+- Malformed batch entries fail the whole request before dispatch instead of
+  being silently dropped.
 
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
@@ -74,6 +124,13 @@ The deploy-regression benchmark reads functions through `/get_functions` too. Th
 structural metrics only `/get_function_signature` returned (`basic_block_count`,
 `cyclomatic_complexity`, instruction count, immediate values, string constants) are no
 longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
+
+### Fixed — integer and object-array parameters no longer bind lossily
+
+- Integer parameters reject fractional, out-of-range and missing required values
+  instead of truncating them or binding 0.
+- Object-array parameters reject entries that are not objects instead of
+  silently dropping them.
 
 ### Changed — one parameter, and one meaning, for "which function"
 

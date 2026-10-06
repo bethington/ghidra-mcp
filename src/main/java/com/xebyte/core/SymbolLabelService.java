@@ -125,12 +125,12 @@ public class SymbolLabelService {
              description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
              category = "symbol", access = ToolAccess.WRITE)
     public Response renameSymbol(
-            @Param(value = "target", source = ParamSource.BODY, paramType = "address",
+            @Param(value = "target", source = ParamSource.BODY, defaultValue = "",
                    aliases = {"address", "function_address"},
                    description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename. "
                                + "May be omitted when old_name carries the symbol name, which is how the "
                                + "replaced rename_global_variable was called.") String target,
-            @Param(value = "new_name", source = ParamSource.BODY,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "",
                    description = "The name to apply. A data global should be g_ + Hungarian + descriptor "
                                + "(g_dwPlayerCount); a code label should be snake_case. Convention misses "
                                + "come back as warnings on an otherwise successful write. IMPORTANT: at a "
@@ -139,20 +139,28 @@ public class SymbolLabelService {
                                + "can still show the old name after a success. Call delete_label on the old "
                                + "name first when you meant to replace it.") String newName,
             @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
-                   description = "auto | data | global | label | external") String kind,
+                    description = "auto | data | global | label | external | namespace | class; namespace/class targets accept qualified names") String kind,
             @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
                    description = "For kind=label: the current label name at the address given by target. "
                                + "When target is omitted this is used as the target instead, for callers "
                                + "migrated from rename_global_variable(old_name, new_name).") String oldName,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+                                + "when multiple programs are open)") String programName,
+            @Param(value = "renames", source = ParamSource.BODY, defaultValue = "[]", description = "Atomic batch [{address,new_name,old_name?},...]; honors kind and existing naming policy") List<Map<String, String>> renames) {
+        if (renames != null && !renames.isEmpty()) {
+            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+            if (pe.hasError()) return pe.error();
+            return BatchOperations.run(pe.program(), threadingStrategy, "Rename symbols", renames,
+                item -> renameSymbol(item.getOrDefault("address", item.get("target")), item.get("new_name"), kind, item.get("old_name"), programName));
+        }
         target = resolveRenameTarget(target, oldName);
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
             case "data":     return renameDataAtAddress(target, newName, programName);
             case "global":   return renameGlobalVariable(target, newName, programName);
             case "external": return renameExternalLocation(target, newName, programName);
+            case "namespace": case "class": return renameNamespaceSymbol(target, newName, programName);
             case "label":
                 return (oldName == null || oldName.isEmpty())
                         ? renameOrLabel(target, newName, programName)
@@ -166,6 +174,43 @@ public class SymbolLabelService {
                         : renameGlobalVariable(target, newName, programName);
             }
         }
+    }
+
+    public Response renameSymbol(String target, String newName, String kind, String oldName, String programName) {
+        return renameSymbol(target, newName, kind, oldName, programName, List.of());
+    }
+
+    private Response renameNamespaceSymbol(String oldName, String newName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        if (oldName == null || oldName.isBlank() || newName == null || newName.isBlank()) return Response.err("Old and new namespace names are required");
+        try {
+            return threadingStrategy.executeWrite(pe.program(), "Rename namespace", () -> {
+                Symbol found = null;
+                if (oldName.contains("::")) {
+                    Namespace current = pe.program().getGlobalNamespace();
+                    for (String part : oldName.split("::")) {
+                        current = pe.program().getSymbolTable().getNamespace(part, current);
+                        if (current == null) break;
+                    }
+                    if (current != null) found = current.getSymbol();
+                }
+                for (Symbol symbol : pe.program().getSymbolTable().getAllSymbols(true)) {
+                    if ((symbol.getSymbolType() == SymbolType.NAMESPACE || symbol.getSymbolType() == SymbolType.CLASS)
+                            && (oldName.equals(symbol.getName()) || oldName.equals(symbol.getName(true)))) {
+                        if (found != null && !found.equals(symbol)) throw new IllegalArgumentException("Ambiguous namespace; use its qualified name");
+                        found = symbol;
+                    }
+                }
+                if (found == null) throw new IllegalArgumentException("Namespace/class not found: " + oldName);
+                found.setName(newName, SourceType.USER_DEFINED);
+                return Response.success("Renamed namespace to " + found.getName(true));
+            });
+        } catch (Exception e) { return Response.err(e.getMessage()); }
+    }
+
+    private void runOnProgramThread(Runnable action) throws Exception {
+        threadingStrategy.executeRead(() -> { action.run(); return null; });
     }
 
     // rename_label merged into rename_symbol(kind=label) in 7.0.0; kept as a helper.
@@ -243,7 +288,7 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null, programName);
     }
 
-    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.WRITE)
+    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). primary=true deletes existing user-defined labels. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.DESTRUCTIVE)
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -253,11 +298,39 @@ public class SymbolLabelService {
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+                                + "when multiple programs are open)") String programName,
+            @Param(value = "primary", source = ParamSource.BODY, defaultValue = "false", description = "Replace user-defined labels and make this label primary, in single or batch mode") boolean primary,
+            @Param(value = "namespace", source = ParamSource.BODY, defaultValue = "", description = "Optional qualified namespace, created if missing") String namespace) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if (primary || namespace != null && !namespace.isBlank()) {
+            List<Map<String, String>> entries = labels != null && !labels.isEmpty() ? labels
+                : List.of(Map.of("address", addressStr == null ? "" : addressStr, "name", labelName == null ? "" : labelName));
+            return BatchOperations.run(program, threadingStrategy, "Create primary/namespaced labels", entries, item -> {
+                Address at = OverrideService.requireAddress(program, item.get("address"));
+                String name = item.get("name");
+                if (name == null || name.isBlank()) throw new IllegalArgumentException("Label name is required");
+                SymbolTable table = program.getSymbolTable();
+                Namespace space = program.getGlobalNamespace();
+                if (namespace != null && !namespace.isBlank()) {
+                    for (String part : namespace.split("::")) {
+                        Namespace next = table.getNamespace(part, space);
+                        space = next != null ? next : table.createNameSpace(space, part, SourceType.USER_DEFINED);
+                    }
+                }
+                if (primary) {
+                    for (Symbol existing : table.getSymbols(at)) {
+                        if (existing.getSymbolType() == SymbolType.LABEL && existing.getSource() == SourceType.USER_DEFINED
+                                && !existing.delete()) throw new IllegalArgumentException("Could not delete existing label");
+                    }
+                }
+                Symbol label = table.createLabel(at, name, space, SourceType.USER_DEFINED);
+                if (primary && !label.isPrimary() && !label.setPrimary()) throw new IllegalArgumentException("Could not set primary label");
+                return Response.ok(JsonHelper.mapOf("status", "success", "address", at.toString(), "name", label.getName(true), "primary", label.isPrimary()));
+            });
+        }
         if (labels != null && !labels.isEmpty()) {
             return batchCreateLabels(labels, programName);
         }
@@ -319,6 +392,10 @@ public class SymbolLabelService {
         }
     }
 
+    public Response createLabel(String address, String name, List<Map<String, String>> labels, String programName) {
+        return createLabel(address, name, labels, programName, false, "");
+    }
+
     public Response batchCreateLabels(List<Map<String, String>> labels) {
         return batchCreateLabels(labels, null);
     }
@@ -343,7 +420,7 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Batch Create Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
@@ -550,7 +627,7 @@ public class SymbolLabelService {
             final List<String> deletedNames = new ArrayList<>();
             final List<String> errors = new ArrayList<>();
 
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Delete Label");
                 try {
                     for (Symbol symbol : symbols) {
@@ -618,7 +695,7 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Batch Delete Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
@@ -765,7 +842,7 @@ public class SymbolLabelService {
         final AtomicReference<String> successMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Rename data");
                 try {
                     Listing listing = program.getListing();
@@ -988,7 +1065,7 @@ public class SymbolLabelService {
                         AtomicReference<String> errorMsg = new AtomicReference<>();
 
                         try {
-                            SwingUtilities.invokeAndWait(() -> {
+                            runOnProgramThread(() -> {
                                 int tx = program.startTransaction("Rename external location");
                                 try {
                                     Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
@@ -1058,7 +1135,7 @@ public class SymbolLabelService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {

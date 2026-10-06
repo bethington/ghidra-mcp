@@ -1213,22 +1213,28 @@ public final class ServiceUtils {
     }
 
     private static DataType resolveDataTypeInternal(DataTypeManager dtm, String typeName) {
+        if (typeName == null || typeName.isBlank()) return null;
+        typeName = typeName.trim();
+        if (typeName.equals("undefined") || typeName.equals("undefined1")) return Undefined1DataType.dataType;
+        if (typeName.equals("undefined2")) return Undefined2DataType.dataType;
+        if (typeName.equals("undefined4")) return Undefined4DataType.dataType;
+        if (typeName.equals("undefined8")) return Undefined8DataType.dataType;
         // ZERO: Map common C type names to Ghidra built-in DataType instances
         DataType wellKnown = resolveWellKnownType(typeName);
         if (wellKnown != null) {
             Msg.info(ServiceUtils.class, "Resolved well-known type: " + typeName + " -> " + wellKnown.getName());
-            return wellKnown;
+            return wellKnown.clone(dtm);
         }
 
         // FIRST: Try Ghidra builtin types in root category
-        DataType builtinType = dtm.getDataType("/" + typeName);
+        DataType builtinType = dtm.getDataType(typeName.startsWith("/") ? typeName : "/" + typeName);
         if (builtinType != null) {
             Msg.info(ServiceUtils.class, "Found builtin data type: " + builtinType.getPathName());
             return builtinType;
         }
 
         // SECOND: Try lowercase version of builtin types
-        DataType builtinTypeLower = dtm.getDataType("/" + typeName.toLowerCase());
+        DataType builtinTypeLower = dtm.getDataType(typeName.startsWith("/") ? typeName.toLowerCase() : "/" + typeName.toLowerCase());
         if (builtinTypeLower != null) {
             Msg.info(ServiceUtils.class, "Found builtin data type (lowercase): " + builtinTypeLower.getPathName());
             return builtinTypeLower;
@@ -1245,14 +1251,16 @@ public final class ServiceUtils {
         if (typeName.contains("[") && typeName.endsWith("]")) {
             int bracketPos = typeName.indexOf('[');
             String baseTypeName = typeName.substring(0, bracketPos);
-            String countStr = typeName.substring(bracketPos + 1, typeName.length() - 1);
+            int closingBracket = typeName.indexOf(']', bracketPos);
+            String countStr = typeName.substring(bracketPos + 1, closingBracket);
+            String remaining = typeName.substring(closingBracket + 1);
 
             try {
                 int count = Integer.parseInt(countStr);
-                DataType baseType = resolveDataTypeInternal(dtm, baseTypeName);
+                DataType baseType = resolveDataTypeInternal(dtm, baseTypeName + remaining);
 
                 if (baseType != null && count > 0) {
-                    ArrayDataType arrayType = new ArrayDataType(baseType, count, baseType.getLength());
+                    ArrayDataType arrayType = new ArrayDataType(baseType, count, baseType.getLength(), dtm);
                     Msg.info(ServiceUtils.class, "Auto-created array type: " + typeName +
                             " (base: " + baseType.getName() + ", count: " + count +
                             ", total size: " + arrayType.getLength() + " bytes)");
@@ -1273,18 +1281,18 @@ public final class ServiceUtils {
 
             if (baseTypeName.equals("void") || baseTypeName.isEmpty()) {
                 Msg.info(ServiceUtils.class, "Creating void* pointer type");
-                return new PointerDataType(dtm.getDataType("/void"));
+                return new PointerDataType(VoidDataType.dataType, dtm);
             }
 
             DataType baseType = resolveDataTypeInternal(dtm, baseTypeName);
             if (baseType != null) {
                 Msg.info(ServiceUtils.class, "Creating pointer type: " + typeName +
                         " (base: " + baseType.getName() + ")");
-                return new PointerDataType(baseType);
+                return new PointerDataType(baseType, dtm);
             }
 
-            Msg.warn(ServiceUtils.class, "Base type not found for " + typeName + ", defaulting to void*");
-            return new PointerDataType(dtm.getDataType("/void"));
+            Msg.warn(ServiceUtils.class, "Base type not found for " + typeName);
+            return null;
         }
 
         // Check for Windows-style pointer types (PXXX)
@@ -1355,6 +1363,8 @@ public final class ServiceUtils {
      * Find a data type by name in all categories/folders of the data type manager.
      */
     public static DataType findDataTypeByNameInAllCategories(DataTypeManager dtm, String typeName) {
+        if (typeName == null || typeName.isBlank()) return null;
+        if (typeName.contains("/")) return dtm.getDataType(typeName.startsWith("/") ? typeName : "/" + typeName);
         DataType result = searchByNameInAllCategories(dtm, typeName);
         if (result != null) {
             return result;

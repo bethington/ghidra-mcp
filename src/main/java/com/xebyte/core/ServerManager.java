@@ -74,7 +74,7 @@ public class ServerManager {
             FunctionBundleService functionBundleService = new FunctionBundleService(programProvider, ts, functionService);
 
             AnnotationScanner scanner = new AnnotationScanner(programProvider, ts,
-                listingService, functionService, commentService, symbolLabelService,
+                listingService, functionService, new OverrideService(programProvider, ts), commentService, symbolLabelService,
                 xrefCallGraphService, dataTypeService, analysisService,
                 documentationHashService, malwareSecurityService, programScriptService,
                 functionBundleService);

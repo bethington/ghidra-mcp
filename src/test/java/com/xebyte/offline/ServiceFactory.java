@@ -69,6 +69,7 @@ public final class ServiceFactory {
         return new Object[] {
             listingService,
             functionService,
+            new com.xebyte.core.OverrideService(provider, ts),
             commentService,
             symbolLabelService,
             xrefCallGraphService,
