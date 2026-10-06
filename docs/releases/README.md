@@ -19,8 +19,8 @@ surface from **272 to 251 tools**: five rename tools collapse into
 the same cycle (`/list_shadowed_globals`, `/batch_get_comments`), and rc.1
 shipped 253.
 
-After rc.1 a second pass removed 53 more tools and added 18, so
-**7.0.0 ships 218 tools** — 214 served by the GUI plugin, 199 by the headless server, 195 by both:
+After rc.1 a second pass removed 53 more tools and added 19, so
+**7.0.0 ships 219 tools** — 215 served by the GUI plugin, 200 by the headless server, 196 by both:
 
 - **`get_functions`** reads one function, or up to 20, with `fields=` choosing
   what comes back. It replaces `decompile_function` and eight other per-function
@@ -45,7 +45,7 @@ After rc.1 a second pass removed 53 more tools and added 18, so
 - **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C to
   disk as a file tree an agent searches with its own Grep, Read and Glob, and keeps
   it current as the program changes. `partition_program` and `find_type_users` come
-  with it.
+  with it, and `get_change_token` tells a client when what it read has gone stale.
 - Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
   `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
   `create_derived_type`, `debugger/step(kind=)`.
@@ -79,10 +79,10 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 (`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
 `--tools-page-size`.
 
-**Lazy tool loading is the default.** Advertising all 218 endpoints in one
+**Lazy tool loading is the default.** Advertising all 219 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (68 endpoints plus 8
+called. The bridge now loads `listing,function,program` (69 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 

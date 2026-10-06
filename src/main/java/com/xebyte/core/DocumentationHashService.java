@@ -306,7 +306,7 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer ghidra://function/{program}/{address} (or /get_functions) when you want decompile + docs + callers in one cacheable read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "

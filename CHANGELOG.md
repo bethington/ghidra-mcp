@@ -6,8 +6,8 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**218 tools** — 214 served by the GUI plugin, 199 by the headless server, 195
-by both. 217 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
+**219 tools** — 215 served by the GUI plugin, 200 by the headless server, 196
+by both. 218 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
 only the bridge calls. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
 7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
@@ -20,7 +20,8 @@ became shared services (`/server/version_control/checkin` and
 `/apply_function_documentation` and `/batch_apply_documentation` (53 tools
 removed and 9 added since rc.1, every one named in
 [`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
-and **218** with the decompilation tree, `/partition_program` and `/find_type_users`.
+218 with the decompilation tree, `/partition_program` and `/find_type_users`, and
+**219** with `/get_change_token`.
 
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
@@ -32,6 +33,43 @@ the 235-tool schema recording); the figures above are the current ones.
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Added — function resources and `/get_change_token`
+
+A function review used to take about five tool calls, and every write forced a re-read.
+The bridge now serves functions and decompilation trees as MCP resources:
+
+| URI | Role |
+| --- | --- |
+| `ghidra://programs` | Discovery root (the sole `resources/list` entry) |
+| `ghidra://program/{program}/index` | Program summary |
+| `ghidra://program/{program}/functions` | `{name, address}` index (capped) |
+| `ghidra://function/{program}/{address}` | The function, rendered as Markdown |
+| `ghidra://function/{program}/by-name/{name}` | Redirect to the address URI |
+| `ghidra://search/{program}/functions/{pattern}` | Name search |
+| `ghidra://program/{program}/changes` | Change token and per-transport delivery caveats |
+| `ghidra://decompile-tree/{id}` | A tree's status, config and search hints |
+
+- **URIs are keyed by address, never by name.** Renaming is the common write, and MCP
+  has no rename notification, so a name-keyed URI would strand a client's cache.
+- **Writes invalidate what they changed.** Every write tool is classified NONE, LOCAL,
+  CALLERS, TYPE or UNBOUNDED, and CI fails on an unclassified one; a struct edit asks
+  `/find_type_users` which functions to invalidate. NONE covers writes no resource shows,
+  `/save_program` above all, which follows nearly every write and would otherwise drop the
+  whole cache. `notifications/resources/updated` is sent before the write's response,
+  because streamable HTTP drops anything addressed to a request whose response has gone.
+  `--stateless-http` refuses `resources/subscribe`, and `--json-response` warns that
+  notifications cannot be delivered.
+- **`/get_change_token`** returns `<saved time>:<session epoch>:<modification number>`;
+  the bridge polls it to catch GUI edits, undo and scripts no write hook sees. Compare it
+  whole: the counter alone restarts at every open.
+- **Bodies are shaped for the model reading them.** A resource body travels inside a JSON
+  string, so a JSON body arrives doubly escaped; the function resource is Markdown
+  (10,131 characters against 18,233 for indented JSON on one bundle, with 336 quote and
+  backslash characters against 2,746). Locals whose name already says their storage
+  (`local_f0`, `uVar7`) are counted rather than listed; the index and search bodies stay
+  JSON but compact, without a per-row URI (`ghidra://program/{program}/functions`
+  234 KB → 90 KB).
 
 ### Added — decompilation tree, `/partition_program`, `/find_type_users`
 

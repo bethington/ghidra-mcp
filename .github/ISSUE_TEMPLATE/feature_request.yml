@@ -55,7 +55,7 @@ body:
     attributes:
       label: Did you check the existing tool catalog?
       description: >
-        218 tools are listed in tests/endpoints.json and in the README's API
+        219 tools are listed in tests/endpoints.json and in the README's API
         Reference. `search_tools` searches the live catalog by keyword.
       options:
         - "Yes, nothing covers this"
