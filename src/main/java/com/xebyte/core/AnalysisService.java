@@ -744,6 +744,14 @@ public class AnalysisService {
             resultMap.put("detected_string", detectedString);
             resultMap.put("suggested_type", detectedString != null ? "char[" + stringLength + "]" : null);
             resultMap.put("string_length", stringLength);
+            Data data = program.getListing().getDataContaining(addr);
+            if (data != null) {
+                Symbol symbol = program.getSymbolTable().getPrimarySymbol(data.getAddress());
+                resultMap.put("data_item", JsonHelper.mapOf("address", data.getAddress().toString(),
+                    "match", addr.equals(data.getAddress()) ? "exact" : "containing", "offset", addr.subtract(data.getAddress()),
+                    "type", data.getDataType().getPathName(), "size", data.getLength(),
+                    "value", data.getDefaultValueRepresentation(), "label", symbol == null ? null : symbol.getName()));
+            }
 
             return Response.ok(resultMap);
         } catch (Exception e) {
