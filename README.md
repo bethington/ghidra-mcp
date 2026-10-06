@@ -969,16 +969,22 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
 - `force_decompile` - Force fresh decompilation
+- `get_call_site_prototype` - Read a localized prototype override at an exact direct/indirect CALL instruction, not the callee entry or its normal signature
 - `get_functions` - Everything about one or many functions in a single call
+- `get_stack_depth_change` - Read an explicit instruction stack-depth override, not inferred depth or callee stack purge
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
+- `remove_stack_depth_change` - Remove an explicit stack-depth override, restoring inferred behavior
 - `rename_function` - Rename function by name
 - `rename_variables` - Batch rename variables
+- `set_call_site_prototype` - Set/replace a prototype override for ONE direct or indirect CALL
+- `set_function_calling_convention` - Change only a function's calling convention at its exact entry address
 - `set_function_no_return` - Set no-return attribute
 - `set_function_prototype` - Set function prototype (return type, param types, calling convention)
 - `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
 - `set_function_this_type` - Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall)
+- `set_stack_depth_change` - Set an explicit signed 32-bit stack-pointer byte delta at an exact instruction address
 - `set_variable_storage` - Set variable storage
 - `set_variable_type` - Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer
 - `set_variables` - Set types and names for multiple variables atomically

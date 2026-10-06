@@ -43,6 +43,7 @@ from pathlib import Path
 SCANNED_SERVICES = (
     "ListingService",
     "FunctionService",
+    "OverrideService",
     "CommentService",
     "SymbolLabelService",
     "XrefCallGraphService",

@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 215,
+  "total_endpoints": 221,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1527,6 +1527,20 @@
       "description": "Get assembly context"
     },
     {
+      "path": "/get_call_site_prototype",
+      "method": "GET",
+      "category": "function",
+      "params": [
+        "call_address",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Read a localized prototype override at an exact direct/indirect CALL instruction, not the callee entry or its normal signature."
+    },
+    {
       "path": "/get_comment",
       "method": "GET",
       "category": "comment",
@@ -1797,6 +1811,20 @@
         "headless"
       ],
       "description": "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property."
+    },
+    {
+      "path": "/get_stack_depth_change",
+      "method": "GET",
+      "category": "function",
+      "params": [
+        "address",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Read an explicit instruction stack-depth override, not inferred depth or callee stack purge. has_override=false means none exists."
     },
     {
       "path": "/get_struct_layout",
@@ -2474,6 +2502,20 @@
       "description": "Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
     },
     {
+      "path": "/remove_stack_depth_change",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "address",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Remove an explicit stack-depth override, restoring inferred behavior. Also removes stale overrides after an instruction has been cleared."
+    },
+    {
       "path": "/remove_struct_field",
       "method": "POST",
       "category": "datatype",
@@ -2984,6 +3026,21 @@
       "description": "Set bookmark"
     },
     {
+      "path": "/set_call_site_prototype",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "call_address",
+        "prototype",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Set/replace a prototype override for ONE direct or indirect CALL. The declaration name is a placeholder, not a rename. Caller/callee signatures and other call sites remain unchanged."
+    },
+    {
       "path": "/set_comment",
       "method": "POST",
       "category": "comment",
@@ -2998,6 +3055,21 @@
         "headless"
       ],
       "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; sets a PLATE comment on a function or a data global alike."
+    },
+    {
+      "path": "/set_function_calling_convention",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "calling_convention",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Change only a function's calling convention at its exact entry address. Preserves its prototype and custom variable storage; Ghidra recomputes dynamic storage and implicit parameters. Accepts default and unprefixed aliases; call-site overrides are unchanged."
     },
     {
       "path": "/set_function_no_return",
@@ -3128,6 +3200,21 @@
         "headless"
       ],
       "description": "Set a value at an address in a property map. The value is coerced to the map's type (int/long/string); 'void' maps ignore the value and just tag the address. Create the map first with create_property_map. Call save_program to persist."
+    },
+    {
+      "path": "/set_stack_depth_change",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "address",
+        "stack_depth_change",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Set an explicit signed 32-bit stack-pointer byte delta at an exact instruction address. Zero is a valid override; this is not an absolute stack depth."
     },
     {
       "path": "/set_variable_storage",

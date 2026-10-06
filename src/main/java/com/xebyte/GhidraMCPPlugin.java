@@ -647,7 +647,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // ==========================================================================
 
         AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
-            listingService, functionService, commentService, symbolLabelService,
+            listingService, functionService, new com.xebyte.core.OverrideService(programProvider, threadingStrategy), commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService,
             emulationService, debuggerService, promptPolicyService, functionBundleService);
