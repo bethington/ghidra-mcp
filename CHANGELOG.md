@@ -54,6 +54,12 @@ and folding `/get_version` into `/mcp/health`).
   a batch rolls back entirely when any item fails or is rejected by a naming gate.
   Creating a function at an existing entry with a different name renames it
   through `rename_function`'s naming-quality gate.
+- `rename_symbol` gains a `renames` batch mode and `kind=namespace|class`, which
+  renames the namespace symbol rather than a similarly named structure or function.
+  `create_label` gains `namespace` (created if missing) and `primary` (replaces
+  user-defined labels at the address) options, in single and bulk mode.
+- Symbol helpers dispatch through the injected threading strategy, so GUI batches
+  no longer call `invokeAndWait` recursively on the EDT.
 - Malformed batch entries fail the whole request before dispatch instead of
   being silently dropped.
 

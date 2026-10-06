@@ -54,6 +54,30 @@ public class BatchEditingGhidraTest {
         assertEquals("GetFirstValue", program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName());
     }
 
+    @Test public void primaryNamespacedLabelsNamespaceRenameAndBulkSymbolRename() {
+        ok(symbols.createLabel("0x1040", "old_label", List.of(), ""));
+        ok(symbols.createLabel("", "", List.of(Map.of("address", "0x1040", "name", "new_label")), "", true, "Outer::Inner"));
+        Symbol primary = program.getSymbolTable().getPrimarySymbol(builder.addr("0x1040"));
+        assertEquals("Outer::Inner::new_label", primary.getName(true));
+        assertEquals(1, program.getSymbolTable().getSymbols(builder.addr("0x1040")).length);
+        ok(symbols.renameSymbol("Outer::Inner", "Renamed", "namespace", "", ""));
+        assertEquals("Outer::Renamed::new_label", primary.getName(true));
+        ok(symbols.renameSymbol("", "", "label", "", "", List.of(Map.of("address", "0x1040", "old_name", "new_label", "new_name", "final_label"))));
+        assertEquals("final_label", program.getSymbolTable().getPrimarySymbol(builder.addr("0x1040")).getName());
+    }
+
+    @Test public void guiBatchesRunOnEdtWithoutRecursiveInvokeAndWait() throws Exception {
+        SymbolLabelService gui = new SymbolLabelService(provider, new SwingThreadingStrategy());
+        ok(gui.createLabel("0x1040", "before_label", List.of(), ""));
+        ok(gui.renameSymbol("", "", "label", "", "", List.of(
+            Map.of("address", "0x1040", "old_name", "before_label", "new_name", "after_label"))));
+        assertEquals("after_label", program.getSymbolTable().getPrimarySymbol(builder.addr("0x1040")).getName());
+        new SwingThreadingStrategy().executeRead(() -> {
+            ok(gui.createLabel("", "", List.of(Map.of("address", "0x1048", "name", "primary_label")), "", true, ""));
+            return null;
+        });
+    }
+
     @Test public void malformedHttpBatchEntriesRejectTheWholeRequest() throws Exception {
         AnnotationScanner scanner = new AnnotationScanner(provider, new DirectThreadingStrategy(), functions, types, comments, symbols);
         String before = program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName();
@@ -74,5 +98,22 @@ public class BatchEditingGhidraTest {
             Map.of("address", "0x1000", "name", "GetFirstValue"), Map.of("address", "0x1010", "name", "Get")));
         assertTrue(response.toJson(), response instanceof Response.Err);
         assertEquals(before, program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName());
+    }
+
+    @Test public void namespaceRenameDoesNotRenameAQualifiedFunction() throws Exception {
+        var function = program.getFunctionManager().getFunctionAt(builder.addr("0x1000"));
+        builder.withTransaction(() -> {
+            try {
+                Namespace outer = program.getSymbolTable().createNameSpace(program.getGlobalNamespace(), "Outer", SourceType.USER_DEFINED);
+                function.setParentNamespace(outer);
+                function.setName("GetOriginalValue", SourceType.USER_DEFINED);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        Response response = symbols.renameSymbol("Outer::GetOriginalValue", "Get", "namespace", "", "");
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertEquals("GetOriginalValue", function.getName());
+        var labelTool = new AnnotationScanner(symbols).getDescriptors().stream()
+            .filter(d -> d.path().equals("/create_label")).findFirst().orElseThrow();
+        assertTrue(labelTool.access().isDestructive());
     }
 }
