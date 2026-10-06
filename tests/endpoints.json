@@ -449,7 +449,9 @@
         "decompiler_comments",
         "disassembly_comments",
         "plate_comment",
-        "program"
+        "program",
+        "comments",
+        "comment_type"
       ],
       "servers": [
         "gui",

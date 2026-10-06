@@ -237,7 +237,7 @@ public class CommentService {
      */
     @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.WRITE)
     public Response batchSetComments(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -258,10 +258,35 @@ public class CommentService {
                                + "that address's EOL comment.") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "comments", source = ParamSource.BODY, defaultValue = "[]", description = "Atomic generic [{address,comment},...]; empty/null comments clear") List<Map<String, String>> comments,
+            @Param(value = "comment_type", source = ParamSource.BODY, defaultValue = "decompiler", description = "eol/disassembly, pre/decompiler, post, plate or repeatable for generic comments") String commentType) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        if (comments != null && !comments.isEmpty()) {
+            int type;
+            switch (commentType) {
+                case "eol": case "disassembly": type = CodeUnit.EOL_COMMENT; break;
+                case "pre": case "decompiler": type = CodeUnit.PRE_COMMENT; break;
+                case "post": type = CodeUnit.POST_COMMENT; break;
+                case "plate": type = CodeUnit.PLATE_COMMENT; break;
+                case "repeatable": type = CodeUnit.REPEATABLE_COMMENT; break;
+                default: return Response.err("Unsupported comment_type: " + commentType);
+            }
+            return BatchOperations.run(program, threadingStrategy, "Set comments", comments, item -> {
+                Address at = OverrideService.requireAddress(program, item.get("address"));
+                if (!item.containsKey("comment")) throw new IllegalArgumentException("comment is required; use null or an empty string to clear");
+                String comment = item.get("comment");
+                if (type == CodeUnit.PLATE_COMMENT) {
+                    Response rejected = globalPlateRejection(program, at, comment);
+                    if (rejected != null) return rejected;
+                }
+                program.getListing().setComment(at, type, comment == null || comment.isEmpty() ? null : comment);
+                return Response.success("Set comment at " + at);
+            });
+        }
 
         // Resolve function address before entering SwingUtilities lambda
         final Address funcAddr;
@@ -285,23 +310,8 @@ public class CommentService {
                 && plateComment != null
                 && !plateComment.equals("null")
                 && !plateComment.isEmpty()) {
-            Function preFunc = program.getFunctionManager().getFunctionAt(funcAddr);
-            if (preFunc == null) {
-                Data preData = program.getListing().getDefinedDataAt(funcAddr);
-                if (preData != null) {
-                    String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
-                    if (plateIssue != null) {
-                        return Response.ok(JsonHelper.mapOf(
-                                "status", "rejected",
-                                "error", plateIssue[0],
-                                "address", functionAddress,
-                                "first_line", plateIssue[1],
-                                "message", "Plate-comment first line must be a >=4-word summary describing what the global represents.",
-                                "suggestion", "Replace with a one-liner like 'Bitmap of currently-active quests for the player' or 'Pointer to the head of the linked unit list.'"
-                        ));
-                    }
-                }
-            }
+            Response rejected = globalPlateRejection(program, funcAddr, plateComment);
+            if (rejected != null) return rejected;
         }
 
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -434,6 +444,22 @@ public class CommentService {
             resultMap.put("warnings", plateWarnings);
         }
         return Response.ok(resultMap);
+    }
+
+    public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
+                                     List<Map<String, String>> disassemblyComments, String plateComment, String programName) {
+        return batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment, programName, List.of(), "decompiler");
+    }
+
+    private static Response globalPlateRejection(Program program, Address address, String comment) {
+        if (comment == null || comment.isEmpty() || program.getFunctionManager().getFunctionAt(address) != null
+                || program.getListing().getDefinedDataAt(address) == null) return null;
+        String[] issue = NamingConventions.checkGlobalPlateComment(comment);
+        if (issue == null) return null;
+        return Response.ok(JsonHelper.mapOf(
+            "status", "rejected", "error", issue[0], "address", address.toString(), "first_line", issue[1],
+            "message", "Plate-comment first line must be a >=4-word summary describing what the global represents.",
+            "suggestion", "Replace with a one-liner like 'Bitmap of currently-active quests for the player' or 'Pointer to the head of the linked unit list.'"));
     }
 
     public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
