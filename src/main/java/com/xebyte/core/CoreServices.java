@@ -7,7 +7,7 @@ import java.util.List;
  * The services both servers expose, built once from a provider and a threading strategy.
  *
  * <p>The GUI plugin, the headless server and the offline test factory each used to
- * construct these sixteen by hand, with the same inter-service wiring
+ * construct these seventeen by hand, with the same inter-service wiring
  * ({@link DocumentationHashService#setFunctionService}, and {@link AnalysisService} and
  * {@link FunctionBundleService} sharing one {@link FunctionService}). Three copies of a
  * dependency graph drift; one does not.
@@ -25,6 +25,7 @@ public record CoreServices(
         CommentService comment,
         SymbolLabelService symbolLabel,
         FunctionService function,
+        OverrideService override,
         XrefCallGraphService xrefCallGraph,
         DataTypeService dataType,
         DocumentationHashService documentationHash,
@@ -44,6 +45,7 @@ public record CoreServices(
             new CommentService(provider, ts),
             new SymbolLabelService(provider, ts),
             function,
+            new OverrideService(provider, ts),
             new XrefCallGraphService(provider, ts),
             new DataTypeService(provider, ts),
             documentationHash,
@@ -56,7 +58,7 @@ public record CoreServices(
 
     /** Every shared service, in declaration order. */
     public List<Object> all() {
-        return List.of(listing, comment, symbolLabel, function, xrefCallGraph, dataType,
+        return List.of(listing, comment, symbolLabel, function, override, xrefCallGraph, dataType,
             documentationHash, analysis, malwareSecurity, programScript, emulation,
             functionBundle);
     }

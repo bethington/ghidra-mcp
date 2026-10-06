@@ -531,6 +531,13 @@ set per server, so both transports of a server give the same answer. Services as
 `ProgramProvider` instead of checking which provider they were given. The unused transport
 abstraction is deleted.
 
+### Added — localized decompiler overrides
+
+- Added shared GUI/headless tools to read, set and remove explicit stack-depth
+  overrides, read/set per-call-site prototype overrides, and change only a
+  function's calling convention without rebuilding its prototype or discarding
+  custom storage.
+
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
 Reviewing a function took five round trips (`decompile_function`,
