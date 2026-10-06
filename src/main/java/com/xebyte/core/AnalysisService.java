@@ -37,7 +37,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
 import javax.swing.SwingUtilities;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -603,7 +602,7 @@ public class AnalysisService {
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Program program = resolvedProgram;
 
@@ -660,7 +659,7 @@ public class AnalysisService {
                     result.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             Msg.error(this, "Thread synchronization error in getFieldAccessContext", e);
             return Response.err("Thread synchronization error: " + e.getMessage());
         }
@@ -1971,11 +1970,7 @@ public class AnalysisService {
                 }
             };
 
-            if (SwingUtilities.isEventDispatchThread()) {
-                completenessWork.run();
-            } else {
-                SwingUtilities.invokeAndWait(completenessWork);
-            }
+            threadingStrategy.runOnUi(completenessWork);
 
             if (errorMsg.get() != null) {
                 return Response.err(errorMsg.get());
@@ -2170,7 +2165,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
                     Address start = startAddr;
@@ -2261,7 +2256,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, name);
                     if (lookup.hasError()) {
@@ -4179,7 +4174,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     // Resolve function by address
                     Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -4394,7 +4389,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
                     Listing listing = program.getListing();
@@ -4539,7 +4534,7 @@ public class AnalysisService {
 
         final AtomicReference<Response> result = new AtomicReference<>();
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Program program = resolvedProgram;
                     Function func = program.getFunctionManager().getFunctionContaining(anchorAddr);
@@ -4597,7 +4592,7 @@ public class AnalysisService {
                     result.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             return Response.err("Thread synchronization error: " + e.getMessage());
         }
 

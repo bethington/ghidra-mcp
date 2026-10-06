@@ -67,7 +67,6 @@ KNOWN_ERROR_PAYLOAD_GOLDENS = {
     "archive_ingest_function.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
     "archive_ingest_program.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
     "tool_goto_address.snap": "needs a GUI CodeBrowser session",
-    "tool_launch_codebrowser.snap": "needs a GUI CodeBrowser session",
 }
 
 

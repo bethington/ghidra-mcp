@@ -21,9 +21,8 @@ import com.xebyte.core.AmbiguousProgramException;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.CoreServices;
 import com.xebyte.core.JsonHelper;
-import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.SecurityConfig;
-import com.xebyte.core.ThreadingStrategy;
+import com.xebyte.core.VersionControlService;
 import com.xebyte.core.VersionInfo;
 import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
@@ -32,10 +31,8 @@ import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
 import ghidra.program.model.listing.Program;
-import ghidra.util.Msg;
 
 import java.io.*;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -103,6 +100,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // Create server manager for shared Ghidra server support
         serverManager = new GhidraServerManager();
+        // VC endpoints resolve DomainFile through the open project.
 
         managementService = new HeadlessManagementService(programProvider, serverManager);
 
@@ -396,26 +394,20 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // ==========================================================================
 
         AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
-            services.plus(managementService));
+            services.plus(managementService, new com.xebyte.core.ProjectLifecycleService(programProvider), new VersionControlService(programProvider, serverManager),
+                new com.xebyte.core.ServerLifecycleService(services.programScript(),
+                    () -> System.exit(0)),
+                new com.xebyte.core.DocumentationBatchService(services.function(), services.comment(),
+                    services.analysis(), null)));
 
         http.endpoints(scanner);
 
-        // These routes are registered below via their own http.route(...) calls
-        // (utility/server/project endpoints that predate the @McpTool convention),
-        // so they are already live and callable. Without this they stayed
-        // invisible in /mcp/schema -- and therefore invisible to the Python
-        // bridge's dynamic tool discovery. Mirrors the GUI-side wiring in
-        // GhidraMCPPlugin; see ManualToolDescriptors for the shared metadata
-        // source. Found via a live-schema-vs-catalog diff (v6.0.0).
+        // These three are McpHttpServer's own routes, with no @McpTool method. They are live
+        // and callable, but without a descriptor they stayed out of /mcp/schema and so out
+        // of the bridge's dynamic tool discovery. ManualToolDescriptors is the shared
+        // metadata source.
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
-            "/check_connection", "/exit_ghidra", "/mcp/health", "/mcp/schema",
-            "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
-            "/server/admin/terminate_checkout", "/server/admin/users",
-            "/server/checkouts", "/server/connect", "/server/disconnect",
-            "/server/repositories", "/server/repository/create", "/server/repository/file",
-            "/server/repository/files", "/server/version_control/add",
-            "/server/version_control/checkin", "/server/version_control/checkout",
-            "/server/version_control/undo_checkout", "/server/version_history");
+            "/check_connection", "/mcp/health", "/mcp/schema");
         // Store scanner size for dynamic endpoint count reporting. Now includes
         // both the dispatch-table (@McpTool-scanned) endpoints and the manually-
         // registered routes just added to the schema above -- countEndpoints()
@@ -443,130 +435,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // HeadlessProgramProvider overrides -- that override is what keeps them
         // working without a PluginTool.
 
-        // --- Server Endpoints ---
-
-        http.route("/server/connect", exchange -> {
-            sendResponse(exchange, serverManager.connect());
-        });
-
-        // /server/status registered via HeadlessManagementService
-
-        http.route("/server/repositories", exchange -> {
-            sendResponse(exchange, serverManager.listRepositories());
-        });
-
-        http.route("/server/disconnect", exchange -> {
-            sendResponse(exchange, serverManager.disconnect());
-        });
-
-        http.route("/server/repository/files", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String repo = params.get("repo");
-            String path = params.get("path");
-            if (path == null) path = "/";
-            sendResponse(exchange, serverManager.listRepositoryFiles(repo, path));
-        });
-
-        http.route("/server/repository/file", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String repo = params.get("repo");
-            String path = params.get("path");
-            sendResponse(exchange, serverManager.getFileInfo(repo, path));
-        });
-
-        http.route("/server/repository/create", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, serverManager.createRepository(params.get("name")));
-        });
-
-        // --- Version Control ---
-
-        http.route("/server/version_control/checkout", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, serverManager.checkoutFile(params.get("repo"), params.get("path")));
-        });
-
-        http.route("/server/version_control/checkin", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            boolean keepCheckedOut = parseBooleanOrDefault(params.get("keepCheckedOut"), false);
-            sendResponse(exchange, serverManager.checkinFile(
-                params.get("repo"), params.get("path"), params.get("comment"), keepCheckedOut));
-        });
-
-        http.route("/server/version_control/undo_checkout", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, serverManager.undoCheckout(params.get("repo"), params.get("path")));
-        });
-
-        http.route("/server/version_control/add", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, serverManager.addToVersionControl(
-                params.get("repo"), params.get("path"), params.get("comment")));
-        });
-
-        http.route("/server/version_history", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, serverManager.getVersionHistory(params.get("repo"), params.get("path")));
-        });
-
-        http.route("/server/checkouts", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, serverManager.getCheckouts(params.get("repo"), params.get("path")));
-        });
-
-        // --- Admin ---
-
-        http.route("/server/admin/terminate_checkout", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String checkoutIdParam = params.getOrDefault("checkoutId", params.getOrDefault("checkout_id", "0"));
-            long checkoutId = Long.parseLong(checkoutIdParam);
-            sendResponse(exchange, serverManager.terminateCheckout(
-                params.get("repo"), params.get("path"), checkoutId));
-        });
-
-        http.route("/server/admin/terminate_all_checkouts", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String folderPath = params.get("path");
-            if (folderPath == null) folderPath = "/";
-            sendResponse(exchange, serverManager.terminateAllCheckouts(
-                params.get("repo"), folderPath));
-        });
-
-        http.route("/server/admin/users", exchange -> {
-            sendResponse(exchange, serverManager.listServerUsers());
-        });
-
-        http.route("/server/admin/set_permissions", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            int accessLevel = parseIntOrDefault(params.get("accessLevel"), 1);
-            sendResponse(exchange, serverManager.setUserPermissions(
-                params.get("repo"), params.get("user"), accessLevel));
-        });
-
         // --- Exit ---
 
-        http.route("/exit_ghidra", exchange -> {
-            sendResponse(exchange, exitServer());
-        });
-
         System.out.println("Registered " + countEndpoints() + " REST API endpoints");
-    }
-
-    /**
-     * Save every open program, answer with what was saved, then exit. The GUI's
-     * /exit_ghidra always did this; headless used to exit and leave the saving to the
-     * shutdown hook, after the caller had already been told it was done.
-     */
-    private String exitServer() {
-        Object saved = services.programScript().saveAllOpenPrograms().asEmbeddable();
-        new Thread(() -> {
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            System.exit(0);
-        }).start();
-        return JsonHelper.toJson(JsonHelper.mapOf(
-            "success", true,
-            "message", "Saving all open programs, then exiting",
-            "save", JsonHelper.mapOf("programs", saved)));
     }
 
     private int countEndpoints() {
@@ -647,106 +518,37 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
     }
 
-    private Map<String, String> parseQueryParams(HttpExchange exchange) {
-        return McpHttpServer.parseQuery(exchange.getRequestURI().getRawQuery());
-    }
-
-    private Map<String, String> parsePostParams(HttpExchange exchange) throws IOException {
+    /**
+     * A flat JSON object or a form-urlencoded body, as string values.
+     *
+     * <p>The JSON case used to be parsed by splitting the body on commas, so a value
+     * containing one was cut off: a checkin comment "fix, retry" arrived as "fix".
+     */
+    public static Map<String, String> parsePostBody(String body) {
         Map<String, String> params = new HashMap<>();
-
-        // Get content type
-        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
-        if (contentType == null) {
-            contentType = "";
-        }
-
-        // Read body
-        String body;
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(exchange.getRequestBody(), StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-                // Bound accumulation so a huge body can't exhaust memory.
-                if (sb.length() > com.xebyte.core.SecurityConfig.MAX_REQUEST_BODY_BYTES) {
-                    return params;  // oversized — treat as no params
-                }
-            }
-            body = sb.toString();
-        }
-
-        if (body.isEmpty()) {
+        String text = body == null ? "" : body.trim();
+        if (text.isEmpty()) {
             return params;
         }
-
-        // Parse based on content type
-        if (contentType.contains("application/json")) {
-            // Simple JSON parsing for flat objects
-            body = body.trim();
-            if (body.startsWith("{") && body.endsWith("}")) {
-                body = body.substring(1, body.length() - 1);
-                for (String pair : body.split(",")) {
-                    String[] kv = pair.split(":", 2);
-                    if (kv.length == 2) {
-                        String key = kv[0].trim().replaceAll("^\"|\"$", "");
-                        String value = kv[1].trim().replaceAll("^\"|\"$", "");
-                        params.put(key, value);
-                    }
+        if (text.startsWith("{")) {
+            JsonHelper.parseJson(text).forEach((key, value) -> {
+                if (value != null) {
+                    params.put(key, jsonText(value));
                 }
-            }
+            });
         } else {
-            // Form-urlencoded
-            for (String param : body.split("&")) {
-                String[] pair = param.split("=", 2);
-                if (pair.length == 2) {
-                    try {
-                        String key = URLDecoder.decode(pair[0], StandardCharsets.UTF_8);
-                        String value = URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
-                        params.put(key, value);
-                    } catch (Exception e) {
-                        // Skip malformed param
-                    }
-                }
-            }
+            params.putAll(McpHttpServer.parseQuery(text));
         }
-
         return params;
     }
 
-    private int parseIntOrDefault(String value, int defaultValue) {
-        if (value == null || value.isEmpty()) {
-            return defaultValue;
+    /** A JSON value as text: integers without Gson's ".0", nested values as JSON. */
+    private static String jsonText(Object value) {
+        if (value instanceof Number n && n.doubleValue() == Math.rint(n.doubleValue())
+                && !Double.isInfinite(n.doubleValue())) {
+            return String.valueOf(n.longValue());
         }
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
+        return value instanceof String || value instanceof Number || value instanceof Boolean
+            ? String.valueOf(value) : JsonHelper.toJson(value);
     }
-
-    private boolean parseBooleanOrDefault(String value, boolean defaultValue) {
-        if (value == null || value.isEmpty()) {
-            return defaultValue;
-        }
-        return Boolean.parseBoolean(value);
-    }
-
-
-    // ==========================================================================
-    // GETTERS
-    // ==========================================================================
-
-    public ProgramProvider getProgramProvider() {
-        return programProvider;
-    }
-
-    public ThreadingStrategy getThreadingStrategy() {
-        return threadingStrategy;
-    }
-
-    public boolean isRunning() {
-        return running;
-    }
-
 }

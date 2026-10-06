@@ -311,13 +311,7 @@ class TestJavaArchitecture(unittest.TestCase):
 
         # /check_connection, /mcp/health and /mcp/instance_info are McpHttpServer's own,
         # served by both servers and registered via http.route by neither.
-        gui_only_expected = {
-            "/batch_apply_documentation",
-            "/server/authenticate",
-            "/tool/goto_address",
-            "/tool/launch_codebrowser",
-            "/tool/running_tools",
-        }
+        gui_only_expected: set[str] = set()
             # /health was the last one: headless-only liveness, retired for the
             # shared /mcp/health.
             # /configure_analyzer, /list_projects and /delete_project were hand-routed
@@ -335,25 +329,33 @@ class TestJavaArchitecture(unittest.TestCase):
         self.assertEqual(gui - headless - annotated, gui_only_expected)
         self.assertEqual(headless - gui - annotated, headless_only_expected)
 
-    def test_manual_admin_endpoint_params_are_cataloged(self):
-        """Hand-registered admin routes should document mode-specific params."""
+    def test_version_control_routes_are_snake_case_only(self):
+        """The unified version-control routes take snake_case parameters, and only those.
+
+        They were hand-coded twice with camelCase spellings (keepCheckedOut, checkoutId,
+        accessLevel) and per-server extras (repo). That is one service now.
+        """
         catalog = {
             entry["path"]: set(entry.get("params", []))
             for entry in json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["endpoints"]
         }
 
         expected_params = {
-            "/server/admin/terminate_all_checkouts": {"repo", "path"},
-            "/server/admin/terminate_checkout": {
-                "repo", "path", "checkoutId", "checkout_id"
-            },
+            "/server/admin/terminate_all_checkouts": {"path"},
+            "/server/admin/terminate_checkout": {"path", "checkout_id"},
+            "/server/admin/set_permissions": {"repo", "user", "access_level"},
+            "/server/version_control/checkout": {"path", "exclusive"},
+            "/server/version_control/undo_checkout": {"path", "keep"},
+            "/server/version_control/add": {"path", "comment", "keep_checked_out"},
+            "/checkin_program": {"path", "comment", "keep_checked_out"},
         }
         for path, params in expected_params.items():
             self.assertIn(path, catalog)
-            self.assertTrue(
-                params.issubset(catalog[path]),
-                f"{path} missing params: {sorted(params - catalog[path])}",
-            )
+            self.assertEqual(params, catalog[path], f"{path} parameters")
+        legacy = {"checkoutId", "keepCheckedOut", "accessLevel"}
+        for path, params in catalog.items():
+            if path.startswith("/server/") or path == "/checkin_program":
+                self.assertFalse(legacy & params, f"{path} still has camelCase params {legacy & params}")
 
 
 class TestProjectStructure(unittest.TestCase):

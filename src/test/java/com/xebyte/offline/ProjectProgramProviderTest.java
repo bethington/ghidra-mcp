@@ -310,20 +310,6 @@ public class ProjectProgramProviderTest {
     }
 
     @Test
-    public void checkinRefusesAFileThatIsNotCheckedOut() throws Exception {
-        Fixture f = new Fixture();
-        Program p = f.file("/fw/a");
-        when(p.getDomainFile().isVersioned()).thenReturn(true);
-        when(p.getDomainFile().isCheckedOut()).thenReturn(false);
-
-        Map<String, Object> out = f.checkinProgram("/fw/a", "c", false);
-
-        assertEquals(false, out.get("success"));
-        assertEquals("File is not checked out: /fw/a", out.get("error"));
-        verify(p.getDomainFile(), never()).checkin(any(), any());
-    }
-
-    @Test
     public void projectInfoIsTheSameShapeWithoutAGui() throws Exception {
         Fixture f = new Fixture();
         when(f.project.getName()).thenReturn("proj");

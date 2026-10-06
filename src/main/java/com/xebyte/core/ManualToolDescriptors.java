@@ -52,33 +52,10 @@ public final class ManualToolDescriptors {
      * the routes themselves were shared.
      */
     public static final List<String> SHARED_ROUTES = List.of(
-        "/batch_apply_documentation",
         "/check_connection",
-        "/exit_ghidra",
         "/mcp/health",
         "/mcp/schema",
-        "/open_project",
-        "/server/admin/set_permissions",
-        "/server/admin/terminate_all_checkouts",
-        "/server/admin/terminate_checkout",
-        "/server/admin/users",
-        "/server/authenticate",
-        "/server/checkouts",
-        "/server/connect",
-        "/server/disconnect",
-        "/server/repositories",
-        "/server/repository/create",
-        "/server/repository/file",
-        "/server/repository/files",
-        "/server/status",
-        "/server/version_control/add",
-        "/server/version_control/checkin",
-        "/server/version_control/checkout",
-        "/server/version_control/undo_checkout",
-        "/server/version_history",
-        "/tool/goto_address",
-        "/tool/launch_codebrowser",
-        "/tool/running_tools"
+        "/open_project"
     );
 
 
@@ -121,34 +98,12 @@ public final class ManualToolDescriptors {
     /** Keyed by path. Built once; entries never mutate after class init. */
     private static final Map<String, AnnotationScanner.ToolDescriptor> ALL = buildAll();
 
-    // Reused wording. GUI mode drives the already-open project and ignores the
-    // repository selector entirely; only the headless server, which holds a
-    // direct Ghidra Server connection, reads it.
-    private static final String REPO_HEADLESS_ONLY =
-            "Repository name on the Ghidra Server. Read only by the headless server —"
-            + " the GUI plugin works on the already-open project and ignores it.";
-
     private static Map<String, AnnotationScanner.ToolDescriptor> buildAll() {
         Map<String, AnnotationScanner.ToolDescriptor> m = new LinkedHashMap<>();
-        add(m, "/batch_apply_documentation", "POST", "analysis",
-            "Apply all documentation to a function in one call", ToolAccess.WRITE,
-            "address", "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step below is applied to the function at this address.",
-            "name", "New function name. Omit or leave empty to skip the rename step.",
-            "prototype", "Full C signature. Applied BEFORE the comment step on purpose, because setting a prototype wipes the plate comment.",
-            "calling_convention", "Convention for the prototype step, e.g. __stdcall. Read only when prototype is also given.",
-            "variable_types", "Object mapping variable name to new type. Each is applied on its own; the step reports set/failed counts plus per-variable errors.",
-            "variable_renames", "Object mapping each variable's CURRENT name to its new name.",
-            "plate_comment", "Plate comment for the function. Pass real multi-line text: an escaped newline sequence is stored as those two literal characters, not as a line break.",
-            "decompiler_comments", "Array of {address, comment} objects setting PRE comments. Each entry carries its own address; the top-level address is the function entry only.",
-            "disassembly_comments", "Array of {address, comment} objects setting EOL comments. Each entry carries its own address.",
-            "goto", "True navigates the CodeBrowser to address before anything else. Must be a JSON boolean: any other type is read as FALSE. Default false.",
-            "score", "True (the default) appends a compact completeness score. Must be a JSON boolean: any other type falls back to the default and is read as TRUE, so the string false does not switch it off.",
-            "program", "Accepted but not read by this route: every step runs against the active program. Use the individual tools when you need to target a specific one.");
         add(m, "/check_connection", "GET", "utility",
             "Liveness probe: {status, server_kind (gui/headless), version, program when one is current}. Cheap and\n"
             + " token-less, unlike the fuller /mcp/health; both servers answer it identically.",
             ToolAccess.READ_ONLY);
-        add(m, "/exit_ghidra", "POST", "program", "Save and exit Ghidra", ToolAccess.DESTRUCTIVE);
         add(m, "/mcp/health", "GET", "utility", "Server health: kind (gui/headless), build, current program, uptime, HTTP pool, memory, endpoint count", ToolAccess.READ_ONLY);
         add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata", ToolAccess.READ_ONLY);
         // /move_file and /move_folder used to live here: manually routed in the
@@ -167,65 +122,6 @@ public final class ManualToolDescriptors {
             "path", "Path to the project: its .gpr file or the project directory holding it.",
             "headless", "GUI mode only. True (the default) loads the project into the FrontEnd tool without opening a CodeBrowser window; false launches one for `program`. The headless server ignores it.",
             "program", "GUI mode only, and only when headless=false: the DomainFile path to open in the launched CodeBrowser.");
-        add(m, "/server/admin/set_permissions", "POST", "server", "Set user permissions on a repository", ToolAccess.WRITE,
-            "repo", REPO_HEADLESS_ONLY + " The GUI plugin answers that this operation needs headless mode.",
-            "user", "Server user whose access is being set. The repository ACL is read, this one entry replaced or appended, and every other user preserved.",
-            "accessLevel", "Numeric Ghidra access level: 0 no access, 1 read only, 2 read/write, 3 admin. Defaults to 1.");
-        add(m, "/server/admin/terminate_all_checkouts", "POST", "server", "Terminate all checkouts in a folder recursively", ToolAccess.DESTRUCTIVE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Folder to walk recursively, terminating every checkout under it. Defaults to / — the whole repository or project.");
-        add(m, "/server/admin/terminate_checkout", "POST", "server", "Terminate all checkouts on a single file", ToolAccess.DESTRUCTIVE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the file whose checkout is being terminated.",
-            "checkoutId", "Numeric checkout id to terminate, as /server/checkouts reports it. Headless mode only, and defaults to 0 when absent; the GUI plugin terminates by path alone.",
-            "checkout_id", "Alternative spelling of checkoutId, read only when checkoutId is absent.");
-        add(m, "/server/admin/users", "GET", "server", "List all users on the server", ToolAccess.READ_ONLY);
-        add(m, "/server/authenticate", "POST", "server", "Register server credentials for programmatic authentication", ToolAccess.WRITE,
-            "username", "Server username. Omit to fall back to Ghidra's stored PasswordPrompt.Name, then to the OS user name.",
-            "password", "Server password. Required — the call is refused without it.");
-        add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts", ToolAccess.READ_ONLY,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Folder to list checkouts under. Defaults to / — everything.");
-        // No parameters: GUI mode reports the already-open project, and headless
-        // mode connects with the host/port GhidraServerManager read from
-        // GHIDRA_SERVER_HOST/GHIDRA_SERVER_PORT at construction. Neither handler
-        // has ever read a per-request host/port.
-        add(m, "/server/connect", "POST", "server", "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.", ToolAccess.WRITE);
-        add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server", ToolAccess.WRITE);
-        add(m, "/server/repositories", "GET", "server", "List repositories on the connected server", ToolAccess.READ_ONLY);
-        add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server", ToolAccess.WRITE,
-            "name", "Name for the new repository. Headless mode only; the GUI plugin refuses and points at Ghidra's Project Manager.");
-        add(m, "/server/repository/file", "GET", "server", "Get file info from a server repository", ToolAccess.READ_ONLY,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the file to describe. Required.");
-        add(m, "/server/repository/files", "GET", "server", "List files in a server repository folder", ToolAccess.READ_ONLY,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Folder to list. Defaults to / — the repository or project root.");
-        add(m, "/server/status", "GET", "headless", "Whether a Ghidra Server is connected (not whether a project is open: see /get_project_info)", ToolAccess.READ_ONLY);
-        add(m, "/server/version_control/add", "POST", "server", "Add a file in the open shared project to version control. Requires /open_project with a ghidra:// URL. Local tree mirrors YOUR working copy.", ToolAccess.WRITE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the not-yet-versioned file to add.",
-            "comment", "Check-in comment recorded for the initial version. Defaults to a generic Added via GhidraMCP.",
-            "keepCheckedOut", "Accepted but not read on this route — neither handler passes it through. Use /server/version_control/checkin, where it does apply.");
-        add(m, "/server/version_control/checkin", "POST", "server", "Check in a DomainFile from the open shared project. Requires /open_project with a ghidra:// URL. Local tree mirrors YOUR working copy.", ToolAccess.WRITE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the checked-out file to check in.",
-            "comment", "Check-in comment recorded on the new version. Defaults to a generic Checked in via GhidraMCP.",
-            "keepCheckedOut", "True keeps the file checked out after the version lands, so you can keep editing. False (the default) releases the checkout.");
-        add(m, "/server/version_control/checkout", "POST", "server", "Check out a DomainFile into a local working copy in the open shared project. Requires /open_project with a ghidra:// URL. Does not open the program.", ToolAccess.WRITE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the versioned file to check out.");
-        add(m, "/server/version_control/undo_checkout", "POST", "server", "Undo a DomainFile checkout in the open shared project (discards local changes). Requires /open_project with a ghidra:// URL.", ToolAccess.DESTRUCTIVE,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the checked-out file to release. Any local changes not checked in are discarded.");
-        add(m, "/server/version_history", "GET", "server", "Get version history for a file", ToolAccess.READ_ONLY,
-            "repo", REPO_HEADLESS_ONLY,
-            "path", "Path of the versioned file whose history to return.");
-        add(m, "/tool/goto_address", "POST", "utility", "Navigate CodeBrowser listing and decompiler to a specific address", ToolAccess.WRITE,
-            "address", "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only — it moves a CodeBrowser window.");
-        add(m, "/tool/launch_codebrowser", "POST", "utility", "Open a file in CodeBrowser, launching a new one if needed", ToolAccess.WRITE,
-            "path", "DomainFile path of the program to open, e.g. /Vanilla/1.13c/D2Common.dll. GUI mode only.");
-        add(m, "/tool/running_tools", "GET", "utility", "List all running Ghidra tool windows", ToolAccess.READ_ONLY);
         return m;
     }
 

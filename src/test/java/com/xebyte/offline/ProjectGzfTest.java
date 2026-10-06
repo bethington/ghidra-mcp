@@ -1,8 +1,9 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.ProjectLifecycle;
 import com.xebyte.headless.HeadlessProgramProvider;
-import com.xebyte.headless.HeadlessProgramProvider.ExportResult;
-import com.xebyte.headless.HeadlessProgramProvider.ImportResult;
+import com.xebyte.core.ProjectLifecycle.ExportResult;
+import com.xebyte.core.ProjectLifecycle.ImportResult;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
@@ -46,11 +47,12 @@ import static org.mockito.Mockito.when;
  * executed in CI. {@code tests/unit/test_ci_java_test_globs.py} now fails if a
  * test class lands outside a selected package again.
  */
-public class GzfExportImportTest {
+public class ProjectGzfTest {
 
     @Test
     public void exportResolvesLiveProgramByExactNameNotSubstring() throws Exception {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        ProjectLifecycle lifecycle = new ProjectLifecycle(provider);
 
         // "D2Common.dll" contains "Common.dll" as a substring — the old fuzzy
         // getProgram() lookup could return it for the request "Common.dll".
@@ -64,7 +66,7 @@ public class GzfExportImportTest {
         Path dir = Files.createTempDirectory("gzf-export-test");
         File out = new File(dir.toFile(), "out.gzf");
 
-        ExportResult res = provider.exportProgramToGzf("Common.dll", out);
+        ExportResult res = lifecycle.exportProgramToGzf("Common.dll", out);
 
         assertTrue("export should succeed: " + res.error, res.success);
         assertEquals("must pack the exactly-named program, not the substring match",
@@ -74,8 +76,9 @@ public class GzfExportImportTest {
     @Test
     public void importRejectsTargetNameWithPathSeparator() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        ProjectLifecycle lifecycle = new ProjectLifecycle(provider);
 
-        ImportResult res = provider.importProgramFromGzf(null, "/", "a/b", false);
+        ImportResult res = lifecycle.importProgramFromGzf(null, "/", "a/b", false);
 
         assertFalse(res.success);
         assertNotNull(res.error);
@@ -86,8 +89,9 @@ public class GzfExportImportTest {
     @Test
     public void importRejectsTargetNameWithTraversalSegment() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        ProjectLifecycle lifecycle = new ProjectLifecycle(provider);
 
-        ImportResult res = provider.importProgramFromGzf(null, "/", "../escape", false);
+        ImportResult res = lifecycle.importProgramFromGzf(null, "/", "../escape", false);
 
         assertFalse(res.success);
         assertNotNull(res.error);
@@ -98,11 +102,12 @@ public class GzfExportImportTest {
     @Test
     public void importValidTargetNamePassesValidationThenChecksProject() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        ProjectLifecycle lifecycle = new ProjectLifecycle(provider);
 
         // Valid name clears the up-front filename check, so the next failure is
         // the "no project open" guard — proving validation ran first and a good
         // name is not rejected.
-        ImportResult res = provider.importProgramFromGzf(null, "/", "CleanName", false);
+        ImportResult res = lifecycle.importProgramFromGzf(null, "/", "CleanName", false);
 
         assertFalse(res.success);
         assertNotNull(res.error);
@@ -113,10 +118,11 @@ public class GzfExportImportTest {
     @Test
     public void importEmptyTargetNameSkipsValidation() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        ProjectLifecycle lifecycle = new ProjectLifecycle(provider);
 
         // An empty target_name is legal — the basename is derived downstream —
         // so it must not be rejected as an invalid filename.
-        ImportResult res = provider.importProgramFromGzf(null, "/", "", false);
+        ImportResult res = lifecycle.importProgramFromGzf(null, "/", "", false);
 
         assertFalse(res.success);
         assertNotNull(res.error);
@@ -149,7 +155,7 @@ public class GzfExportImportTest {
 
         Path dir = Files.createTempDirectory("gzf-overwrite");
         File gzf = Files.createFile(dir.resolve("fw.gzf")).toFile();
-        ImportResult res = new HeadlessProgramProvider(project)
+        ImportResult res = new ProjectLifecycle(new HeadlessProgramProvider(project))
             .importProgramFromGzf(gzf, "/mg", "fw", true);
 
         assertTrue(res.error, res.success);

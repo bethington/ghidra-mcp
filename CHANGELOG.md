@@ -6,13 +6,15 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**211 tools** — 203 served by the GUI plugin, 189 by the headless server, 181
+**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
 by both. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 245 after `/list_shadowed_globals` and `/batch_get_comments`, 219
 after `/get_functions` replaced nine function readers, 215 after the listing,
-xref, tag, utility and GUI-cursor folds, and **211** once both servers shared
-one set of program-operation names (`/load_program`,
-`/load_program_from_project`, `/project/info` and headless `/health` retired).
+xref, tag, utility and GUI-cursor folds, 211 once both servers shared one set
+of program-operation names (`/load_program`, `/load_program_from_project`,
+`/project/info` and headless `/health` retired), and **209** once version
+control and the CodeBrowser tools became shared services
+(`/server/version_control/checkin` and `/tool/launch_codebrowser` retired).
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -21,6 +23,72 @@ one set of program-operation names (`/load_program`,
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Changed — shared services on both servers (version control, lifecycle, GUI tools, batch docs)
+
+The GUI plugin and headless server still built overlapping logic in the plugin class,
+`GhidraServerManager`, and hand-registered routes. The remaining duplication moved into
+annotated services both scanners share, and several routes that used to exist on only one
+server now register on both.
+
+**Version control** — `VersionControlService` owns checkout, undo, add, and check-in.
+The duplicate `/server/version_control/checkin` route is retired; use `/checkin_program`.
+
+**Server lifecycle** — `/server/authenticate` and `/exit_ghidra` are `@McpTool` methods on
+`ServerLifecycleService` on both servers instead of GUI-only hand routes.
+
+**GUI tools** — CodeBrowser navigation and running-tool listing live in `GuiToolService`.
+`/tool/launch_codebrowser` is retired; open a program with `/open_program` (and optional
+CodeBrowser launch via project open options) instead of a separate launch route.
+
+**Batch documentation** — `/batch_apply_documentation` is served by
+`DocumentationBatchService` on both servers.
+
+**Project archive and GZF/GAR** — export, import, archive, and restore project routes are
+served by `ProjectLifecycleService` on the GUI as well as headless (catalog `servers`:
+both).
+
+**UI threading** — services that must touch Swing go through
+`ThreadingStrategy.runOnUi` (the Swing thread on the GUI, the calling thread headless)
+instead of calling `SwingUtilities` directly; the analyst's windows are reached through
+`Workbench`.
+
+**Ghidra Server repositories** — headless `open_project` accepts `ghidra://` repository
+URLs via `SharedProjectLocator` (local `.gpr` paths still use the file-root allow-list on
+both servers).
+
+**Dead code** — reference analysis removed unused helpers in `ServiceUtils`,
+`XrefCallGraph`, and `DocumentationHashService`; headless POST bodies are bounded
+(`SecurityConfig`, `HeadlessPostBodyTest`).
+
+**Every response says which program it acted on.** Of 12 sampled responses, 2 named
+their program, so a survey of 17 programs could return seventeen identical readings
+without anyone noticing. The scanner now stamps `"program"` on every object payload
+whose request resolved one, unless it already carries `program` or `program_name`. HTTP
+threads are pooled, so the resolved program is cleared on entry and in `finally`; a
+request that resolves nothing never inherits the previous one's label.
+
+**Edits to a file that was not checked out vanished, and every tool said success.** A
+versioned file that is not checked out opens as an in-memory copy that saves nowhere.
+`open_program` now reports `read_only: true` with the reason, each edit carries the
+reason in `warnings`, `save_program` names the cause and the remedy, and
+`close_program(save=true)` refuses and asks for `save=false`. A second checkout answers
+`already_checked_out` instead of Ghidra's "private file exists", and a checkout reopens
+an unedited copy on itself (`reopened`) or reports `reopen_required` for an edited one.
+
+**`dry_run` stays refused on the moved tools.** Version control, project lifecycle,
+`/exit_ghidra`, `/server/*` and `/tool/goto_address` are now annotated tools, so they
+declare `dryRun = false` like the routes they replace; a rollback cannot undo any of
+them.
+
+| retired | use instead |
+| --- | --- |
+| `/server/version_control/checkin` | `/checkin_program` |
+| `/tool/launch_codebrowser` | `/open_project` (project/CodeBrowser launch options) |
+
+Catalog: **235** endpoints — **231** on the GUI plugin, **214** headless, **210** on both
+(two routes removed, four archive/import routes gained `gui` in `servers`, and
+`/batch_apply_documentation` and `/server/authenticate` gained headless).
 
 ### Changed — headless and GUI: one program model, one set of names, one health surface
 

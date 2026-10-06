@@ -269,8 +269,6 @@ public final class McpHttpServer {
 
     public int activeRequests() { return activeRequests.get(); }
 
-    public int routeCount() { return routes.size(); }
-
     /** Request-pool figures for a health endpoint; empty while stopped. */
     public Map<String, Object> poolStats() {
         var pool = executor;

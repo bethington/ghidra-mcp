@@ -4,7 +4,6 @@ import ghidra.app.services.CodeViewerService;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.options.OptionType;
 import ghidra.framework.options.Options;
-import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.address.AddressSpace;
@@ -21,17 +20,11 @@ import ghidra.program.model.util.PropertyMap;
 import ghidra.program.model.util.PropertyMapManager;
 import ghidra.program.model.util.StringPropertyMap;
 import ghidra.program.model.util.VoidPropertyMap;
-import ghidra.program.util.ProgramLocation;
-import ghidra.program.util.ProgramSelection;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
-import ghidra.app.util.importer.AutoImporter;
-import ghidra.app.util.importer.MessageLog;
-import ghidra.app.util.opinion.LoadResults;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TimeoutTaskMonitor;
 
-import javax.swing.SwingUtilities;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -92,17 +85,6 @@ public class ProgramScriptService {
             ghidra.app.script.GhidraScriptUtil.getBundleHost()
                     .enable(new generic.jar.ResourceFile(scriptDirectory));
         }
-    }
-
-    /**
-     * The PluginTool this provider works through; null when running headless.
-     *
-     * <p>A seed, not the answer: callers needing a CodeViewer or a
-     * ProgramManager walk the project's running tools from here, which is why
-     * the FrontEnd tool serves even though it carries neither.
-     */
-    private PluginTool getToolFromProvider() {
-        return programProvider.getTool();
     }
 
     private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
@@ -897,7 +879,7 @@ public class ProgramScriptService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     ghidra.framework.model.DomainFile df = program.getDomainFile();
                     if (df == null) {
@@ -913,6 +895,11 @@ public class ProgramScriptService {
                             "saved", false,
                             "message", "No unsaved changes"
                         ));
+                        return;
+                    }
+                    String unsaveable = ProgramSaves.unsaveableReason(program);
+                    if (unsaveable != null) {
+                        errorMsg.set(unsaveable);
                         return;
                     }
                     ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
@@ -1011,11 +998,7 @@ public class ProgramScriptService {
         };
 
         try {
-            if (SwingUtilities.isEventDispatchThread()) {
-                saveTask.run();
-            } else {
-                SwingUtilities.invokeAndWait(saveTask);
-            }
+            threadingStrategy.runOnUi(saveTask);
         } catch (Throwable e) {
             return Response.err("Failed to save all programs: " +
                     (e.getMessage() != null ? e.getMessage() : e.toString()));
@@ -1079,7 +1062,9 @@ public class ProgramScriptService {
              description = "Close an open program by project path or name. Never prompts interactively: "
                          + "unsaved changes are saved first by default (save=true) or silently discarded "
                          + "(save=false) before closing, so this cannot block the caller on a GUI "
-                         + "confirmation dialog the way Ghidra's own close normally would.", category = "program", access = ToolAccess.DESTRUCTIVE)
+                         + "confirmation dialog the way Ghidra's own close normally would. save=true is "
+                         + "refused when the edits cannot be saved (a versioned file that is not checked "
+                         + "out), rather than closing and losing them.", category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response closeProgram(
             @Param(value = "name", source = ParamSource.BODY,
                     description = "Program name or project path") String name,
@@ -1105,14 +1090,21 @@ public class ProgramScriptService {
             return Response.ok(JsonHelper.mapOf(
                 "success", true, "closed_count", 0, "released_cache", false, "name", search));
         }
+        // Closing would drop the edits with only a log line ("Unsaved changes LOST") behind a
+        // success. Make the caller choose the discard.
+        String unsaveable = ProgramSaves.unsaveableReason(target);
+        if (save && target.isChanged() && unsaveable != null) {
+            return Response.err("Not closed: the unsaved edits cannot be saved. " + unsaveable
+                + " Pass save=false to close and discard them.");
+        }
 
         AtomicInteger closedCount = new AtomicInteger(0);
         AtomicReference<String> error = new AtomicReference<>();
         ghidra.framework.model.DomainFile targetFile = target.getDomainFile();
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
-                    for (ProgramManager pm : findAllProgramManagers()) {
+                    for (ProgramManager pm : programManagers()) {
                         for (Program program : pm.getAllOpenPrograms()) {
                             boolean same = program == target || (targetFile != null
                                 && program.getDomainFile() != null
@@ -1307,40 +1299,6 @@ public class ProgramScriptService {
 
     private static final String NO_GUI_CURSOR = "Headless mode has no GUI cursor";
 
-    /**
-     * CodeViewerService from this tool or any running CodeBrowser — FrontEnd
-     * alone has none.
-     */
-    private CodeViewerService findCodeViewerService() {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return null;
-        }
-        CodeViewerService service = tool.getService(CodeViewerService.class);
-        if (service != null) {
-            return service;
-        }
-        try {
-            ghidra.framework.model.Project project = tool.getProject();
-            if (project == null) {
-                return null;
-            }
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            if (tm == null) {
-                return null;
-            }
-            for (PluginTool runningTool : tm.getRunningTools()) {
-                service = runningTool.getService(CodeViewerService.class);
-                if (service != null) {
-                    return service;
-                }
-            }
-        } catch (Exception e) {
-            // ToolManager may not be available in all contexts
-        }
-        return null;
-    }
-
     /** One cursor facet: value when present, else null + reason (never omit the key). */
     private static final class CursorPart {
         final Object value;
@@ -1360,10 +1318,28 @@ public class ProgramScriptService {
         }
     }
 
+    /** The listing's code viewer in the analyst's windows, or null without a GUI. */
+    private CodeViewerService codeViewer() {
+        Workbench workbench = programProvider.workbench();
+        return workbench == null ? null : workbench.codeViewer();
+    }
+
+    /** Every program manager the analyst's windows expose; empty without a GUI. */
+    private List<ProgramManager> programManagers() {
+        Workbench workbench = programProvider.workbench();
+        return workbench == null ? List.of() : workbench.allProgramManagers();
+    }
+
+    /** On the GUI, show the program in a CodeBrowser: "shown" or why not; null headless. */
+    private String showInWorkbench(Program program) {
+        Workbench workbench = programProvider.workbench();
+        return workbench == null ? null : workbench.showProgram(program);
+    }
+
     private CursorPart cursorAddressPart() {
-        CodeViewerService service = findCodeViewerService();
+        CodeViewerService service = codeViewer();
         if (service == null) {
-            return CursorPart.missing(getToolFromProvider() == null
+            return CursorPart.missing(programProvider.workbench() == null
                     ? NO_GUI_CURSOR
                     : "Code viewer service not available");
         }
@@ -1381,9 +1357,9 @@ public class ProgramScriptService {
     }
 
     private CursorPart cursorFunctionPart() {
-        CodeViewerService service = findCodeViewerService();
+        CodeViewerService service = codeViewer();
         if (service == null) {
-            return CursorPart.missing(getToolFromProvider() == null
+            return CursorPart.missing(programProvider.workbench() == null
                     ? NO_GUI_CURSOR
                     : "Code viewer service not available");
         }
@@ -1413,9 +1389,9 @@ public class ProgramScriptService {
     }
 
     private CursorPart cursorSelectionPart() {
-        CodeViewerService service = findCodeViewerService();
+        CodeViewerService service = codeViewer();
         if (service == null) {
-            return CursorPart.missing(getToolFromProvider() == null
+            return CursorPart.missing(programProvider.workbench() == null
                     ? NO_GUI_CURSOR
                     : "Code viewer service not available");
         }
@@ -1466,8 +1442,7 @@ public class ProgramScriptService {
      * conflating them is what the ambiguity rule exists to stop.
      */
     private CursorPart cursorProgramPart() {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
+        if (programProvider.workbench() == null) {
             return CursorPart.missing("Headless mode has no GUI cursor");
         }
         Program focused = programProvider.getCurrentProgram();
@@ -1585,10 +1560,10 @@ public class ProgramScriptService {
     /**
      * List all files in the current Ghidra project.
      */
-    @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/list_project_files", description = "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the checkout holds uncommitted work.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listProjectFiles(
             @Param(value = "folder", description = "Project folder path") String folderPath) {
-        ghidra.framework.model.Project project = resolveProject();
+        ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1623,14 +1598,10 @@ public class ProgramScriptService {
         ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
         List<Map<String, Object>> fileList = new ArrayList<>();
         for (ghidra.framework.model.DomainFile file : files) {
-            fileList.add(JsonHelper.mapOf(
-                "name", file.getName(),
-                "path", file.getPathname(),
-                "content_type", file.getContentType(),
-                "version", file.getVersion(),
-                "is_read_only", file.isReadOnly(),
-                "is_versioned", file.isVersioned()
-            ));
+            // With version-control state, so a checkout that still holds uncommitted work
+            // (modified_since_checkout) can be told from an idle one without reading icons
+            // in the Ghidra GUI. This is what the GUI's /server/repository/files reported.
+            fileList.add(ProjectVersionControl.fileState(file));
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -1645,7 +1616,7 @@ public class ProgramScriptService {
     public Response createFolder(
             @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ghidra.framework.model.Project project = resolveProject();
+        ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1678,7 +1649,7 @@ public class ProgramScriptService {
     @McpTool(path = "/delete_file", dryRun = false, method = "POST", description = "Delete a file from the project", category = "project", access = ToolAccess.DESTRUCTIVE)
     public Response deleteFile(
             @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
-        ghidra.framework.model.Project project = resolveProject();
+        ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1698,28 +1669,14 @@ public class ProgramScriptService {
             if (domainFile == null) {
                 return Response.ok(JsonHelper.mapOf("success", true, "deleted", false, "filePath", filePath));
             }
-            closeOpenProgramForFile(getToolFromProvider(), filePath);
+            if (!programProvider.closeProgramByPath(filePath) && programProvider.workbench() != null) {
+                programProvider.workbench().closeProgramForFile(filePath);
+            }
             domainFile.delete();
             return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
         } catch (Exception e) {
             return Response.err("Failed to delete file: " + e.getMessage());
         }
-    }
-
-    /**
-     * Resolve the active project across GUI, FrontEnd and headless modes.
-     *
-     * <p>GUI/FrontEnd reach it through the PluginTool; headless has no tool at
-     * all and answers via {@link ProgramProvider#getProject()}. Project-level
-     * tools must go through here rather than {@code getToolFromProvider()},
-     * which returns null headless and would make them GUI-only.
-     */
-    private ghidra.framework.model.Project resolveProject() {
-        PluginTool tool = getToolFromProvider();
-        if (tool != null && tool.getProject() != null) {
-            return tool.getProject();
-        }
-        return programProvider.getProject();
     }
 
     /** True if any open program is backed by the given project file path. */
@@ -1744,7 +1701,7 @@ public class ProgramScriptService {
                    description = "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll") String filePath,
             @Param(value = "destFolder", source = ParamSource.BODY,
                    description = "Destination project folder path, e.g. /Mods/PD2-S12") String destFolder) {
-        ghidra.framework.model.Project project = resolveProject();
+        ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1836,7 +1793,7 @@ public class ProgramScriptService {
                    description = "Project folder path to move, e.g. /Vanilla/1.00") String sourcePath,
             @Param(value = "destPath", source = ParamSource.BODY,
                    description = "Destination parent folder path, e.g. /Mods") String destPath) {
-        ghidra.framework.model.Project project = resolveProject();
+        ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1891,35 +1848,6 @@ public class ProgramScriptService {
         }
     }
 
-    private void closeOpenProgramForFile(PluginTool tool, String filePath) {
-        // Releases the provider's own handle on both servers (and closes it in every
-        // CodeBrowser on the GUI), by exact path.
-        if (programProvider.closeProgramByPath(filePath) || tool == null) {
-            return;
-        }
-        // Close paths must NEVER spawn a CodeBrowser — there is nothing useful
-        // we can close in a fresh tool. findExistingProgramManager returns null
-        // if no CodeBrowser is running, in which case there is also nothing
-        // open to close, so we just return.
-        ProgramManager pm = findExistingProgramManager(tool);
-        if (pm == null) {
-            return;
-        }
-        for (Program prog : programProvider.getAllOpenPrograms()) {
-            if (prog.getDomainFile() != null
-                    && prog.getDomainFile().getPathname().equalsIgnoreCase(filePath)) {
-                // ignoreChanges=true: this only runs to clear the way for
-                // delete_file's delete() call right after, so there is
-                // nothing worth saving. false would risk Ghidra's own
-                // interactive "Save changes?" dialog, which blocks the Swing
-                // event thread -- and with it every other MCP request -- until
-                // a human dismisses it.
-                pm.closeProgram(prog, true);
-                return;
-            }
-        }
-    }
-
     /** The provider as a project-backed one, or null for a bare test double. */
     private ProjectProgramProvider projectProvider() {
         return programProvider instanceof ProjectProgramProvider ppp ? ppp : null;
@@ -1968,17 +1896,22 @@ public class ProgramScriptService {
             }
         }
 
-        String shown = showInCodeBrowser(program);
+        String shown = showInWorkbench(program);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("success", true);
         out.put("name", program.getName());
         out.put("path", domainFile.getPathname());
         // The writable open failed and the read-only fallback took it: edits cannot be
         // saved, and the caller must hear why (a stale SLEIGH language is the usual cause).
-        out.put("read_only", !program.isChangeable());
+        // A versioned file that is not checked out opens changeable but not saveable: that is
+        // read-only for every purpose a caller has.
+        String unsaveable = ProgramSaves.unsaveableReason(program);
+        out.put("read_only", !program.isChangeable() || unsaveable != null);
         Exception whyReadOnly = provider.readOnlyReason(program);
         if (whyReadOnly != null) {
             out.put("read_only_reason", describeOpenFailure(whyReadOnly, domainFile.getPathname()));
+        } else if (unsaveable != null) {
+            out.put("read_only_reason", unsaveable);
         }
         out.put("auto_analyzed", analyzed);
         out.put("function_count", program.getFunctionManager().getFunctionCount());
@@ -2013,31 +1946,6 @@ public class ProgramScriptService {
         body.put("requested_path", path);
         body.put("diagnostics", diagnostics);
         return Response.ok(body);
-    }
-
-    /**
-     * On the GUI, show the program in a CodeBrowser (reusing a running one). The
-     * CodeBrowser takes its own consumer; the provider's cached reference stays and is
-     * what close and eviction release. Returns null headless, else "shown" or why not.
-     */
-    private String showInCodeBrowser(Program program) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return null;
-        }
-        ProgramManager pm = findOrCreateProgramManager(tool);
-        if (pm == null) {
-            return "no CodeBrowser could be found or launched";
-        }
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                pm.openProgram(program);
-                pm.setCurrentProgram(program);
-            });
-            return "shown";
-        } catch (Exception e) {
-            return "failed: " + (e.getMessage() != null ? e.getMessage() : e.toString());
-        }
     }
 
     /**
@@ -2145,7 +2053,7 @@ public class ProgramScriptService {
                 }
             }
 
-            String shown = showInCodeBrowser(program);
+            String shown = showInWorkbench(program);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("success", true);
             out.put("name", program.getName());
@@ -2210,35 +2118,12 @@ public class ProgramScriptService {
             info.put("current_program", ProjectProgramProvider.keyFor(current));
         }
 
-        PluginTool tool = getToolFromProvider();
-        if (tool != null && project.getToolManager() != null) {
-            List<String> tools = new ArrayList<>();
-            boolean codeBrowser = false;
-            for (PluginTool running : project.getToolManager().getRunningTools()) {
-                tools.add(running.getName());
-                codeBrowser |= running.getService(ProgramManager.class) != null;
-            }
-            info.put("running_tools", tools);
-            info.put("codebrowser_active", codeBrowser);
+        Workbench workbench = programProvider.workbench();
+        if (workbench != null) {
+            info.put("running_tools", workbench.runningToolNames());
+            info.put("codebrowser_active", workbench.codeBrowserActive());
         }
         return Response.ok(info);
-    }
-
-    @McpTool(path = "/checkin_program", dryRun = false, method = "POST",
-            description = "Check a program in to the shared Ghidra Server as a new version. Saves pending "
-                + "edits and closes the program first (a file checked in while open must stay checked "
-                + "out). Requires a shared project and the file checked out. Returns "
-                + "version_before/version/version_bumped.",
-            category = "project", access = ToolAccess.WRITE)
-    public Response checkinProgram(
-            @Param(value = "path", source = ParamSource.BODY, description = "Project path of the file; empty uses the sole open program") String path,
-            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "", description = "Checkin comment") String comment,
-            @Param(value = "keep_checked_out", source = ParamSource.BODY, defaultValue = "false", description = "Keep the file checked out after the new version lands") boolean keepCheckedOut) {
-        ProjectProgramProvider provider = projectProvider();
-        if (provider == null) {
-            return Response.err("This server has no project to check in from");
-        }
-        return Response.ok(provider.checkinProgram(path, comment, keepCheckedOut));
     }
 
     @McpTool(path = "/reanalyze", dryRun = false, method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
@@ -2319,117 +2204,6 @@ public class ProgramScriptService {
     }
 
     // ========================================================================
-    // Script Execution
-    private List<ProgramManager> findAllProgramManagers() {
-        List<ProgramManager> managers = new ArrayList<>();
-        Set<PluginTool> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-
-        PluginTool activeTool = getToolFromProvider();
-        if (activeTool != null) {
-            seen.add(activeTool);
-            ProgramManager pm = activeTool.getService(ProgramManager.class);
-            if (pm != null) {
-                managers.add(pm);
-            }
-
-            try {
-                ghidra.framework.model.Project project = activeTool.getProject();
-                if (project != null) {
-                    ghidra.framework.model.ToolManager tm = project.getToolManager();
-                    if (tm != null) {
-                        for (PluginTool runningTool : tm.getRunningTools()) {
-                            if (!seen.add(runningTool)) {
-                                continue;
-                            }
-                            ProgramManager runningPm = runningTool.getService(ProgramManager.class);
-                            if (runningPm != null) {
-                                managers.add(runningPm);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Msg.warn(this, "Error scanning for ProgramManager services: " + e.getMessage());
-            }
-        }
-
-        ProgramManager providerPm = programProvider.findProgramManager();
-        if (providerPm != null && !managers.contains(providerPm)) {
-            managers.add(providerPm);
-        }
-        return managers;
-    }
-
-    /**
-     * Find an existing ProgramManager without spawning a new CodeBrowser.
-     * Returns null when no CodeBrowser is currently running and exposing
-     * ProgramManager. Use this from close paths and other operations that
-     * have nothing useful to do in a freshly-spawned empty tool.
-     */
-    private ProgramManager findExistingProgramManager(PluginTool tool) {
-        ProgramManager pm = tool.getService(ProgramManager.class);
-        if (pm != null) return pm;
-
-        pm = programProvider.findProgramManager();
-        if (pm != null) return pm;
-
-        ghidra.framework.model.Project project = tool.getProject();
-        if (project == null) return null;
-        ghidra.framework.model.ToolManager tm = project.getToolManager();
-        if (tm == null) return null;
-        try {
-            for (PluginTool running : tm.getRunningTools()) {
-                if (running == tool) continue;
-                ProgramManager rpm = running.getService(ProgramManager.class);
-                if (rpm != null) return rpm;
-            }
-        } catch (Exception e) {
-            Msg.warn(this, "Error scanning running tools for ProgramManager: " + e.getMessage());
-        }
-        return null;
-    }
-
-    /**
-     * Find an existing ProgramManager or launch a new CodeBrowser to get one.
-     *
-     * <p>Resolution order matters for window hygiene: GhidraMCPPlugin lives in
-     * the FrontEnd tool, which has no ProgramManager of its own, so the answer
-     * always comes from a running CodeBrowser. Without scanning running tools
-     * first, every /open_program and /import_file call would fall through to
-     * ws.runTool and accumulate a fresh CodeBrowser per call. The scan reuses
-     * any existing CodeBrowser so additional programs open as tabs in it.
-     */
-    private ProgramManager findOrCreateProgramManager(PluginTool tool) {
-        ProgramManager pm = findExistingProgramManager(tool);
-        if (pm != null) return pm;
-
-        // No CodeBrowser is up — spawn one. This should be rare in practice;
-        // it covers genuinely-headless-style sessions where no GUI tool is up.
-        ghidra.framework.model.Project project = tool.getProject();
-        try {
-            if (project != null) {
-                ghidra.framework.model.ToolManager tm = project.getToolManager();
-                if (tm != null) {
-                    ghidra.framework.model.ToolTemplate template =
-                        project.getLocalToolChest().getToolTemplate("CodeBrowser");
-                    if (template != null) {
-                        ghidra.framework.model.Workspace ws = tm.getActiveWorkspace();
-                        PluginTool newTool = ws.runTool(template);
-                        if (newTool != null) {
-                            pm = newTool.getService(ProgramManager.class);
-                            if (pm != null) return pm;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Msg.warn(this, "Failed to launch CodeBrowser: " + e.getMessage());
-        }
-
-        return null;
-    }
-
-    // ========================================================================
 
     /**
      * Execute a Ghidra script by path with optional arguments.
@@ -2482,11 +2256,11 @@ public class ProgramScriptService {
         final PrintWriter[] scriptPrintWriterHolder = {null};
         final TimeoutTaskMonitor[] scriptMonitorHolder = {null};
 
-        // Get the PluginTool for script state (GUI mode only)
-        final PluginTool pluginTool = getToolFromProvider();
+        // The analyst's windows, for script state (GUI mode only)
+        final Workbench workbench = programProvider.workbench();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 StringWriter scriptWriter = new StringWriter();
                 try {
                     // Capture console output
@@ -2596,8 +2370,8 @@ public class ProgramScriptService {
                     // Set up script state
                     ghidra.program.util.ProgramLocation location = new ghidra.program.util.ProgramLocation(program, program.getMinAddress());
                     ghidra.app.script.GhidraState scriptState;
-                    if (pluginTool != null) {
-                        scriptState = new ghidra.app.script.GhidraState(pluginTool, pluginTool.getProject(), program, location, null, null);
+                    if (workbench != null) {
+                        scriptState = workbench.scriptState(program, location);
                     } else {
                         scriptState = new ghidra.app.script.GhidraState(null, null, program, location, null, null);
                     }
@@ -2899,7 +2673,7 @@ public class ProgramScriptService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     resultData.set(JsonHelper.mapOf(
                         "note", "Script listing requires Ghidra GUI access",
@@ -3339,7 +3113,7 @@ public class ProgramScriptService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Create memory block");
                 boolean txSuccess = false;
                 try {
@@ -3813,7 +3587,7 @@ public class ProgramScriptService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Set image base");
                 boolean txSuccess = false;
                 try {

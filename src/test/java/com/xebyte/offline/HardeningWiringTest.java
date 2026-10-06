@@ -147,6 +147,8 @@ public class HardeningWiringTest extends TestCase {
                 read("core", "JsonHelper.java").contains("readNBytes"));
         assertTrue("GUI parsePostParams must bound the read",
                 read("GhidraMCPPlugin.java").contains("readNBytes"));
+        assertTrue("GUI hand-coded routes must read bodies through the bounded JsonHelper.parseBody",
+                read("GhidraMCPPlugin.java").contains("JsonHelper.parseBody("));
         assertTrue("McpHttpServer must reject an oversized Content-Length (413)",
                 read("core", "McpHttpServer.java").contains("exceedsMaxBody"));
         assertTrue("UDS must reject oversized Content-Length (413)",
@@ -173,6 +175,32 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("Expected create/export/import/archive to each call "
                 + "resolveWithinRootOrLog (>=4 uses incl. helper def), found " + helperUses,
                 helperUses >= 5);
+    }
+
+    /** /open_project takes a filesystem path on both servers, so both contain it. */
+    public void testOpenProjectEnforcesFileRootOnBothServers() throws IOException {
+        String headless = body(read("headless", "HeadlessManagementService.java"), "/open_project");
+        assertTrue("headless /open_project must resolve a local path within the file root",
+                headless.contains("resolveWithinRootOrLog("));
+        assertTrue("a ghidra:// URL is a repository, not a filesystem path",
+                headless.contains("ghidra://"));
+        String gui = read("GhidraMCPPlugin.java");
+        int at = gui.indexOf("private String openProject(String projectPath, boolean headless");
+        assertTrue("GUI openProject not found", at >= 0);
+        assertTrue("GUI /open_project must resolve the path within the file root",
+                gui.substring(at, at + 2500).contains("resolveWithinFileRoot("));
+    }
+
+    /** A scoped server must not check in outside its scope either. */
+    public void testCheckinEnforcesProjectFolderScope() throws IOException {
+        String src = read("core", "ProjectVersionControl.java");
+        int lookup = src.indexOf("private FileOrError file(String path)");
+        assertTrue("the file lookup must exist", lookup >= 0);
+        int scope = src.indexOf("isPathInProjectScope(", lookup);
+        assertTrue("every operation that names a file goes through file(), which must apply the scope",
+                scope > lookup && scope < src.indexOf("getFile(normalized)", lookup));
+        assertTrue("the folder walks must skip files outside the scope too",
+                src.split("isPathInProjectScope\\(", -1).length >= 4);
     }
 
     private static int countOccurrences(String s, String sub) {

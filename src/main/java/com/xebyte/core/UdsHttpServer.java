@@ -51,10 +51,6 @@ public class UdsHttpServer {
         contexts.put(path, handler);
     }
 
-    public void removeContext(String path) {
-        contexts.remove(path);
-    }
-
     public Path getSocketPath() {
         return socketPath;
     }

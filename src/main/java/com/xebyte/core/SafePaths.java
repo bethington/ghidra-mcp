@@ -1,4 +1,4 @@
-package com.xebyte.headless;
+package com.xebyte.core;
 
 import java.io.File;
 import java.io.IOException;
@@ -15,11 +15,11 @@ import java.nio.file.Path;
  * for that validation so every endpoint enforces the same rule.
  *
  * <p>Pure static logic — no Ghidra dependencies — so it is exercised offline by
- * {@code com.xebyte.offline.HeadlessPathsTest}.
+ * {@code com.xebyte.offline.SafePathsTest}.
  */
-public final class HeadlessPaths {
+public final class SafePaths {
 
-    private HeadlessPaths() {
+    private SafePaths() {
     }
 
     /**

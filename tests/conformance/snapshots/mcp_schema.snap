@@ -1,5 +1,5 @@
 {
-  "count": 203,
+  "count": 205,
   "tools": [
     {
       "category": "function",
@@ -811,6 +811,32 @@
       "path": "/archive_ingest_program"
     },
     {
+      "category": "project",
+      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file, and refuses while an open program has unsaved changes, since the archive would not contain them: save first.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "default": "/data/exports",
+          "description": "Directory the .gar will be written to. Must already exist.",
+          "name": "output_dir",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Output file name. Defaults to `<project>.gar`. `.gar` is appended if missing.",
+          "name": "output_name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/archive_project",
+      "read_only": false
+    },
+    {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing.",
@@ -868,17 +894,28 @@
     },
     {
       "category": "analysis",
-      "description": "Apply all documentation to a function in one call",
+      "description": "Apply all documentation to a function in one call: rename, prototype, variable types, variable renames and comments, then a compact completeness score. Every step is optional and independent, and the response reports each one. The prototype is applied before the comments on purpose, because setting a prototype wipes the plate comment.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step below is applied to the function at this address.",
+          "description": "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step is applied to the function at this address.",
           "name": "address",
-          "required": false,
+          "param_type": "address",
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
+          "default": "false",
+          "description": "True navigates the CodeBrowser to address before anything else. Needs a window, so it fails on a headless server.",
+          "name": "goto",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
           "description": "New function name. Omit or leave empty to skip the rename step.",
           "name": "name",
           "required": false,
@@ -886,13 +923,15 @@
           "type": "string"
         },
         {
-          "description": "Full C signature. Applied BEFORE the comment step on purpose, because setting a prototype wipes the plate comment.",
+          "default": "",
+          "description": "Full C signature. Applied BEFORE the comment step on purpose.",
           "name": "prototype",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
+          "default": "",
           "description": "Convention for the prototype step, e.g. __stdcall. Read only when prototype is also given.",
           "name": "calling_convention",
           "required": false,
@@ -902,18 +941,19 @@
         {
           "description": "Object mapping variable name to new type. Each is applied on its own; the step reports set/failed counts plus per-variable errors.",
           "name": "variable_types",
-          "required": false,
+          "required": true,
           "source": "body",
-          "type": "string"
+          "type": "object"
         },
         {
           "description": "Object mapping each variable's CURRENT name to its new name.",
           "name": "variable_renames",
-          "required": false,
+          "required": true,
           "source": "body",
-          "type": "string"
+          "type": "object"
         },
         {
+          "default": "",
           "description": "Plate comment for the function. Pass real multi-line text: an escaped newline sequence is stored as those two literal characters, not as a line break.",
           "name": "plate_comment",
           "required": false,
@@ -921,42 +961,40 @@
           "type": "string"
         },
         {
+          "default": "[]",
           "description": "Array of {address, comment} objects setting PRE comments. Each entry carries its own address; the top-level address is the function entry only.",
           "name": "decompiler_comments",
           "required": false,
           "source": "body",
-          "type": "string"
+          "type": "array"
         },
         {
+          "default": "[]",
           "description": "Array of {address, comment} objects setting EOL comments. Each entry carries its own address.",
           "name": "disassembly_comments",
           "required": false,
           "source": "body",
-          "type": "string"
+          "type": "array"
         },
         {
-          "description": "True navigates the CodeBrowser to address before anything else. Must be a JSON boolean: any other type is read as FALSE. Default false.",
-          "name": "goto",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "True (the default) appends a compact completeness score. Must be a JSON boolean: any other type falls back to the default and is read as TRUE, so the string false does not switch it off.",
+          "default": "true",
+          "description": "True (the default) appends a compact completeness score.",
           "name": "score",
           "required": false,
           "source": "body",
-          "type": "string"
+          "type": "boolean"
         },
         {
-          "description": "Accepted but not read by this route: every step runs against the active program. Use the individual tools when you need to target a specific one.",
+          "default": "",
+          "description": "Target program name or project path. Every step runs against it. Omit to use the active program; always specify it on a headless server or when several programs are open.",
           "name": "program",
           "required": false,
-          "source": "body",
+          "source": "query",
           "type": "string"
         }
       ],
-      "path": "/batch_apply_documentation"
+      "path": "/batch_apply_documentation",
+      "read_only": false
     },
     {
       "category": "function",
@@ -1359,7 +1397,8 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Close an open program by project path or name. Never prompts interactively: unsaved changes are saved first by default (save=true) or silently discarded (save=false) before closing, so this cannot block the caller on a GUI confirmation dialog the way Ghidra's own close normally would.",
+      "description": "Close an open program by project path or name. Never prompts interactively: unsaved changes are saved first by default (save=true) or silently discarded (save=false) before closing, so this cannot block the caller on a GUI confirmation dialog the way Ghidra's own close normally would. save=true is refused when the edits cannot be saved (a versioned file that is not checked out), rather than closing and losing them.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -1378,7 +1417,8 @@
           "type": "boolean"
         }
       ],
-      "path": "/close_program"
+      "path": "/close_program",
+      "read_only": false
     },
     {
       "category": "documentation",
@@ -2756,10 +2796,45 @@
     },
     {
       "category": "program",
-      "description": "Save and exit Ghidra",
+      "description": "Save every open program (and, in the GUI, debugger traces), then stop the server process. The response reports what was saved. Nothing can be called after it.",
+      "destructive": true,
       "method": "POST",
       "params": [],
-      "path": "/exit_ghidra"
+      "path": "/exit_ghidra",
+      "read_only": false
+    },
+    {
+      "category": "project",
+      "description": "Export a program to a GZF (Ghidra packed-database) file on disk. The resulting .gzf can be imported into any Ghidra GUI (File → Import) or back into a project via /import_program. Resolution order: (1) the in-memory program with that name (captures live analyst edits); (2) a DomainFile in the open project (on-disk state). Output is written to `output_dir/output_name` (defaults: /data/exports and `<program>.gzf`). Refuses to overwrite an existing file.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Program name or project path (e.g. 'myprog' or '/myprog').",
+          "name": "program_name",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "/data/exports",
+          "description": "Directory the .gzf will be written to. Must already exist.",
+          "name": "output_dir",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Output file name. Defaults to `<program>.gzf`. `.gzf` is appended if missing.",
+          "name": "output_name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/export_program",
+      "read_only": false
     },
     {
       "category": "malware",
@@ -4092,7 +4167,8 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Import a binary file from disk into the current Ghidra project and open it. For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+      "description": "Import a binary file from disk into the open project and open it. If the destination folder already holds a file of that name, that file is opened instead (reused_existing: true). For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4128,14 +4204,56 @@
         },
         {
           "default": "true",
-          "description": "Start auto-analysis after import",
+          "description": "Run auto-analysis after import (not run on a reused existing file)",
           "name": "auto_analyze",
           "required": false,
           "source": "body",
           "type": "boolean"
         }
       ],
-      "path": "/import_file"
+      "path": "/import_file",
+      "read_only": false
+    },
+    {
+      "category": "project",
+      "description": "Import a GZF (Ghidra packed-database) file into the open project. The GZF must already exist on disk at `gzf_path` (typically staged on a shared volume by the orchestrator). Lands at `target_folder/target_name` (defaults: `/` and the GZF basename sans `.gzf`). Set `overwrite=true` to replace an existing program at the destination; otherwise the call fails on collision.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Absolute path to the .gzf file on disk.",
+          "name": "gzf_path",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "/",
+          "description": "Destination folder in the project. Intermediate folders are created.",
+          "name": "target_folder",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Destination file name in the project. Defaults to the GZF basename sans `.gzf`.",
+          "name": "target_name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "When true, delete any existing program at the destination before importing.",
+          "name": "overwrite",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/import_program",
+      "read_only": false
     },
     {
       "category": "analysis",
@@ -4468,10 +4586,12 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.",
+      "description": "List all open programs. If more than one is listed, pass program= on subsequent tool calls — omitting it returns an error naming every open program (guessing is never acceptable with multiple candidates).",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/list_open_programs"
+      "path": "/list_open_programs",
+      "read_only": true
     },
     {
       "category": "listing",
@@ -4518,7 +4638,8 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "List files in the current project",
+      "description": "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the checkout holds uncommitted work.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4529,7 +4650,8 @@
           "type": "string"
         }
       ],
-      "path": "/list_project_files"
+      "path": "/list_project_files",
+      "read_only": true
     },
     {
       "category": "program",
@@ -5316,6 +5438,7 @@
       "category": "symbol",
       "category_description": "Create/rename/delete labels, rename data, globals, external locations",
       "description": "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5360,9 +5483,18 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Per-call override for the naming-quality gate: 'enforce' rejects a convention miss, 'warn' applies the name and returns the miss as a warning, 'off' skips the check. Omit to use the project/global setting.",
+          "name": "strict_mode",
+          "required": false,
+          "source": "body",
+          "type": "string"
         }
       ],
-      "path": "/rename_symbol"
+      "path": "/rename_symbol",
+      "read_only": false
     },
     {
       "category": "function",
@@ -5488,6 +5620,38 @@
         }
       ],
       "path": "/resolve_duplicate_type"
+    },
+    {
+      "category": "project",
+      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. The open project is left alone, and the restored one is NOT opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Absolute path to the .gar file on disk.",
+          "name": "gar_path",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "/data/ghidra_projects",
+          "description": "Directory under which the new project (project_name.gpr + project_name.rep/) will be created.",
+          "name": "parent_dir",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "Name of the new project to create from the archive.",
+          "name": "project_name",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/restore_project",
+      "read_only": false
     },
     {
       "category": "analysis",
@@ -5750,104 +5914,95 @@
     },
     {
       "category": "server",
-      "description": "Set user permissions on a repository",
+      "description": "Set one user's access to a repository (needs admin access). The repository's ACL is read, this one entry replaced or appended, and every other user preserved.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it. The GUI plugin answers that this operation needs headless mode.",
+          "description": "Repository name, as /server/repositories lists them",
           "name": "repo",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Server user whose access is being set. The repository ACL is read, this one entry replaced or appended, and every other user preserved.",
+          "description": "Server user whose access is being set",
           "name": "user",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Numeric Ghidra access level: 0 no access, 1 read only, 2 read/write, 3 admin. Defaults to 1.",
-          "name": "accessLevel",
-          "required": false,
+          "description": "The access to grant: read_only (0), write (1) or admin (2), by name or number. Required: there is no safe default for a permission.",
+          "name": "access_level",
+          "required": true,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/server/admin/set_permissions"
+      "path": "/server/admin/set_permissions",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Terminate all checkouts in a folder recursively",
+      "description": "Force-release every server checkout under a folder, recursively, and report how many landed.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Folder to walk recursively, terminating every checkout under it. Defaults to / — the whole repository or project.",
+          "default": "/",
+          "description": "Folder to walk recursively. Defaults to / (the whole project).",
           "name": "path",
           "required": false,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/server/admin/terminate_all_checkouts"
+      "path": "/server/admin/terminate_all_checkouts",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Terminate all checkouts on a single file",
+      "description": "Force-release the checkouts of a single file. Without checkout_id: this project's own checkout first, then every server checkout of the file.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Path of the file whose checkout is being terminated.",
+          "description": "Path of the file whose checkout is being terminated",
           "name": "path",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Numeric checkout id to terminate, as /server/checkouts reports it. Headless mode only, and defaults to 0 when absent; the GUI plugin terminates by path alone.",
-          "name": "checkoutId",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Alternative spelling of checkoutId, read only when checkoutId is absent.",
+          "default": "",
+          "description": "Terminate only this checkout, as /server/checkouts reports it. Empty terminates every checkout of the file.",
           "name": "checkout_id",
           "required": false,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/server/admin/terminate_checkout"
+      "path": "/server/admin/terminate_checkout",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "List all users on the server",
+      "description": "List all users registered on the server (needs admin access).",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/server/admin/users"
+      "path": "/server/admin/users",
+      "read_only": true
     },
     {
       "category": "server",
-      "description": "Register server credentials for programmatic authentication",
+      "description": "Register Ghidra Server credentials for this process, replacing any from the environment. They are used for every server connection from now on, including opening a shared project and /server/connect.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
+          "default": "",
           "description": "Server username. Omit to fall back to Ghidra's stored PasswordPrompt.Name, then to the OS user name.",
           "name": "username",
           "required": false,
@@ -5855,254 +6010,236 @@
           "type": "string"
         },
         {
-          "description": "Server password. Required — the call is refused without it.",
+          "default": "",
+          "description": "Server password. Required: the call is refused without it.",
           "name": "password",
           "required": false,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/server/authenticate"
+      "path": "/server/authenticate",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "List all checked-out files in a folder, including server-side checkouts",
+      "description": "What is checked out under a file or folder of the open project, locally or on the server (with the holders' users and checkout ids). modified_since_checkout says whether a checkout holds uncommitted work, which is what decides if it is safe to release.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
-          "description": "Folder to list checkouts under. Defaults to / — everything.",
+          "default": "/",
+          "description": "File or folder to report under. Defaults to / (everything).",
           "name": "path",
           "required": false,
           "source": "query",
           "type": "string"
         }
       ],
-      "path": "/server/checkouts"
+      "path": "/server/checkouts",
+      "read_only": true
     },
     {
       "category": "server",
-      "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables.",
+      "description": "Establish the Ghidra Server connection, or report the existing one. Takes no parameters: the GUI's connection is its open project, and headless connects with GHIDRA_SERVER_HOST, GHIDRA_SERVER_PORT, GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD.",
+      "destructive": false,
       "method": "POST",
       "params": [],
-      "path": "/server/connect"
+      "path": "/server/connect",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Disconnect from the Ghidra server",
+      "description": "Disconnect from the Ghidra Server.",
+      "destructive": false,
       "method": "POST",
       "params": [],
-      "path": "/server/disconnect"
+      "path": "/server/disconnect",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "List repositories on the connected server",
+      "description": "List the repositories on the connected Ghidra Server.",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/server/repositories"
+      "path": "/server/repositories",
+      "read_only": true
     },
     {
       "category": "server",
-      "description": "Create a new repository on the server",
+      "description": "Create a new repository on the connected Ghidra Server (needs admin access).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Name for the new repository. Headless mode only; the GUI plugin refuses and points at Ghidra's Project Manager.",
+          "description": "Name for the new repository",
           "name": "name",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/server/repository/create"
+      "path": "/server/repository/create",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Get file info from a server repository",
+      "description": "Describe one file of a server repository: name, path, content type, version.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name, as /server/repositories lists them",
           "name": "repo",
-          "required": false,
+          "required": true,
           "source": "query",
           "type": "string"
         },
         {
-          "description": "Path of the file to describe. Required.",
+          "description": "Path of the file to describe",
+          "name": "path",
+          "required": true,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/server/repository/file",
+      "read_only": true
+    },
+    {
+      "category": "server",
+      "description": "List the files and folders of a server repository folder. This is the server's own tree; the open project's tree is /list_project_files.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "description": "Repository name, as /server/repositories lists them",
+          "name": "repo",
+          "required": true,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "/",
+          "description": "Folder to list. Defaults to / (the repository root).",
           "name": "path",
           "required": false,
           "source": "query",
           "type": "string"
         }
       ],
-      "path": "/server/repository/file"
+      "path": "/server/repository/files",
+      "read_only": true
     },
     {
       "category": "server",
-      "description": "List files in a server repository folder",
-      "method": "GET",
-      "params": [
-        {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "description": "Folder to list. Defaults to / — the repository or project root.",
-          "name": "path",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/server/repository/files"
-    },
-    {
-      "category": "headless",
-      "description": "Check headless server connection status",
+      "description": "Whether a Ghidra Server is connected (not whether a project is open: see /get_project_info).",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/server/status"
+      "path": "/server/status",
+      "read_only": true
     },
     {
       "category": "server",
-      "description": "Add a file to version control",
+      "description": "Add a file of the open shared project to version control.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Path of the not-yet-versioned file to add.",
+          "description": "Path of the not-yet-versioned file to add",
           "name": "path",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Check-in comment recorded for the initial version. Defaults to a generic Added via GhidraMCP.",
+          "default": "",
+          "description": "Comment recorded for the initial version. Defaults to \"Added via GhidraMCP\".",
           "name": "comment",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Accepted but not read on this route — neither handler passes it through. Use /server/version_control/checkin, where it does apply.",
-          "name": "keepCheckedOut",
+          "default": "false",
+          "description": "Keep the file checked out afterwards, so local edits can continue without a second checkout",
+          "name": "keep_checked_out",
           "required": false,
           "source": "body",
-          "type": "string"
+          "type": "boolean"
         }
       ],
-      "path": "/server/version_control/add"
+      "path": "/server/version_control/add",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Check in a version-controlled file",
+      "description": "Check out a file of the open shared project into a local working copy. Does not open the program. Requires /open_project on a shared project.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Path of the checked-out file to check in.",
+          "description": "Path of the versioned file to check out",
           "name": "path",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Check-in comment recorded on the new version. Defaults to a generic Checked in via GhidraMCP.",
-          "name": "comment",
+          "default": "true",
+          "description": "Take an exclusive checkout (the default). False allows others to check the file out concurrently.",
+          "name": "exclusive",
           "required": false,
           "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "True keeps the file checked out after the version lands, so you can keep editing. False (the default) releases the checkout.",
-          "name": "keepCheckedOut",
-          "required": false,
-          "source": "body",
-          "type": "string"
+          "type": "boolean"
         }
       ],
-      "path": "/server/version_control/checkin"
+      "path": "/server/version_control/checkout",
+      "read_only": false
     },
     {
       "category": "server",
-      "description": "Check out a version-controlled file",
+      "description": "Undo a checkout in the open shared project, discarding local changes that were not checked in. Close the program first: an open file cannot be released.",
+      "destructive": true,
       "method": "POST",
       "params": [
-        {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Path of the versioned file to check out.",
-          "name": "path",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        }
-      ],
-      "path": "/server/version_control/checkout"
-    },
-    {
-      "category": "server",
-      "description": "Undo a file checkout",
-      "method": "POST",
-      "params": [
-        {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
         {
           "description": "Path of the checked-out file to release. Any local changes not checked in are discarded.",
           "name": "path",
-          "required": false,
+          "required": true,
           "source": "body",
-          "type": "string"
-        }
-      ],
-      "path": "/server/version_control/undo_checkout"
-    },
-    {
-      "category": "server",
-      "description": "Get version history for a file",
-      "method": "GET",
-      "params": [
-        {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
-          "name": "repo",
-          "required": false,
-          "source": "query",
           "type": "string"
         },
         {
-          "description": "Path of the versioned file whose history to return.",
-          "name": "path",
+          "default": "false",
+          "description": "Keep the local copy as a private file instead of discarding it",
+          "name": "keep",
           "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/server/version_control/undo_checkout",
+      "read_only": false
+    },
+    {
+      "category": "server",
+      "description": "Version history of a versioned file: version, user, comment and time of each.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "description": "Path of the versioned file whose history to return",
+          "name": "path",
+          "required": true,
           "source": "query",
           "type": "string"
         }
       ],
-      "path": "/server/version_history"
+      "path": "/server/version_history",
+      "read_only": true
     },
     {
       "category": "program",
@@ -6688,40 +6825,29 @@
     },
     {
       "category": "utility",
-      "description": "Navigate CodeBrowser listing and decompiler to a specific address",
+      "description": "Move the running CodeBrowser's listing and decompiler to an address, in the program it has current. Reports the function containing the address, if any.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only — it moves a CodeBrowser window.",
+          "description": "Address to navigate to, as 0x<hex> or <space>:<hex>. It moves a CodeBrowser window, so it needs a running CodeBrowser with a program open.",
           "name": "address",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         }
       ],
-      "path": "/tool/goto_address"
+      "path": "/tool/goto_address",
+      "read_only": false
     },
     {
       "category": "utility",
-      "description": "Open a file in CodeBrowser, launching a new one if needed",
-      "method": "POST",
-      "params": [
-        {
-          "description": "DomainFile path of the program to open, e.g. /Vanilla/1.13c/D2Common.dll. GUI mode only.",
-          "name": "path",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        }
-      ],
-      "path": "/tool/launch_codebrowser"
-    },
-    {
-      "category": "utility",
-      "description": "List all running Ghidra tool windows",
+      "description": "The Ghidra tool windows that are running, with each one's current program and open programs when it has a program manager (a CodeBrowser does).",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/tool/running_tools"
+      "path": "/tool/running_tools",
+      "read_only": true
     },
     {
       "category": "datatype",

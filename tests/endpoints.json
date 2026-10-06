@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 211,
+  "total_endpoints": 209,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -351,12 +351,13 @@
     {
       "path": "/archive_project",
       "method": "POST",
-      "category": "headless",
+      "category": "project",
       "params": [
         "output_dir",
         "output_name"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File â†’ Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) â€” unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
@@ -399,6 +400,7 @@
       "category": "analysis",
       "params": [
         "address",
+        "goto",
         "name",
         "prototype",
         "calling_convention",
@@ -407,12 +409,12 @@
         "plate_comment",
         "decompiler_comments",
         "disassembly_comments",
-        "goto",
         "score",
         "program"
       ],
       "servers": [
-        "gui"
+        "gui",
+        "headless"
       ],
       "description": "Apply all documentation to a function in one call"
     },
@@ -1301,13 +1303,14 @@
     {
       "path": "/export_program",
       "method": "POST",
-      "category": "headless",
+      "category": "project",
       "params": [
         "program_name",
         "output_dir",
         "output_name"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Export an open or project-resident program to a Ghidra Zip File (.gzf). Looks up the program in the open-programs map first (so it works on file-loaded programs without a project), then falls back to the open project's DomainFile."
@@ -1924,7 +1927,7 @@
     {
       "path": "/import_program",
       "method": "POST",
-      "category": "headless",
+      "category": "project",
       "params": [
         "gzf_path",
         "target_folder",
@@ -1932,6 +1935,7 @@
         "overwrite"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/'). Refuses to overwrite a program that is currently loaded in memory."
@@ -2555,13 +2559,14 @@
     {
       "path": "/restore_project",
       "method": "POST",
-      "category": "headless",
+      "category": "project",
       "params": [
         "gar_path",
         "parent_dir",
         "project_name"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
@@ -2692,7 +2697,7 @@
       "params": [
         "repo",
         "user",
-        "accessLevel"
+        "access_level"
       ],
       "servers": [
         "gui",
@@ -2705,7 +2710,6 @@
       "method": "POST",
       "category": "server",
       "params": [
-        "repo",
         "path"
       ],
       "servers": [
@@ -2719,9 +2723,7 @@
       "method": "POST",
       "category": "server",
       "params": [
-        "repo",
         "path",
-        "checkoutId",
         "checkout_id"
       ],
       "servers": [
@@ -2750,7 +2752,8 @@
         "password"
       ],
       "servers": [
-        "gui"
+        "gui",
+        "headless"
       ],
       "description": "Register server credentials for programmatic authentication"
     },
@@ -2844,7 +2847,7 @@
     {
       "path": "/server/status",
       "method": "GET",
-      "category": "headless",
+      "category": "server",
       "params": [],
       "servers": [
         "gui",
@@ -2857,10 +2860,9 @@
       "method": "POST",
       "category": "server",
       "params": [
-        "repo",
         "path",
         "comment",
-        "keepCheckedOut"
+        "keep_checked_out"
       ],
       "servers": [
         "gui",
@@ -2869,28 +2871,12 @@
       "description": "Add a file to version control"
     },
     {
-      "path": "/server/version_control/checkin",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "path",
-        "comment",
-        "keepCheckedOut"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Check in a version-controlled file"
-    },
-    {
       "path": "/server/version_control/checkout",
       "method": "POST",
       "category": "server",
       "params": [
-        "repo",
-        "path"
+        "path",
+        "exclusive"
       ],
       "servers": [
         "gui",
@@ -2903,8 +2889,8 @@
       "method": "POST",
       "category": "server",
       "params": [
-        "repo",
-        "path"
+        "path",
+        "keep"
       ],
       "servers": [
         "gui",
@@ -2917,7 +2903,6 @@
       "method": "GET",
       "category": "server",
       "params": [
-        "repo",
         "path"
       ],
       "servers": [
@@ -3183,18 +3168,6 @@
         "gui"
       ],
       "description": "Navigate CodeBrowser listing and decompiler to a specific address"
-    },
-    {
-      "path": "/tool/launch_codebrowser",
-      "method": "POST",
-      "category": "utility",
-      "params": [
-        "path"
-      ],
-      "servers": [
-        "gui"
-      ],
-      "description": "Open a file in CodeBrowser, launching a new one if needed"
     },
     {
       "path": "/tool/running_tools",

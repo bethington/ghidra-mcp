@@ -48,47 +48,6 @@ public final class ServiceUtils {
     }
 
     /**
-     * Unescape JSON string escape sequences: \n -> newline, \" -> quote, \\ -> backslash, etc.
-     */
-    public static String unescapeJsonString(String s) {
-        if (s == null || s.isEmpty()) return s;
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' && i + 1 < s.length()) {
-                char next = s.charAt(i + 1);
-                switch (next) {
-                    case 'n':  sb.append('\n'); i++; break;
-                    case 'r':  sb.append('\r'); i++; break;
-                    case 't':  sb.append('\t'); i++; break;
-                    case '"':  sb.append('"');  i++; break;
-                    case '\\': sb.append('\\'); i++; break;
-                    case '/':  sb.append('/');  i++; break;
-                    case 'u':
-                        if (i + 5 < s.length()) {
-                            try {
-                                int cp = Integer.parseInt(s.substring(i + 2, i + 6), 16);
-                                sb.append((char) cp);
-                                i += 5;
-                            } catch (NumberFormatException e) {
-                                sb.append(c);
-                            }
-                        } else {
-                            sb.append(c);
-                        }
-                        break;
-                    default:
-                        sb.append(c);
-                        break;
-                }
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
      * Serialize a List of objects to a JSON array string.
      * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
      */
@@ -191,40 +150,6 @@ public final class ServiceUtils {
     // Numeric/Boolean Parsing
     // ========================================================================
 
-    /**
-     * Parse an integer from a string, returning defaultValue if null or invalid.
-     */
-    public static int parseIntOrDefault(String val, int defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Integer.parseInt(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a double from a string, returning defaultValue if null or invalid.
-     */
-    public static double parseDoubleOrDefault(String val, double defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Double.parseDouble(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a boolean from an Object (Boolean, String, or null), returning defaultValue if unrecognized.
-     */
-    public static boolean parseBoolOrDefault(Object obj, boolean defaultValue) {
-        if (obj == null) return defaultValue;
-        if (obj instanceof Boolean) return (Boolean) obj;
-        if (obj instanceof String) return Boolean.parseBoolean((String) obj);
-        return defaultValue;
-    }
-
     // ========================================================================
     // Collection Utilities
     // ========================================================================
@@ -296,26 +221,6 @@ public final class ServiceUtils {
     }
 
     /**
-     * Convert a list of strings into a newline-delimited string, applying offset and limit.
-     *
-     * @deprecated Produces plain text, which violates the response contract
-     *     (see {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}). Use
-     *     {@link #paged(String, List, int, int)} instead. Retained only while
-     *     the staged text-to-JSON migration is in flight.
-     */
-    @Deprecated
-    public static String paginateList(List<String> items, int offset, int limit) {
-        int start = Math.max(0, offset);
-        int end = Math.min(items.size(), offset + limit);
-
-        if (start >= items.size()) {
-            return "";
-        }
-        List<String> sub = items.subList(start, end);
-        return String.join("\n", sub);
-    }
-
-    /**
      * Safely downcast a List&lt;Object&gt; to List&lt;Map&lt;String,String&gt;&gt;.
      */
     @SuppressWarnings("unchecked")
@@ -368,47 +273,6 @@ public final class ServiceUtils {
     // ========================================================================
     // String Utilities
     // ========================================================================
-
-    /**
-     * Escape non-ASCII characters to \\xHH hex notation.
-     */
-    public static String escapeNonAscii(String input) {
-        if (input == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (char c : input.toCharArray()) {
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else {
-                sb.append("\\x");
-                sb.append(Integer.toHexString(c & 0xFF));
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Escape special characters in a string for display.
-     */
-    public static String escapeString(String input) {
-        if (input == null) return "";
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < input.length(); i++) {
-            char c = input.charAt(i);
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else {
-                sb.append(String.format("\\x%02x", (int) c & 0xFF));
-            }
-        }
-        return sb.toString();
-    }
 
     /**
      * Check if a string meets quality criteria: 4+ chars, 80%+ printable ASCII.
@@ -796,18 +660,6 @@ public final class ServiceUtils {
     // ========================================================================
     // Program Resolution
     // ========================================================================
-
-    /**
-     * Generate a JSON error response for when a program cannot be found.
-     * @deprecated Use {@link #getProgramOrError(ProgramProvider, String)} instead.
-     */
-    @Deprecated
-    public static String programNotFoundError(String programName) {
-        if (programName == null || programName.isEmpty()) {
-            return "{\"error\": \"No program is currently open\"}";
-        }
-        return "{\"error\": \"Program not found: " + escapeJson(programName) + "\"}";
-    }
 
     /**
      * Type-safe result from program resolution.

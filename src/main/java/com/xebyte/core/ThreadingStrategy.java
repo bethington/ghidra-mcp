@@ -119,9 +119,14 @@ public interface ThreadingStrategy {
     }
 
     /**
-     * Check if we're running in headless mode.
+     * Run an action on the UI thread and wait for it: the Swing event thread on the GUI, the
+     * calling thread headless, where there is none. For work that touches windows or must
+     * share the event thread's ordering with the GUI's own edits.
      *
-     * @return true if running headless (no GUI)
+     * @param action The action to run
+     * @throws Exception if the action fails
      */
-    boolean isHeadless();
+    default void runOnUi(Runnable action) throws Exception {
+        action.run();
+    }
 }

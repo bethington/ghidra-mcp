@@ -1,6 +1,7 @@
 package com.xebyte.core;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.framework.data.DomainFileProxy;
 import ghidra.framework.model.DomainFile;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -45,6 +46,30 @@ public final class ProgramSaves {
      * and the recursion crosses class boundaries on a single thread.
      */
     static final ThreadLocal<Boolean> IN_ANALYSIS_WAIT = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /**
+     * Why edits to {@code program} cannot be saved, or null when they can.
+     *
+     * <p>A versioned file that is not checked out opens as an in-memory copy of its latest
+     * version, behind a {@link DomainFileProxy}: every edit applies, and the save throws
+     * "Location does not exist for a save operation!", which names neither the cause nor
+     * the remedy. Measured on a shared project on 2026-10-01: an agent made dozens of renames
+     * that way, every one reported success, and all of them vanished on close.
+     */
+    public static String unsaveableReason(Program program) {
+        if (program == null || program.canSave()) {
+            return null;
+        }
+        DomainFile df = program.getDomainFile();
+        String path = df != null ? df.getPathname() : program.getName();
+        if (df instanceof DomainFileProxy) {
+            return path + " is not checked out: it is open as an in-memory copy of a versioned "
+                + "file (or of a read-only project), so edits apply but cannot be saved and are "
+                + "lost when it closes. Check it out with /server/version_control/checkout, which "
+                + "reopens it writable when it has no edits yet.";
+        }
+        return path + " cannot be saved: its project file is read-only.";
+    }
 
     /** A save call that may throw what {@code DomainFile.save}/{@code Program.save} throw. */
     @FunctionalInterface

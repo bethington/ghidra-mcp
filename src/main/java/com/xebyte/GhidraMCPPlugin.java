@@ -25,7 +25,6 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.services.DebuggerTraceManagerService;
-import ghidra.app.services.GoToService;
 
 import ghidra.app.script.GhidraScriptUtil;
 import ghidra.app.script.GhidraScript;
@@ -39,7 +38,6 @@ import ghidra.program.model.mem.Memory;
 import ghidra.framework.plugintool.PluginInfo;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.util.Msg;
-import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.trace.model.Trace;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.data.DataType;
@@ -70,14 +68,9 @@ import com.xebyte.core.ServerManager;
 
 import ghidra.framework.main.ApplicationLevelPlugin;
 
-import ghidra.framework.model.DomainFile;
-import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
-import ghidra.framework.model.ProjectData;
 import ghidra.framework.model.ProjectLocator;
 import ghidra.framework.model.ProjectManager;
-import ghidra.framework.store.ItemCheckoutStatus;
-import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.main.AppInfo;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
@@ -86,12 +79,14 @@ import ghidra.util.task.TaskMonitor;
 import com.xebyte.core.HttpExchange;
 import com.xebyte.core.SunHttpExchangeAdapter;
 import com.sun.net.httpserver.Headers;
+import com.xebyte.core.HttpExchange;
 
 import javax.swing.SwingUtilities;
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.io.*;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -106,7 +101,7 @@ import java.util.regex.Pattern;
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 203 endpoints for reverse engineering automation. " +
+                  "Provides 205 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -190,11 +185,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // nest on the same thread (see AnnotationScanner.createHandler).
     private final com.xebyte.core.ThreadingStrategy threadingStrategy;
 
-    // Server authenticator for programmatic login (bypasses GUI password dialog)
-    private com.xebyte.core.GhidraMCPAuthenticator authenticator;
-
     // Service layer for delegated operations
     private final com.xebyte.core.CoreServices services;
+    private final com.xebyte.core.GuiToolService guiToolService;
     private final com.xebyte.core.ListingService listingService;
     private final com.xebyte.core.CommentService commentService;
     private final com.xebyte.core.SymbolLabelService symbolLabelService;
@@ -228,6 +221,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.malwareSecurityService = services.malwareSecurity();
         this.programScriptService = services.programScript();
         this.debuggerService = new com.xebyte.core.DebuggerService(programProvider, threadingStrategy, tool);
+        this.guiToolService = new com.xebyte.core.GuiToolService(tool);
         this.promptPolicyService = new com.xebyte.core.PromptPolicyService();
         Msg.info(this, "============================================");
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
@@ -242,7 +236,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             new com.xebyte.core.GhidraMCPAuthInitializer().run();
         }
         if (com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
-            this.authenticator = com.xebyte.core.GhidraMCPAuthInitializer.getAuthenticator();
             Msg.info(this, "GhidraMCP: Server authenticator registered — auto-login active");
         } else {
             Msg.info(this, "GhidraMCP: No server credentials configured — GUI auth will be used");
@@ -485,7 +478,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private AnnotationScanner buildScanner() {
         AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
-            services.plus(debuggerService, promptPolicyService));
+            services.plus(debuggerService, promptPolicyService,
+                new com.xebyte.core.ProjectLifecycleService(programProvider),
+                new com.xebyte.core.VersionControlService(programProvider,
+                    new com.xebyte.core.ProjectServerSession(programProvider)),
+                new com.xebyte.core.ServerLifecycleService(services.programScript(), guiLifecycle()),
+                guiToolService,
+                new com.xebyte.core.DocumentationBatchService(services.function(), services.comment(),
+                    services.analysis(), guiToolService::gotoAddress)));
         // The hand-coded routes are live on every transport, but the scanner only
         // knows annotated methods; without this they stay out of /mcp/schema and so
         // out of the bridge's dynamic tool discovery.
@@ -556,491 +556,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // ----------------------------------------------------------------------------------
     // New methods to implement the new functionalities
     // ----------------------------------------------------------------------------------
-
-    /**
-     * Get function by address
-     */
-    private String getFunctionByAddress(String addressStr, String programName) {
-        return functionService.getFunctionByAddress(addressStr, programName).toJson();
-    }
-
-    // Backward compatibility overload
-    private String getFunctionByAddress(String addressStr) {
-        return functionService.getFunctionByAddress(addressStr).toJson();
-    }
-
-    /**
-     * Gets a function at the given address or containing the address
-     * @return the function or null if not found
-     */
-    private Function getFunctionForAddress(Program program, Address addr) {
-        Function func = program.getFunctionManager().getFunctionAt(addr);
-        if (func == null) {
-            func = program.getFunctionManager().getFunctionContaining(addr);
-        }
-        return func;
-    }
-
-    private String decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
-        return functionService.decompileFunctionByAddress(addressStr, programName, timeoutSeconds).toJson();
-    }
-
-    private String decompileFunctionByAddress(String addressStr, String programName) {
-        return functionService.decompileFunctionByAddress(addressStr, programName).toJson();
-    }
-
-    private String decompileFunctionByAddress(String addressStr) {
-        return functionService.decompileFunctionByAddress(addressStr).toJson();
-    }
-
-    private String disassembleFunction(String addressStr, String programName) {
-        return functionService.disassembleFunction(addressStr, programName).toJson();
-    }
-
-    private String disassembleFunction(String addressStr) {
-        return functionService.disassembleFunction(addressStr).toJson();
-    }
-
-    /**
-     * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT)
-     */
-    @SuppressWarnings("deprecation")
-    private String setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
-        return commentService.setCommentAtAddress(addressStr, comment, commentType, transactionName).toJson();
-    }
-
-    private String renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
-        return functionService.renameFunctionByAddress(functionAddrStr, newName, programName).toJson();
-    }
-
-    // Backward compatible overload (used by batchApplyDocumentation)
-    private String renameFunctionByAddress(String functionAddrStr, String newName) {
-        return functionService.renameFunctionByAddress(functionAddrStr, newName).toJson();
-    }
-
-    private com.xebyte.core.FunctionService.PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
-        return functionService.setFunctionPrototype(functionAddrStr, prototype);
-    }
-
-    private com.xebyte.core.FunctionService.PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention) {
-        return functionService.setFunctionPrototype(functionAddrStr, prototype, callingConvention);
-    }
-
-    private com.xebyte.core.FunctionService.PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention, String programName) {
-        return functionService.setFunctionPrototype(functionAddrStr, prototype, callingConvention, programName);
-    }
-
-    private String listCallingConventions(String programName) {
-        return listingService.listCallingConventions(programName).toJson();
-    }
-
-    private String listCallingConventions() {
-        return listingService.listCallingConventions(null).toJson();
-    }
-
-    private String setLocalVariableType(String functionAddrStr, String variableName, String newType, String programName) {
-        return functionService.setLocalVariableType(functionAddrStr, variableName, newType, programName).toJson();
-    }
-
-    private String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
-        return functionService.setLocalVariableType(functionAddrStr, variableName, newType).toJson();
-    }
-
-    private String setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
-        return functionService.setFunctionNoReturn(functionAddrStr, noReturn, programName).toJson();
-    }
-
-    private String setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
-        return functionService.setFunctionNoReturn(functionAddrStr, noReturn).toJson();
-    }
-
-    private String clearInstructionFlowOverride(String instructionAddrStr, String programName) {
-        return functionService.clearInstructionFlowOverride(instructionAddrStr, programName).toJson();
-    }
-
-    private String clearInstructionFlowOverride(String instructionAddrStr) {
-        return functionService.clearInstructionFlowOverride(instructionAddrStr).toJson();
-    }
-
-    private String setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
-        return functionService.setVariableStorage(functionAddrStr, variableName, storageSpec, programName).toJson();
-    }
-
-    private String setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
-        return functionService.setVariableStorage(functionAddrStr, variableName, storageSpec).toJson();
-    }
-
-    /**
-     * Run a Ghidra script programmatically (v1.7.0, fixed v2.0.1)
-     *
-     * Fixes: Issue #1 (args support via setScriptArgs), Issue #2 (OSGi path
-     * resolution by copying to ~/ghidra_scripts/), Issue #5 (timeout protection).
-     *
-     * @param scriptPath Path to the script file (.java or .py), or just a filename
-     * @param scriptArgs Optional space-separated arguments for the script
-     * @return Script output or error message
-     */
-    private String runGhidraScript(String scriptPath, String scriptArgs, String programName) {
-        return programScriptService.runGhidraScript(scriptPath, scriptArgs, programName).toJson();
-    }
-
-    private String runGhidraScript(String scriptPath, String scriptArgs) {
-        return programScriptService.runGhidraScript(scriptPath, scriptArgs).toJson();
-    }
-
-    /**
-     * List available Ghidra scripts (v1.7.0)
-     *
-     * @param filter Optional filter string to match script names
-     * @return JSON list of available scripts
-     */
-    private String listGhidraScripts(String filter) {
-        return programScriptService.listGhidraScripts(filter).toJson();
-    }
-
-    /**
-     * Force decompiler reanalysis for a function (v1.7.0)
-     *
-     * Clears cached decompilation results and forces a fresh analysis.
-     * Useful after making changes to function signatures, variables, or data types.
-     *
-     * @param functionAddrStr Function address to reanalyze
-     * @return Success message with new decompilation
-     */
-    private String forceDecompile(String functionAddrStr) {
-        return functionService.forceDecompile(functionAddrStr).toJson();
-    }
-
-    /**
-     * Get all references to a specific address (xref to)
-     */
-    private String getXrefsTo(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsTo(addressStr, null, offset, limit, programName).toJson();
-    }
-
-    /**
-     * Get all references from a specific address (xref from)
-     */
-    private String getXrefsFrom(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsFrom(addressStr, offset, limit, programName).toJson();
-    }
-
-    /**
-     * Get all references to a specific function by name
-     */
-    private String getFunctionXrefs(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionXrefs(functionName, offset, limit, programName).toJson();
-    }
-
-/**
- * List all defined strings in the program with their addresses
- */
-    private String listDefinedStrings(int offset, int limit, String filter, String programName) {
-        return listingService.listDefinedStrings(offset, limit, filter, programName).toJson();
-    }
-
-    private String getFunctionCount(String programName) {
-        return listingService.getFunctionCount(programName).toJson();
-    }
-
-    private String searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
-        return listingService.searchStrings(query, minLength, encoding, offset, limit, programName).toJson();
-    }
-
-    /**
-     * List all registered analyzers and their enabled/disabled state.
-     */
-    private String listAnalyzers(String programName) {
-        return analysisService.listAnalyzers(programName).toJson();
-    }
-
-    /**
-     * Trigger auto-analysis on the current or named program.
-     */
-    private String runAnalysis(String programName) {
-        return analysisService.runAnalysis(programName).toJson();
-    }
-
-    /**
-     * Check if the given data is a string type
-     */
-    private boolean isStringData(Data data) {
-        if (data == null) return false;
-
-        DataType dt = data.getDataType();
-        String typeName = dt.getName().toLowerCase();
-        return typeName.contains("string") || typeName.contains("char") || typeName.equals("unicode");
-    }
-
-    /**
-     * Check if a string meets quality criteria for listing
-     * - Minimum length of 4 characters
-     * - At least 80% printable ASCII characters
-     */
-    private boolean isQualityString(String str) {
-        if (str == null || str.length() < 4) {
-            return false;
-        }
-
-        int printableCount = 0;
-        for (int i = 0; i < str.length(); i++) {
-            char c = str.charAt(i);
-            // Printable ASCII: space (32) to tilde (126), plus common whitespace
-            if ((c >= 32 && c < 127) || c == '\n' || c == '\r' || c == '\t') {
-                printableCount++;
-            }
-        }
-
-        double printableRatio = (double) printableCount / str.length();
-        return printableRatio >= 0.80;
-    }
-
-    /**
-     * Escape special characters in a string for display
-     */
-    /**
-     * Maps common C type names to Ghidra built-in DataType instances.
-     * These types exist as Java classes but may not be in the per-program DTM.
-     */
-    private DataType resolveWellKnownType(String typeName) {
-        switch (typeName.toLowerCase()) {
-            case "int":        return ghidra.program.model.data.IntegerDataType.dataType;
-            case "uint":       return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
-            case "short":      return ghidra.program.model.data.ShortDataType.dataType;
-            case "ushort":     return ghidra.program.model.data.UnsignedShortDataType.dataType;
-            case "long":       return ghidra.program.model.data.LongDataType.dataType;
-            case "ulong":      return ghidra.program.model.data.UnsignedLongDataType.dataType;
-            case "longlong":
-            case "long long":  return ghidra.program.model.data.LongLongDataType.dataType;
-            case "char":       return ghidra.program.model.data.CharDataType.dataType;
-            case "uchar":      return ghidra.program.model.data.UnsignedCharDataType.dataType;
-            case "float":      return ghidra.program.model.data.FloatDataType.dataType;
-            case "double":     return ghidra.program.model.data.DoubleDataType.dataType;
-            case "bool":
-            case "boolean":    return ghidra.program.model.data.BooleanDataType.dataType;
-            case "void":       return ghidra.program.model.data.VoidDataType.dataType;
-            case "byte":       return ghidra.program.model.data.ByteDataType.dataType;
-            case "sbyte":      return ghidra.program.model.data.SignedByteDataType.dataType;
-            case "word":       return ghidra.program.model.data.WordDataType.dataType;
-            case "dword":      return ghidra.program.model.data.DWordDataType.dataType;
-            case "qword":      return ghidra.program.model.data.QWordDataType.dataType;
-            case "int8_t":
-            case "int8":       return ghidra.program.model.data.SignedByteDataType.dataType;
-            case "uint8_t":
-            case "uint8":      return ghidra.program.model.data.ByteDataType.dataType;
-            case "int16_t":
-            case "int16":      return ghidra.program.model.data.ShortDataType.dataType;
-            case "uint16_t":
-            case "uint16":     return ghidra.program.model.data.UnsignedShortDataType.dataType;
-            case "int32_t":
-            case "int32":      return ghidra.program.model.data.IntegerDataType.dataType;
-            case "uint32_t":
-            case "uint32":     return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
-            case "int64_t":
-            case "int64":      return ghidra.program.model.data.LongLongDataType.dataType;
-            case "uint64_t":
-            case "uint64":     return ghidra.program.model.data.UnsignedLongLongDataType.dataType;
-            case "size_t":     return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
-            case "unsigned int": return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
-            case "unsigned short": return ghidra.program.model.data.UnsignedShortDataType.dataType;
-            case "unsigned long": return ghidra.program.model.data.UnsignedLongDataType.dataType;
-            case "unsigned char": return ghidra.program.model.data.UnsignedCharDataType.dataType;
-            case "signed char": return ghidra.program.model.data.SignedByteDataType.dataType;
-            default:           return null;
-        }
-    }
-
-    /**
-     * Resolves a data type by name, handling common types and pointer types
-     * @param dtm The data type manager
-     * @param typeName The type name to resolve
-     * @return The resolved DataType, or null if not found
-     */
-    private DataType resolveDataType(DataTypeManager dtm, String typeName) {
-        // ZERO: Map common C type names to Ghidra built-in DataType instances
-        // These types exist as Java classes but may not be registered in the per-program DTM
-        DataType wellKnown = resolveWellKnownType(typeName);
-        if (wellKnown != null) {
-            Msg.info(this, "Resolved well-known type: " + typeName + " -> " + wellKnown.getName());
-            return wellKnown;
-        }
-
-        // FIRST: Try Ghidra builtin types in root category (prioritize over Windows types)
-        // This ensures we use lowercase builtin types (uint, ushort, byte) instead of
-        // Windows SDK types (UINT, USHORT, BYTE) when the type name matches
-        DataType builtinType = dtm.getDataType("/" + typeName);
-        if (builtinType != null) {
-            Msg.info(this, "Found builtin data type: " + builtinType.getPathName());
-            return builtinType;
-        }
-
-        // SECOND: Try lowercase version of builtin types (handles "UINT" → "/uint")
-        DataType builtinTypeLower = dtm.getDataType("/" + typeName.toLowerCase());
-        if (builtinTypeLower != null) {
-            Msg.info(this, "Found builtin data type (lowercase): " + builtinTypeLower.getPathName());
-            return builtinTypeLower;
-        }
-
-        // THIRD: Search all categories as fallback (for Windows types, custom types, etc.)
-        DataType dataType = findDataTypeByNameInAllCategories(dtm, typeName);
-        if (dataType != null) {
-            Msg.info(this, "Found data type in categories: " + dataType.getPathName());
-            return dataType;
-        }
-
-        // Check for array syntax: "type[count]"
-        if (typeName.contains("[") && typeName.endsWith("]")) {
-            int bracketPos = typeName.indexOf('[');
-            String baseTypeName = typeName.substring(0, bracketPos);
-            String countStr = typeName.substring(bracketPos + 1, typeName.length() - 1);
-
-            try {
-                int count = Integer.parseInt(countStr);
-                DataType baseType = resolveDataType(dtm, baseTypeName);  // Recursive call
-
-                if (baseType != null && count > 0) {
-                    // Create array type on-the-fly
-                    ArrayDataType arrayType = new ArrayDataType(baseType, count, baseType.getLength());
-                    Msg.info(this, "Auto-created array type: " + typeName +
-                            " (base: " + baseType.getName() + ", count: " + count +
-                            ", total size: " + arrayType.getLength() + " bytes)");
-                    return arrayType;
-                } else if (baseType == null) {
-                    Msg.error(this, "Cannot create array: base type '" + baseTypeName + "' not found");
-                    return null;
-                }
-            } catch (NumberFormatException e) {
-                Msg.error(this, "Invalid array count in type: " + typeName);
-                return null;
-            }
-        }
-
-        // Check for C-style pointer types (type*)
-        if (typeName.endsWith("*")) {
-            String baseTypeName = typeName.substring(0, typeName.length() - 1).trim();
-
-            // Special case for void*
-            if (baseTypeName.equals("void") || baseTypeName.isEmpty()) {
-                Msg.info(this, "Creating void* pointer type");
-                return new PointerDataType(dtm.getDataType("/void"));
-            }
-
-            // Try to resolve the base type recursively (handles nested types)
-            DataType baseType = resolveDataType(dtm, baseTypeName);
-            if (baseType != null) {
-                Msg.info(this, "Creating pointer type: " + typeName +
-                        " (base: " + baseType.getName() + ")");
-                return new PointerDataType(baseType);
-            }
-
-            // If base type not found, warn and default to void*
-            Msg.warn(this, "Base type not found for " + typeName + ", defaulting to void*");
-            return new PointerDataType(dtm.getDataType("/void"));
-        }
-
-        // Check for Windows-style pointer types (PXXX)
-        if (typeName.startsWith("P") && typeName.length() > 1) {
-            String baseTypeName = typeName.substring(1);
-
-            // Special case for PVOID
-            if (baseTypeName.equals("VOID")) {
-                return new PointerDataType(dtm.getDataType("/void"));
-            }
-
-            // Try to find the base type
-            DataType baseType = findDataTypeByNameInAllCategories(dtm, baseTypeName);
-            if (baseType != null) {
-                return new PointerDataType(baseType);
-            }
-
-            Msg.warn(this, "Base type not found for " + typeName + ", defaulting to void*");
-            return new PointerDataType(dtm.getDataType("/void"));
-        }
-
-        // Handle common built-in types
-        switch (typeName.toLowerCase()) {
-            case "int":
-            case "long":
-                return dtm.getDataType("/int");
-            case "uint":
-            case "unsigned int":
-            case "unsigned long":
-            case "dword":
-                return dtm.getDataType("/uint");
-            case "short":
-                return dtm.getDataType("/short");
-            case "ushort":
-            case "unsigned short":
-            case "word":
-                return dtm.getDataType("/ushort");
-            case "char":
-            case "byte":
-                return dtm.getDataType("/char");
-            case "uchar":
-            case "unsigned char":
-                return dtm.getDataType("/uchar");
-            case "longlong":
-            case "__int64":
-                return dtm.getDataType("/longlong");
-            case "ulonglong":
-            case "unsigned __int64":
-                return dtm.getDataType("/ulonglong");
-            case "bool":
-            case "boolean":
-                return dtm.getDataType("/bool");
-            case "float":
-                return dtm.getDataType("/dword");  // Use dword as 4-byte float substitute
-            case "double":
-                return dtm.getDataType("/double");
-            case "void":
-                return dtm.getDataType("/void");
-            default:
-                // Try as a direct path
-                DataType directType = dtm.getDataType("/" + typeName);
-                if (directType != null) {
-                    return directType;
-                }
-
-                // Return null if type not found - let caller handle error
-                Msg.error(this, "Unknown type: " + typeName);
-                return null;
-        }
-    }
-
-    /**
-     * Find a data type by name in all categories/folders of the data type manager
-     * This searches through all categories rather than just the root
-     */
-    private DataType findDataTypeByNameInAllCategories(DataTypeManager dtm, String typeName) {
-        // Try exact match first
-        DataType result = searchByNameInAllCategories(dtm, typeName);
-        if (result != null) {
-            return result;
-        }
-
-        // Try lowercase
-        return searchByNameInAllCategories(dtm, typeName.toLowerCase());
-    }
-
-    /**
-     * Helper method to search for a data type by name in all categories
-     */
-    private DataType searchByNameInAllCategories(DataTypeManager dtm, String name) {
-        // Get all data types from the manager
-        Iterator<DataType> allTypes = dtm.getAllDataTypes();
-        while (allTypes.hasNext()) {
-            DataType dt = allTypes.next();
-            // Check if the name matches exactly (case-sensitive)
-            if (dt.getName().equals(name)) {
-                return dt;
-            }
-            // For case-insensitive, we want an exact match except for case
-            if (dt.getName().equalsIgnoreCase(name)) {
-                return dt;
-            }
-        }
-        return null;
-    }
 
     // ----------------------------------------------------------------------------------
     // Utility: parse query params, parse post params, pagination, etc.
@@ -1204,11 +719,28 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return programScriptService.saveCurrentProgram(programName).toJson();
     }
 
-    private Map<String, Object> saveEverythingBeforeExit() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("programs", programScriptService.saveAllOpenPrograms().asEmbeddable());
-        result.put("traces", saveAllOpenDebuggerTraces());
-        return result;
+    /**
+     * What the GUI adds to the shared {@code /exit_ghidra}: answer Ghidra's own prompts while
+     * it saves, save the debugger traces too, and close the tools without writing their
+     * layouts back.
+     */
+    private com.xebyte.core.ServerLifecycle guiLifecycle() {
+        return new com.xebyte.core.ServerLifecycle() {
+            @Override
+            public void prepare() {
+                promptPolicyService.enableFor("exit_ghidra", 30);
+            }
+
+            @Override
+            public Map<String, Object> saveExtras() {
+                return Map.of("traces", saveAllOpenDebuggerTraces());
+            }
+
+            @Override
+            public void exit() {
+                SwingUtilities.invokeLater(GhidraMCPPlugin.this::closeGhidraWithoutSavingToolLayouts);
+            }
+        };
     }
 
     private void closeGhidraWithoutSavingToolLayouts() {
@@ -1434,191 +966,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
         });
 
-        http.route("/exit_ghidra", exchange -> {
-            try {
-                promptPolicyService.enableFor("exit_ghidra", 30);
-                Map<String, Object> saveResult = saveEverythingBeforeExit();
-                sendResponse(exchange, JsonHelper.toJson(JsonHelper.mapOf(
-                    "success", true,
-                    "message", "Saving all open programs and traces, then exiting Ghidra",
-                    "save", saveResult
-                )));
-                // Schedule exit after response is sent
-                new Thread(() -> {
-                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-                    SwingUtilities.invokeLater(() -> {
-                        closeGhidraWithoutSavingToolLayouts();
-                    });
-                }).start();
-            } catch (Throwable e) {
-                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
-            }
-        });
-
-        // ==========================================================================
-        // PROJECT VERSION CONTROL ENDPOINTS (16 endpoints)
-        // Uses Ghidra's internal Project/DomainFile API - no separate connection needed
-        // ==========================================================================
-
-        // --- Project Status (4 endpoints) ---
-
-        http.route("/server/connect", exchange -> {
-            Project project = tool.getProject();
-            if (project == null) {
-                sendResponse(exchange, "{\"error\": \"No project open in Ghidra\"}");
-                return;
-            }
-            ProjectData data = project.getProjectData();
-            boolean isShared = data.getProjectLocator().isTransient() ? false : (getProjectRepository() != null);
-            sendResponse(exchange, "{\"status\": \"connected\", \"project\": \"" + escapeJson(project.getName()) + "\", " +
-                "\"shared\": " + isShared + ", " +
-                "\"message\": \"GUI plugin uses the open Ghidra project directly. No separate connection needed.\"}");
-        });
-
-        http.route("/server/disconnect", exchange -> {
-            sendResponse(exchange, "{\"status\": \"ok\", \"message\": \"GUI plugin uses the open project. No disconnect needed.\"}");
-        });
-
-        http.route("/server/status", exchange -> {
-            sendResponse(exchange, getProjectStatusJson());
-        });
-
-        http.route("/server/repositories", exchange -> {
-            Project project = tool.getProject();
-            if (project == null) {
-                sendResponse(exchange, "{\"error\": \"No project open\"}");
-                return;
-            }
-            sendResponse(exchange, "{\"repositories\": [\"" + escapeJson(project.getName()) + "\"], \"count\": 1, " +
-                "\"message\": \"GUI mode returns the current project. Use headless mode for multi-repo browsing.\"}");
-        });
-
-        // --- Repository Browsing (3 endpoints) ---
-
-        http.route("/server/repository/files", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String folderPath = params.get("path");
-            if (folderPath == null) folderPath = params.get("folder");
-            if (folderPath == null) folderPath = "/";
-            sendResponse(exchange, listProjectFilesJson(folderPath));
-        });
-
-        http.route("/server/repository/file", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String filePath = params.get("path");
-            if (filePath == null) {
-                sendResponse(exchange, "{\"error\": \"'path' parameter required\"}");
-                return;
-            }
-            sendResponse(exchange, getProjectFileInfoJson(filePath));
-        });
-
-        http.route("/server/repository/create", exchange -> {
-            sendResponse(exchange, "{\"error\": \"Repository creation not available in GUI mode. Use Ghidra's Project Manager or headless mode.\"}");
-        });
-
-        // --- Version Control Operations (4 endpoints) ---
-
-        http.route("/server/version_control/checkout", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            boolean exclusive = Boolean.parseBoolean(params.getOrDefault("exclusive", "true").toString());
-            sendResponse(exchange, checkoutProjectFile(filePath, exclusive));
-        });
-
-        http.route("/server/version_control/checkin", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            String comment = params.getOrDefault("comment", "Checked in via GhidraMCP").toString();
-            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
-            sendResponse(exchange, checkinProjectFile(filePath, comment, keepCheckedOut));
-        });
-
-        http.route("/server/version_control/undo_checkout", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            boolean keep = Boolean.parseBoolean(params.getOrDefault("keep", "false").toString());
-            sendResponse(exchange, undoCheckoutProjectFile(filePath, keep));
-        });
-
-        http.route("/server/version_control/add", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            String comment = params.getOrDefault("comment", "Added via GhidraMCP").toString();
-            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
-            sendResponse(exchange, addToVersionControl(filePath, comment, keepCheckedOut));
-        });
-
-        // --- Version History & Checkouts (2 endpoints) ---
-
-        http.route("/server/version_history", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String filePath = params.get("path");
-            sendResponse(exchange, getProjectFileVersionHistory(filePath));
-        });
-
-        http.route("/server/checkouts", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String folderPath = params.get("path");
-            if (folderPath == null) folderPath = "/";
-            sendResponse(exchange, listProjectCheckouts(folderPath));
-        });
-
-        // --- Admin Operations (3 endpoints) ---
-
-        http.route("/server/admin/terminate_checkout", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            sendResponse(exchange, terminateFileCheckout(filePath));
-        });
-
-        http.route("/server/admin/terminate_all_checkouts", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String folderPath = params.get("path") != null ? params.get("path").toString() : "/";
-            sendResponse(exchange, terminateAllCheckouts(folderPath));
-        });
-
-        http.route("/server/admin/users", exchange -> {
-            sendResponse(exchange, "{\"error\": \"User listing requires headless mode with direct server connection.\"}");
-        });
-
-        http.route("/server/admin/set_permissions", exchange -> {
-            sendResponse(exchange, "{\"error\": \"Permission management requires headless mode with direct server connection.\"}");
-        });
+        // The /server/* version-control and repository routes are @McpTools on
+        // VersionControlService, over the open project and a ProjectServerSession.
 
         // ==========================================================================
         // PROJECT & TOOL MANAGEMENT ENDPOINTS (4 endpoints)
         // FrontEnd-level operations for project and tool management
         // ==========================================================================
 
-        http.route("/tool/running_tools", exchange -> {
-            sendResponse(exchange, getRunningTools());
-        });
-
-        http.route("/tool/launch_codebrowser", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String filePath = params.get("path") != null ? params.get("path").toString() : null;
-            sendResponse(exchange, launchCodeBrowser(filePath));
-        });
-
-        http.route("/tool/goto_address", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String address = params.get("address") != null ? params.get("address").toString() : null;
-            sendResponse(exchange, gotoAddress(address));
-        });
-
-        http.route("/batch_apply_documentation", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            sendResponse(exchange, batchApplyDocumentation(params));
-        });
-
-        http.route("/server/authenticate", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String username = params.get("username") != null ? params.get("username").toString() : null;
-            String password = params.get("password") != null ? params.get("password").toString() : null;
-            sendResponse(exchange, authenticateServer(username, password));
-        });
     }
 
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
@@ -2263,223 +1618,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return analysisService.analyzeFunctionCompleteness(functionAddress, compact).toJson();
     }
 
-    /**
-     * v4.0.0: Apply all documentation to a function in a single call.
-     * Orchestrates: goto -> rename -> prototype -> variable types -> variable renames -> comments -> score.
-     * Ordering matters: prototype MUST come before comments (set_function_prototype wipes plate comments).
-     * Each step is optional — only fields present in params are applied.
-     * Each step is independent — failures in one step don't prevent subsequent steps.
-     */
-    @SuppressWarnings("unchecked")
-    private String batchApplyDocumentation(Map<String, Object> params) {
-        String address = params.get("address") != null ? params.get("address").toString() : null;
-        if (address == null || address.trim().isEmpty()) {
-            return "{\"error\": \"address parameter is required\"}";
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"address\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(address)).append("\", \"steps\": {");
-        java.util.List<String> errors = new java.util.ArrayList<>();
-        boolean firstStep = true;
-
-        // Step 1: Goto (optional) — navigate CodeBrowser to this function
-        Object gotoParam = params.get("goto");
-        boolean doGoto = gotoParam instanceof Boolean ? (Boolean) gotoParam : false;
-        if (doGoto) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            try {
-                String gotoResult = gotoAddress(address);
-                boolean gotoOk = gotoResult != null && !gotoResult.contains("\"error\"");
-                sb.append("\"goto\": {\"success\": ").append(gotoOk).append("}");
-            } catch (Exception e) {
-                sb.append("\"goto\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-                errors.add("goto: " + e.getMessage());
-            }
-        }
-
-        // Step 2: Rename function (optional)
-        String name = params.get("name") != null ? params.get("name").toString() : null;
-        if (name != null && !name.isEmpty()) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            try {
-                String renameResult = renameFunctionByAddress(address, name);
-                boolean renameOk = renameResult != null && (renameResult.contains("Success") || renameResult.contains("Renamed"));
-                sb.append("\"rename\": {\"success\": ").append(renameOk);
-                if (!renameOk) {
-                    sb.append(", \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(renameResult)).append("\"");
-                    errors.add("rename: " + renameResult);
-                }
-                sb.append("}");
-            } catch (Exception e) {
-                sb.append("\"rename\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-                errors.add("rename: " + e.getMessage());
-            }
-        }
-
-        // Step 3: Set prototype (optional) — MUST come BEFORE comments (wipes plate comment)
-        String prototype = params.get("prototype") != null ? params.get("prototype").toString() : null;
-        if (prototype != null && !prototype.isEmpty()) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            try {
-                String callingConvention = params.get("calling_convention") != null ? params.get("calling_convention").toString() : null;
-                com.xebyte.core.FunctionService.PrototypeResult protoResult = setFunctionPrototype(address, prototype, callingConvention);
-                sb.append("\"prototype\": {\"success\": ").append(protoResult.isSuccess());
-                if (!protoResult.isSuccess()) {
-                    sb.append(", \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(protoResult.getErrorMessage())).append("\"");
-                    errors.add("prototype: " + protoResult.getErrorMessage());
-                }
-                sb.append("}");
-            } catch (Exception e) {
-                sb.append("\"prototype\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-                errors.add("prototype: " + e.getMessage());
-            }
-        }
-
-        // Step 4: Set variable types (optional)
-        Object varTypesObj = params.get("variable_types");
-        if (varTypesObj instanceof Map) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            Map<String, Object> varTypes = (Map<String, Object>) varTypesObj;
-            int setCount = 0, failCount = 0;
-            java.util.List<String> typeErrors = new java.util.ArrayList<>();
-            for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
-                try {
-                    String typeResult = setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
-                    if (typeResult != null && (typeResult.contains("Success") || typeResult.contains("success") || typeResult.contains("Changed"))) {
-                        setCount++;
-                    } else {
-                        failCount++;
-                        typeErrors.add(entry.getKey() + ": " + (typeResult != null ? typeResult.substring(0, Math.min(typeResult.length(), 100)) : "null"));
-                    }
-                } catch (Exception e) {
-                    failCount++;
-                    typeErrors.add(entry.getKey() + ": " + e.getMessage());
-                }
-            }
-            sb.append("\"variable_types\": {\"success\": ").append(failCount == 0);
-            sb.append(", \"set\": ").append(setCount).append(", \"failed\": ").append(failCount);
-            if (!typeErrors.isEmpty()) {
-                sb.append(", \"errors\": [");
-                for (int i = 0; i < typeErrors.size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append("\"").append(com.xebyte.core.ServiceUtils.escapeJson(typeErrors.get(i))).append("\"");
-                }
-                sb.append("]");
-                errors.addAll(typeErrors);
-            }
-            sb.append("}");
-        }
-
-        // Step 5: Rename variables (optional)
-        Object varRenamesObj = params.get("variable_renames");
-        if (varRenamesObj instanceof Map) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            Map<String, String> varRenames = new java.util.LinkedHashMap<>();
-            for (Map.Entry<String, Object> entry : ((Map<String, Object>) varRenamesObj).entrySet()) {
-                varRenames.put(entry.getKey(), entry.getValue().toString());
-            }
-            try {
-                String renameResult = batchRenameVariables(address, varRenames, true);
-                // batchRenameVariables returns JSON — pass through key fields
-                boolean renameOk = renameResult != null && renameResult.contains("\"success\": true");
-                sb.append("\"variable_renames\": {\"success\": ").append(renameOk);
-                // Extract counts from JSON response
-                try {
-                    int renamedIdx = renameResult.indexOf("\"variables_renamed\":");
-                    int failedIdx = renameResult.indexOf("\"variables_failed\":");
-                    if (renamedIdx >= 0) {
-                        String countStr = renameResult.substring(renamedIdx + 20).trim();
-                        int end = countStr.indexOf(',');
-                        if (end < 0) end = countStr.indexOf('}');
-                        sb.append(", \"renamed\": ").append(countStr.substring(0, end).trim());
-                    }
-                    if (failedIdx >= 0) {
-                        String countStr = renameResult.substring(failedIdx + 19).trim();
-                        int end = countStr.indexOf(',');
-                        if (end < 0) end = countStr.indexOf('}');
-                        sb.append(", \"failed\": ").append(countStr.substring(0, end).trim());
-                    }
-                } catch (Exception ignored) { }
-                if (!renameOk) errors.add("variable_renames: " + renameResult);
-                sb.append("}");
-            } catch (Exception e) {
-                sb.append("\"variable_renames\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-                errors.add("variable_renames: " + e.getMessage());
-            }
-        }
-
-        // Step 6: Set comments (optional) — AFTER prototype to avoid wipe
-        String plateComment = params.get("plate_comment") != null ? params.get("plate_comment").toString() : null;
-        java.util.List<Map<String, String>> decompComments = convertToMapList(params.get("decompiler_comments"));
-        java.util.List<Map<String, String>> disasmComments = convertToMapList(params.get("disassembly_comments"));
-        boolean hasComments = plateComment != null ||
-                              (decompComments != null && !decompComments.isEmpty()) ||
-                              (disasmComments != null && !disasmComments.isEmpty());
-        if (hasComments) {
-            if (!firstStep) sb.append(", ");
-            firstStep = false;
-            try {
-                String commentResult = batchSetComments(address, decompComments, disasmComments, plateComment);
-                boolean commentOk = commentResult != null && commentResult.contains("\"success\": true");
-                sb.append("\"comments\": {\"success\": ").append(commentOk);
-                // Extract plate_comment_set from response
-                if (commentResult != null && commentResult.contains("\"plate_comment_set\": true")) {
-                    sb.append(", \"plate\": true");
-                }
-                try {
-                    int decompIdx = commentResult.indexOf("\"decompiler_comments_set\":");
-                    int disasmIdx = commentResult.indexOf("\"disassembly_comments_set\":");
-                    if (decompIdx >= 0) {
-                        String countStr = commentResult.substring(decompIdx + 26).trim();
-                        int end = countStr.indexOf(',');
-                        if (end < 0) end = countStr.indexOf('}');
-                        sb.append(", \"decompiler\": ").append(countStr.substring(0, end).trim());
-                    }
-                    if (disasmIdx >= 0) {
-                        String countStr = commentResult.substring(disasmIdx + 27).trim();
-                        int end = countStr.indexOf(',');
-                        if (end < 0) end = countStr.indexOf('}');
-                        sb.append(", \"disassembly\": ").append(countStr.substring(0, end).trim());
-                    }
-                } catch (Exception ignored) { }
-                if (!commentOk) errors.add("comments: " + commentResult);
-                sb.append("}");
-            } catch (Exception e) {
-                sb.append("\"comments\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-                errors.add("comments: " + e.getMessage());
-            }
-        }
-
-        sb.append("}"); // close "steps"
-
-        // Step 7: Completeness score (optional, default true)
-        Object scoreParam = params.get("score");
-        boolean doScore = scoreParam instanceof Boolean ? (Boolean) scoreParam : true;
-        if (doScore) {
-            try {
-                // Always use compact mode internally — AI already has workflow guidance in its prompt
-                String scoreResult = analyzeFunctionCompleteness(address, true);
-                sb.append(", \"completeness\": ").append(scoreResult);
-            } catch (Exception e) {
-                sb.append(", \"completeness\": {\"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
-            }
-        }
-
-        // Errors summary
-        sb.append(", \"errors\": [");
-        for (int i = 0; i < errors.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("\"").append(com.xebyte.core.ServiceUtils.escapeJson(errors.get(i))).append("\"");
-        }
-        sb.append("]}");
-
-        return sb.toString();
-    }
 
     /**
      * v1.5.0: Find next undefined function needing analysis
@@ -2493,85 +1631,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String findNextUndefinedFunction(String startAddress, String criteria,
                                             String pattern, String direction) {
         return analysisService.findNextUndefinedFunction(startAddress, criteria, pattern, direction).toJson();
-    }
-
-    /**
-     * v1.5.0: Batch set variable types
-     */
-    @SuppressWarnings("deprecation")
-    /**
-     * Individual variable type setting using setLocalVariableType (fallback method)
-     * NOW USES OPTIMIZED SINGLE-DECOMPILE METHOD
-     * This method was refactored to use batchSetVariableTypesOptimized() which decompiles
-     * the function ONCE and applies all type changes within that single decompilation,
-     * avoiding the repeated decompilation timeout issues that plagued the previous approach.
-     */
-    private String batchSetVariableTypesIndividual(String functionAddress, Map<String, String> variableTypes) {
-        // Delegate to the optimized batch method that decompiles once
-        // This fixes the issue where each setLocalVariableType() call caused its own decompilation
-        return batchSetVariableTypesOptimized(functionAddress, variableTypes);
-    }
-
-    /**
-     * OPTIMIZED: Batch set variable types - simple wrapper that calls setLocalVariableType
-     * sequentially with proper spacing to avoid thread issues
-     */
-    private String batchSetVariableTypesOptimized(String functionAddress, Map<String, String> variableTypes) {
-        if (variableTypes == null || variableTypes.isEmpty()) {
-            return "{\"success\": true, \"method\": \"optimized\", \"variables_typed\": 0, \"variables_failed\": 0}";
-        }
-
-        final AtomicInteger variablesTyped = new AtomicInteger(0);
-        final AtomicInteger variablesFailed = new AtomicInteger(0);
-        final List<String> errors = new ArrayList<>();
-
-        // Call setLocalVariableType for each variable with small delay between calls
-        for (Map.Entry<String, String> entry : variableTypes.entrySet()) {
-            String varName = entry.getKey();
-            String newType = entry.getValue();
-
-            try {
-                // Call the working setLocalVariableType method
-                String result = setLocalVariableType(functionAddress, varName, newType);
-
-                if (result.toLowerCase().contains("success")) {
-                    variablesTyped.incrementAndGet();
-                } else {
-                    errors.add(varName + ": " + result);
-                    variablesFailed.incrementAndGet();
-                }
-
-                // Small delay to allow Ghidra to process
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            } catch (Exception e) {
-                errors.add(varName + ": " + e.getMessage());
-                variablesFailed.incrementAndGet();
-            }
-        }
-
-        // Build response
-        StringBuilder result = new StringBuilder();
-        result.append("{");
-        result.append("\"success\": ").append(variablesFailed.get() == 0 && variablesTyped.get() > 0).append(", ");
-        result.append("\"method\": \"optimized\", ");
-        result.append("\"variables_typed\": ").append(variablesTyped.get()).append(", ");
-        result.append("\"variables_failed\": ").append(variablesFailed.get());
-
-        if (!errors.isEmpty()) {
-            result.append(", \"errors\": [");
-            for (int i = 0; i < errors.size(); i++) {
-                if (i > 0) result.append(", ");
-                result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-            }
-            result.append("]");
-        }
-
-        result.append("}");
-        return result.toString();
     }
 
     /**
@@ -2750,435 +1809,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // Uses Ghidra's internal DomainFile/DomainFolder API
     // ==========================================================================
 
-    private RepositoryAdapter getProjectRepository() {
-        try {
-            Project project = tool.getProject();
-            if (project == null) return null;
-            ProjectData data = project.getProjectData();
-            // ProjectData.getRepository() is available on the implementation class
-            java.lang.reflect.Method m = data.getClass().getMethod("getRepository");
-            return (RepositoryAdapter) m.invoke(data);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * The Ghidra Server connection, the one thing {@code /server/status} means on both
-     * servers: {@code connected} is whether a server is reachable, never whether a
-     * project is open. The project itself is {@code /get_project_info}.
-     */
-    private String getProjectStatusJson() {
-        Project project = tool.getProject();
-        RepositoryAdapter repo = project != null ? getProjectRepository() : null;
-        Map<String, Object> out = new LinkedHashMap<>();
-        boolean connected = false;
-        if (repo != null) {
-            try {
-                connected = repo.isConnected();
-                out.put("server_info", repo.getServerInfo().toString());
-            } catch (Exception e) {
-                out.put("last_error", e.getMessage());
-            }
-            out.put("repository", repo.getName());
-        }
-        out.put("connected", connected);
-        out.put("shared_project", repo != null);
-        return JsonHelper.toJson(out);
-    }
-
-    private String listProjectFilesJson(String folderPath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        ProjectData data = project.getProjectData();
-        DomainFolder folder;
-        if (folderPath == null || folderPath.isEmpty() || folderPath.equals("/")) {
-            folder = data.getRootFolder();
-        } else {
-            folder = data.getFolder(folderPath);
-        }
-        if (folder == null) return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"folder\": \"").append(escapeJson(folder.getPathname())).append("\", \"files\": [");
-        DomainFile[] files = folder.getFiles();
-        for (int i = 0; i < files.length; i++) {
-            if (i > 0) sb.append(", ");
-            appendFileJson(sb, files[i]);
-        }
-        sb.append("], \"folders\": [");
-        DomainFolder[] folders = folder.getFolders();
-        for (int i = 0; i < folders.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("\"").append(escapeJson(folders[i].getName())).append("\"");
-        }
-        sb.append("], \"file_count\": ").append(files.length);
-        sb.append(", \"folder_count\": ").append(folders.length).append("}");
-        return sb.toString();
-    }
-
-    private void appendFileJson(StringBuilder sb, DomainFile f) {
-        sb.append("{\"name\": \"").append(escapeJson(f.getName())).append("\"");
-        sb.append(", \"path\": \"").append(escapeJson(f.getPathname())).append("\"");
-        sb.append(", \"version\": ").append(f.getVersion());
-        sb.append(", \"latest_version\": ").append(f.getLatestVersion());
-        sb.append(", \"is_versioned\": ").append(f.isVersioned());
-        sb.append(", \"is_checked_out\": ").append(f.isCheckedOut());
-        sb.append(", \"is_checked_out_exclusive\": ").append(f.isCheckedOutExclusive());
-        sb.append(", \"is_read_only\": ").append(f.isReadOnly());
-        if (f.isCheckedOut()) {
-            // Whether a checkout still holds UNCOMMITTED local work is the one
-            // thing that decides if it is safe to release -- and it was not
-            // observable through any endpoint, so the only way to answer it was
-            // to read icons in the Ghidra GUI. On a shared project that work
-            // exists solely in the local project directory: no server copy, no
-            // backup. Surface it so a tool can tell "idle checkout" (safe to
-            // undo) from "holds work" (must be checked in first).
-            sb.append(", \"modified_since_checkout\": ").append(f.modifiedSinceCheckout());
-            sb.append(", \"is_hijacked\": ").append(f.isHijacked());
-            try {
-                ItemCheckoutStatus status = f.getCheckoutStatus();
-                if (status != null) {
-                    sb.append(", \"checkout_user\": \"").append(escapeJson(status.getUser())).append("\"");
-                    sb.append(", \"checkout_id\": ").append(status.getCheckoutId());
-                    sb.append(", \"checkout_version\": ").append(status.getCheckoutVersion());
-                }
-            } catch (IOException e) {
-                sb.append(", \"checkout_error\": \"").append(escapeJson(e.getMessage())).append("\"");
-            }
-        }
-        sb.append("}");
-    }
-
-    private String getProjectFileInfoJson(String filePath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        StringBuilder sb = new StringBuilder();
-        appendFileJson(sb, file);
-        return sb.toString();
-    }
-
-    private String checkoutProjectFile(String filePath, boolean exclusive) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        try {
-            boolean success = file.checkout(exclusive, new ConsoleTaskMonitor());
-            return "{\"status\": \"" + (success ? "checked_out" : "checkout_failed") + "\", " +
-                "\"path\": \"" + escapeJson(filePath) + "\", \"exclusive\": " + exclusive + "}";
-        } catch (Exception e) {
-            return "{\"error\": \"Checkout failed: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    private String checkinProjectFile(String filePath, String comment, boolean keepCheckedOut) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        if (!file.isCheckedOut()) return "{\"error\": \"File is not checked out: " + escapeJson(filePath) + "\"}";
-        try {
-            file.checkin(new ghidra.framework.data.CheckinHandler() {
-                public boolean keepCheckedOut() { return keepCheckedOut; }
-                public String getComment() { return comment; }
-                public boolean createKeepFile() { return false; }
-            }, new ConsoleTaskMonitor());
-            return "{\"status\": \"checked_in\", \"path\": \"" + escapeJson(filePath) + "\", " +
-                "\"comment\": \"" + escapeJson(comment) + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
-        } catch (Exception e) {
-            return "{\"error\": \"Checkin failed: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    private String undoCheckoutProjectFile(String filePath, boolean keep) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        if (!file.isCheckedOut()) return "{\"error\": \"File is not checked out: " + escapeJson(filePath) + "\"}";
-        try {
-            file.undoCheckout(keep);
-            return "{\"status\": \"checkout_undone\", \"path\": \"" + escapeJson(filePath) + "\", \"kept_copy\": " + keep + "}";
-        } catch (Exception e) {
-            return "{\"error\": \"Undo checkout failed: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    /**
-     * Add a file to version control.
-     *
-     * @param filePath       project path of the file to add
-     * @param comment        initial version comment
-     * @param keepCheckedOut keep the file checked out afterwards, so local edits
-     *                       can continue without a second checkout round-trip.
-     *                       This was advertised on /server/version_control/add
-     *                       but hardcoded to false here until v7.0.1.
-     * @return JSON result
-     */
-    private String addToVersionControl(String filePath, String comment, boolean keepCheckedOut) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        if (file.isVersioned()) return "{\"error\": \"File already under version control: " + escapeJson(filePath) + "\"}";
-        try {
-            file.addToVersionControl(comment, keepCheckedOut, new ConsoleTaskMonitor());
-            return "{\"status\": \"added\", \"path\": \"" + escapeJson(filePath) + "\", \"comment\": \"" + escapeJson(comment)
-                + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
-        } catch (Exception e) {
-            return "{\"error\": \"Add to version control failed: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    private String getProjectFileVersionHistory(String filePath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-        try {
-            ghidra.framework.store.Version[] versions = file.getVersionHistory();
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"path\": \"").append(escapeJson(filePath)).append("\", \"versions\": [");
-            for (int i = 0; i < versions.length; i++) {
-                if (i > 0) sb.append(", ");
-                sb.append("{\"version\": ").append(versions[i].getVersion());
-                sb.append(", \"user\": \"").append(escapeJson(versions[i].getUser())).append("\"");
-                sb.append(", \"comment\": \"").append(escapeJson(versions[i].getComment() != null ? versions[i].getComment() : "")).append("\"");
-                sb.append(", \"date\": \"").append(new java.util.Date(versions[i].getCreateTime())).append("\"");
-                sb.append("}");
-            }
-            sb.append("], \"count\": ").append(versions.length).append("}");
-            return sb.toString();
-        } catch (Exception e) {
-            return "{\"error\": \"Failed to get version history: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    private String listProjectCheckouts(String folderPath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        ProjectData data = project.getProjectData();
-        DomainFolder folder;
-        if (folderPath == null || folderPath.isEmpty() || folderPath.equals("/")) {
-            folder = data.getRootFolder();
-        } else {
-            folder = data.getFolder(folderPath);
-        }
-        if (folder == null) return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
-
-        RepositoryAdapter repo = getProjectRepository();
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"checkouts\": [");
-        int count = collectCheckouts(sb, folder, 0, repo);
-        sb.append("], \"count\": ").append(count).append("}");
-        return sb.toString();
-    }
-
-    private int collectCheckouts(StringBuilder sb, DomainFolder folder, int count, RepositoryAdapter repo) {
-        for (DomainFile f : folder.getFiles()) {
-            boolean localCheckout = f.isCheckedOut();
-            ItemCheckoutStatus[] serverCheckouts = null;
-
-            // Check server-side checkouts via RepositoryAdapter
-            if (repo != null && f.isVersioned()) {
-                try {
-                    String path = f.getPathname();
-                    int lastSlash = path.lastIndexOf('/');
-                    String parentPath = lastSlash > 0 ? path.substring(0, lastSlash) : "/";
-                    String fileName = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
-                    serverCheckouts = repo.getCheckouts(parentPath, fileName);
-                } catch (Exception e) { /* skip */ }
-            }
-            boolean serverCheckout = serverCheckouts != null && serverCheckouts.length > 0;
-
-            if (localCheckout || serverCheckout) {
-                if (count > 0) sb.append(", ");
-                appendFileJson(sb, f);
-                if (serverCheckout) {
-                    sb.setLength(sb.length() - 1); // remove closing }
-                    sb.append(", \"server_checkouts\": [");
-                    for (int i = 0; i < serverCheckouts.length; i++) {
-                        if (i > 0) sb.append(", ");
-                        sb.append("{\"checkout_id\": ").append(serverCheckouts[i].getCheckoutId());
-                        sb.append(", \"user\": \"").append(escapeJson(serverCheckouts[i].getUser())).append("\"");
-                        sb.append(", \"checkout_version\": ").append(serverCheckouts[i].getCheckoutVersion());
-                        sb.append("}");
-                    }
-                    sb.append("]}");
-                }
-                count++;
-            }
-        }
-        for (DomainFolder sub : folder.getFolders()) {
-            count = collectCheckouts(sb, sub, count, repo);
-        }
-        return count;
-    }
-
-    private String terminateFileCheckout(String filePath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        if (filePath == null) return "{\"error\": \"'path' parameter required\"}";
-        DomainFile file = project.getProjectData().getFile(filePath);
-        if (file == null) return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
-
-        // First try: undo checkout with force via the DomainFile API
-        if (file.isCheckedOut()) {
-            try {
-                file.undoCheckout(false, true);
-                return "{\"status\": \"terminated\", \"path\": \"" + escapeJson(filePath) + "\", \"method\": \"undo_checkout_force\"}";
-            } catch (Exception e) {
-                // Fall through to repository adapter approach
-            }
-        }
-
-        // Second try: use RepositoryAdapter for server-side termination
-        RepositoryAdapter repo = getProjectRepository();
-        if (repo == null) {
-            return "{\"error\": \"Cannot terminate checkout: project has no repository connection\"}";
-        }
-        try {
-            int lastSlash = filePath.lastIndexOf('/');
-            String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
-            String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
-            ItemCheckoutStatus[] checkouts = repo.getCheckouts(parentPath, fileName);
-            if (checkouts == null || checkouts.length == 0) {
-                return "{\"error\": \"No active checkouts found for: " + escapeJson(filePath) + "\"}";
-            }
-            int terminated = 0;
-            for (ItemCheckoutStatus cs : checkouts) {
-                try {
-                    repo.terminateCheckout(parentPath, fileName, cs.getCheckoutId(), false);
-                    terminated++;
-                } catch (Exception e) {
-                    // continue trying others
-                }
-            }
-            return "{\"status\": \"terminated\", \"path\": \"" + escapeJson(filePath) + "\", " +
-                "\"terminated_count\": " + terminated + ", \"total_checkouts\": " + checkouts.length + "}";
-        } catch (Exception e) {
-            return "{\"error\": \"Terminate checkout failed: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    /**
-     * Terminate ALL server-side checkouts in a folder recursively.
-     * Returns a summary of all terminated checkouts.
-     */
-    private String terminateAllCheckouts(String folderPath) {
-        Project project = tool.getProject();
-        if (project == null) return "{\"error\": \"No project open\"}";
-        ProjectData data = project.getProjectData();
-        DomainFolder folder;
-        if (folderPath == null || folderPath.isEmpty() || folderPath.equals("/")) {
-            folder = data.getRootFolder();
-        } else {
-            folder = data.getFolder(folderPath);
-        }
-        if (folder == null) return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
-
-        RepositoryAdapter repo = getProjectRepository();
-        if (repo == null) {
-            return "{\"error\": \"Cannot terminate checkouts: project has no repository connection\"}";
-        }
-
-        StringBuilder details = new StringBuilder();
-        details.append("[");
-        int[] counts = {0, 0}; // [files_with_checkouts, total_terminated]
-        terminateCheckoutsRecursive(folder, repo, details, counts);
-        details.append("]");
-
-        return "{\"status\": \"terminated\", \"folder\": \"" + escapeJson(folderPath != null ? folderPath : "/") + "\", " +
-            "\"files_with_checkouts\": " + counts[0] + ", " +
-            "\"checkouts_terminated\": " + counts[1] + ", " +
-            "\"details\": " + details.toString() + "}";
-    }
-
-    private void terminateCheckoutsRecursive(DomainFolder folder, RepositoryAdapter repo, StringBuilder details, int[] counts) {
-        for (DomainFile f : folder.getFiles()) {
-            if (!f.isVersioned()) continue;
-            try {
-                String path = f.getPathname();
-                int lastSlash = path.lastIndexOf('/');
-                String parentPath = lastSlash > 0 ? path.substring(0, lastSlash) : "/";
-                String fileName = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
-                ItemCheckoutStatus[] checkouts = repo.getCheckouts(parentPath, fileName);
-                if (checkouts != null && checkouts.length > 0) {
-                    int terminated = 0;
-                    for (ItemCheckoutStatus cs : checkouts) {
-                        try {
-                            repo.terminateCheckout(parentPath, fileName, cs.getCheckoutId(), false);
-                            terminated++;
-                        } catch (Exception e) { /* continue */ }
-                    }
-                    if (counts[0] > 0) details.append(", ");
-                    details.append("{\"path\": \"").append(escapeJson(path)).append("\"");
-                    details.append(", \"terminated\": ").append(terminated);
-                    details.append(", \"total\": ").append(checkouts.length).append("}");
-                    counts[0]++;
-                    counts[1] += terminated;
-                }
-            } catch (Exception e) { /* skip file */ }
-        }
-        for (DomainFolder sub : folder.getFolders()) {
-            terminateCheckoutsRecursive(sub, repo, details, counts);
-        }
-    }
-
     // ==========================================================================
     // PROJECT & TOOL MANAGEMENT HELPERS
     // ==========================================================================
-
-    private String getRunningTools() {
-        Project project = tool.getProject();
-        if (project == null) {
-            return "{\"error\": \"No project open\"}";
-        }
-        try {
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            if (tm == null) {
-                return "{\"error\": \"ToolManager not available\"}";
-            }
-            PluginTool[] tools = tm.getRunningTools();
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"tools\": [");
-            for (int i = 0; i < tools.length; i++) {
-                if (i > 0) sb.append(", ");
-                sb.append("{\"name\": \"").append(escapeJson(tools[i].getName())).append("\"");
-                sb.append(", \"instance\": \"").append(escapeJson(tools[i].getInstanceName())).append("\"");
-                ghidra.app.services.ProgramManager pm = tools[i].getService(ghidra.app.services.ProgramManager.class);
-                if (pm != null) {
-                    sb.append(", \"has_program_manager\": true");
-                    Program current = pm.getCurrentProgram();
-                    if (current != null) {
-                        sb.append(", \"current_program\": \"").append(escapeJson(current.getName())).append("\"");
-                    }
-                    Program[] progs = pm.getAllOpenPrograms();
-                    sb.append(", \"open_programs\": [");
-                    for (int j = 0; j < progs.length; j++) {
-                        if (j > 0) sb.append(", ");
-                        sb.append("\"").append(escapeJson(progs[j].getName())).append("\"");
-                    }
-                    sb.append("]");
-                } else {
-                    sb.append(", \"has_program_manager\": false");
-                }
-                sb.append("}");
-            }
-            sb.append("], \"count\": ").append(tools.length).append("}");
-            return sb.toString();
-        } catch (Exception e) {
-            return "{\"error\": \"Failed to list tools: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
 
     /**
      * Open (or switch to) a Ghidra project from the FrontEnd plugin.
@@ -3202,6 +1835,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         if (projectPath == null || projectPath.trim().isEmpty()) {
             return "{\"error\": \"path parameter is required\"}";
         }
+        String trimmed = projectPath.trim();
+        if (!trimmed.startsWith("ghidra://")) {
+            java.nio.file.Path local = com.xebyte.core.SecurityConfig.getInstance()
+                    .resolveWithinFileRoot(trimmed);
+            if (local == null) {
+                return "{\"error\": \"Path is outside this server's file root\"}";
+            }
+            trimmed = local.toString();
+        }
+        projectPath = trimmed;
 
         // Parse the path into a (location, name) pair for ProjectLocator.
         // Accept three shapes the user is likely to type:
@@ -3243,7 +1886,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             // Already open — honor headless flag for CodeBrowser side-effect anyway.
             String maybeLaunch = null;
             if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-                maybeLaunch = launchCodeBrowser(programToLaunch);
+                maybeLaunch = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
             }
             return "{\"success\": true, \"project\": \"" + escapeJson(name) + "\", "
                 + "\"already_open\": true, \"headless\": " + headless
@@ -3289,7 +1932,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         String launchResult = null;
         if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-            launchResult = launchCodeBrowser(programToLaunch);
+            launchResult = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
         }
         StringBuilder json = new StringBuilder(256);
         json.append("{\"success\": true, \"project\": \"").append(escapeJson(opened[0].getName()))
@@ -3299,178 +1942,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
         json.append("}");
         return json.toString();
-    }
-
-    private String launchCodeBrowser(String filePath) {
-        Project project = tool.getProject();
-        if (project == null) {
-            return "{\"error\": \"No project open\"}";
-        }
-
-        DomainFile domainFile = null;
-        if (filePath != null && !filePath.trim().isEmpty()) {
-            domainFile = project.getProjectData().getFile(filePath);
-            if (domainFile == null) {
-                return "{\"error\": \"File not found in project: " + escapeJson(filePath) + "\"}";
-            }
-        }
-
-        try {
-            ghidra.framework.model.ToolServices ts = project.getToolServices();
-            if (ts == null) {
-                return "{\"error\": \"ToolServices not available\"}";
-            }
-
-            // Find existing CodeBrowser or launch a new one
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            PluginTool codeBrowser = null;
-            if (tm != null) {
-                for (PluginTool runningTool : tm.getRunningTools()) {
-                    if (runningTool.getService(ghidra.app.services.ProgramManager.class) != null) {
-                        codeBrowser = runningTool;
-                        break;
-                    }
-                }
-            }
-
-            if (codeBrowser != null && domainFile != null) {
-                // Existing CodeBrowser found - open the file in it
-                final ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
-                final Program program = (Program) domainFile.getDomainObject(this, false, false, TaskMonitor.DUMMY);
-                javax.swing.SwingUtilities.invokeAndWait(() -> {
-                    pm.openProgram(program);
-                    pm.setCurrentProgram(program);
-                });
-                return "{\"success\": true, \"message\": \"Opened in existing CodeBrowser\", " +
-                    "\"tool\": \"" + escapeJson(codeBrowser.getName()) + "\", " +
-                    "\"program\": \"" + escapeJson(program.getName()) + "\", " +
-                    "\"path\": \"" + escapeJson(filePath) + "\"}";
-            } else if (domainFile != null) {
-                // No CodeBrowser running - launch one with the file (must run on EDT)
-                final DomainFile df = domainFile;
-                final String fp = filePath;
-                javax.swing.SwingUtilities.invokeAndWait(() -> {
-                    ts.launchDefaultTool(Collections.singletonList(df));
-                });
-                return "{\"success\": true, \"message\": \"Launched new CodeBrowser\", " +
-                    "\"path\": \"" + escapeJson(fp) + "\"}";
-            } else {
-                // No file specified - just launch empty CodeBrowser (must run on EDT)
-                javax.swing.SwingUtilities.invokeAndWait(() -> {
-                    ts.launchDefaultTool(Collections.emptyList());
-                });
-                return "{\"success\": true, \"message\": \"Launched new CodeBrowser (no file)\"}";
-            }
-        } catch (Exception e) {
-            return "{\"error\": \"Failed to launch CodeBrowser: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    /**
-     * Navigate the CodeBrowser listing/decompiler to a specific address.
-     * Finds the running CodeBrowser via ToolManager and uses GoToService.
-     */
-    private String gotoAddress(String addressStr) {
-        if (addressStr == null || addressStr.trim().isEmpty()) {
-            return "{\"error\": \"address parameter is required\"}";
-        }
-
-        try {
-            Project project = tool.getProject();
-            if (project == null) {
-                return "{\"error\": \"No project open\"}";
-            }
-
-            // Find a running CodeBrowser
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            if (tm == null) {
-                return "{\"error\": \"ToolManager not available\"}";
-            }
-
-            PluginTool codeBrowser = null;
-            for (PluginTool runningTool : tm.getRunningTools()) {
-                if (runningTool.getService(ghidra.app.services.ProgramManager.class) != null) {
-                    codeBrowser = runningTool;
-                    break;
-                }
-            }
-
-            if (codeBrowser == null) {
-                return "{\"error\": \"No CodeBrowser running\"}";
-            }
-
-            // Get GoToService from the CodeBrowser
-            GoToService goToService = codeBrowser.getService(GoToService.class);
-            if (goToService == null) {
-                return "{\"error\": \"GoToService not available in CodeBrowser\"}";
-            }
-
-            // Get the current program from the CodeBrowser
-            ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
-            Program program = pm.getCurrentProgram();
-            if (program == null) {
-                return "{\"error\": \"No program open in CodeBrowser\"}";
-            }
-
-            // Parse the address
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) {
-                return "{\"error\": \"Invalid address: " + escapeJson(addressStr) + "\"}";
-            }
-
-            // Navigate on the EDT
-            final GoToService gts = goToService;
-            final Address targetAddr = addr;
-            final AtomicBoolean success = new AtomicBoolean(false);
-            SwingUtilities.invokeAndWait(() -> {
-                success.set(gts.goTo(targetAddr));
-            });
-
-            if (success.get()) {
-                // Check if the address is in a function
-                Function func = program.getFunctionManager().getFunctionContaining(addr);
-                String funcInfo = func != null
-                    ? ", \"function\": \"" + escapeJson(func.getName()) + "\""
-                    : "";
-                return "{\"success\": true, \"address\": \"" + addr.toString() + "\"" + funcInfo + "}";
-            } else {
-                return "{\"error\": \"GoToService could not navigate to " + escapeJson(addressStr) + "\"}";
-            }
-        } catch (Exception e) {
-            return "{\"error\": \"Failed to navigate: " + escapeJson(e.getMessage()) + "\"}";
-        }
-    }
-
-    private String authenticateServer(String username, String password) {
-        try {
-            if (password == null || password.isEmpty()) {
-                return "{\"error\": \"Password is required\"}";
-            }
-            // Resolve username if not provided
-            if (username == null || username.isEmpty()) {
-                username = ghidra.framework.preferences.Preferences.getProperty("PasswordPrompt.Name");
-            }
-            if (username == null || username.isEmpty()) {
-                username = System.getProperty("user.name");
-            }
-
-            char[] passwordChars = password.toCharArray();
-            if (this.authenticator != null) {
-                // Update existing authenticator
-                this.authenticator.updateCredentials(username, passwordChars);
-                Msg.info(this, "GhidraMCP: Updated server credentials for user: " + username);
-            } else {
-                // Create and register new authenticator
-                this.authenticator = new com.xebyte.core.GhidraMCPAuthenticator(username, passwordChars);
-                ghidra.framework.client.ClientUtil.setClientAuthenticator(this.authenticator);
-                Msg.info(this, "GhidraMCP: Registered server authenticator for user: " + username);
-            }
-
-            return "{\"success\": true, \"message\": \"Server credentials registered\", " +
-                "\"username\": \"" + escapeJson(username) + "\"}";
-        } catch (Exception e) {
-            return "{\"error\": \"Failed to register authenticator: " + escapeJson(e.getMessage()) + "\"}";
-        }
     }
 
     @Override

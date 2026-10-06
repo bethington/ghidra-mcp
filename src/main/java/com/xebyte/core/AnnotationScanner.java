@@ -66,11 +66,6 @@ public class AnnotationScanner {
                 program.endTransaction(tx, success);
             }
         }
-
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     };
 
     private final List<EndpointDef> endpoints = new ArrayList<>();
@@ -244,6 +239,9 @@ public class AnnotationScanner {
             McpTool tool, ParamBinding[] bindings) {
         boolean isWrite = "POST".equalsIgnoreCase(tool.method());
         return (query, body) -> {
+            // Pooled HTTP threads: clear on entry so a prior request that somehow
+            // skipped its finally cannot stamp this response with a stale program.
+            ServiceUtils.clearResolvedProgramName();
             try {
                 Object[] args = new Object[bindings.length];
                 for (int i = 0; i < bindings.length; i++) {
@@ -298,7 +296,10 @@ public class AnnotationScanner {
                         return threadingStrategy.executeWrite(program, "[DRY RUN] " + tool.path(), () -> {
                             int tx = program.startTransaction("[DRY RUN] " + tool.path());
                             try {
-                                Response result = (Response) method.invoke(service, args);
+                                // Inject before dry-run wrap so the program label survives
+                                // the Text conversion; wrapDryRun prefixes into the same object.
+                                Response result = injectResolvedProgram(
+                                        (Response) method.invoke(service, args));
                                 return wrapDryRunResponse(result);
                             } finally {
                                 program.endTransaction(tx, false); // Always rollback
@@ -307,7 +308,8 @@ public class AnnotationScanner {
                     }
                 }
 
-                return (Response) method.invoke(service, args);
+                Response result = injectResolvedProgram((Response) method.invoke(service, args));
+                return isWrite && tool.dryRun() ? warnIfUnsaveable(result) : result;
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
                 String msg = cause != null ? cause.getMessage() : e.getMessage();
@@ -316,8 +318,92 @@ public class AnnotationScanner {
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "Invocation error for " + tool.path() + ": " + e.getMessage(), e);
                 return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
+            } finally {
+                ServiceUtils.clearResolvedProgramName();
             }
         };
+    }
+
+    /**
+     * Append a warning to a successful program edit that can never be saved. The edit
+     * applied, so the response is right to say success; what it does not say is that the
+     * edit lives only in memory, because the program is an in-memory copy of a versioned
+     * file that is not checked out ({@link ProgramSaves#unsaveableReason}). Without this, every edit reported success
+     * and the loss surfaced only at close.
+     */
+    static Response warnIfUnsaveable(Response response) {
+        Program program = ServiceUtils.peekResolvedProgram();
+        if (program == null || !(response instanceof Response.Ok ok)
+                || !(ok.data() instanceof Map<?, ?> map) || !program.isChanged()) {
+            return response;
+        }
+        String reason = ProgramSaves.unsaveableReason(program);
+        if (reason == null) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        List<Object> warnings = new ArrayList<>();
+        Object existing = out.get("warnings");
+        if (existing instanceof Collection<?> c) {
+            warnings.addAll(c);
+        } else if (existing != null) {
+            warnings.add(existing);
+        }
+        warnings.add(reason);
+        out.put("warnings", warnings);
+        return Response.ok(out);
+    }
+
+    /**
+     * Stamp {@code "program": "<resolved>"} on object payloads that do not already
+     * name their subject. Skip Text/array/scalar and never overwrite
+     * {@code program}/{@code program_name} — get_metadata and get_function_count
+     * already speak for themselves.
+     */
+    static Response injectResolvedProgram(Response response) {
+        String name = ServiceUtils.peekResolvedProgramName();
+        if (name == null || name.isEmpty() || response == null) {
+            return response;
+        }
+        if (!(response instanceof Response.Ok ok)) {
+            return response;
+        }
+        Object data = ok.data();
+        if (data instanceof Map<?, ?> map) {
+            if (map.containsKey("program") || map.containsKey("program_name")) {
+                return response;
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("program", name);
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return Response.ok(out);
+        }
+        if (data == null
+                || data instanceof CharSequence
+                || data instanceof Number
+                || data instanceof Boolean
+                || data instanceof Collection
+                || data.getClass().isArray()) {
+            return response;
+        }
+        // Non-Map objects that still serialize as JSON objects (rare).
+        String json = response.toJson();
+        if (json == null || !json.startsWith("{")) {
+            return response;
+        }
+        Map<String, Object> parsed = JsonHelper.parseJson(json);
+        if (parsed.containsKey("program") || parsed.containsKey("program_name")) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("program", name);
+        out.putAll(parsed);
+        return Response.ok(out);
     }
 
     /** A tool that takes {@code dry_run} itself implements its own preview. */

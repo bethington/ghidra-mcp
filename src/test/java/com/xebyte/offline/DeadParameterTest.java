@@ -275,34 +275,6 @@ public class DeadParameterTest extends TestCase {
     }
 
     /**
-     * {@code /server/version_control/add} must pass the caller's
-     * {@code keepCheckedOut} to Ghidra rather than a hardcoded {@code false}.
-     *
-     * <p>Not covered by the scan above: the route is registered with
-     * {@code createContext}, not {@code @McpTool}, so its parameters live in
-     * {@link com.xebyte.core.ManualToolDescriptors} instead of an annotation.
-     *
-     * @throws IOException if the source cannot be read
-     */
-    public void testAddToVersionControlHonorsKeepCheckedOut() throws IOException {
-        String src = ProjectSource.readMainSource("GhidraMCPPlugin.java");
-
-        assertTrue(
-            "The /server/version_control/add handler must read the keepCheckedOut parameter it "
-                + "advertises in ManualToolDescriptors.",
-            src.contains("addToVersionControl(filePath, comment, keepCheckedOut)"));
-
-        assertFalse(
-            "addToVersionControl must not hardcode keepCheckedOut=false -- that is exactly the bug "
-                + "this test exists for. Pass the caller's value through to DomainFile.",
-            src.contains("file.addToVersionControl(comment, false,"));
-
-        assertTrue(
-            "addToVersionControl must pass the caller's flag to DomainFile.addToVersionControl.",
-            src.contains("file.addToVersionControl(comment, keepCheckedOut,"));
-    }
-
-    /**
      * Parameters removed on 2026-08-30 must not come back. Each promised
      * behaviour that does not exist anywhere in the codebase, so a
      * well-meaning re-add would restore the original misleading schema rather
@@ -389,30 +361,22 @@ public class DeadParameterTest extends TestCase {
     }
 
     /**
-     * {@code /server/connect} takes no parameters. It reports the open project
-     * in GUI mode, and in headless mode connects using the host and port
-     * {@code GhidraServerManager} read from the environment at construction --
-     * both {@code final} fields, set before any request arrives.
-     *
-     * @throws IOException if a source file cannot be read
+     * {@code /server/connect} takes no parameters. The GUI's connection is its open
+     * project, and headless connects with the host and port {@code GhidraServerManager}
+     * read from the environment at construction -- both {@code final} fields, set before
+     * any request arrives. (That {@code add} honours {@code keep_checked_out} is
+     * behavioural now, in {@code ProjectVersionControlTest}.)
      */
-    public void testServerConnectAdvertisesNoHostOrPort() throws IOException {
-        String src = ProjectSource.readMainSource("core", "ManualToolDescriptors.java");
-
-        int idx = src.indexOf("\"/server/connect\"");
-        assertTrue("/server/connect descriptor not found in ManualToolDescriptors", idx >= 0);
-        int end = src.indexOf(");", idx);
-        String descriptor = src.substring(idx, end < 0 ? src.length() : end);
-
-        assertFalse(
-            "/server/connect advertises a 'host' parameter, but neither handler reads one: "
-                + "GhidraServerManager.connect() takes no arguments and its host field is final, "
-                + "initialised from GHIDRA_SERVER_HOST at construction.",
-            descriptor.contains("\"host\""));
-        assertFalse(
-            "/server/connect advertises a 'port' parameter, but neither handler reads one: "
-                + "GhidraServerManager.connect() takes no arguments and its port field is final, "
-                + "initialised from GHIDRA_SERVER_PORT at construction.",
-            descriptor.contains("\"port\""));
+    public void testServerConnectAdvertisesNoParameters() {
+        com.xebyte.core.AnnotationScanner scanner = new com.xebyte.core.AnnotationScanner(
+            ServiceFactory.stubProvider(), ServiceFactory.buildAllServices());
+        for (com.xebyte.core.AnnotationScanner.ToolDescriptor d : scanner.getDescriptors()) {
+            if (d.path().equals("/server/connect")) {
+                assertTrue("/server/connect advertises parameters, but neither session reads a "
+                        + "per-request host or port: " + d.params(), d.params().isEmpty());
+                return;
+            }
+        }
+        fail("/server/connect is not registered");
     }
 }

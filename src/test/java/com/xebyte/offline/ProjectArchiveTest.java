@@ -1,8 +1,11 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.ProjectLifecycle;
+import com.xebyte.core.ProjectLifecycle.ArchiveResult;
+import com.xebyte.core.ProjectLifecycle.RestoreResult;
 import com.xebyte.headless.HeadlessProgramProvider;
-import com.xebyte.headless.HeadlessProgramProvider.ArchiveResult;
-import com.xebyte.headless.HeadlessProgramProvider.RestoreResult;
+import ghidra.framework.model.Project;
+import ghidra.program.model.listing.Program;
 import org.junit.Test;
 
 import java.io.File;
@@ -11,13 +14,15 @@ import java.nio.file.Files;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Offline contract tests for the GAR archive/restore endpoints added in
  * PR #264 ({@code /archive_project}, {@code /restore_project}).
  *
  * <p>Every validation branch in {@code restoreProject} runs <em>before</em> any
- * project or {@code HeadlessArchiveBridge} call, so a fresh
+ * project or {@code ArchiveBridge} call, so a fresh
  * {@link HeadlessProgramProvider} (no project open) reaches all of them without
  * a live Ghidra project. These pin the path-safety and argument contract so a
  * caller cannot escape {@code parent_dir} or smuggle a traversal
@@ -29,10 +34,10 @@ import static org.junit.Assert.assertTrue;
  * executed in CI. {@code tests/unit/test_ci_java_test_globs.py} now fails if a
  * test class lands outside a selected package again.
  */
-public class GarArchiveRestoreTest {
+public class ProjectArchiveTest {
 
-    private static HeadlessProgramProvider provider() {
-        return new HeadlessProgramProvider();
+    private static ProjectLifecycle provider() {
+        return new ProjectLifecycle(new HeadlessProgramProvider());
     }
 
     /** A real, existing {@code .gar} file so gar-existence/extension checks pass. */
@@ -123,5 +128,30 @@ public class GarArchiveRestoreTest {
         assertFalse(res.success);
         assertNotNull(res.error);
         assertTrue(res.error, res.error.contains("No project open"));
+    }
+
+    // -------------------------------------------------------------------
+    // archiveCurrentProject — unsaved programs
+    // -------------------------------------------------------------------
+
+    /** An archive is what is on disk, so an open program with edits would silently be missing them. */
+    @Test
+    public void archiveRefusesWhileAnOpenProgramHasUnsavedChanges() throws Exception {
+        HeadlessProgramProvider provider = new HeadlessProgramProvider(mock(Project.class));
+        Program edited = mock(Program.class);
+        when(edited.getName()).thenReturn("edited.dll");
+        when(edited.isChanged()).thenReturn(true);
+        Program clean = mock(Program.class);
+        when(clean.getName()).thenReturn("clean.dll");
+        provider.trackOpenProgram(edited);
+        provider.trackOpenProgram(clean);
+
+        File dir = Files.createTempDirectory("archive-unsaved").toFile();
+        ArchiveResult res = new ProjectLifecycle(provider).archiveCurrentProject(new File(dir, "p.gar"));
+
+        assertFalse(res.success);
+        assertTrue(res.error, res.error.contains("edited.dll"));
+        assertFalse("only the changed program is named", res.error.contains("clean.dll"));
+        assertFalse(new File(dir, "p.gar").exists());
     }
 }

@@ -382,62 +382,6 @@ public class XrefCallGraphService {
         return null;
     }
 
-    /**
-     * Get all references to a specific function by name.
-     * Agent-visible surface is {@code /get_functions?fields=xrefs}.
-     */
-    public Response getFunctionXrefs(
-            @Param(value = "function", defaultValue = "",
-                   aliases = {"name", "address", "function_name", "function_address"},
-                   description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
-                               + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-            if (resolved.hasError()) return resolved.error();Function function = resolved.function();
-
-            List<Map<String, Object>> refs = new ArrayList<>();
-            FunctionManager funcManager = program.getFunctionManager();
-            Address entryPoint = function.getEntryPoint();
-            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
-
-            while (refIter.hasNext()) {
-                Reference ref = refIter.next();
-                Address fromAddr = ref.getFromAddress();
-                RefType refType = ref.getReferenceType();
-
-                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("from_address", fromAddr.toString(false));
-                entry.put("type", refType.getName());
-                if (fromFunc != null) {
-                    entry.put("from_function", fromFunc.getName());
-                }
-                refs.add(entry);
-            }
-
-            return ServiceUtils.paged("references", refs, offset, limit);
-        } catch (Exception e) {
-            return Response.err("Error getting function references: " + e.getMessage());
-        }
-    }
-
     // -----------------------------------------------------------------------
     // Callee/Caller Methods
     // -----------------------------------------------------------------------

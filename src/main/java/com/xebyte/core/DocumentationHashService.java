@@ -13,6 +13,7 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 import javax.swing.SwingUtilities;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
@@ -973,38 +974,6 @@ public class DocumentationHashService {
     // -----------------------------------------------------------------------
 
     /**
-     * Get the function signature (feature vector) for cross-binary comparison.
-     * Kept for benchmarks; agents use {@code /get_functions?fields=signature}
-     * for the Ghidra signature string, or this method directly for the feature vector.
-     */
-    public Response handleGetFunctionSignature(
-            @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            Address addr = ServiceUtils.resolveFunctionAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) return Response.err("No function at address: " + addressStr);
-
-            BinaryComparisonService.FunctionSignature sig =
-                BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
-            return Response.ok(sig.toMap());
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-    }
-
-    /**
      * Find functions in target program similar to the source function.
      */
     @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
@@ -1560,7 +1529,7 @@ public class DocumentationHashService {
         };
 
         try {
-            SwingUtilities.invokeAndWait(mergeTask);
+            threadingStrategy.runOnUi(mergeTask);
         } catch (Throwable t) {
             return Response.err("Merge invocation failed: " + t.getMessage());
         }
