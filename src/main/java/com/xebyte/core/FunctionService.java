@@ -713,12 +713,12 @@ Map<String, Object> out = new LinkedHashMap<>();
      */
     @McpTool(path = "/rename_function", method = "POST", description = "Rename a function identified by name OR address. Runs the full naming-quality gate (verb-tier specificity + token-subset collision) with an optional strict_mode override. Replaces rename_function_by_address.", category = "function", access = ToolAccess.WRITE)
     public Response renameFunctionByAddress(
-            @Param(value = "old_name", source = ParamSource.BODY,
+            @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
                    aliases = {"function_address", "function", "oldName"},
                    description = "Function name or address to rename. Address accepts 0x<hex> or "
                                + "<space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact "
                                + "function name.") Function targetFunc,
-            @Param(value = "new_name", source = ParamSource.BODY,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "",
                    description = "New function name in PascalCase, verb first: GetPlayerHealth, not "
                                + "get_player_health and not PlayerHealth. An UPPERCASE module prefix is "
                                + "allowed and validated separately (MODULE_GetValue). The quality "
@@ -732,8 +732,16 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Optional per-call override for naming enforcement: 'enforce' (reject "
                                + "low-quality names), 'warn' (write goes through with warnings), or 'off' "
                                + "(skip validation entirely). Omit to use the project/global setting.")
-                    String strictModeArg) {
-        
+                    String strictModeArg,
+            @Param(value = "renames", source = ParamSource.BODY, defaultValue = "[]", description = "Atomic multi-function renames: [{address,new_name},...]; uses the same naming gates as single mode") List<Map<String, String>> renames) {
+        if (renames != null && !renames.isEmpty()) {
+            return BatchOperations.run(program, threadingStrategy, "Rename functions", renames,
+                item -> renameFunctionByAddress(batchItemFunction(program, item), item.get("new_name"), program, strictModeArg, List.of()));
+        }
+
+        if (targetFunc == null) {
+            return Response.err("Function address or name is required");
+        }
 
         if (newName == null || newName.isEmpty()) {
             return Response.err("New function name is required");
@@ -817,8 +825,22 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    
+    public Response renameFunctionByAddress(Function targetFunc, String newName, Program program, String strictModeArg) {
+        return renameFunctionByAddress(targetFunc, newName, program, strictModeArg, List.of());
+    }
 
+    private static Function batchItemFunction(Program program, Map<String, String> item) {
+        String reference = item.getOrDefault("address", item.get("old_name"));
+        if (reference == null || reference.isBlank()) {
+            throw new Refusal("Item requires address");
+        }
+
+        ServiceUtils.FunctionOrError found = ServiceUtils.getFunctionOrError(program, reference.trim());
+        if (found.function() == null) {
+            throw new Refusal(found.message());
+        }
+        return found.function();
+    }
 
 
     /**
@@ -2636,7 +2658,7 @@ Map<String, Object> out = new LinkedHashMap<>();
      */
     @McpTool(path = "/create_function", method = "POST", description = "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response createFunctionAtAddress(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -2644,14 +2666,23 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "address is unambiguous.") Address addr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional name for the new function; leave empty to keep Ghidra's "
-                               + "generated FUN_<address>. Written directly, so the naming-quality gate "
-                               + "does not run here — use rename_function if you want it to.") String name,
+                                + "generated FUN_<address>. Written directly, so the naming-quality gate "
+                                + "does not run for new functions. Renaming an existing entry uses "
+                                + "rename_function's naming-quality gate.") String name,
             @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) disassembles the entry address first when no "
                                + "instruction exists there, which is what lets you create a function over "
-                               + "raw undefined bytes. False requires the address to be disassembled "
+                                + "raw undefined bytes. False requires the address to be disassembled "
                                + "already; function creation fails otherwise.") boolean disassembleFirst,
-            @Param(value = "program", defaultValue = "") Program program) {
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "items", source = ParamSource.BODY, defaultValue = "[]", description = "Atomic batch [{address,name?},...]; existing entry functions are renamed when a name is supplied") List<Map<String, String>> functions) {
+        if (functions != null && !functions.isEmpty()) {
+            return BatchOperations.run(program, threadingStrategy, "Create functions", functions,
+                item -> createFunctionAtAddress(item.get("address") == null ? null
+                        : ServiceUtils.parseAddress(program, item.get("address")),
+                    item.get("name"), disassembleFirst, program, List.of()));
+        }
+
         if (addr == null) {
             return Response.err("address parameter required");
         }
@@ -2664,7 +2695,20 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // Check if a function already exists at this address
                 Function existing = program.getFunctionManager().getFunctionAt(addr);
                 if (existing != null) {
-                    throw new Refusal("Function already exists at " + addr.toString() + ": " + existing.getName());
+                    if (name != null && !name.isBlank() && !name.equals(existing.getName())) {
+                        Response renamed = renameFunctionByAddress(existing, name, program, null, List.of());
+                        if (renamed instanceof Response.Err error) {
+                            throw new Refusal(error.message());
+                        }
+                        if (renamed instanceof Response.Ok ok && ok.data() instanceof Map<?, ?> renamedData
+                                && "rejected".equals(renamedData.get("status"))) {
+                            Map<String, Object> rejected = new LinkedHashMap<>();
+                            renamedData.forEach((key, value) -> rejected.put(String.valueOf(key), value));
+                            return rejected;
+                        }
+                    }
+                    return new LinkedHashMap<>(JsonHelper.mapOf("status", "success", "address", addr.toString(),
+                        "function_name", existing.getName(), "existing", true));
                 }
 
                 // Optionally disassemble first
