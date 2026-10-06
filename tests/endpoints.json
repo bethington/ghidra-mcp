@@ -1064,7 +1064,8 @@
       "params": [
         "type_name",
         "resolve_demangler_duplicate",
-        "program"
+        "program",
+        "force"
       ],
       "servers": [
         "gui",
