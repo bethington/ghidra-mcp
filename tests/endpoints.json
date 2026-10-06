@@ -72,7 +72,9 @@
         "field_name",
         "field_type",
         "offset",
-        "program"
+        "program",
+        "fields",
+        "overwrite"
       ],
       "servers": [
         "gui",
@@ -2621,7 +2623,8 @@
       "params": [
         "struct_name",
         "field_name",
-        "program"
+        "program",
+        "shrink"
       ],
       "servers": [
         "gui",
