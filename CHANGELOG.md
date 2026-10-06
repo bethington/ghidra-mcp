@@ -22,6 +22,8 @@ Changes on `dev` after 7.1.0.
 - `add_struct_field` now accepts atomic bulk `fields`, rejects defined-field
   overlaps unless `overwrite=true`, and reuses undefined padding. Field removal
   defaults to preserving layout (`shrink=true` explicitly shifts fields).
+- Type deletion checks users and applied data (including typedef/pointer
+  wrappers and function variables/returns) and refuses unless `force=true`.
 
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 

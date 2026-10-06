@@ -31,7 +31,7 @@ public class DatatypeMcpToolsEndpointsOfflineTest extends TestCase {
         EXPECTED.put("/create_struct",
             new Expected("POST", "datatype", "category_path", "fields", "name", "program", "replace_placeholder"));
         EXPECTED.put("/delete_data_type",
-            new Expected("POST", "datatype", "program", "resolve_demangler_duplicate", "type_name"));
+            new Expected("POST", "datatype", "force", "program", "resolve_demangler_duplicate", "type_name"));
         EXPECTED.put("/resize_struct",
             new Expected("POST", "datatype", "force", "name", "new_size", "preserve_fields", "program"));
         EXPECTED.put("/recreate_struct",
