@@ -35,6 +35,9 @@ and folding `/get_version` into `/mcp/health`).
   validate explicit sizes, and accept array/pointer types. A union member with an
   unknown type fails the call instead of being skipped. Enum creation also accepts
   an array of `{name,value}` objects.
+- `add_struct_field` now accepts atomic bulk `fields`, rejects defined-field
+  overlaps unless `overwrite=true`, and reuses undefined padding. Field removal
+  defaults to preserving layout (`shrink=true` explicitly shifts fields).
 - Function signatures retain named parameters and calling conventions and update
   in place; invalid parameters roll back. Identical typedef creation is a no-op
   and conflicting typedefs are rejected.

@@ -1319,9 +1319,9 @@ public class DataTypeService {
                 DataTypeComponent targetComponent = null;
 
                 // Support offset-based lookup: "offset:16" or "offset:0x10"
-                if (fieldName != null && fieldName.startsWith("offset:")) {
+                if (fieldName != null && (fieldName.startsWith("offset:") || fieldName.startsWith("0x"))) {
                     try {
-                        String offsetStr = fieldName.substring(7).trim();
+                        String offsetStr = fieldName.startsWith("offset:") ? fieldName.substring(7).trim() : fieldName;
                         int targetOffset = offsetStr.startsWith("0x") || offsetStr.startsWith("0X")
                                 ? Integer.parseInt(offsetStr.substring(2), 16)
                                 : Integer.parseInt(offsetStr);
@@ -1358,7 +1358,18 @@ public class DataTypeService {
                         errorMessage.set("New data type not found: " + newType);
                         return null;
                     }
-                    struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
+                    int length = componentLength(newDataType, -1);
+                    if (!struct.isPackingEnabled()) {
+                        int extraStart = targetComponent.getOffset() + targetComponent.getLength();
+                        if (length > targetComponent.getLength()) {
+                            checkFieldRange(struct, extraStart, length - targetComponent.getLength(), false);
+                            clearFieldRange(struct, extraStart, length - targetComponent.getLength());
+                            int required = Math.addExact(targetComponent.getOffset(), length);
+                            if (required > struct.getLength()) struct.growStructure(required - struct.getLength());
+                        }
+                    }
+                    struct.replace(targetComponent.getOrdinal(), newDataType, length,
+                        targetComponent.getFieldName(), targetComponent.getComment());
                 }
 
                 // If new name is specified, apply the configured field naming policy.
@@ -1838,24 +1849,36 @@ public class DataTypeService {
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Simple name of the existing structure to add to, matched across every "
                                + "category (no /path prefix needed).") String structName,
-            @Param(value = "field_name", source = ParamSource.BODY,
-                   description = "Name for the new field. The project's Hungarian prefix is applied "
+            @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
+                    description = "Name for the new field. The project's Hungarian prefix is applied "
                                + "automatically from field_type, so the stored name can differ from what "
                                + "you send — the response reports the name actually used, and "
                                + "remove_struct_field accepts either form.") String fieldName,
-            @Param(value = "field_type", source = ParamSource.BODY,
+            @Param(value = "field_type", source = ParamSource.BODY, defaultValue = "",
                    description = "Type of the new field, resolved recursively (pointer chains, array "
                                + "syntax such as dword[8], existing struct/enum names).") String fieldType,
             @Param(value = "offset", source = ParamSource.BODY, defaultValue = "-1",
                    description = "BYTE offset to place the field at. -1 (the default) appends to the end. "
-                               + "A non-negative offset OVERWRITES whatever occupies that range rather than "
-                               + "shifting later fields, and grows the struct when it lies at or past the "
-                               + "current end.") int offset,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+                                + "A non-negative offset reuses padding without shifting later fields; "
+                                + "defined fields require overwrite=true. It grows the struct when past the "
+                                + "current end.") int offset,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true, defaultValue = "[]", description = "Bulk additions: name, type and optional offset, size, comment; atomic rollback on any failure") String fieldsJson,
+            @Param(value = "overwrite", source = ParamSource.BODY, defaultValue = "false", description = "Allow replacing defined fields; undefined padding is reusable") boolean overwrite) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
+        if (fieldsJson != null && !fieldsJson.equals("[]") && !fieldsJson.isBlank()) {
+            try {
+                List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
+                return threadingStrategy.executeWrite(program, "Add struct fields", () -> {
+                    Structure struct = requireStruct(program, structName);
+                    for (FieldDefinition field : fields) addField(program, struct, field, overwrite);
+                    return Response.ok(JsonHelper.mapOf("status", "success", "field_count", fields.size(), "size", struct.getLength()));
+                });
+            } catch (Exception e) { return Response.err(e.getMessage()); }
+        }
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
         if (fieldType == null || fieldType.isEmpty()) return Response.err("Field type is required");
 
@@ -1888,23 +1911,7 @@ public class DataTypeService {
                     return null;
                 }
 
-                if (offset >= 0) {
-                    // Overlay at specific offset (replace undefined padding, do NOT shift fields)
-                    if (offset < struct.getLength()) {
-                        struct.replaceAtOffset(offset, newFieldType, newFieldType.getLength(), finalFieldName, null);
-                    } else {
-                        // At or beyond current struct size — grow to fit, then place
-                        int needed = offset + newFieldType.getLength() - struct.getLength();
-                        if (needed > 0) {
-                            struct.growStructure(needed);
-                        }
-                        struct.replaceAtOffset(offset, newFieldType, newFieldType.getLength(), finalFieldName, null);
-                    }
-                } else {
-                    // Add at end
-                    struct.add(newFieldType, finalFieldName, null);
-                }
-
+                addField(program, struct, new FieldDefinition(finalFieldName, fieldType, offset), overwrite);
                 success.set(true);
                 return null;
             });
@@ -1926,6 +1933,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response addStructField(String structName, String fieldName, String fieldType, int offset, String programName) {
+        return addStructField(structName, fieldName, fieldType, offset, programName, "[]", false);
+    }
+
     public Response addStructField(String structName, String fieldName, String fieldType, int offset) {
         return addStructField(structName, fieldName, fieldType, offset, null);
     }
@@ -1947,7 +1958,8 @@ public class DataTypeService {
      *  ordinal, -1 if not found, -2 if the stem is ambiguous. */
     static int resolveFieldOrdinal(Structure struct, String fieldName) {
         for (DataTypeComponent c : struct.getDefinedComponents()) {
-            if (fieldName.equals(c.getFieldName())) return c.getOrdinal();
+            if (fieldName.equals(c.getFieldName()) || fieldName.equals(c.getDefaultFieldName())
+                    || fieldName.equals("field" + c.getOrdinal() + "_0x" + Integer.toHexString(c.getOffset()))) return c.getOrdinal();
         }
         int matches = 0, ord = -1;
         String wantStem = hungarianStem(fieldName);
@@ -1967,9 +1979,10 @@ public class DataTypeService {
                    description = "Simple name of the existing structure to edit, matched across every "
                                + "category (no /path prefix needed).") String structName,
             @Param(value = "field_name", source = ParamSource.BODY,
-                   description = "Field to remove. Matched exactly first, then by Hungarian stem, so the "
+                    description = "Field to remove, or hex offset / offset:N. Matched exactly first, then by Hungarian stem, so the "
                                + "name you originally sent still works after auto-prefixing changed it.") String fieldName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "shrink", source = ParamSource.BODY, defaultValue = "false", description = "Shift later fields and shrink; otherwise clear to undefined preserving offsets (packed structures always repack)") boolean shrink) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1995,7 +2008,11 @@ public class DataTypeService {
                 }
 
                 Structure struct = (Structure) dataType;
-                int targetOrdinal = resolveFieldOrdinal(struct, fieldName);
+                int targetOrdinal;
+                if (fieldName.startsWith("0x") || fieldName.startsWith("offset:")) {
+                    DataTypeComponent component = struct.getComponentAt(parseNonnegativeInt(fieldName.replace("offset:", ""), "offset"));
+                    targetOrdinal = component == null ? -1 : component.getOrdinal();
+                } else targetOrdinal = resolveFieldOrdinal(struct, fieldName);
 
                 if (targetOrdinal == -2) {
                     errorMessage.set("Field '" + fieldName + "' is ambiguous in '" + structName
@@ -2007,7 +2024,8 @@ public class DataTypeService {
                     return null;
                 }
 
-                struct.delete(targetOrdinal);
+                if (shrink || struct.isPackingEnabled()) struct.delete(targetOrdinal);
+                else struct.clearComponent(targetOrdinal);
                 success.set(true);
                 return null;
             });
@@ -2026,6 +2044,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response removeStructField(String structName, String fieldName, String programName) {
+        return removeStructField(structName, fieldName, programName, false);
+    }
+
     public Response removeStructField(String structName, String fieldName) {
         return removeStructField(structName, fieldName, null);
     }
@@ -3256,6 +3278,39 @@ public class DataTypeService {
             if (component.getOffset() < (long) offset + length && component.getEndOffset() >= offset
                     && !isPadding(component.getDataType()))
                 throw new IllegalArgumentException("Field would overwrite " + component.getDefaultFieldName() + "; pass overwrite=true explicitly");
+        }
+    }
+
+    private Structure requireStruct(Program program, String name) {
+        DataType type = ServiceUtils.findDataTypeByNameInAllCategories(program.getDataTypeManager(), name);
+        if (!(type instanceof Structure)) throw new IllegalArgumentException("Structure not found: " + name);
+        return (Structure) type;
+    }
+
+    private static void clearFieldRange(Structure struct, int offset, int length) {
+        DataTypeComponent[] components = struct.getDefinedComponents();
+        // Clearing a component expands it into undefined bytes, changing later ordinals.
+        for (int index = components.length - 1; index >= 0; index--) {
+            DataTypeComponent component = components[index];
+            if (component.getOffset() < (long) offset + length && component.getEndOffset() >= offset)
+                struct.clearComponent(component.getOrdinal());
+        }
+    }
+
+    private void addField(Program program, Structure struct, FieldDefinition field, boolean overwrite) throws Exception {
+        for (DataTypeComponent existing : struct.getDefinedComponents()) {
+            if (field.name.equals(existing.getFieldName())) throw new IllegalArgumentException("Duplicate field: " + field.name);
+        }
+        DataType type = ServiceUtils.resolveDataType(program.getDataTypeManager(), field.type);
+        int length = componentLength(type, field.size);
+        if (field.offset < 0) struct.add(type, length, field.name, field.comment);
+        else {
+            if (struct.isPackingEnabled()) throw new IllegalArgumentException("Explicit offsets cannot be honored in a packed structure");
+            checkFieldRange(struct, field.offset, length, overwrite);
+            clearFieldRange(struct, field.offset, length);
+            int required = Math.addExact(field.offset, length);
+            if (required > struct.getLength()) struct.growStructure(required - struct.getLength());
+            struct.replaceAtOffset(field.offset, type, length, field.name, field.comment);
         }
     }
 
