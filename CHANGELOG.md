@@ -75,6 +75,13 @@ structural metrics only `/get_function_signature` returned (`basic_block_count`,
 `cyclomatic_complexity`, instruction count, immediate values, string constants) are no
 longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
 
+### Fixed — integer and object-array parameters no longer bind lossily
+
+- Integer parameters reject fractional, out-of-range and missing required values
+  instead of truncating them or binding 0.
+- Object-array parameters reject entries that are not objects instead of
+  silently dropping them.
+
 ### Changed — one parameter, and one meaning, for "which function"
 
 Function-scoped tools spelled the same locator four ways (`address`, `name`,
