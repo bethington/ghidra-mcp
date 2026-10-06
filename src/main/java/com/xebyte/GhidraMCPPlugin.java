@@ -52,7 +52,7 @@ import java.util.concurrent.TimeUnit;
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 206 endpoints for reverse engineering automation. " +
+                  "Provides 205 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -414,7 +414,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                     new com.xebyte.core.ProjectServerSession(programProvider)),
                 new com.xebyte.core.ServerLifecycleService(services.programScript(), guiLifecycle()),
                 guiToolService,
-                new com.xebyte.core.DocumentationBatchService(services.function(), services.comment(),
+                new com.xebyte.core.DocumentationApplyService(programProvider, services.function(), services.comment(), services.symbolLabel(),
                     services.analysis(), guiToolService::gotoAddress)));
         // The hand-coded routes are live on every transport, but the scanner only
         // knows annotated methods; without this they stay out of /mcp/schema and so

@@ -397,7 +397,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             services.plus(managementService, new com.xebyte.core.ProjectLifecycleService(programProvider), new VersionControlService(programProvider, serverManager),
                 new com.xebyte.core.ServerLifecycleService(services.programScript(),
                     () -> System.exit(0)),
-                new com.xebyte.core.DocumentationBatchService(services.function(), services.comment(),
+                new com.xebyte.core.DocumentationApplyService(programProvider, services.function(), services.comment(), services.symbolLabel(),
                     services.analysis(), null)));
 
         http.endpoints(scanner);

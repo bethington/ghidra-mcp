@@ -49,7 +49,7 @@ ENDPOINT_TIMEOUTS = {
     "rename_function": 45,
     "consolidate_duplicate_types": 60,
     "analyze_function_completeness": 120,
-    "apply_function_documentation": 60,
+    "apply_documentation": 90,
     # get_timeout() keys on the LAST path segment, so "/debugger/launch"
     # looks up "launch" here, not "debugger_launch" -- easy to miss when
     # adding overrides for nested debugger/* routes.

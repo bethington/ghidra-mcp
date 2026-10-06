@@ -109,6 +109,16 @@ fails on a descriptor with no registered route, which is what caught the leftove
    `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 215
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
 
+## One tool for applying documentation
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `apply_function_documentation(json_body)` | `apply_documentation` | Pass the export's fields as parameters instead of one JSON string: `apply_documentation(target_address=..., name=..., parameters=[...], comments=[...], labels=[...])`. |
+| `batch_apply_documentation(address, ..., decompiler_comments, disassembly_comments)` | `apply_documentation` | Same fields, except the two comment lists become one: `comments=[{address, pre_comment, eol_comment}]`. |
+
+`apply_documentation` also takes `entries=[...]` for many functions at once, plus the
+prototype, variable-type and variable-rename fields that used to need separate calls.
+
 ## Folds after the consolidation
 
 Fifteen more tools folded into a sibling, still within one permission tier. Each survivor
@@ -133,7 +143,7 @@ keeps its own single-item call unchanged and gains the removed tool's job.
 | `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
 | `get_function_tags(function)` | `get_functions` | `get_functions(function, fields="tags")`; `tags` is a list of names, and is part of the default bundle |
 | `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)`, or several names for any-of; every result also carries its `tags` |
-| `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`; attaching creates the definition |
+| `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`, or `apply_documentation(tags=..., tag_comments=...)`; attaching creates the definition |
 
 The bridge's own `debugger_step_into` / `debugger_step_over` proxies, which forward to the
 external debugger server, are unaffected: only the GUI plugin's `/debugger/step_*` routes
@@ -154,7 +164,8 @@ Search the consumer for each item.
   server's repository, not the project tree.
 - **A name shared by several functions is an error** that lists their addresses, and a name
   typed in the wrong case resolves everywhere instead of in some tools.
-- **Every tool listed under "Folds after the consolidation"** is gone. `find_data_types` returns
+- **Every tool listed under "Folds after the consolidation"** and `apply_function_documentation`
+  (use `apply_documentation`; it takes the same export) are gone. `find_data_types` returns
   records under `data_types`, not preformatted strings.
 - **Function tags:** `get_function_tags`, `search_functions_by_tag` and
   `create_function_tag` are gone (`doc_lint`, `conformance_dashboard`, `fun_doc`,

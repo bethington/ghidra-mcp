@@ -13,7 +13,7 @@ import ghidra.util.Msg;
  * rolled back its own nested transaction silently threw away a rename, two comments and a
  * struct that the enclosing script transaction had already made.
  *
- * <p>That is easy to hit here. Endpoints nest by design — {@code apply_function_documentation}
+ * <p>That is easy to hit here. Endpoints nest by design — {@code apply_documentation}
  * calls into rename and comment paths that each open their own transaction — and every
  * script runs inside a transaction the script manager opened, so anything reached from
  * {@code /run_ghidra_script} or {@code /run_script_inline} is nested by construction.

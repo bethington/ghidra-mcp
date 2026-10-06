@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 210,
+  "total_endpoints": 209,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -298,18 +298,36 @@
       "description": "Apply data type"
     },
     {
-      "path": "/apply_function_documentation",
+      "path": "/apply_documentation",
       "method": "POST",
-      "category": "documentation",
+      "category": "analysis",
       "params": [
-        "json_body",
+        "address",
+        "target_address",
+        "entries",
+        "goto",
+        "name",
+        "function_name",
+        "prototype",
+        "calling_convention",
+        "return_type",
+        "params",
+        "parameters",
+        "variable_types",
+        "variable_renames",
+        "plate_comment",
+        "comments",
+        "labels",
+        "tags",
+        "tag_comments",
+        "score",
         "program"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Apply function documentation"
+      "description": "Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...]). Per function, every step is optional and independent and the response reports each one: rename, signature, variable types and renames, comments, labels, then a completeness score. It accepts what get_function_documentation exports (with target_address), so documentation copied between versions applies as it is. The signature is applied before the comments on purpose, because setting a prototype wipes the plate comment."
     },
     {
       "path": "/archive_ingest_function",
@@ -393,30 +411,6 @@
         "headless"
       ],
       "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs."
-    },
-    {
-      "path": "/batch_apply_documentation",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "address",
-        "goto",
-        "name",
-        "prototype",
-        "calling_convention",
-        "variable_types",
-        "variable_renames",
-        "plate_comment",
-        "decompiler_comments",
-        "disassembly_comments",
-        "score",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Apply all documentation to a function in one call"
     },
     {
       "path": "/batch_rename_function_components",

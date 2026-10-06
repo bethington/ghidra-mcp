@@ -433,8 +433,8 @@ class TestSafeDocumentationOperations:
         document = get_response.json()
         document["target_address"] = address
         response = http_client.post(
-            "/apply_function_documentation",
-            json_data={"json_body": json.dumps(document)},
+            "/apply_documentation",
+            json_data=document,
         )
 
         assert response.status_code == 200, response.text
