@@ -16,8 +16,9 @@ from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
 variable-type setters into `set_variable_type`, six `batch_*` tools into their
 one-or-many survivors, and the comment family into `set_comment` / `get_comment`
 with an explicit kind. Two endpoints were added later in the same cycle
-(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 215 tools**
-— 201 served by the GUI plugin, 191 by the headless server, 177 by both. No
+(`/list_shadowed_globals`, `/batch_get_comments`), followed by six
+decompiler-override tools and `/clear_data`, so **7.0.0 ships 222 tools**
+— 208 served by the GUI plugin, 198 by the headless server, 184 by both. No
 capability is removed — every operation the deleted tools performed is
 reachable through the survivor — and there are no backward-compatibility
 aliases. `tests/unit/test_migration_guide_successors.py` proves that: all 23
@@ -34,7 +35,7 @@ A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
 
-**Lazy tool loading is the default.** Advertising all 215 endpoints in one
+**Lazy tool loading is the default.** Advertising all 222 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
 called. The bridge now loads `listing,function,program` (84 endpoints plus 8

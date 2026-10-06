@@ -12,13 +12,14 @@ Complete version history for the Ghidra MCP Server project.
   direct global lookup and member/ancestor namespaces, restoring class renames that
   previously reported “not found”. Ambiguous bare names still require qualification.
 
-**215 tools** — 201 served by the GUI plugin, 191 by the headless server, 177
+**222 tools** — 208 served by the GUI plugin, 198 by the headless server, 184
 by both. Stacked on #567 (`/get_functions` replaced nine function readers);
 this pass folds listing, xref, tag, utility, and GUI-cursor tools. The
 advertised surface went from 272 → 251 in the first consolidation cycle, then
 245 after `/list_shadowed_globals` and `/batch_get_comments`, then 219 after
 `/get_functions`, then **215** after the folds below (including `/get_ui_cursor`
 and folding `/get_version` into `/mcp/health`).
+Six decompiler-override tools and `/clear_data` bring the current catalog to 222.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
