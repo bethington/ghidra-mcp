@@ -234,7 +234,7 @@ public class ProjectVersionControlTest {
     public void checkinRefusesAFileThatIsNotCheckedOut() throws Exception {
         Fixture f = new Fixture();
         DomainFile a = f.file("/fw/a", true, false);
-        assertEquals("File is not checked out: /fw/a", err(f.vc.checkin("/fw/a", "c", false)));
+        assertEquals("File is not checked out: /fw/a", err(f.vc.checkin("/fw/a", "c", false, false)));
         verify(a, never()).checkin(any(), any());
     }
 
@@ -242,7 +242,7 @@ public class ProjectVersionControlTest {
     public void checkinRefusesAFileNotUnderVersionControl() {
         Fixture f = new Fixture();
         f.file("/fw/a", false, false);
-        assertTrue(err(f.vc.checkin("/fw/a", "c", false)).startsWith("File is not under version control"));
+        assertTrue(err(f.vc.checkin("/fw/a", "c", false, false)).startsWith("File is not under version control"));
     }
 
     @Test
@@ -251,7 +251,7 @@ public class ProjectVersionControlTest {
         DomainFile a = f.file("/fw/a", true, true);
         when(a.getVersion()).thenReturn(4, 5);
 
-        Map<String, Object> out = ok(f.vc.checkin("/fw/a", "fix, retry: now", true));
+        Map<String, Object> out = ok(f.vc.checkin("/fw/a", "fix, retry: now", true, false));
 
         assertEquals(4, out.get("version_before"));
         assertEquals(5, out.get("version"));
@@ -275,11 +275,37 @@ public class ProjectVersionControlTest {
         when(open.isChanged()).thenReturn(false);
         when(f.provider.getAllOpenPrograms()).thenReturn(new Program[] {open});
 
-        f.vc.checkin("/fw/a", "c", false);
+        f.vc.checkin("/fw/a", "c", false, false);
 
         org.mockito.InOrder order = inOrder(f.provider, a);
         order.verify(f.provider).closeProgramByPath("/fw/a");
         order.verify(a).checkin(any(), any(TaskMonitor.class));
+    }
+
+    /**
+     * Found live: checkin_program(dry_run=true) saved, closed and checked in for real (the
+     * scanner's rollback cannot undo a check-in), then failed ending its transaction on the
+     * closed program. The dry run is now the tool's own, and touches nothing.
+     */
+    @Test
+    public void aDryRunReportsWhatWouldHappenAndTouchesNothing() throws Exception {
+        Fixture f = new Fixture();
+        DomainFile a = f.file("/fw/a", true, true);
+        when(a.getVersion()).thenReturn(1);
+        Program open = mock(Program.class);
+        when(open.getDomainFile()).thenReturn(a);
+        when(open.isChanged()).thenReturn(true);
+        when(f.provider.getAllOpenPrograms()).thenReturn(new Program[] {open});
+
+        Map<String, Object> out = ok(f.vc.checkin("/fw/a", "c", false, true));
+
+        assertEquals("would_check_in", out.get("status"));
+        assertEquals(java.util.List.of("/fw/a"), out.get("would_save"));
+        assertEquals(true, out.get("would_close"));
+        assertEquals(1, out.get("version"));
+        verify(a, never()).checkin(any(), any());
+        verify(f.provider, never()).closeProgramByPath(any());
+        verify(open, never()).save(any(), any());
     }
 
     @Test
@@ -290,14 +316,14 @@ public class ProjectVersionControlTest {
         when(open.getDomainFile()).thenReturn(a);
         when(f.provider.getCurrentProgram()).thenReturn(open);
 
-        assertEquals("checked_in", ok(f.vc.checkin("", "c", false)).get("status"));
+        assertEquals("checked_in", ok(f.vc.checkin("", "c", false, false)).get("status"));
         verify(a).checkin(any(), any(TaskMonitor.class));
     }
 
     @Test
     public void checkinWithNoPathAndNothingOpenSaysSo() {
         Fixture f = new Fixture();
-        assertEquals("No sole open program; supply 'path'.", err(f.vc.checkin(null, "c", false)));
+        assertEquals("No sole open program; supply 'path'.", err(f.vc.checkin(null, "c", false, false)));
     }
 
     // ---------------------------------------------------------- undo and add

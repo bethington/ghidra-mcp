@@ -6,15 +6,15 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
-by both. The advertised surface went from 272 → 251 in the first consolidation
+**210 tools** — 206 served by the GUI plugin, 191 by the headless server, 187 by
+both. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 245 after `/list_shadowed_globals` and `/batch_get_comments`, 219
 after `/get_functions` replaced nine function readers, 215 after the listing,
-xref, tag, utility and GUI-cursor folds, 211 once both servers shared one set
-of program-operation names (`/load_program`, `/load_program_from_project`,
-`/project/info` and headless `/health` retired), and **209** once version
-control and the CodeBrowser tools became shared services
-(`/server/version_control/checkin` and `/tool/launch_codebrowser` retired).
+xref, tag, utility and GUI-cursor folds, 211 once both servers shared one set of
+program-operation names (`/load_program`, `/load_program_from_project`,
+`/project/info` and headless `/health` retired), 209 once version control and
+the CodeBrowser tools became shared services (`/server/version_control/checkin`
+and `/tool/launch_codebrowser` retired), and **210** with `/set_memory_block`.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -23,6 +23,35 @@ control and the CodeBrowser tools became shared services
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Fixed — check-in dry run, firmware memory permissions, shared-project paths
+
+- **`checkin_program(dry_run=true)` reports instead of refusing.** A check-in is not a
+  transaction, so the scanner's rolled-back dry run cannot cover it. The tool now takes
+  `dry_run` itself and reports `would_save`, `would_close`, the version and
+  `modified_since_checkout` without saving, closing or checking in anything. It also moves
+  from the `project` group to `server`, beside checkout and undo.
+- **`/set_memory_block`** changes an existing block's read/write/execute/volatile flags.
+  Firmware loaders often mark flash writable, so the decompiler reads every literal-pool
+  word as a variable (`iVar2 = DAT_08016e58;`) instead of the peripheral base it holds.
+  On a 339-function firmware, marking flash read-only took those pool reads from 1123 to 4
+  and printed the bases as constants or their labels.
+- **Shared projects default to `~/ghidra-shared-projects`.** Ghidra 12.1.3's
+  `ProjectLocator` rejects a path element starting with `.`, so the old
+  `~/.ghidra-mcp/shared-projects` default made every shared-project open fail.
+- **Debugger tools resolve `program` like every other tool**, so an unknown or ambiguous
+  name is an error naming the candidates instead of falling back to the current program.
+- **The bridge keeps loaded tool groups across a Ghidra restart.** It re-registered only
+  the default groups, so the next call to a `load_tool_group()`-ed tool returned
+  "Unknown tool" mid-task.
+- **Catalog parameters are derived, not accumulated.** `RegenerateEndpointsJson` takes
+  parameter lists from the annotations (names plus aliases) and from
+  `ManualToolDescriptors` for hand-registered routes; the old union kept every name ever
+  listed, so a parameter removed from a tool was advertised forever. Catalog descriptions
+  that had drifted from their tools are refreshed, and the conformance schema snapshot
+  records `destructive`/`read_only` again.
+- **91 dead wrapper methods are gone from `GhidraMCPPlugin`** (~790 lines), left behind
+  when their routes moved into the shared services.
 
 ### Fixed — headless scripts get the project; failed scripts say why
 

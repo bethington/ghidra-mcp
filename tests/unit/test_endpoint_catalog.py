@@ -26,8 +26,13 @@ BRIDGE_PKG = PROJECT_ROOT / "python" / "bridge_mcp_ghidra"
 
 
 def _bridge_sources() -> list[Path]:
-    """All Python source files that make up the bridge package."""
-    return sorted(BRIDGE_PKG.glob("*.py"))
+    """All Python source files that make up the bridge package.
+
+    Recursive on purpose: a non-recursive glob would let a future
+    ``bridge_mcp_ghidra/foo/*.py`` subpackage silently escape the
+    per-module line cap.
+    """
+    return sorted(BRIDGE_PKG.rglob("*.py"))
 
 
 def _bridge_source_text() -> str:

@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 209,
+  "total_endpoints": 210,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -42,7 +42,7 @@
         "gui",
         "headless"
       ],
-      "description": "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist."
+      "description": "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and created on the fly (give a new tag a description with tag_comments). Replaces batch_add_function_tags and create_function_tag."
     },
     {
       "path": "/add_memory_reference",
@@ -244,7 +244,7 @@
         "gui",
         "headless"
       ],
-      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are â€” apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing."
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -360,7 +360,7 @@
         "gui",
         "headless"
       ],
-      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File â†’ Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) â€” unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file, and refuses while an open program has unsaved changes, since the archive would not contain them: save first."
     },
     {
       "path": "/audit_global",
@@ -392,7 +392,7 @@
         "gui",
         "headless"
       ],
-      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool â€” start every doc pass with this when the function has global xrefs."
+      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs."
     },
     {
       "path": "/batch_apply_documentation",
@@ -510,16 +510,17 @@
         "gui",
         "headless"
       ],
-      "description": "Health check endpoint"
+      "description": "Liveness probe: {status, server_kind (gui/headless), version, program when one is current}. Cheap and token-less, unlike the fuller /mcp/health; both servers answer it identically."
     },
     {
       "path": "/checkin_program",
       "method": "POST",
-      "category": "project",
+      "category": "server",
       "params": [
         "path",
         "comment",
-        "keep_checked_out"
+        "keep_checked_out",
+        "dry_run"
       ],
       "servers": [
         "gui",
@@ -540,7 +541,7 @@
         "gui",
         "headless"
       ],
-      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable â€” a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code â€” inspect the before/after observations and resulting disassembly after every call."
+      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call."
     },
     {
       "path": "/clear_function_comments",
@@ -1545,7 +1546,7 @@
         "gui",
         "headless"
       ],
-      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). Returns each comment kind plus a convenience `comment` (first non-empty) and `has_comment` flag."
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts."
     },
     {
       "path": "/get_entry_points",
@@ -1690,7 +1691,7 @@
         "gui",
         "headless"
       ],
-      "description": "Get function hash"
+      "description": "Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=). On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
     },
     {
       "path": "/get_function_pcode",
@@ -1776,7 +1777,7 @@
         "gui",
         "headless"
       ],
-      "description": "Read all options in a program option group with types, current values, defaults, and descriptions. Use list_option_groups to discover group names."
+      "description": "Read all options in a program option group with types, current values, defaults, and descriptions. Omit group to list the option groups instead (e.g. 'Program Information', 'Analyzers', 'Decompiler'), each with its option count."
     },
     {
       "path": "/get_project_info",
@@ -1843,7 +1844,7 @@
         "gui",
         "headless"
       ],
-      "description": "What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program — one call instead of four. type=address|function|selection|program|all (default all). Takes no program parameter: the focused program is an answer this reports, not an input. Headless has no analyst and no cursor, so every facet reports null with a reason there — use the program parameter on a data endpoint instead. Replaces get_current_address, get_current_function, get_current_selection and get_current_program_info."
+      "description": "What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program — one call instead of four. type=address|function|selection|program|all (default all). Takes NO program parameter: the focused program is an answer this reports, not an input. Headless has no analyst and no cursor, so every facet reports null with a reason there — use the program parameter on a data endpoint instead. Replaces get_current_address, get_current_function, get_current_selection and get_current_program_info."
     },
     {
       "path": "/get_valid_data_types",
@@ -2136,7 +2137,7 @@
         "gui",
         "headless"
       ],
-      "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end."
+      "description": "List (address, value) entries stored in a property map, with pagination. Optionally restrict to an inclusive address range with start/end. Omit map to list the property maps instead: each one's name, value type (int|long|string|object|void) and how many addresses hold a value."
     },
     {
       "path": "/list_scripts",
@@ -2192,7 +2193,7 @@
         "gui",
         "headless"
       ],
-      "description": "HTTP server health: pool stats, uptime, memory, active request count"
+      "description": "Server health: kind (gui/headless), build, current program, uptime, HTTP pool, memory, endpoint count"
     },
     {
       "path": "/mcp/schema",
@@ -2235,7 +2236,7 @@
         "gui",
         "headless"
       ],
-      "description": "Modify struct field"
+      "description": "Modify a field in a structure: retype it (new_type, which also embeds a struct by value, e.g. Rectangle inside LayoutNode), rename it (new_name), or both. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create."
     },
     {
       "path": "/move_data_type_to_category",
@@ -2387,7 +2388,7 @@
         "gui",
         "headless"
       ],
-      "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition â€” use delete_function_tag for that."
+      "description": "Detach one or more tags from a function. Does not delete the program-wide tag definition — use delete_function_tag for that."
     },
     {
       "path": "/remove_program_option",
@@ -2433,7 +2434,7 @@
         "gui",
         "headless"
       ],
-      "description": "Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
+      "description": "Remove memory cross-reference(s) from one address to another — the inverse of add_memory_reference. Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references and reports each removed reference's source_type. Accepts space-prefixed addresses (mem:1000)."
     },
     {
       "path": "/remove_struct_field",
@@ -2569,7 +2570,7 @@
         "gui",
         "headless"
       ],
-      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
+      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. The open project is left alone, and the restored one is NOT opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
     },
     {
       "path": "/run_analysis",
@@ -2973,7 +2974,7 @@
         "gui",
         "headless"
       ],
-      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function â€” call rename_function separately if needed."
+      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function — call rename_function separately if needed."
     },
     {
       "path": "/set_function_tag_comment",
@@ -3024,7 +3025,7 @@
         "gui",
         "headless"
       ],
-      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type â†’ rename_data â†’ batch_set_comments â†’ create_label)."
+      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label)."
     },
     {
       "path": "/set_image_base",
@@ -3039,6 +3040,25 @@
         "headless"
       ],
       "description": "Set the base address of the program (rebases all addresses)"
+    },
+    {
+      "path": "/set_memory_block",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "block",
+        "address",
+        "read",
+        "write",
+        "execute",
+        "volatile",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels."
     },
     {
       "path": "/set_program_option",

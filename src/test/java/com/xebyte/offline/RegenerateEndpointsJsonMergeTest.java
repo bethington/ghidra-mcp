@@ -11,17 +11,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Unit coverage for {@link RegenerateEndpointsJson#mergeEntry}: the params ordered-set union
- * that keeps catalog-only params (hand-registered route extras like /open_project's
- * headless/program — or stale annotation names, which linger visibly for manual cleanup)
- * instead of clobbering them from the scanner.
+ * Unit coverage for {@link RegenerateEndpointsJson#mergeEntry}.
+ *
+ * <p>The param list is DERIVED from the scanner (names plus declared aliases),
+ * not accumulated from the catalog. The old union kept every catalog-only name,
+ * which made the list grow-only: a parameter deleted from an {@code @McpTool}
+ * was advertised forever, and hand-registered extras were preserved only by
+ * accident of that same rule. The regenerator now takes hand-registered routes
+ * from {@link com.xebyte.core.ManualToolDescriptors} instead, so the catalog can
+ * both gain and LOSE parameters truthfully.
  */
 public class RegenerateEndpointsJsonMergeTest extends TestCase {
 
     private static AnnotationScanner.ToolDescriptor tool(String... paramNames) {
         List<AnnotationScanner.ParamDescriptor> params = new ArrayList<>();
         for (String n : paramNames) {
-            params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string", false));
+            params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string", false, java.util.List.of()));
         }
         return new AnnotationScanner.ToolDescriptor("/open_project", "POST", "scanner description",
                 "headless", null, ToolAccess.WRITE, params);
@@ -49,25 +54,45 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
         return names;
     }
 
-    public void testOpenProjectCatalogExtrasKept() {
+    public void testCatalogOnlyParamsAreDroppedWhenTheScannerKnowsTheTool() {
+        // /open_project's headless/program now arrive via ManualToolDescriptors,
+        // which the regenerator feeds to the scanner. A name present ONLY in the
+        // catalog is therefore stale by definition and must not survive -- that
+        // is what let a removed parameter be advertised indefinitely.
         RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
                 tool("path"), entry("Open a project", "headless", "path", "headless", "program"));
-        assertEquals(List.of("path", "headless", "program"), paramsOf(result.entry));
-        assertEquals(List.of("headless", "program"), result.retainedCatalogParams);
+        assertEquals(List.of("path"), paramsOf(result.entry));
+        assertTrue(result.retainedCatalogParams.isEmpty());
+    }
+
+    public void testAliasesAreAuthoritativeParams() {
+        // Aliases are argument names the handler genuinely accepts, so they belong
+        // in the catalog by derivation rather than by being remembered.
+        List<AnnotationScanner.ParamDescriptor> params = new ArrayList<>();
+        params.add(new AnnotationScanner.ParamDescriptor(
+                "function", "String", "BODY", false, null, "", "string", false,
+                List.of("address", "name")));
+        AnnotationScanner.ToolDescriptor withAliases = new AnnotationScanner.ToolDescriptor(
+                "/open_project", "POST", "d", "headless", null, ToolAccess.WRITE, params);
+        RegenerateEndpointsJson.MergeResult result =
+                RegenerateEndpointsJson.mergeEntry(withAliases, entry("d", "headless", "function"));
+        assertEquals(List.of("function", "address", "name"), paramsOf(result.entry));
     }
 
     public void testScannerOrderWinsOnOverlap() {
         RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
                 tool("a", "b"), entry("d", "c", "b", "x"));
-        assertEquals(List.of("a", "b", "x"), paramsOf(result.entry));
-        assertEquals(List.of("x"), result.retainedCatalogParams);
+        assertEquals(List.of("a", "b"), paramsOf(result.entry));
+        // "x" exists only in the catalog and the scanner has params, so it is
+        // stale rather than an extra to preserve.
+        assertTrue(result.retainedCatalogParams.isEmpty());
     }
 
     public void testDuplicateNamesEmittedOnce() {
         RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
                 tool("path", "path"), entry("d", "c", "headless", "headless"));
-        assertEquals(List.of("path", "headless"), paramsOf(result.entry));
-        assertEquals(List.of("headless"), result.retainedCatalogParams);
+        assertEquals(List.of("path"), paramsOf(result.entry));
+        assertTrue(result.retainedCatalogParams.isEmpty());
     }
 
     public void testNoExistingEntryUsesScannerParams() {
@@ -134,11 +159,18 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
         assertEquals("headless", result.entry.get("category").getAsString());
     }
 
-    public void testRetainedNamesKeepExistingOrder() {
+    public void testRetainedNamesOnlyWhenScannerKnowsNothing() {
+        // Retention is the last resort for a route with no descriptor at all --
+        // not a way for the catalog to outvote the scanner.
         RegenerateEndpointsJson.MergeResult result = RegenerateEndpointsJson.mergeEntry(
                 tool("path"), entry("d", "c", "program", "headless", "path"));
-        assertEquals(List.of("path", "program", "headless"), paramsOf(result.entry));
-        assertEquals(List.of("program", "headless"), result.retainedCatalogParams);
+        assertEquals(List.of("path"), paramsOf(result.entry));
+        assertTrue(result.retainedCatalogParams.isEmpty());
+
+        RegenerateEndpointsJson.MergeResult noScannerParams = RegenerateEndpointsJson.mergeEntry(
+                tool(), entry("d", "c", "program", "headless"));
+        assertEquals(List.of("program", "headless"), paramsOf(noScannerParams.entry));
+        assertEquals(List.of("program", "headless"), noScannerParams.retainedCatalogParams);
     }
 
     public void testExistingEntryNotMutated() {

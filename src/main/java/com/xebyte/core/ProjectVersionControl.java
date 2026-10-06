@@ -254,7 +254,7 @@ public final class ProjectVersionControl {
      *
      * @param path null or blank checks in the sole open program's file
      */
-    public Response checkin(String path, String comment, boolean keepCheckedOut) {
+    public Response checkin(String path, String comment, boolean keepCheckedOut, boolean dryRun) {
         if (project() == null) return Response.err(NO_PROJECT);
         String cmt = comment == null ? "" : comment;
 
@@ -277,6 +277,28 @@ public final class ProjectVersionControl {
         }
         if (!file.isCheckedOut()) {
             return Response.err("File is not checked out: " + filePath);
+        }
+
+        if (dryRun) {
+            List<String> wouldSave = new ArrayList<>();
+            boolean open = false;
+            for (Program p : provider.getAllOpenPrograms()) {
+                if (p.getDomainFile() != null && p.getDomainFile().getPathname().equals(filePath)) {
+                    open = true;
+                    if (p.isChanged()) {
+                        wouldSave.add(filePath);
+                    }
+                }
+            }
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("dry_run", true);
+            extras.put("version", file.getVersion());
+            extras.put("would_save", wouldSave);
+            extras.put("would_close", open);
+            extras.put("modified_since_checkout", file.modifiedSinceCheckout() || !wouldSave.isEmpty());
+            extras.put("keep_checked_out", keepCheckedOut);
+            extras.put("comment", cmt);
+            return report("would_check_in", true, file, extras);
         }
 
         for (Program p : provider.getAllOpenPrograms()) {

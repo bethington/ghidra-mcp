@@ -42,8 +42,10 @@ public class VersionControlService {
             description = "Check a program in to the shared Ghidra Server as a new version. Saves pending "
                 + "edits and closes the program first (a file checked in while open must stay checked "
                 + "out). Requires a shared project and the file checked out. Returns "
-                + "version_before/version/version_bumped.",
-            category = "project", access = ToolAccess.WRITE)
+                + "version_before/version/version_bumped. dry_run=true checks everything and reports "
+                + "what would happen (programs it would save, whether it would close one) without "
+                + "doing any of it.",
+            category = "server", access = ToolAccess.WRITE)
     public Response checkinProgram(
             @Param(value = "path", source = ParamSource.BODY, defaultValue = "",
                    description = "Project path of the file; empty uses the sole open program") String path,
@@ -51,8 +53,11 @@ public class VersionControlService {
                    description = "Check-in comment recorded on the new version") String comment,
             @Param(value = "keep_checked_out", source = ParamSource.BODY, defaultValue = "false",
                    description = "Keep the file checked out after the new version lands, so you can keep "
-                               + "editing. False (the default) releases the checkout.") boolean keepCheckedOut) {
-        return files.checkin(path, comment, keepCheckedOut);
+                               + "editing. False (the default) releases the checkout.") boolean keepCheckedOut,
+            @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Report what the check-in would do without saving, closing or "
+                               + "checking in anything.") boolean dryRun) {
+        return files.checkin(path, comment, keepCheckedOut, dryRun);
     }
 
     @McpTool(path = "/server/version_control/checkout", dryRun = false, method = "POST",

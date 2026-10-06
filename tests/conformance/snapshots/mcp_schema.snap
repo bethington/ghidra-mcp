@@ -1,5 +1,5 @@
 {
-  "count": 205,
+  "count": 206,
   "tools": [
     {
       "category": "function",
@@ -62,6 +62,7 @@
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Create a cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables). Leaves the underlying bytes untouched and adds proper bidirectional navigation. On programs with multiple address spaces (e.g. embedded targets), prefix addresses with the space name (mem:1000).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -113,12 +114,14 @@
           "type": "string"
         }
       ],
-      "path": "/add_memory_reference"
+      "path": "/add_memory_reference",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Add a field to a structure",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -159,12 +162,14 @@
           "type": "string"
         }
       ],
-      "path": "/add_struct_field"
+      "path": "/add_struct_field",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Get auto-analysis status for open programs",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -175,12 +180,14 @@
           "type": "string"
         }
       ],
-      "path": "/analysis_status"
+      "path": "/analysis_status",
+      "read_only": true
     },
     {
       "category": "malware",
       "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
       "description": "Detect suspicious API call patterns",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -192,12 +199,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_api_call_chains"
+      "path": "/analyze_api_call_chains",
+      "read_only": true
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Analyze call graph paths between functions",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -231,12 +240,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_call_graph"
+      "path": "/analyze_call_graph",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Analyze function control flow complexity",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -255,12 +266,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_control_flow"
+      "path": "/analyze_control_flow",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -304,12 +317,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_data_region"
+      "path": "/analyze_data_region",
+      "read_only": false
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Trace how a value propagates through a function using the decompiler's PCode graph. Direction 'backward' walks producers (Varnode.getDef); 'forward' walks consumers (Varnode.getDescendants). Terminates at constants, parameters, call boundaries, or max_steps. Phi (MULTIEQUAL) nodes are summarized rather than recursed. On programs with multiple address spaces, prefix addresses with the space name (mem:1000).",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -353,12 +368,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_dataflow"
+      "path": "/analyze_dataflow",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -384,12 +401,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_for_documentation"
+      "path": "/analyze_for_documentation",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -462,12 +481,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_function_complete"
+      "path": "/analyze_function_complete",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -510,12 +531,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_function_completeness"
+      "path": "/analyze_function_completeness",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -543,12 +566,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_global_completeness"
+      "path": "/analyze_global_completeness",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Analyze structure field access patterns. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -583,12 +608,14 @@
           "type": "string"
         }
       ],
-      "path": "/analyze_struct_field_usage"
+      "path": "/analyze_struct_field_usage",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Atomic type application with classification. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -638,7 +665,8 @@
           "type": "string"
         }
       ],
-      "path": "/apply_data_classification"
+      "path": "/apply_data_classification",
+      "read_only": false
     },
     {
       "category": "datatype",
@@ -694,6 +722,7 @@
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -712,12 +741,14 @@
           "type": "string"
         }
       ],
-      "path": "/apply_function_documentation"
+      "path": "/apply_function_documentation",
+      "read_only": false
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -759,12 +790,14 @@
           "type": "boolean"
         }
       ],
-      "path": "/archive_ingest_function"
+      "path": "/archive_ingest_function",
+      "read_only": false
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Bulk-ingest every function in a program into the cross-version documentation archive. Posts each to /v1/doc_archive/upsert. Returns per-binary counts (created / updated / conflicts_enqueued / errors).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -808,7 +841,8 @@
           "type": "boolean"
         }
       ],
-      "path": "/archive_ingest_program"
+      "path": "/archive_ingest_program",
+      "read_only": false
     },
     {
       "category": "project",
@@ -840,6 +874,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -859,12 +894,14 @@
           "type": "string"
         }
       ],
-      "path": "/audit_global"
+      "path": "/audit_global",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -890,7 +927,8 @@
           "type": "string"
         }
       ],
-      "path": "/audit_globals_in_function"
+      "path": "/audit_globals_in_function",
+      "read_only": true
     },
     {
       "category": "analysis",
@@ -1000,6 +1038,7 @@
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1053,12 +1092,14 @@
           "type": "string"
         }
       ],
-      "path": "/batch_rename_function_components"
+      "path": "/batch_rename_function_components",
+      "read_only": false
     },
     {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
       "description": "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1102,12 +1143,14 @@
           "type": "string"
         }
       ],
-      "path": "/batch_set_comments"
+      "path": "/batch_set_comments",
+      "read_only": false
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Report of source file strings and their FUN_* functions",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1127,12 +1170,14 @@
           "type": "string"
         }
       ],
-      "path": "/batch_string_anchor_report"
+      "path": "/batch_string_anchor_report",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Bulk cross-binary function matching",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1181,12 +1226,14 @@
           "type": "string"
         }
       ],
-      "path": "/bulk_fuzzy_match"
+      "path": "/bulk_fuzzy_match",
+      "read_only": true
     },
     {
       "category": "symbol",
       "category_description": "Create/rename/delete labels, rename data, globals, external locations",
       "description": "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1206,32 +1253,35 @@
           "type": "string"
         }
       ],
-      "path": "/can_rename_at_address"
+      "path": "/can_rename_at_address",
+      "read_only": true
     },
     {
       "category": "utility",
-      "description": "Health check endpoint",
+      "description": "Liveness probe: {status, server_kind (gui/headless), version, program when one is current}. Cheap and\n token-less, unlike the fuller /mcp/health; both servers answer it identically.",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/check_connection"
+      "path": "/check_connection",
+      "read_only": true
     },
     {
-      "category": "project",
-      "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Check a program in to the shared Ghidra Server as a new version. Saves pending edits and closes the program first (a file checked in while open must stay checked out). Requires a shared project and the file checked out. Returns version_before/version/version_bumped.",
+      "category": "server",
+      "description": "Check a program in to the shared Ghidra Server as a new version. Saves pending edits and closes the program first (a file checked in while open must stay checked out). Requires a shared project and the file checked out. Returns version_before/version/version_bumped. dry_run=true checks everything and reports what would happen (programs it would save, whether it would close one) without doing any of it.",
       "destructive": false,
       "method": "POST",
       "params": [
         {
+          "default": "",
           "description": "Project path of the file; empty uses the sole open program",
           "name": "path",
-          "required": true,
+          "required": false,
           "source": "body",
           "type": "string"
         },
         {
           "default": "",
-          "description": "Checkin comment",
+          "description": "Check-in comment recorded on the new version",
           "name": "comment",
           "required": false,
           "source": "body",
@@ -1239,8 +1289,16 @@
         },
         {
           "default": "false",
-          "description": "Keep the file checked out after the new version lands",
+          "description": "Keep the file checked out after the new version lands, so you can keep editing. False (the default) releases the checkout.",
           "name": "keep_checked_out",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "false",
+          "description": "Report what the check-in would do without saving, closing or checking in anything.",
+          "name": "dry_run",
           "required": false,
           "source": "body",
           "type": "boolean"
@@ -1253,6 +1311,7 @@
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -1281,12 +1340,14 @@
           "type": "string"
         }
       ],
-      "path": "/clear_flow_and_repair"
+      "path": "/clear_flow_and_repair",
+      "read_only": false
     },
     {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
       "description": "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -1336,12 +1397,14 @@
           "type": "string"
         }
       ],
-      "path": "/clear_function_comments"
+      "path": "/clear_function_comments",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Clear flow override at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -1361,12 +1424,14 @@
           "type": "string"
         }
       ],
-      "path": "/clear_instruction_flow_override"
+      "path": "/clear_instruction_flow_override",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Clone a data type with new name",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1392,7 +1457,8 @@
           "type": "string"
         }
       ],
-      "path": "/clone_data_type"
+      "path": "/clone_data_type",
+      "read_only": false
     },
     {
       "category": "program",
@@ -1424,6 +1490,7 @@
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Compare documented vs undocumented counts",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1435,7 +1502,8 @@
           "type": "string"
         }
       ],
-      "path": "/compare_programs_documentation"
+      "path": "/compare_programs_documentation",
+      "read_only": true
     },
     {
       "category": "analysis",
@@ -1475,6 +1543,7 @@
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Convert number between hex/decimal/binary formats",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1493,12 +1562,14 @@
           "type": "integer"
         }
       ],
-      "path": "/convert_number"
+      "path": "/convert_number",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Create a new data type category",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1517,7 +1588,8 @@
           "type": "string"
         }
       ],
-      "path": "/create_data_type_category"
+      "path": "/create_data_type_category",
+      "read_only": false
     },
     {
       "category": "datatype",
@@ -1572,6 +1644,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Create an enum data type",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1605,12 +1678,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_enum"
+      "path": "/create_enum",
+      "read_only": false
     },
     {
       "category": "project",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Create a folder in the project",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1629,12 +1704,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_folder"
+      "path": "/create_folder",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1670,12 +1747,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_function"
+      "path": "/create_function",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Create a function signature data type",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1708,12 +1787,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_function_signature"
+      "path": "/create_function_signature",
+      "read_only": false
     },
     {
       "category": "symbol",
       "category_description": "Create/rename/delete labels, rename data, globals, external locations",
       "description": "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1750,12 +1831,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_label"
+      "path": "/create_label",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1870,12 +1953,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_memory_block"
+      "path": "/create_memory_block",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Create a user property map to store typed values keyed by address. Types: int, long, string, void (address-presence tag). Use a string map holding JSON to store arbitrary structured per-address data. Call save_program to persist.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1902,12 +1987,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_property_map"
+      "path": "/create_property_map",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1941,12 +2028,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_struct"
+      "path": "/create_struct",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Create a union data type",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -1972,12 +2061,14 @@
           "type": "string"
         }
       ],
-      "path": "/create_union"
+      "path": "/create_union",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Translate a runtime dynamic address from the current trace back to a static Ghidra program address",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -1989,20 +2080,24 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/dynamic_to_static"
+      "path": "/debugger/dynamic_to_static",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Interrupt (break into) the running target",
+      "destructive": false,
       "method": "POST",
       "params": [],
-      "path": "/debugger/interrupt"
+      "path": "/debugger/interrupt",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Launch an executable through Ghidra's Trace RMI debugger launcher",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2069,12 +2164,14 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/launch"
+      "path": "/debugger/launch",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "List available debugger launch/attach options for the current program",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2086,28 +2183,34 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/launch_offers"
+      "path": "/debugger/launch_offers",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "List all breakpoints in the current trace",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/debugger/list_breakpoints"
+      "path": "/debugger/list_breakpoints",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "List modules (DLLs/EXEs) loaded in the debugged process",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/debugger/modules"
+      "path": "/debugger/modules",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Read memory from the debugged process. Returns hex dump and DWORD interpretation.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2127,20 +2230,24 @@
           "type": "integer"
         }
       ],
-      "path": "/debugger/read_memory"
+      "path": "/debugger/read_memory",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Read CPU registers from the current debug trace snapshot. Shows general-purpose registers (EAX-EDI, EIP, ESP, EFLAGS for x86)",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/debugger/registers"
+      "path": "/debugger/registers",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Remove a breakpoint at an address",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2152,20 +2259,24 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/remove_breakpoint"
+      "path": "/debugger/remove_breakpoint",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Resume execution of the debugged process",
+      "destructive": false,
       "method": "POST",
       "params": [],
-      "path": "/debugger/resume"
+      "path": "/debugger/resume",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Set a software execution breakpoint at an address in the trace",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2177,12 +2288,14 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/set_breakpoint"
+      "path": "/debugger/set_breakpoint",
+      "read_only": false
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Get the call stack backtrace for the current thread",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2194,12 +2307,14 @@
           "type": "integer"
         }
       ],
-      "path": "/debugger/stack_trace"
+      "path": "/debugger/stack_trace",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Translate a static Ghidra program address to a runtime dynamic address in the current trace",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2219,15 +2334,18 @@
           "type": "string"
         }
       ],
-      "path": "/debugger/static_to_dynamic"
+      "path": "/debugger/static_to_dynamic",
+      "read_only": true
     },
     {
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "Get debugger status: active trace, thread, execution state, module count",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/debugger/status"
+      "path": "/debugger/status",
+      "read_only": true
     },
     {
       "category": "debugger",
@@ -2252,14 +2370,17 @@
       "category": "debugger",
       "category_description": "Live debugging: attach, breakpoints, step, registers, memory. Requires a CodeBrowser with Debugger view open.",
       "description": "List all open debug traces",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/debugger/traces"
+      "path": "/debugger/traces",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2287,12 +2408,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_bookmark"
+      "path": "/delete_bookmark",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Delete a data type by name. Fails if the type is referenced; use resolve_duplicate_type first to remove unused /Demangler 1-byte stubs when a full type exists.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2319,12 +2442,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_data_type"
+      "path": "/delete_data_type",
+      "read_only": false
     },
     {
       "category": "project",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Delete a file from the project",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2335,12 +2460,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_file"
+      "path": "/delete_file",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2366,12 +2493,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_function"
+      "path": "/delete_function",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Delete a program-wide function tag definition. This detaches the tag from every function that had it.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2390,12 +2519,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_function_tag"
+      "path": "/delete_function_tag",
+      "read_only": false
     },
     {
       "category": "symbol",
       "category_description": "Create/rename/delete labels, rename data, globals, external locations",
       "description": "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2432,12 +2563,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_label"
+      "path": "/delete_label",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Delete a user property map and all values it holds. Call save_program to persist.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -2456,12 +2589,14 @@
           "type": "string"
         }
       ],
-      "path": "/delete_property_map"
+      "path": "/delete_property_map",
+      "read_only": false
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2489,12 +2624,14 @@
           "type": "string"
         }
       ],
-      "path": "/detect_array_bounds"
+      "path": "/detect_array_bounds",
+      "read_only": false
     },
     {
       "category": "malware",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Detect crypto algorithm constants",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2506,12 +2643,14 @@
           "type": "string"
         }
       ],
-      "path": "/detect_crypto_constants"
+      "path": "/detect_crypto_constants",
+      "read_only": true
     },
     {
       "category": "malware",
       "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
       "description": "Detect common malware behaviors",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2523,12 +2662,14 @@
           "type": "string"
         }
       ],
-      "path": "/detect_malware_behaviors"
+      "path": "/detect_malware_behaviors",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2562,12 +2703,14 @@
           "type": "string"
         }
       ],
-      "path": "/diff_functions"
+      "path": "/diff_functions",
+      "read_only": true
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. Returns the disassembled instruction text (mnemonic + operands + bytes) when `include_instructions` is true (default), so callers working on custom processor definitions (#205) can read back what Ghidra produced without a follow-up call.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2628,12 +2771,14 @@
           "type": "string"
         }
       ],
-      "path": "/disassemble_bytes"
+      "path": "/disassemble_bytes",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2653,12 +2798,14 @@
           "type": "string"
         }
       ],
-      "path": "/disassemble_function"
+      "path": "/disassemble_function",
+      "read_only": true
     },
     {
       "category": "emulation",
       "category_description": "Targeted function emulation for hash resolution, crypto analysis, and controlled execution of isolated code paths",
       "description": "Emulate a single function with controlled register/memory inputs. Returns final register state after execution. Ideal for understanding hash functions, crypto routines, or any pure-computation code path.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2722,12 +2869,14 @@
           "type": "string"
         }
       ],
-      "path": "/emulate_function"
+      "path": "/emulate_function",
+      "read_only": true
     },
     {
       "category": "emulation",
       "category_description": "Targeted function emulation for hash resolution, crypto analysis, and controlled execution of isolated code paths",
       "description": "Brute-force API hash resolution. Emulates a hash function with each candidate API name and returns the one that produces the target hash. Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -2792,7 +2941,8 @@
           "type": "string"
         }
       ],
-      "path": "/emulate_hash_batch"
+      "path": "/emulate_hash_batch",
+      "read_only": true
     },
     {
       "category": "program",
@@ -2840,6 +2990,7 @@
       "category": "malware",
       "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
       "description": "Enhanced IOC extraction with context",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2851,12 +3002,14 @@
           "type": "string"
         }
       ],
-      "path": "/extract_iocs_with_context"
+      "path": "/extract_iocs_with_context",
+      "read_only": true
     },
     {
       "category": "malware",
       "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
       "description": "Detect anti-analysis and anti-debug techniques",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2868,12 +3021,14 @@
           "type": "string"
         }
       ],
-      "path": "/find_anti_analysis_techniques"
+      "path": "/find_anti_analysis_techniques",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Find gaps of undefined/unanalyzed bytes in executable memory not covered by any function body. Useful for discovering missed functions in firmware and embedded binaries. Reports each contiguous uncovered range with its size, content type, and the nearest functions on each side.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -2909,7 +3064,8 @@
           "type": "string"
         }
       ],
-      "path": "/find_code_gaps"
+      "path": "/find_code_gaps",
+      "read_only": true
     },
     {
       "category": "datatype",
@@ -2982,6 +3138,7 @@
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Identify unreachable code blocks",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3000,7 +3157,8 @@
           "type": "string"
         }
       ],
-      "path": "/find_dead_code"
+      "path": "/find_dead_code",
+      "read_only": true
     },
     {
       "category": "listing",
@@ -3126,6 +3284,7 @@
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3166,12 +3325,14 @@
           "type": "string"
         }
       ],
-      "path": "/find_next_undefined_function"
+      "path": "/find_next_undefined_function",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Find structurally similar functions",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3198,12 +3359,14 @@
           "type": "string"
         }
       ],
-      "path": "/find_similar_functions"
+      "path": "/find_similar_functions",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3251,12 +3414,14 @@
           "type": "integer"
         }
       ],
-      "path": "/find_similar_functions_fuzzy"
+      "path": "/find_similar_functions_fuzzy",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3276,12 +3441,14 @@
           "type": "string"
         }
       ],
-      "path": "/find_undocumented_by_string"
+      "path": "/find_undocumented_by_string",
+      "read_only": true
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3307,12 +3474,14 @@
           "type": "string"
         }
       ],
-      "path": "/force_decompile"
+      "path": "/force_decompile",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "List all physical address spaces in the program. On programs with multiple address spaces (e.g., embedded targets), use the returned space names to prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. Also check addressable_unit_size: a value > 1 means the space is word-addressed (e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. Do NOT multiply or divide addresses seen in Ghidra output; use them as-is. Overlay spaces are also listed, each marked is_overlay=true with its overlayed_space (base). Address an overlay location as <overlay>::<hex> (e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3324,12 +3493,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_address_spaces"
+      "path": "/get_address_spaces",
+      "read_only": true
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Get assembly pattern context for xref sources",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -3356,7 +3527,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_assembly_context"
+      "path": "/get_assembly_context",
+      "read_only": true
     },
     {
       "category": "comment",
@@ -3406,6 +3578,7 @@
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Get program entry points",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3417,12 +3590,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_entry_points"
+      "path": "/get_entry_points",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Get enum member values",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3441,12 +3616,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_enum_values"
+      "path": "/get_enum_values",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Get external location details by address or DLL name",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3474,12 +3651,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_external_location"
+      "path": "/get_external_location",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -3515,12 +3694,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_field_access_context"
+      "path": "/get_field_access_context",
+      "read_only": true
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Get entire program call graph",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3548,12 +3729,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_full_call_graph"
+      "path": "/get_full_call_graph",
+      "read_only": true
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Traverse call graph from a function. Accepts function name or address.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3595,12 +3778,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_function_call_graph"
+      "path": "/get_function_call_graph",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Get total function count",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3612,12 +3797,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_function_count"
+      "path": "/get_function_count",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3643,7 +3830,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_function_documentation"
+      "path": "/get_function_documentation",
+      "read_only": true
     },
     {
       "category": "documentation",
@@ -3707,6 +3895,7 @@
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3740,11 +3929,12 @@
           "type": "string"
         }
       ],
-      "path": "/get_function_pcode"
+      "path": "/get_function_pcode",
+      "read_only": true
     },
     {
       "category": "function",
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that.",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, get_function_bundle, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3773,7 +3963,7 @@
         },
         {
           "default": "",
-          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
+          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; asking for refs decompiles). Omit or leave empty for the full bundle.",
           "name": "fields",
           "required": false,
           "source": "query",
@@ -3830,6 +4020,7 @@
       "category": "program",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3857,12 +4048,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_language_metadata"
+      "path": "/get_language_metadata",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Get program metadata",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3874,7 +4067,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_metadata"
+      "path": "/get_metadata",
+      "read_only": true
     },
     {
       "category": "program",
@@ -3952,6 +4146,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Get structure field layout",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3970,12 +4165,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_struct_layout"
+      "path": "/get_struct_layout",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Get data type size and info",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -3994,7 +4191,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_type_size"
+      "path": "/get_type_size",
+      "read_only": true
     },
     {
       "category": "getter",
@@ -4019,6 +4217,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "List valid Ghidra data type strings",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4037,12 +4236,14 @@
           "type": "string"
         }
       ],
-      "path": "/get_valid_data_types"
+      "path": "/get_valid_data_types",
+      "read_only": true
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4078,7 +4279,8 @@
           "type": "string"
         }
       ],
-      "path": "/get_xrefs_from"
+      "path": "/get_xrefs_from",
+      "read_only": true
     },
     {
       "category": "xref",
@@ -4136,6 +4338,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Parse C source (structs/unions/enums/typedefs) into the program's data type manager via Ghidra's CParser. Returns how many types were added and any parser messages. Used to load a project's canonical type vocabulary from a generated header.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4162,7 +4365,8 @@
           "type": "string"
         }
       ],
-      "path": "/import_data_types"
+      "path": "/import_data_types",
+      "read_only": false
     },
     {
       "category": "program",
@@ -4259,6 +4463,7 @@
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4294,12 +4499,14 @@
           "type": "string"
         }
       ],
-      "path": "/inspect_memory_content"
+      "path": "/inspect_memory_content",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "List available analyzers",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4311,12 +4518,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_analyzers"
+      "path": "/list_analyzers",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4345,12 +4554,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_bookmarks"
+      "path": "/list_bookmarks",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List available calling conventions",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4362,12 +4573,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_calling_conventions"
+      "path": "/list_calling_conventions",
+      "read_only": true
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4402,12 +4615,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_class_members"
+      "path": "/list_class_members",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4475,12 +4690,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_data_items_by_xrefs"
+      "path": "/list_data_items_by_xrefs",
+      "read_only": true
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "List all program-wide function tag definitions with their use counts.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4508,12 +4725,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_function_tags"
+      "path": "/list_function_tags",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4581,7 +4800,8 @@
           "type": "string"
         }
       ],
-      "path": "/list_globals"
+      "path": "/list_globals",
+      "read_only": true
     },
     {
       "category": "program",
@@ -4717,6 +4937,7 @@
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "List available Ghidra scripts",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4728,12 +4949,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_scripts"
+      "path": "/list_scripts",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals — it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4769,12 +4992,14 @@
           "type": "string"
         }
       ],
-      "path": "/list_shadowed_globals"
+      "path": "/list_shadowed_globals",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "List defined strings with optional filter",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -4810,26 +5035,32 @@
           "type": "string"
         }
       ],
-      "path": "/list_strings"
+      "path": "/list_strings",
+      "read_only": true
     },
     {
       "category": "utility",
-      "description": "HTTP server health: pool stats, uptime, memory, active request count",
+      "description": "Server health: kind (gui/headless), build, current program, uptime, HTTP pool, memory, endpoint count",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/mcp/health"
+      "path": "/mcp/health",
+      "read_only": true
     },
     {
       "category": "utility",
       "description": "Machine-readable API schema with endpoint metadata",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/mcp/schema"
+      "path": "/mcp/schema",
+      "read_only": true
     },
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Bulk merge: copy ALL RE documentation from one program to another at matching addresses, in a single server-side transaction. Categories: function names + signatures + plate comments + locals + calling convention + no-return + tags; standalone data types; data definitions (typed globals); plate comments at any address; comments at all 4 types (EOL/PRE/POST/REPEATABLE) on instructions AND data; labels & globals (with namespace preservation); external locations (ordinal renames); bookmarks; equates. Designed for the orphan-rescue workflow: source is typically '<name>_recovered', target is the original '<name>.dll'. Idempotent — re-running on an already-merged target only fills gaps. Set dry_run=true to count without writing.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4855,7 +5086,8 @@
           "type": "boolean"
         }
       ],
-      "path": "/merge_program_documentation"
+      "path": "/merge_program_documentation",
+      "read_only": false
     },
     {
       "category": "datatype",
@@ -4911,6 +5143,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Move data type to category",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4936,12 +5169,14 @@
           "type": "string"
         }
       ],
-      "path": "/move_data_type_to_category"
+      "path": "/move_data_type_to_category",
+      "read_only": false
     },
     {
       "category": "project",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Move a program file to a different folder in the project, preserving all analysis and documentation. Refuses when the program has unsaved changes -- call save_program first -- rather than discarding them. A program that is open but clean is closed, moved, then reopened at its new path.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4959,12 +5194,14 @@
           "type": "string"
         }
       ],
-      "path": "/move_file"
+      "path": "/move_file",
+      "read_only": false
     },
     {
       "category": "project",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Move a project folder (and everything under it) into another folder. Refuses to move a folder into itself or into its own descendant, which would orphan the subtree.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -4982,7 +5219,8 @@
           "type": "string"
         }
       ],
-      "path": "/move_folder"
+      "path": "/move_folder",
+      "read_only": false
     },
     {
       "category": "program",
@@ -5012,13 +5250,15 @@
     },
     {
       "category": "headless",
-      "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params.",
+      "category_description": "Headless server program management (no GUI required)",
+      "description": "Open a Ghidra project: a local .gpr/directory, or a shared Ghidra Server repository via ghidra://host[:port]/repo (creates a persistent local shared project under ~/.ghidra-mcp/shared-projects/ keyed by host_port_repo, overridable with GHIDRA_MCP_SHARED_PROJECT_DIR). Does not auto-open repository files — max ~5 shared-server programs open at once; opening 20+ crashes Ghidra. Requires /server/connect first for URL opens. The local tree mirrors YOUR working copy (not other users' checkins until you refresh).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Path to the project: its .gpr file or the project directory holding it.",
+          "description": "Path to an existing project: either its .gpr file, the project directory holding it, or a ghidra://host[:port]/repo URL for a shared Ghidra Server repository.",
           "name": "path",
-          "required": false,
+          "required": true,
           "source": "body",
           "type": "string"
         },
@@ -5037,11 +5277,13 @@
           "type": "string"
         }
       ],
-      "path": "/open_project"
+      "path": "/open_project",
+      "read_only": false
     },
     {
       "category": "system",
       "description": "Temporarily enable, disable, or query scoped automation prompt handling",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5069,12 +5311,14 @@
           "type": "integer"
         }
       ],
-      "path": "/prompt_policy"
+      "path": "/prompt_policy",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -5102,12 +5346,14 @@
           "type": "string"
         }
       ],
-      "path": "/read_memory"
+      "path": "/read_memory",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Trigger full auto-analysis on a program",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5119,12 +5365,14 @@
           "type": "string"
         }
       ],
-      "path": "/reanalyze"
+      "path": "/reanalyze",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5174,12 +5422,14 @@
           "type": "string"
         }
       ],
-      "path": "/recreate_struct"
+      "path": "/recreate_struct",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition — use delete_function_tag for that. Replaces batch_remove_function_tags.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -5222,12 +5472,14 @@
           "type": "string"
         }
       ],
-      "path": "/remove_function_tag"
+      "path": "/remove_function_tag",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Remove an option from a program option group. Built-in registered options may be re-created with defaults by Ghidra; primarily for clearing custom options. Call save_program to persist.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -5253,12 +5505,14 @@
           "type": "string"
         }
       ],
-      "path": "/remove_program_option"
+      "path": "/remove_program_option",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Remove the value stored at a single address in a property map. Call save_program to persist.",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -5285,12 +5539,14 @@
           "type": "string"
         }
       ],
-      "path": "/remove_property"
+      "path": "/remove_property",
+      "read_only": false
     },
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
       "description": "Remove memory cross-reference(s) from one address to another (the inverse of add_memory_reference). Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references — the response reports each removed reference's source_type. On multi-space programs, prefix addresses with the space name (mem:1000).",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -5326,12 +5582,14 @@
           "type": "string"
         }
       ],
-      "path": "/remove_reference"
+      "path": "/remove_reference",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Remove a field from a structure (by the name you created it with, even after Hungarian auto-prefixing).",
+      "destructive": true,
       "method": "POST",
       "params": [
         {
@@ -5357,12 +5615,14 @@
           "type": "string"
         }
       ],
-      "path": "/remove_struct_field"
+      "path": "/remove_struct_field",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5388,12 +5648,14 @@
           "type": "string"
         }
       ],
-      "path": "/rename_data_type"
+      "path": "/rename_data_type",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Rename a function identified by name OR address. Runs the full naming-quality gate (verb-tier specificity + token-subset collision) with an optional strict_mode override. Replaces rename_function_by_address.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5432,7 +5694,8 @@
           "type": "string"
         }
       ],
-      "path": "/rename_function"
+      "path": "/rename_function",
+      "read_only": false
     },
     {
       "category": "symbol",
@@ -5500,6 +5763,7 @@
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5517,7 +5781,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_functions reports (parameters, locals, decompiled_code), not the raw listing's.",
+          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_function_variables and decompile_function report, not the raw listing's.",
           "name": "variable_renames",
           "required": true,
           "source": "body",
@@ -5540,12 +5804,14 @@
           "type": "string"
         }
       ],
-      "path": "/rename_variables"
+      "path": "/rename_variables",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5587,12 +5853,14 @@
           "type": "string"
         }
       ],
-      "path": "/resize_struct"
+      "path": "/resize_struct",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5619,7 +5887,8 @@
           "type": "string"
         }
       ],
-      "path": "/resolve_duplicate_type"
+      "path": "/resolve_duplicate_type",
+      "read_only": false
     },
     {
       "category": "project",
@@ -5657,6 +5926,7 @@
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Trigger auto-analysis on program",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5668,12 +5938,14 @@
           "type": "string"
         }
       ],
-      "path": "/run_analysis"
+      "path": "/run_analysis",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5716,12 +5988,14 @@
           "type": "string"
         }
       ],
-      "path": "/run_ghidra_script"
+      "path": "/run_ghidra_script",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -5748,20 +6022,24 @@
           "type": "string"
         }
       ],
-      "path": "/run_script_inline"
+      "path": "/run_script_inline",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Save all open programs",
+      "destructive": false,
       "method": "GET",
       "params": [],
-      "path": "/save_all_programs"
+      "path": "/save_all_programs",
+      "read_only": false
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Save current program",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -5773,12 +6051,14 @@
           "type": "string"
         }
       ],
-      "path": "/save_program"
+      "path": "/save_program",
+      "read_only": false
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Search for byte patterns with masks",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -5805,12 +6085,14 @@
           "type": "string"
         }
       ],
-      "path": "/search_byte_patterns"
+      "path": "/search_byte_patterns",
+      "read_only": true
     },
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
       "description": "Search for instructions by mnemonic and/or operand substring. Complement to /search_byte_patterns (byte-level); this matches after Ghidra has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without knowing the encoding. Case-insensitive substring match on both fields. Returns {address, function, mnemonic, operands, bytes} per match.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -5854,12 +6136,14 @@
           "type": "string"
         }
       ],
-      "path": "/search_instructions"
+      "path": "/search_instructions",
+      "read_only": true
     },
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
       "description": "Search strings by regex pattern.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -5910,7 +6194,8 @@
           "type": "string"
         }
       ],
-      "path": "/search_strings"
+      "path": "/search_strings",
+      "read_only": true
     },
     {
       "category": "server",
@@ -6245,6 +6530,7 @@
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6280,12 +6566,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_bookmark"
+      "path": "/set_bookmark",
+      "read_only": false
     },
     {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
       "description": "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6321,12 +6609,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_comment"
+      "path": "/set_comment",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6356,12 +6646,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_function_no_return"
+      "path": "/set_function_no_return",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6396,12 +6688,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_function_prototype"
+      "path": "/set_function_prototype",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Update the comment/description on an existing program-wide function tag.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6427,12 +6721,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_function_tag_comment"
+      "path": "/set_function_tag_comment",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Type the implicit 'this' of a __thiscall/__fastcall member function by associating the function with its class. Ghidra's auto-'this' (ECX on x86) is an immutable auto-parameter; with auto-storage it derives its type from the function's parent Class namespace, matched by name to a same-named structure. This tool finds/creates a class namespace for the struct and moves the function into it (no custom storage). Pass 'MyClass *' or 'MyClass'; the structure MyClass must already exist (create_struct). On programs with multiple address spaces, prefix function_address with the space name (mem:1000).",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6462,7 +6758,8 @@
           "type": "string"
         }
       ],
-      "path": "/set_function_this_type"
+      "path": "/set_function_this_type",
+      "read_only": false
     },
     {
       "category": "datatype",
@@ -6540,6 +6837,7 @@
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Set the base address of the program (rebases all addresses)",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6558,7 +6856,76 @@
           "type": "string"
         }
       ],
-      "path": "/set_image_base"
+      "path": "/set_image_base",
+      "read_only": false
+    },
+    {
+      "category": "program",
+      "category_description": "Program management, script execution, memory read, bookmarks, save",
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "default": "",
+          "description": "Block name as the memory map shows it (e.g. ram, FLASH). Give this or address.",
+          "name": "block",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Any address inside the block, 0x<hex> or <space>:<hex>. Give this or block.",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "New read permission; omit to leave it as it is.",
+          "name": "read",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "New write permission; omit to leave it as it is. false on a flash block is what makes literal-pool constants fold.",
+          "name": "write",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "New execute permission; omit to leave it as it is.",
+          "name": "execute",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "New volatile flag (contents change outside program flow, e.g. MMIO); omit to leave it as it is.",
+          "name": "volatile",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/set_memory_block",
+      "read_only": false
     },
     {
       "category": "program",
@@ -6654,6 +7021,7 @@
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6693,12 +7061,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_variable_storage"
+      "path": "/set_variable_storage",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6713,7 +7083,7 @@
           "aliases": [
             "parameter_name"
           ],
-          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_functions fields=parameters,locals lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
+          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_function_variables lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
           "name": "variable_name",
           "required": true,
           "source": "body",
@@ -6735,12 +7105,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_variable_type"
+      "path": "/set_variable_type",
+      "read_only": false
     },
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6772,12 +7144,14 @@
           "type": "string"
         }
       ],
-      "path": "/set_variables"
+      "path": "/set_variables",
+      "read_only": false
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "AI-assisted field name suggestions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "POST",
       "params": [
         {
@@ -6805,12 +7179,14 @@
           "type": "string"
         }
       ],
-      "path": "/suggest_field_names"
+      "path": "/suggest_field_names",
+      "read_only": true
     },
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Switch MCP context to a different program",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -6821,7 +7197,8 @@
           "type": "string"
         }
       ],
-      "path": "/switch_program"
+      "path": "/switch_program",
+      "read_only": false
     },
     {
       "category": "utility",
@@ -6853,6 +7230,7 @@
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -6880,12 +7258,14 @@
           "type": "string"
         }
       ],
-      "path": "/validate_data_type"
+      "path": "/validate_data_type",
+      "read_only": true
     },
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "destructive": false,
       "method": "GET",
       "params": [
         {
@@ -6925,7 +7305,8 @@
           "type": "string"
         }
       ],
-      "path": "/validate_function_prototype"
+      "path": "/validate_function_prototype",
+      "read_only": true
     }
   ]
 }

@@ -792,6 +792,11 @@ public final class ServiceUtils {
     public static ProgramOrError getActiveProgramOrError(ProgramProvider provider) {
         Program program = provider.getCurrentProgram();
         if (program == null) {
+            // Distinguish "nothing is open" from "several are open and none is
+            // active". Headless no longer has a current-program concept, so this
+            // returns null the moment a second program opens — and answering
+            // "No program loaded." while listing two loaded programs is a message
+            // that contradicts its own evidence.
             Program[] all = provider.getAllOpenPrograms();
             String message = (all != null && all.length > 1)
                     ? "Multiple programs open and none is active; 'program' is required."

@@ -631,6 +631,37 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         self.assertEqual(bridge.state._active_socket, inst["socket"])
         self.assertIsNone(bridge.state._active_tcp)
 
+    def test_a_reconnect_keeps_the_groups_the_session_loaded(self):
+        """Found live: after a server restart the bridge re-registered only the default
+        groups, and the next call to a load_tool_group()-ed tool returned "Unknown tool"."""
+        import bridge_mcp_ghidra as bridge
+
+        inst = self._instance(url="http://127.0.0.1:8089")
+        st = bridge.state
+        saved = (st._lazy_mode, set(st._default_groups), set(st._loaded_groups))
+        st._lazy_mode = True
+        # In place: other code holds these set objects.
+        st._default_groups.clear()
+        st._default_groups.update({"listing", "function", "program"})
+        st._loaded_groups.clear()
+        st._loaded_groups.update({"listing", "function", "program", "decompile-checkout"})
+        try:
+            with (
+                patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+                patch.object(bridge.transport, "uds_supported", return_value=True),
+                patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+                patch.object(bridge.registry, "register_tools_from_schema", return_value=0) as register,
+            ):
+                self.assertTrue(bridge.dispatch._try_reconnect())
+            self.assertEqual(register.call_args.kwargs["groups"],
+                             {"listing", "function", "program", "decompile-checkout"})
+        finally:
+            st._lazy_mode = saved[0]
+            st._default_groups.clear()
+            st._default_groups.update(saved[1])
+            st._loaded_groups.clear()
+            st._loaded_groups.update(saved[2])
+
     def test_reconnects_via_tcp_url_when_uds_unsupported(self):
         import bridge_mcp_ghidra as bridge
 

@@ -74,4 +74,17 @@ public class ProgramScriptServiceValidationTest extends TestCase {
             assertTrue(((Response.Err) r).message().contains("Script execution disabled"));
         }
     }
+
+    public void testSetMemoryBlockNeedsSomethingToChange() {
+        Response r = scripts.setMemoryBlock("ram", "", null, null, null, null, "");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("nothing to change"));
+    }
+
+    public void testSetMemoryBlockNeedsExactlyOneOfBlockAndAddress() {
+        Response neither = scripts.setMemoryBlock("", "", null, false, null, null, "");
+        Response both = scripts.setMemoryBlock("ram", "0x08005000", null, false, null, null, "");
+        assertTrue(((Response.Err) neither).message().contains("exactly one of block or address"));
+        assertTrue(((Response.Err) both).message().contains("exactly one of block or address"));
+    }
 }

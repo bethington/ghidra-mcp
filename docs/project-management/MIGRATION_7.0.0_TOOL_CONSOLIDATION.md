@@ -131,10 +131,35 @@ keeps its own single-item call unchanged and gains the removed tool's job.
 | `debugger_step_into()` | `debugger_step` | `debugger_step(kind="into")` |
 | `debugger_step_over()` | `debugger_step` | `debugger_step(kind="over")` |
 | `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
+| `get_function_tags(function)` | `get_functions` | `get_functions(function, fields="tags")`; `tags` is a list of names, and is part of the default bundle |
+| `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)`, or several names for any-of; every result also carries its `tags` |
+| `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`; attaching creates the definition |
 
 The bridge's own `debugger_step_into` / `debugger_step_over` proxies, which forward to the
 external debugger server, are unaffected: only the GUI plugin's `/debugger/step_*` routes
 folded.
+
+## For consumers outside this repository (fun-doc, d2-game-exe)
+
+This repository no longer contains fun-doc, so nothing here catches a break on that side.
+Search the consumer for each item.
+
+- **Retired and never coming back:** `/decompile_function` (use `get_functions`),
+  `/health`, `/project/info`, `/load_program*`, `/tool/launch_codebrowser`,
+  `/server/version_control/checkin` (use `/checkin_program`).
+- **`/check_connection` is JSON now** (`status`, `server_kind`, `version`, `program`), not
+  plain text; a client comparing it to a literal breaks.
+- **`/server/*` is snake_case only** and answers the same way on both servers:
+  `keep_checked_out`, `checkout_id`, `access_level`. `/server/repository/files` is the
+  server's repository, not the project tree.
+- **A name shared by several functions is an error** that lists their addresses, and a name
+  typed in the wrong case resolves everywhere instead of in some tools.
+- **Every tool listed under "Folds after the consolidation"** is gone. `find_data_types` returns
+  records under `data_types`, not preformatted strings.
+- **Function tags:** `get_function_tags`, `search_functions_by_tag` and
+  `create_function_tag` are gone (`doc_lint`, `conformance_dashboard`, `fun_doc`,
+  `battletest_promoter`, `adversarial_reproof` and `golden_bench` call them). Reads are
+  `get_functions(fields="tags")` and `find_functions(tag=...)`; `list_function_tags` stays.
 
 ## Call-shape changes worth knowing
 
