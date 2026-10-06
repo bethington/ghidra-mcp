@@ -132,26 +132,12 @@ _active_request_handles: set[RequestCancelHandle] = set()
 # Strict program routing
 # --------------------------------------------------------------------------
 
-# When GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1, the bridge refuses any
-# program-scoped call that omits a program selector, so a forgotten one fails
-# loudly instead of silently running against the server's mutable "current
-# program" and hitting the wrong binary. Off by default. (Full rationale in
-# commit 6f85c5e / README.)
+# tools.require_program: refuse any program-scoped call that omits a program
+# selector, so a forgotten one fails loudly instead of silently running against
+# the server's mutable "current program" and hitting the wrong binary. Off by
+# default; settings.connect_groups() sets it from the project's settings and this
+# session's GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM. (Rationale in commit 6f85c5e / README.)
 _require_selectors: bool = False
-
-
-def _init_require_selectors() -> None:
-    """Read GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS once, at import. Set it to 1 to enable."""
-    global _require_selectors
-    _require_selectors = (os.getenv("GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS") or "").strip() == "1"
-    if _require_selectors:
-        logger.info(
-            "Strict program routing enabled (GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1); "
-            "program-scoped calls missing a program selector will be refused"
-        )
-
-
-_init_require_selectors()
 
 
 def get_connection_snapshot() -> ConnectionSnapshot:

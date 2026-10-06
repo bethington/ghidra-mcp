@@ -156,8 +156,15 @@ class TestCliArguments(_CliHarness):
         self.assertTrue(state._lazy_mode)
 
     def test_default_groups_parsed_and_stripped(self):
-        self.run_main("--default-groups", " function , datatype ,")
-        self.assertEqual(state._default_groups, {"function", "datatype"})
+        from bridge_mcp_ghidra import settings
+
+        try:
+            self.run_main("--default-groups", " function , datatype ,")
+            # the flag is this session's tools.autoload; a plain list replaces the project's
+            self.assertEqual(settings.resolve("tools.autoload", {"tools.autoload": ["listing"]}),
+                             ["function", "datatype"])
+        finally:
+            settings.SESSION.pop("tools.autoload", None)
 
     def test_transport_and_port_applied(self):
         mocks = self.run_main("--transport", "streamable-http", "--mcp-port", "9905")

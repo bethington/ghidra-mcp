@@ -927,6 +927,7 @@ class TestAutoConnect(unittest.TestCase):
             patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://127.0.0.1:9999"}),
             patch.object(bridge.transport, "tcp_request", return_value=('{"data":{"project":"Chosen"}}', 200)) as info,
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.settings, "fetch", return_value={}),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             self.assertTrue(bridge._auto_connect(project="Chosen"))

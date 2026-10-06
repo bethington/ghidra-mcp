@@ -145,7 +145,7 @@ The concern is **NOT** about token count. It's about **tool discoverability**:
 
 ### What ghidra-mcp Already Has
 
-- ✓ Tool groups (`GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`)
+- ✓ Tool groups (`tools.autoload`, `load_tool_group`)
 - ✓ Category filtering (20 categories)
 - ✓ Dynamic registration (headless vs. GUI)
 - ✓ Parameter aliases (Issue #210, improves prompt quality)

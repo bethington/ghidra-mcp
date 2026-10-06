@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from . import resources  # noqa: F401  (registers MCP resources on import)
 from . import subscriptions  # noqa: F401  (registers subscribe/unsubscribe handlers)
 from . import server
+from . import settings
 from . import state
 from .config import AUTH_TOKEN, logger
 from .server import mcp
@@ -518,7 +519,8 @@ def main():
         "--default-groups",
         type=str,
         default=None,
-        help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
+        help="This session's tools.autoload: a comma-separated list replaces the project's "
+        "setting, +group/-group adjusts it (default: the project's, else listing,function,program)",
     )
     parser.add_argument(
         "--expose",
@@ -571,7 +573,11 @@ def main():
     # indistinguishable and swallow the env var.
     state._lazy_mode = args.lazy if args.lazy is not None else state.lazy_mode_from_env()
     if args.default_groups is not None:
-        state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
+        # The session's tools.autoload: a plain list replaces the project's, +x/-y adjusts it.
+        settings.SESSION["tools.autoload"] = args.default_groups
+    # Until a project's settings arrive on connect, the session's value over the defaults.
+    state._default_groups = set(settings.resolve("tools.autoload", {}))
+    state._require_selectors = bool(settings.resolve("tools.require_program", {}))
 
     from . import facade as _facade
 
@@ -587,10 +593,9 @@ def main():
         logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
     else:
         logger.info(
-            "Lazy tool loading: only %s on connect. "
-            "Call search_tools()/load_tool_group() for the rest, or pass "
-            "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front.",
-            ",".join(sorted(state._default_groups)),
+            "Lazy tool loading: tools.autoload (and tools.last_loaded, if tools.restore_loaded) "
+            "on connect. Call search_tools()/load_tool_group() for the rest, or pass "
+            "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front."
         )
     if args.tools_page_size < 0:
         parser.error("--tools-page-size must be 0 (no pagination) or a positive count")
