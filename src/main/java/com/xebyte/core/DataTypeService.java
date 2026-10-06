@@ -1,5 +1,10 @@
 package com.xebyte.core;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.*;
@@ -70,6 +75,8 @@ public class DataTypeService {
         String name;
         String type;
         int offset;
+        int size = -1;
+        String comment;
 
         FieldDefinition(String name, String type, int offset) {
             this.name = name;
@@ -396,10 +403,11 @@ public class DataTypeService {
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New structure type name, for example UnitAny or SkillTableEntry") String name,
             @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
-                   description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]") String fieldsJson,
+                    description = "JSON array of fields with name and type, optional decimal/hex offset, size and comment. size cannot stretch a fixed-size type; use arrays. Alternate field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off keys are accepted.") String fieldsJson,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
                    description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "category_path", source = ParamSource.BODY, defaultValue = "", description = "Category for the new structure, e.g. /VTables") String categoryPath) {
         if (name == null || name.isEmpty()) {
             return Response.err("Structure name is required");
         }
@@ -442,13 +450,11 @@ public class DataTypeService {
             DataTypeManager dtm = program.getDataTypeManager();
 
             // Check if struct already exists
-            DataType existingType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
+            DataType existingType = categoryPath == null || categoryPath.isBlank()
+                ? ServiceUtils.findDataTypeByNameInAllCategories(dtm, name)
+                : dtm.getDataType(category(categoryPath), name);
             if (existingType != null) {
-                if (replacePlaceholder && existingType.getLength() <= 1) {
-                    if (!deletePlaceholderType(program, existingType, name, new StringBuilder())) {
-                        return Response.err("Failed to remove 1-byte placeholder '" + existingType.getPathName() + "' before create_struct");
-                    }
-                } else {
+                if (!replacePlaceholder || existingType.getLength() > 1) {
                     return Response.err("Structure with name '" + name + "' already exists"
                             + " (" + existingType.getPathName() + ", " + existingType.getLength()
                             + " bytes). Use replace_placeholder=true for 1-byte stubs, or resolve_duplicate_type.");
@@ -463,6 +469,7 @@ public class DataTypeService {
                     return Response.err("Unknown field type: " + field.type);
                 }
                 resolvedTypes.put(field, fieldType);
+                componentLength(fieldType, field.size);
             }
 
             // Determine if any fields have explicit offsets
@@ -473,10 +480,8 @@ public class DataTypeService {
             if (hasOffsets) {
                 for (Map.Entry<FieldDefinition, DataType> entry : resolvedTypes.entrySet()) {
                     int off = entry.getKey().offset;
-                    int len = entry.getValue().getLength();
-                    if (off >= 0 && off + len > requiredSize) {
-                        requiredSize = off + len;
-                    }
+                    int len = componentLength(entry.getValue(), entry.getKey().size);
+                    if (off >= 0) requiredSize = Math.max(requiredSize, Math.addExact(off, len));
                 }
             }
             final int structInitSize = requiredSize;
@@ -487,8 +492,10 @@ public class DataTypeService {
             // (headless) with transaction commit/rollback handled centrally.
             try {
                 threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
+                    if (existingType != null && !dtm.remove(existingType, null))
+                        throw new IllegalArgumentException("Failed to remove placeholder '" + existingType.getPathName() + "'");
                     ghidra.program.model.data.StructureDataType struct =
-                        new ghidra.program.model.data.StructureDataType(name, structInitSize);
+                        new ghidra.program.model.data.StructureDataType(category(categoryPath), name, structInitSize, dtm);
 
                     for (Map.Entry<FieldDefinition, DataType> entry : resolvedTypes.entrySet()) {
                         FieldDefinition field = entry.getKey();
@@ -496,11 +503,12 @@ public class DataTypeService {
 
                         if (field.offset >= 0 && hasOffsetsFinal) {
                             // Place field at explicit offset
+                            checkFieldRange(struct, field.offset, componentLength(fieldType, field.size), false);
                             struct.replaceAtOffset(field.offset, fieldType,
-                                fieldType.getLength(), field.name, "");
+                                componentLength(fieldType, field.size), field.name, field.comment);
                         } else {
                             // Append to end
-                            struct.add(fieldType, fieldType.getLength(), field.name, "");
+                            struct.add(fieldType, componentLength(fieldType, field.size), field.name, field.comment);
                         }
                     }
 
@@ -545,6 +553,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response createStruct(String name, String fieldsJson, boolean replacePlaceholder, String programName) {
+        return createStruct(name, fieldsJson, replacePlaceholder, programName, "");
+    }
+
     public Response createStruct(String name, String fieldsJson) {
         return createStruct(name, fieldsJson, false, null);
     }
@@ -564,13 +576,14 @@ public class DataTypeService {
             @Param(value = "values", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON object mapping member name to integer value, e.g. "
                                + "{\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal "
-                               + "strings, or 0x-prefixed hex strings; floats and non-numeric strings are "
+                                + "strings, or 0x-prefixed hex strings; also accepts [{name,value},...]. Floats and non-numeric strings are "
                                + "rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any "
                                + "complaint comes back as a warning, not a failure.") String valuesJson,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "4",
                    description = "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). "
                                + "Anything else is rejected.") int size,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "category_path", source = ParamSource.BODY, defaultValue = "", description = "Category for the new enumeration") String categoryPath) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -590,6 +603,17 @@ public class DataTypeService {
 
         try {
             // Parse the values JSON (supports int, string, and hex formats)
+            JsonElement rawValues = JsonParser.parseString(valuesJson);
+            if (rawValues.isJsonArray()) {
+                JsonObject mapped = new JsonObject();
+                for (JsonElement member : rawValues.getAsJsonArray()) {
+                    JsonObject object = member.getAsJsonObject();
+                    String memberName = object.get("name").getAsString();
+                    if (mapped.has(memberName)) throw new IllegalArgumentException("Duplicate enum member: " + memberName);
+                    mapped.add(memberName, object.get("value"));
+                }
+                valuesJson = mapped.toString();
+            }
             Map<String, Long> values = parseValuesJson(valuesJson);
 
             if (values.isEmpty()) {
@@ -601,7 +625,7 @@ public class DataTypeService {
             DataTypeManager dtm = program.getDataTypeManager();
 
             // Check if enum already exists
-            DataType existingType = dtm.getDataType("/" + name);
+            DataType existingType = dtm.getDataType(category(categoryPath), name);
             if (existingType != null) {
                 return Response.err("Enumeration with name '" + name + "' already exists");
             }
@@ -612,7 +636,7 @@ public class DataTypeService {
             try {
                 return threadingStrategy.executeWrite(program, "Create Enumeration: " + name, () -> {
                     ghidra.program.model.data.EnumDataType enumDt =
-                        new ghidra.program.model.data.EnumDataType(name, size);
+                        new ghidra.program.model.data.EnumDataType(category(categoryPath), name, size, dtm);
 
                     for (Map.Entry<String, Long> entry : values.entrySet()) {
                         enumDt.add(entry.getKey(), entry.getValue());
@@ -646,6 +670,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response createEnum(String name, String valuesJson, int size, String programName) {
+        return createEnum(name, valuesJson, size, programName, "");
+    }
+
     public Response createEnum(String name, String valuesJson, int size) {
         return createEnum(name, valuesJson, size, null);
     }
@@ -662,11 +690,12 @@ public class DataTypeService {
                    description = "JSON array of member objects, same shape as create_struct: required "
                                + "keys name and type; field_name/fieldName and "
                                + "field_type/fieldType/data_type/dataType are accepted as alternates. Any "
-                               + "offset key is IGNORED — union members all start at 0. A member whose type "
-                               + "cannot be resolved is skipped and reported under fields_skipped instead "
-                               + "of failing the call. Names get the project's Hungarian prefix applied "
+                                + "offset key is IGNORED — union members all start at 0. Invalid member types "
+                                + "fail the whole transaction. Optional size must match a fixed type's natural size; "
+                                + "comment is preserved. Names get the project's Hungarian prefix applied "
                                + "automatically.") String fieldsJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "category_path", source = ParamSource.BODY, defaultValue = "", description = "Category for the new union") String categoryPath) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -682,7 +711,7 @@ public class DataTypeService {
         try {
             threadingStrategy.executeWrite(program, "Create union", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                UnionDataType union = new UnionDataType(name);
+                UnionDataType union = new UnionDataType(category(categoryPath), name, dtm);
 
                 // Parse fields from JSON using the same method as structs
                 List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
@@ -697,11 +726,10 @@ public class DataTypeService {
                 for (FieldDefinition field : fields) {
                     DataType dt = ServiceUtils.resolveDataType(dtm, field.type);
                     if (dt != null) {
-                        union.add(dt, field.name, null);
+                        union.add(dt, componentLength(dt, field.size), field.name, field.comment);
                         fieldsAdded.add(JsonHelper.mapOf("name", field.name, "type", field.type));
                     } else {
-                        fieldsSkipped.add(JsonHelper.mapOf("name", field.name, "type", field.type,
-                                "reason", "Data type not found"));
+                        throw new IllegalArgumentException("Data type not found: " + field.type);
                     }
                 }
 
@@ -728,6 +756,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response createUnion(String name, String fieldsJson, String programName) {
+        return createUnion(name, fieldsJson, programName, "");
+    }
+
     public Response createUnion(String name, String fieldsJson) {
         return createUnion(name, fieldsJson, null);
     }
@@ -875,17 +907,17 @@ public class DataTypeService {
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Name for the function-definition type. This creates a SIGNATURE in the "
                                + "data type manager; it changes no function in the listing.") String name,
-            @Param(value = "return_type", source = ParamSource.BODY,
+            @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "void",
                    description = "Return type, resolved recursively (pointer chains, arrays, struct "
-                               + "names). Required — pass `void` for no return value.") String returnType,
-            @Param(value = "parameters", source = ParamSource.BODY,
+                                + "names). Defaults to void.") String returnType,
+            @Param(value = "parameters", source = ParamSource.BODY, fieldsJson = true, defaultValue = "[]",
                    description = "JSON array of parameter objects, e.g. "
                                + "[{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. "
-                               + "Only the TYPES are used: parameter names are discarded and the created "
-                               + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
-                               + "a type containing a comma or a colon does not survive it, and a parameter "
-                               + "whose type cannot be resolved is dropped silently.") String parametersJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+                                + "Names and types are preserved. Invalid types fail and roll back the whole "
+                                + "update. Empty array clears arguments on an existing definition.") String parametersJson,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "calling_convention", source = ParamSource.BODY, defaultValue = "", description = "Optional convention for the reusable signature") String convention,
+            @Param(value = "category_path", source = ParamSource.BODY, defaultValue = "", description = "Category for the reusable function definition") String categoryPath) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -910,41 +942,34 @@ public class DataTypeService {
                 }
 
                 // Create function definition
-                FunctionDefinitionDataType funcDef = new FunctionDefinitionDataType(name);
+                DataType existing = dtm.getDataType(category(categoryPath), name);
+                if (existing != null && !(existing instanceof FunctionDefinition))
+                    throw new IllegalArgumentException("Name is taken by another data type: " + name);
+                FunctionDefinition funcDef = existing instanceof FunctionDefinition
+                    ? (FunctionDefinition) existing : new FunctionDefinitionDataType(category(categoryPath), name, dtm);
                 funcDef.setReturnType(returnDataType);
 
                 // Parse parameters if provided
                 if (parametersJson != null && !parametersJson.isEmpty()) {
                     try {
-                        // Simple JSON parsing for parameters
-                        String[] paramPairs = parametersJson.replace("[", "").replace("]", "")
-                                                           .replace("{", "").replace("}", "")
-                                                           .split(",");
-
                         List<ParameterDefinition> params = new ArrayList<>();
-                        for (String paramPair : paramPairs) {
-                            if (paramPair.trim().isEmpty()) continue;
-
-                            String[] parts = paramPair.split(":");
-                            if (parts.length >= 2) {
-                                String paramType = parts[1].replace("\"", "").trim();
-                                DataType paramDataType = ServiceUtils.resolveDataType(dtm, paramType);
-                                if (paramDataType != null) {
-                                    params.add(new ParameterDefinitionImpl(null, paramDataType, null));
-                                }
-                            }
+                        for (JsonElement element : JsonParser.parseString(parametersJson).getAsJsonArray()) {
+                            JsonObject parameter = element.getAsJsonObject();
+                            String paramType = parameter.get("type").getAsString();
+                            DataType paramDataType = ServiceUtils.resolveDataType(dtm, paramType);
+                            if (paramDataType == null) throw new IllegalArgumentException("Unknown parameter type: " + paramType);
+                            String paramName = parameter.has("name") ? parameter.get("name").getAsString() : null;
+                            params.add(new ParameterDefinitionImpl(paramName, paramDataType, null));
                         }
-                        if (!params.isEmpty()) {
-                            funcDef.setArguments(params.toArray(new ParameterDefinition[0]));
-                        }
+                        funcDef.setArguments(params.toArray(new ParameterDefinition[0]));
                         paramCount.set(params.size());
                     } catch (Exception e) {
-                        // If JSON parsing fails, continue without parameters
-                        warnings.add("Could not parse parameters, continuing without them");
+                        throw new IllegalArgumentException("Invalid parameters: " + e.getMessage(), e);
                     }
                 }
 
-                DataType addedFuncDef = dtm.addDataType(funcDef, DataTypeConflictHandler.REPLACE_HANDLER);
+                if (convention != null && !convention.isBlank()) funcDef.setCallingConvention(OverrideService.resolveConvention(program, convention));
+                DataType addedFuncDef = existing != null ? funcDef : dtm.addDataType(funcDef, DataTypeConflictHandler.DEFAULT_HANDLER);
                 createdName.set(addedFuncDef.getName());
                 success.set(true);
                 return null;
@@ -967,6 +992,10 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response createFunctionSignature(String name, String returnType, String parametersJson, String programName) {
+        return createFunctionSignature(name, returnType, parametersJson, programName, "", "");
+    }
+
     public Response createFunctionSignature(String name, String returnType, String parametersJson) {
         return createFunctionSignature(name, returnType, parametersJson, null);
     }
@@ -3164,53 +3193,70 @@ public class DataTypeService {
 
     private List<FieldDefinition> parseFieldsJson(String fieldsJson) {
         List<FieldDefinition> fields = new ArrayList<>();
-
-        if (fieldsJson == null || fieldsJson.isEmpty()) {
-            Msg.error(this, "Fields JSON is null or empty");
-            return fields;
+        JsonArray array = JsonParser.parseString(fieldsJson).getAsJsonArray();
+        if (array.size() == 0 || array.size() > MAX_STRUCT_FIELDS)
+            throw new IllegalArgumentException("fields must contain 1 to " + MAX_STRUCT_FIELDS + " members");
+        Set<String> names = new HashSet<>();
+        for (JsonElement element : array) {
+            JsonObject object = element.getAsJsonObject();
+            Map<String, String> values = new LinkedHashMap<>();
+            for (String key : object.keySet()) {
+                if (!object.get(key).isJsonNull()) values.put(key, object.get(key).getAsString());
+            }
+            String name = firstOf(values, "name", "field_name", "fieldName", "field");
+            String type = firstOf(values, "type", "field_type", "fieldType", "data_type", "dataType");
+            if (name == null || name.isBlank() || type == null || type.isBlank())
+                throw new IllegalArgumentException(badFieldsFormatHint("Every field requires name and type"));
+            name = NamingConventions.applyStructFieldNamingPolicy(name, type);
+            if (!names.add(name)) throw new IllegalArgumentException("Duplicate field name: " + name);
+            String offset = firstOf(values, "offset", "field_offset", "fieldOffset", "off");
+            FieldDefinition field = new FieldDefinition(name, type, offset == null ? -1 : parseNonnegativeInt(offset, "offset"));
+            if (values.containsKey("size")) field.size = parseNonnegativeInt(values.get("size"), "size");
+            field.comment = values.get("comment");
+            fields.add(field);
         }
-
-        try {
-            // Trim and validate JSON array
-            String json = fieldsJson.trim();
-            if (!json.startsWith("[")) {
-                Msg.error(this, "Fields JSON must be an array starting with [, got: " + json.substring(0, Math.min(50, json.length())));
-                return fields;
-            }
-            if (!json.endsWith("]")) {
-                Msg.error(this, "Fields JSON must be an array ending with ]");
-                return fields;
-            }
-
-            // Remove outer brackets
-            json = json.substring(1, json.length() - 1).trim();
-
-            // Parse field objects using proper bracket/brace matching
-            List<String> fieldJsons = parseFieldJsonArray(json);
-            Msg.info(this, "Found " + fieldJsons.size() + " field objects to parse");
-
-            for (String fieldJson : fieldJsons) {
-                FieldDefinition field = parseFieldJsonObject(fieldJson);
-                if (field != null && field.name != null && field.type != null) {
-                    fields.add(field);
-                    Msg.info(this, "  Parsed field: " + field.name + " (" + field.type + ")");
-                } else {
-                    Msg.warn(this, "  Field missing required fields (name/type): " + fieldJson.substring(0, Math.min(50, fieldJson.length())));
-                }
-            }
-
-            if (fields.isEmpty()) {
-                Msg.error(this, "No valid fields parsed from JSON");
-            } else {
-                Msg.info(this, "Successfully parsed " + fields.size() + " field(s)");
-            }
-
-        } catch (Exception e) {
-            Msg.error(this, "Exception parsing fields JSON: " + e.getMessage());
-            e.printStackTrace();
-        }
-
         return fields;
+    }
+
+    static int parseNonnegativeInt(String value, String parameter) {
+        try {
+            int parsed = value.startsWith("0x") || value.startsWith("0X")
+                ? Integer.parseInt(value.substring(2), 16) : new java.math.BigDecimal(value).intValueExact();
+            if (parsed < 0) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException | ArithmeticException e) {
+            throw new IllegalArgumentException(parameter + " must be a nonnegative decimal or hex integer");
+        }
+    }
+
+    static int componentLength(DataType type, int size) {
+        if (type == null) throw new IllegalArgumentException("Unknown data type");
+        int natural = type.getLength();
+        if (size != -1 && (size <= 0 || natural > 0 && size != natural))
+            throw new IllegalArgumentException("size cannot stretch a fixed-size type; use array syntax instead");
+        int length = size == -1 ? natural : size;
+        if (length <= 0) throw new IllegalArgumentException("Type requires a positive explicit size");
+        return length;
+    }
+
+    private static CategoryPath category(String path) {
+        return path == null || path.isBlank() ? CategoryPath.ROOT : new CategoryPath(path);
+    }
+
+    static boolean isPadding(DataType type) {
+        if (type instanceof Array array) return isPadding(array.getDataType());
+        return Undefined.isUndefined(type);
+    }
+
+    static void checkFieldRange(Structure struct, int offset, int length, boolean overwrite) {
+        if (offset < 0 || length <= 0 || (long) offset + length > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Invalid field range");
+        if (overwrite) return;
+        for (DataTypeComponent component : struct.getDefinedComponents()) {
+            if (component.getOffset() < (long) offset + length && component.getEndOffset() >= offset
+                    && !isPadding(component.getDataType()))
+                throw new IllegalArgumentException("Field would overwrite " + component.getDefaultFieldName() + "; pass overwrite=true explicitly");
+        }
     }
 
     /**

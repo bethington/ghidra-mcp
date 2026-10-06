@@ -29,6 +29,18 @@ and folding `/get_version` into `/mcp/health`).
   function's calling convention without rebuilding its prototype or discarding
   custom storage.
 
+### Changed — type editing preserves layouts and references
+
+- Type creators accept a category path; struct/union members retain comments,
+  validate explicit sizes, and accept array/pointer types. A union member with an
+  unknown type fails the call instead of being skipped. Enum creation also accepts
+  an array of `{name,value}` objects.
+- Function signatures retain named parameters and calling conventions and update
+  in place; invalid parameters roll back. Identical typedef creation is a no-op
+  and conflicting typedefs are rejected.
+- Type resolution honors target ABI sizes and qualified category paths, rejects
+  unknown C pointer targets, and preserves placeholders if replacement fails.
+
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
 Reviewing a function took five round trips (`decompile_function`,
