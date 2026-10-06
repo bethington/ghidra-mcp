@@ -168,6 +168,10 @@ public class SymbolLabelService {
         }
     }
 
+    private void runOnProgramThread(Runnable action) throws Exception {
+        threadingStrategy.executeRead(() -> { action.run(); return null; });
+    }
+
     // rename_label merged into rename_symbol(kind=label) in 7.0.0; kept as a helper.
     public Response renameLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -343,7 +347,7 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Batch Create Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
@@ -550,7 +554,7 @@ public class SymbolLabelService {
             final List<String> deletedNames = new ArrayList<>();
             final List<String> errors = new ArrayList<>();
 
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Delete Label");
                 try {
                     for (Symbol symbol : symbols) {
@@ -618,7 +622,7 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Batch Delete Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
@@ -765,7 +769,7 @@ public class SymbolLabelService {
         final AtomicReference<String> successMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 int tx = program.startTransaction("Rename data");
                 try {
                     Listing listing = program.getListing();
@@ -988,7 +992,7 @@ public class SymbolLabelService {
                         AtomicReference<String> errorMsg = new AtomicReference<>();
 
                         try {
-                            SwingUtilities.invokeAndWait(() -> {
+                            runOnProgramThread(() -> {
                                 int tx = program.startTransaction("Rename external location");
                                 try {
                                     Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
@@ -1058,7 +1062,7 @@ public class SymbolLabelService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            runOnProgramThread(() -> {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {
