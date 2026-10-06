@@ -85,10 +85,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
             return action.call();
         }
 
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     }
 
     private Program program;

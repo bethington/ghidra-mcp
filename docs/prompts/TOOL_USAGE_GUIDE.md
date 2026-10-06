@@ -536,3 +536,37 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 The **truth** axis is falsifiability (`fun-doc/falsify.py`): mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. Tier-1 (mechanically certain) findings mark the function `DOC_REFUTED`, stamp an idempotent `[AUDIT falsify:*]` plate flag, force an audit pass seeded with the contradiction, and keep the function in the work queue regardless of its score.
 
 Operationally: treat a high completeness score as "the form is filled in", never as "the content is verified". When a plate carries an `[AUDIT falsify:*]` flag, resolving that contradiction — by correcting the documentation to match the disassembly, never the reverse — takes priority over any score-driven work.
+
+## Shared projects: check out before you edit
+
+On a project bound to a Ghidra Server, a versioned file that is not checked out opens as
+an **in-memory copy** of its latest version. Edits apply, but there is nowhere to save
+them, and they are gone when the program closes. The tools say so:
+
+- `open_program` reports `read_only: true` with a `read_only_reason` naming the checkout.
+- Every edit that succeeds on such a copy carries that reason in `warnings`.
+- `save_program` refuses with the same reason. Ghidra's own message here is "Location
+  does not exist for a save operation!".
+- `close_program(save=true)` refuses rather than close and drop the edits. `save=false`
+  discards them deliberately.
+
+The workflow (the version-control tools are in the `server` group, `checkin_program`
+included):
+
+```python
+server_version_control_checkout(path="/fw/a.dll", exclusive=False)
+open_program(path="/fw/a.dll")      # read_only: false
+# ... edits ...
+save_program(program="/fw/a.dll")   # optional: checkin saves first
+checkin_program(path="/fw/a.dll", comment="named the USB handlers", dry_run=True)  # preview
+checkin_program(path="/fw/a.dll", comment="named the USB handlers")
+```
+
+A checkout of a file that is already open behaves like this:
+
+- **The copy has no edits:** it is closed and reopened on the checkout (`reopened: true`).
+- **The copy has edits:** it is left alone and the response says `reopen_required`.
+  Those edits cannot move into the checkout. Close the copy with `save=false`, reopen it,
+  and redo them.
+- **The file is already checked out:** the checkout answers `already_checked_out`, not
+  an error.

@@ -19,7 +19,6 @@ import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 import javax.swing.SwingUtilities;
-import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -341,7 +340,7 @@ public class DataTypeService {
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     // Common builtin types
                     List<String> builtinTypes = List.of(
@@ -2271,7 +2270,7 @@ public class DataTypeService {
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
@@ -2511,7 +2510,7 @@ public class DataTypeService {
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     // Get data at address to determine structure
                     Data data = program.getListing().getDataAt(addr);
@@ -2622,7 +2621,7 @@ public class DataTypeService {
                     responseRef.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             Msg.error(this, "Thread synchronization error in analyzeStructFieldUsage", e);
             return Response.err("Thread synchronization error: " + e.getMessage());
         }
@@ -2752,7 +2751,7 @@ public class DataTypeService {
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Msg.info(this, "Generating field name suggestions for structure at " + structAddressStr);
 
@@ -2809,7 +2808,7 @@ public class DataTypeService {
                     responseRef.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             Msg.error(this, "Thread synchronization error in suggestFieldNames", e);
             return Response.err("Thread synchronization error: " + e.getMessage());
         }

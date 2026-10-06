@@ -31,8 +31,4 @@ public class NoopThreadingStrategy implements ThreadingStrategy {
           + "not call their methods.");
     }
 
-    @Override
-    public boolean isHeadless() {
-        return true;
-    }
 }

@@ -99,7 +99,11 @@ public class SwingThreadingStrategy implements ThreadingStrategy {
     }
 
     @Override
-    public boolean isHeadless() {
-        return false;
+    public void runOnUi(Runnable action) throws Exception {
+        if (SwingUtilities.isEventDispatchThread()) {
+            action.run();
+        } else {
+            SwingUtilities.invokeAndWait(action);
+        }
     }
 }

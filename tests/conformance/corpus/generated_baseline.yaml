@@ -1255,12 +1255,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: tool_launch_codebrowser
-  tier: write
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: tool_running_tools
   tier: read
   assert:

@@ -32,10 +32,12 @@ import java.nio.file.Paths;
  *       under this root, preventing path traversal. This applies to {@code /import_file}
  *       (and the headless import path). When unset, paths are accepted as-is (pre-v5.4.1
  *       behavior).
- *       <p>Note: {@code /delete_file} and {@code /open_project} operate on Ghidra
- *       <em>project domain</em> paths (e.g. {@code /Vanilla/1.00/D2Common.dll}), not
- *       filesystem paths, so file-root canonicalization does not apply to them; their
- *       analogous containment guard is project-folder scope
+ *       <p>{@code /open_project} takes a filesystem path too (a {@code .gpr} or project
+ *       directory), so it is contained the same way on both servers; a {@code ghidra://}
+ *       URL names a server repository and is not a path. {@code /delete_file} operates
+ *       on Ghidra <em>project domain</em> paths (e.g. {@code /Vanilla/1.00/D2Common.dll}),
+ *       not filesystem paths, so file-root canonicalization does not apply to it; its
+ *       containment guard is project-folder scope
  *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
  *       scope is configured.</li>
  * </ul>

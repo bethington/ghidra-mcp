@@ -91,17 +91,13 @@ public interface ProgramProvider {
     }
 
     /**
-     * The PluginTool this provider works through, when there is one.
+     * The analyst's windows (running CodeBrowsers and their program managers), when there
+     * are any. Headless has none and returns null, which is how GUI-only operations detect
+     * that they cannot run.
      *
-     * <p>Only a seed: callers that need a specific service (a CodeViewer, a
-     * ProgramManager) walk {@code ToolManager.getRunningTools()} from this
-     * tool's project, so the FrontEnd tool is enough even though it carries
-     * neither. Headless has no tool at all and returns null, which is how
-     * GUI-only operations detect that they cannot run.
-     *
-     * @return The tool, or null when running headless
+     * @return The workbench, or null when running headless
      */
-    default ghidra.framework.plugintool.PluginTool getTool() {
+    default Workbench workbench() {
         return null;
     }
 

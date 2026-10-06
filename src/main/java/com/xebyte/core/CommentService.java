@@ -66,7 +66,7 @@ public class CommentService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, transactionName);
                 try {
                     // Empty means REMOVE, which is what a caller passing "" is asking for and
@@ -318,7 +318,7 @@ public class CommentService {
         final AtomicInteger overwrittenCount = new AtomicInteger(0);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Batch Set Comments");
                 try {
                     // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
@@ -487,7 +487,7 @@ public class CommentService {
         final AtomicBoolean plateCleared = new AtomicBoolean(false);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Clear Function Comments");
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);

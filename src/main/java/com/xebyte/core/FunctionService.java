@@ -3318,7 +3318,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                      (length != null ? " with length " + length : "") +
                      (endAddress != null ? " to " + endAddress : ""));
 
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Disassemble Bytes");
                 boolean success = false;
 
@@ -3858,7 +3858,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Batch Rename Variables");
                 // Suppress events during batch operation to prevent re-analysis on each rename
                 WriteTx eventTx = WriteTx.begin(program, "Suppress Events");
@@ -4156,7 +4156,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 WriteTx tx = WriteTx.begin(program, "Set Variables");
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -4358,7 +4358,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         // Get function name for individual operations
         final String[] functionName = new String[1];
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 if (addr != null) {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {

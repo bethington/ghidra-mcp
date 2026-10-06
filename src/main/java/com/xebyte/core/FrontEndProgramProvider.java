@@ -38,6 +38,7 @@ import java.util.Set;
 public class FrontEndProgramProvider extends ProjectProgramProvider {
 
     private final PluginTool tool;
+    private final Workbench workbench;
     // Current program when no CodeBrowser has one: the first program opened on demand,
     // or the one /switch_program selected. CodeBrowser focus always wins over it.
     private volatile Program currentProgram;
@@ -49,6 +50,7 @@ public class FrontEndProgramProvider extends ProjectProgramProvider {
     public FrontEndProgramProvider(PluginTool tool, Object consumer) {
         super(consumer, false);
         this.tool = tool;
+        this.workbench = new Workbench(tool, this);
     }
 
     @Override
@@ -171,7 +173,7 @@ public class FrontEndProgramProvider extends ProjectProgramProvider {
     }
 
     @Override
-    public PluginTool getTool() {
-        return tool;
+    public Workbench workbench() {
+        return workbench;
     }
 }

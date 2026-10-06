@@ -103,17 +103,6 @@ public class ServerManager {
         }
     }
 
-    /** The tool that registered first, or any remaining one. */
-    public PluginTool getActiveTool() {
-        String id = activeToolId.get();
-        if (id != null) {
-            PluginTool t = tools.get(id);
-            if (t != null) return t;
-        }
-        var iter = tools.values().iterator();
-        return iter.hasNext() ? iter.next() : null;
-    }
-
     public boolean isRunning() { return server != null; }
 
     /** Stop the UDS server without deregistering tools. Use for manual stop/restart. */

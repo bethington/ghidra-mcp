@@ -29,12 +29,12 @@ import java.io.IOException;
  * Static facade exposing Ghidra's native {@code .gar} create / restore
  * capability to headless callers (no {@code PluginTool} required).
  */
-public final class HeadlessArchiveBridge {
+public final class ArchiveBridge {
 
     /** Ghidra's canonical archive extension (kept here for callers). */
     public static final String ARCHIVE_EXTENSION = ArchivePlugin.ARCHIVE_EXTENSION;
 
-    private HeadlessArchiveBridge() {
+    private ArchiveBridge() {
         // static-only
     }
 
