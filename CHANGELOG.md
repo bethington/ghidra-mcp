@@ -48,6 +48,15 @@ and folding `/get_version` into `/mcp/health`).
 - `search_data_types` gains an optional kind filter and accepts an empty pattern;
   `get_type_size` reports members, signatures and base types.
 
+### Added — atomic batches for editing tools
+
+- `rename_function` (`renames`) and `create_function` (`items`) gain batch modes;
+  a batch rolls back entirely when any item fails or is rejected by a naming gate.
+  Creating a function at an existing entry with a different name renames it
+  through `rename_function`'s naming-quality gate.
+- Malformed batch entries fail the whole request before dispatch instead of
+  being silently dropped.
+
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
 Reviewing a function took five round trips (`decompile_function`,

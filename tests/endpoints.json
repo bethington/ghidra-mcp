@@ -726,7 +726,8 @@
         "address",
         "name",
         "disassemble_first",
-        "program"
+        "program",
+        "items"
       ],
       "servers": [
         "gui",
@@ -2565,7 +2566,8 @@
         "oldName",
         "new_name",
         "program",
-        "strict_mode"
+        "strict_mode",
+        "renames"
       ],
       "servers": [
         "gui",
