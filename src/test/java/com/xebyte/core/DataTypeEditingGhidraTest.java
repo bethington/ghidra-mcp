@@ -59,6 +59,27 @@ public class DataTypeEditingGhidraTest {
         assertEquals("void", ((FunctionDefinition) program.getDataTypeManager().getDataType("/Types/Callback")).getReturnType().getName());
     }
 
+    @Test public void typedefReplacementAndReferencedDeletionRequireConsent() throws Exception {
+        ok(service.createDerivedType("typedef", "int *", "Alias", 1, ""));
+        ok(service.createDerivedType("typedef", "int *", "Alias", 1, ""));
+        ok(service.createDerivedType("typedef", "char *", "Alias", 1, ""));
+        TypeDef alias = (TypeDef) program.getDataTypeManager().getDataType("/Alias");
+        assertEquals("char *", alias.getBaseDataType().getName());
+        ok(service.createStruct("S", "[{\"name\":\"x\",\"type\":\"int\"}]", false, "", "/Types"));
+        builder.withTransaction(() -> {
+            StructureDataType parent = new StructureDataType("Parent", 0);
+            parent.add(new PointerDataType(structure()), "child", null);
+            program.getDataTypeManager().addDataType(parent, null);
+            try { program.getListing().createData(builder.addr("0x1000"), structure()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+        Response blocked = service.deleteDataType("S", false, "", false);
+        assertTrue(blocked.toJson(), blocked instanceof Response.Err);
+        assertTrue(blocked.toJson().contains("Parent"));
+        assertNotNull(structure());
+        ok(service.deleteDataType("S", false, "", true));
+    }
+
     @Test public void namedUndefinedPaddingCanBeCarvedAndTailFieldsCanGrow() {
         ok(service.createStruct("S", "[{\"name\":\"padding\",\"type\":\"undefined[16]\"}]", false, "", "/Types"));
         ok(service.addStructField("S", "", "", -1, "", "[{\"name\":\"inside\",\"type\":\"uint\",\"offset\":4}]", false));
@@ -72,6 +93,43 @@ public class DataTypeEditingGhidraTest {
         assertEquals(24, matrix.getLength());
         assertEquals(2, ((Array) matrix).getNumElements());
         assertEquals(3, ((Array) ((Array) matrix).getDataType()).getNumElements());
+    }
+
+    @Test public void deletingAnAppliedTypedefRequiresForceAndPreservesDataOnRejection() throws Exception {
+        ok(service.createDerivedType("typedef", "uint", "Alias", 1, ""));
+        DataType alias = program.getDataTypeManager().getDataType("/Alias");
+        builder.withTransaction(() -> {
+            try { program.getListing().createData(builder.addr("0x1000"), new ArrayDataType(alias, 2, alias.getLength())); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+        Response response = service.deleteDataType("Alias", false, "", false);
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertNotNull(program.getListing().getDefinedDataAt(builder.addr("0x1000")));
+        assertSame(alias, program.getDataTypeManager().getDataType("/Alias"));
+        ok(service.deleteDataType("Alias", false, "", true));
+        assertNull(program.getListing().getDefinedDataAt(builder.addr("0x1000")));
+    }
+
+    @Test public void deletingFunctionReturnAndParameterTypesRequiresForce() throws Exception {
+        ok(service.createStruct("S", "[{\"name\":\"value\",\"type\":\"uint\"}]", false, "", "/Types"));
+        builder.setBytes("0x1080", "c3");
+        builder.disassemble("0x1080", 1);
+        builder.createFunction("0x1080");
+        Function function = program.getFunctionManager().getFunctionAt(builder.addr("0x1080"));
+        builder.withTransaction(() -> {
+            try { function.setReturnType(structure(), SourceType.USER_DEFINED); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+        assertTrue(service.deleteDataType("S", false, "", false) instanceof Response.Err);
+        assertEquals(structure(), function.getReturnType());
+        builder.withTransaction(() -> {
+            try {
+                function.setReturnType(VoidDataType.dataType, SourceType.USER_DEFINED);
+                function.addParameter(new ParameterImpl("value", new PointerDataType(structure(), program.getDataTypeManager()), program), SourceType.USER_DEFINED);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        assertTrue(service.deleteDataType("S", false, "", false) instanceof Response.Err);
+        assertNotNull(structure());
     }
 
     @Test public void insertionCarvesAllPaddingAndOverwriteClearsIntersectingFields() {

@@ -41,6 +41,8 @@ and folding `/get_version` into `/mcp/health`).
 - Function signatures retain named parameters and calling conventions and update
   in place; invalid parameters roll back. Identical typedef creation is a no-op
   and conflicting typedefs are rejected.
+- Type deletion checks users and applied data (including typedef/pointer
+  wrappers and function variables/returns) and refuses unless `force=true`.
 - Type resolution honors target ABI sizes and qualified category paths, rejects
   unknown C pointer targets, and preserves placeholders if replacement fails.
 

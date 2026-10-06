@@ -1197,16 +1197,17 @@ public class DataTypeService {
      * Delete a data type from the program
      */
     @McpTool(path = "/delete_data_type", method = "POST",
-            description = "Delete a data type by name. Fails if the type is referenced; use resolve_duplicate_type first to remove unused /Demangler 1-byte stubs when a full type exists.",
+            description = "Delete a data type by name. Reports referencing types and applied locations and refuses deletion unless force=true. Use resolve_duplicate_type for unused demangler stubs.",
             category = "datatype", access = ToolAccess.DESTRUCTIVE)
     public Response deleteDataType(
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Simple name of the type to delete, matched across every category (no "
                                + "/path prefix needed). Deletion fails while anything still references "
-                               + "the type.") String typeName,
+                                + "the type unless force=true.") String typeName,
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "force", source = ParamSource.BODY, defaultValue = "false", description = "Explicitly allow deleting a referenced/applied type") boolean force) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1226,8 +1227,32 @@ public class DataTypeService {
                     return null;
                 }
 
-                // Check if type is in use (simplified check)
-                // Note: Ghidra will prevent deletion if type is in use during remove operation
+                Set<String> users = new TreeSet<>();
+                Set<DataType> visited = new HashSet<>();
+                Deque<DataType> pending = new ArrayDeque<>();
+                pending.add(dataType);
+                visited.add(dataType);
+                while (!pending.isEmpty()) {
+                    for (DataType parent : pending.remove().getParents()) {
+                        if (!visited.add(parent)) continue;
+                        if (parent instanceof Pointer || parent instanceof Array) pending.add(parent);
+                        else users.add(parent.getPathName());
+                    }
+                }
+                int applied = 0;
+                for (Data data : program.getListing().getDefinedData(true)) {
+                    if (referencesType(data.getDataType(), dataType)) applied++;
+                }
+                for (Function function : program.getFunctionManager().getFunctions(true)) {
+                    if (referencesType(function.getReturnType(), dataType))
+                        users.add("return type of " + function.getName() + " at " + function.getEntryPoint());
+                    for (Variable variable : function.getAllVariables()) {
+                        if (referencesType(variable.getDataType(), dataType))
+                            users.add("variable " + variable.getName() + " in " + function.getName() + " at " + function.getEntryPoint());
+                    }
+                }
+                if (!force && (!users.isEmpty() || applied > 0))
+                    throw new IllegalArgumentException("Type is in use: referenced by " + users + "; applied at " + applied + " locations. Pass force=true to delete anyway.");
 
                 boolean deleted = dtm.remove(dataType, null);
                 if (deleted) {
@@ -1262,12 +1287,28 @@ public class DataTypeService {
     }
 
     // Backward compatibility overload
+    public Response deleteDataType(String typeName, boolean resolveDemanglerDuplicate, String programName) {
+        return deleteDataType(typeName, resolveDemanglerDuplicate, programName, false);
+    }
+
     public Response deleteDataType(String typeName) {
         return deleteDataType(typeName, false, null);
     }
 
     public Response deleteDataType(String typeName, String programName) {
         return deleteDataType(typeName, false, programName);
+    }
+
+    private static boolean referencesType(DataType type, DataType target) {
+        Set<DataType> visited = new HashSet<>();
+        while (type != null && visited.add(type)) {
+            if (type.equals(target)) return true;
+            if (type instanceof Array array) type = array.getDataType();
+            else if (type instanceof TypeDef typedef) type = typedef.getDataType();
+            else if (type instanceof Pointer pointer) type = pointer.getDataType();
+            else return false;
+        }
+        return false;
     }
 
     /**
