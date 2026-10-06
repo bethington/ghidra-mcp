@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
+### Fixed — class and namespace rename resolution
+
+- `rename_symbol(kind=class|namespace)` resolves addressless namespaces through
+  direct global lookup and member/ancestor namespaces, restoring class renames that
+  previously reported “not found”. Ambiguous bare names still require qualification.
+
 **215 tools** — 201 served by the GUI plugin, 191 by the headless server, 177
 by both. Stacked on #567 (`/get_functions` replaced nine function readers);
 this pass folds listing, xref, tag, utility, and GUI-cursor tools. The
@@ -54,6 +60,12 @@ and folding `/get_version` into `/mcp/health`).
   a batch rolls back entirely when any item fails or is rejected by a naming gate.
   Creating a function at an existing entry with a different name renames it
   through `rename_function`'s naming-quality gate.
+- `rename_symbol` gains a `renames` batch mode and `kind=namespace|class`, which
+  renames the namespace symbol rather than a similarly named structure or function.
+  `create_label` gains `namespace` (created if missing) and `primary` (replaces
+  user-defined labels at the address) options, in single and bulk mode.
+- Symbol helpers dispatch through the injected threading strategy, so GUI batches
+  no longer call `invokeAndWait` recursively on the EDT.
 - Malformed batch entries fail the whole request before dispatch instead of
   being silently dropped.
 
