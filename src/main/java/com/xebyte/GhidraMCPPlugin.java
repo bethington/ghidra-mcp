@@ -59,6 +59,7 @@ import ghidra.program.model.block.CodeBlockIterator;
 import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
 
+import com.xebyte.core.VersionInfo;
 import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.McpHttpServer;
@@ -99,87 +100,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
-// Load version from properties file (populated by Maven during build)
-class VersionInfo {
-    private static String VERSION = "7.0.0"; // Default fallback
-    private static String APP_NAME = "GhidraMCP";
-    private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
-    private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
-    private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    // Default fallback when the plugin has not yet finished registering its
-    // scanner-driven endpoints (e.g., headless usage that imports this class
-    // without running the GUI activation path). The live value is set via
-    // setEndpointCount() once the scanner has enumerated everything.
-    private static volatile int ENDPOINT_COUNT = 177;
-
-    static {
-        // v5.4.2: loading "/version.properties" from the classpath root was
-        // hitting a sibling version.properties exported by another Ghidra
-        // module, which resolved first and returned stale values. Move the
-        // resource under the com/xebyte/ package path so the lookup is scoped
-        // to this plugin's classes.
-        try (InputStream input = GhidraMCPPlugin.class
-                .getResourceAsStream("/com/xebyte/version.properties")) {
-            if (input != null) {
-                Properties props = new Properties();
-                props.load(input);
-                VERSION = props.getProperty("app.version", VERSION);
-                APP_NAME = props.getProperty("app.name", APP_NAME);
-                GHIDRA_VERSION = props.getProperty("ghidra.version", GHIDRA_VERSION);
-                BUILD_TIMESTAMP = props.getProperty("build.timestamp", BUILD_TIMESTAMP);
-                BUILD_NUMBER = props.getProperty("build.number", BUILD_NUMBER);
-            }
-        } catch (IOException e) {
-            // Use defaults (hard-coded above) if file not found.
-        }
-    }
-
-    public static String getVersion() {
-        return VERSION;
-    }
-
-    public static String getAppName() {
-        return APP_NAME;
-    }
-
-    public static String getGhidraVersion() {
-        return GHIDRA_VERSION;
-    }
-
-    public static String getBuildTimestamp() {
-        return BUILD_TIMESTAMP;
-    }
-
-    public static String getBuildNumber() {
-        return BUILD_NUMBER;
-    }
-
-    public static int getEndpointCount() {
-        return ENDPOINT_COUNT;
-    }
-
-    /**
-     * Update the live endpoint count after the AnnotationScanner has
-     * enumerated everything. Keeps {@code /mcp/health.version.endpoint_count}
-     * in sync with {@code /mcp/schema} so version-banner output and
-     * release smoke tests don't drift from reality.
-     */
-    public static void setEndpointCount(int count) {
-        ENDPOINT_COUNT = count;
-    }
-
-    public static String getFullVersion() {
-        return VERSION + " (build " + BUILD_NUMBER + ", " + BUILD_TIMESTAMP + ")";
-    }
-}
-
 @PluginInfo(
     status = PluginStatus.RELEASED,
     packageName = ghidra.framework.main.UtilityPluginPackage.NAME,
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 201 endpoints for reverse engineering automation. " +
+                  "Provides 203 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -190,8 +117,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     // Static singleton: one TCP server shared across all tool windows (fixes #35).
     // Serves this plugin's own FrontEnd-mode services; the socket is ServerManager's.
-    private static final long serverStartMillis = System.currentTimeMillis();
     private static int instanceCount = 0;
+    // What this plugin's /mcp/schema serves, for the Server Status dialog.
+    private int endpointCount;
     // Live plugin instances. The TCP server's route lambdas capture the
     // owning instance's services (programProvider, listingService, …); when
     // that instance is disposed first while others survive, the routes are
@@ -266,6 +194,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private com.xebyte.core.GhidraMCPAuthenticator authenticator;
 
     // Service layer for delegated operations
+    private final com.xebyte.core.CoreServices services;
     private final com.xebyte.core.ListingService listingService;
     private final com.xebyte.core.CommentService commentService;
     private final com.xebyte.core.SymbolLabelService symbolLabelService;
@@ -276,10 +205,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private final com.xebyte.core.AnalysisService analysisService;
     private final com.xebyte.core.MalwareSecurityService malwareSecurityService;
     private final com.xebyte.core.ProgramScriptService programScriptService;
-    private final com.xebyte.core.EmulationService emulationService;
     private final com.xebyte.core.DebuggerService debuggerService;
     private final com.xebyte.core.PromptPolicyService promptPolicyService;
-    private final com.xebyte.core.FunctionBundleService functionBundleService;
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -289,24 +216,21 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // Initialize service layer — FrontEnd mode: opens programs on-demand from project
         this.programProvider = new FrontEndProgramProvider(tool, this);
         this.threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
-        this.listingService = new com.xebyte.core.ListingService(programProvider);
-        this.commentService = new com.xebyte.core.CommentService(programProvider, threadingStrategy);
-        this.symbolLabelService = new com.xebyte.core.SymbolLabelService(programProvider, threadingStrategy);
-        this.functionService = new com.xebyte.core.FunctionService(programProvider, threadingStrategy);
-        this.xrefCallGraphService = new com.xebyte.core.XrefCallGraphService(programProvider, threadingStrategy);
-        this.dataTypeService = new com.xebyte.core.DataTypeService(programProvider, threadingStrategy);
-        this.documentationHashService = new com.xebyte.core.DocumentationHashService(programProvider, threadingStrategy, new com.xebyte.core.BinaryComparisonService());
-        this.documentationHashService.setFunctionService(this.functionService);
-        this.analysisService = new com.xebyte.core.AnalysisService(programProvider, threadingStrategy, this.functionService);
-        this.malwareSecurityService = new com.xebyte.core.MalwareSecurityService(programProvider, threadingStrategy);
-        this.programScriptService = new com.xebyte.core.ProgramScriptService(programProvider, threadingStrategy);
-        this.emulationService = new com.xebyte.core.EmulationService(programProvider, threadingStrategy);
+        this.services = com.xebyte.core.CoreServices.build(programProvider, threadingStrategy);
+        this.listingService = services.listing();
+        this.commentService = services.comment();
+        this.symbolLabelService = services.symbolLabel();
+        this.functionService = services.function();
+        this.xrefCallGraphService = services.xrefCallGraph();
+        this.dataTypeService = services.dataType();
+        this.documentationHashService = services.documentationHash();
+        this.analysisService = services.analysis();
+        this.malwareSecurityService = services.malwareSecurity();
+        this.programScriptService = services.programScript();
         this.debuggerService = new com.xebyte.core.DebuggerService(programProvider, threadingStrategy, tool);
         this.promptPolicyService = new com.xebyte.core.PromptPolicyService();
-        this.functionBundleService = new com.xebyte.core.FunctionBundleService(programProvider, threadingStrategy, this.functionService);
         Msg.info(this, "============================================");
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
-        Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
         Msg.info(this, "============================================");
 
         // Server authenticator: ensure credentials are registered before any project opens.
@@ -538,7 +462,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                     "TCP: " + tcpStatus + "\n" +
                     "Strict naming enforcement: " + NamingPolicy.getInstance().isStrictNamingEnforcement() + "\n" +
                     "Version: " + VersionInfo.getFullVersion() + "\n" +
-                    "Endpoints: " + VersionInfo.getEndpointCount();
+                    "Endpoints: " + endpointCount;
                 Msg.showInfo(getClass(), null, "GhidraMCP", message);
             }
         };
@@ -561,17 +485,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private AnnotationScanner buildScanner() {
         AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
-            listingService, functionService, commentService, symbolLabelService,
-            xrefCallGraphService, dataTypeService, analysisService,
-            documentationHashService, malwareSecurityService, programScriptService,
-            emulationService, debuggerService, promptPolicyService, functionBundleService);
+            services.plus(debuggerService, promptPolicyService));
         // The hand-coded routes are live on every transport, but the scanner only
         // knows annotated methods; without this they stay out of /mcp/schema and so
         // out of the bridge's dynamic tool discovery.
         com.xebyte.core.ManualToolDescriptors.addAll(
             scanner, com.xebyte.core.ManualToolDescriptors.SHARED_ROUTES);
-        // /mcp/health's version.endpoint_count must match what /mcp/schema serves.
-        VersionInfo.setEndpointCount(scanner.getDescriptors().size());
+        endpointCount = scanner.getDescriptors().size();
+        Msg.info(this, "Endpoints: " + endpointCount);
         return scanner;
     }
 
@@ -606,18 +527,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             mgr.registerTool(tool, buildScanner(), this::registerHandCodedRoutes,
                 transportConfig());
         }
-    }
-
-    // ----------------------------------------------------------------------------------
-    // Pagination-aware listing (consolidated under listProgramItems)
-    // ----------------------------------------------------------------------------------
-
-    private String listProgramItems(String kind, int offset, int limit, String programName) {
-        return listingService.listProgramItems(kind, offset, limit, programName).toJson();
-    }
-
-    private String listProgramItems(String kind, int offset, int limit) {
-        return listingService.listProgramItems(kind, offset, limit, null).toJson();
     }
 
     private String listDataItemsByXrefs(int offset, int limit, String format, String programName) {
@@ -1297,7 +1206,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     private Map<String, Object> saveEverythingBeforeExit() {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("programs", JsonHelper.parseJson(programScriptService.saveAllOpenPrograms().toJson()));
+        result.put("programs", programScriptService.saveAllOpenPrograms().asEmbeddable());
         result.put("traces", saveAllOpenDebuggerTraces());
         return result;
     }
@@ -1332,6 +1241,17 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
 
         currentTool.close();
+
+        // Closing every tool does NOT exit Ghidra -- the front end outlives them
+        // and the JVM stays up. Measured: /exit_ghidra saved 5 programs, stopped
+        // both servers, deregistered all 3 tools, and then sat there with the
+        // project window still on screen, while the caller had already been told
+        // "exiting Ghidra". Exit is the front end's own operation.
+        try {
+            AppInfo.exitGhidra();
+        } catch (Throwable e) {
+            Msg.error(this, "Tools closed but Ghidra did not exit: " + e.getMessage(), e);
+        }
     }
 
     private Map<String, Object> saveAllOpenDebuggerTraces() {
@@ -1406,7 +1326,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Save a debugger trace, retrying if the attempt races an in-flight
      * transaction on the trace's own domain object -- the same {@code
      * IOException: Unable to lock due to active transaction} documented for
-     * program saves in {@code ProgramScriptService.saveWithRetry}, confirmed
+     * program saves in {@code ProgramSaves.withRetry}, confirmed
      * live against a debugger trace too (2026-07-26): a trace accumulates its
      * own transactions from continuous Trace RMI sync writes (module/register
      * updates), and one can still be open when {@code exit_ghidra} saves on
@@ -1452,17 +1372,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return programScriptService.listProjectFiles(folderPath).toJson();
     }
 
-    /**
-     * Open a program from the current project by path
-     */
-    private String openProgramFromProject(String path) {
-        return programScriptService.openProgramFromProject(path).toJson();
-    }
-
-    private String openProgramFromProject(String path, boolean autoAnalyze) {
-        return programScriptService.openProgramFromProject(path, autoAnalyze).toJson();
-    }
-
     // ====================================================================================
     // FUNCTION HASH INDEX - Cross-binary documentation propagation
     // ====================================================================================
@@ -1494,49 +1403,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * TCP side wraps its Sun exchange in {@link SunHttpExchangeAdapter} at registration.
      */
     private void registerHandCodedRoutes(McpHttpServer http) {
-        // ==========================================================================
-        // HEALTH / METRICS ENDPOINT
-        // Exposes HTTP thread pool saturation, active request count, uptime,
-        // memory. Used by the dashboard to show a "server is struggling" badge
-        // and by regression tests to assert healthy baselines.
-        // ==========================================================================
-        http.route("/mcp/health", exchange -> {
-            int active = http.activeRequests();
-            long uptimeSec = (System.currentTimeMillis() - serverStartMillis) / 1000L;
-            Runtime rt = Runtime.getRuntime();
-            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
-            long totalMb = rt.totalMemory() / (1024L * 1024L);
-            long maxMb = rt.maxMemory() / (1024L * 1024L);
-            Program current = getCurrentProgram();
-
-            sendResponse(exchange, com.xebyte.core.JsonHelper.toJson(
-                com.xebyte.core.JsonHelper.mapOf(
-                    "status", "ok",
-                    "connected", true,
-                    "program", current != null ? current.getName() : null,
-                    "version", com.xebyte.core.JsonHelper.mapOf(
-                        "plugin_version", VersionInfo.getVersion(),
-                        "plugin_name", VersionInfo.getAppName(),
-                        "full_version", VersionInfo.getFullVersion(),
-                        "build_timestamp", VersionInfo.getBuildTimestamp(),
-                        "build_number", VersionInfo.getBuildNumber(),
-                        "ghidra_version", VersionInfo.getGhidraVersion(),
-                        "java_version", System.getProperty("java.version"),
-                        "endpoint_count", VersionInfo.getEndpointCount()),
-                    "uptime_seconds", uptimeSec,
-                    "active_requests", active,
-                    "http_pool", http.poolStats(),
-                    "memory_mb", com.xebyte.core.JsonHelper.mapOf(
-                        "used", usedMb, "total", totalMb, "max", maxMb))));
-        });
+        // /check_connection, /mcp/health and /mcp/instance_info are McpHttpServer's own:
+        // both servers answer them identically, bar server_kind.
 
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
         // ==========================================================================
 
-        http.route("/check_connection", exchange -> {
-            sendResponse(exchange, checkConnection());
-        });
+        // ==========================================================================
+        // GUI-ONLY ENDPOINTS (require PluginTool/CodeBrowser/Swing context)
+        // ==========================================================================
 
         // /open_project — open (or switch to) a Ghidra project from the
         // FrontEnd plugin programmatically. Mirrors the headless server's
@@ -1715,10 +1591,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // PROJECT & TOOL MANAGEMENT ENDPOINTS (4 endpoints)
         // FrontEnd-level operations for project and tool management
         // ==========================================================================
-
-        http.route("/project/info", exchange -> {
-            sendResponse(exchange, getProjectInfo());
-        });
 
         http.route("/tool/running_tools", exchange -> {
             sendResponse(exchange, getRunningTools());
@@ -1950,17 +1822,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
         return dataTypeService.applyDataType(addressStr, typeName, clearExisting).toJson();
-    }
-
-    /**
-     * Check if the plugin is running and accessible
-     */
-    private String checkConnection() {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "Connected: GhidraMCP plugin running, but no program loaded";
-        }
-        return "Connected: GhidraMCP plugin running with program '" + program.getName() + "'";
     }
 
     /**
@@ -2721,6 +2582,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     /**
+     * Validate that batch operations actually persisted by checking current state
+     */
+    /**
      * NEW v1.6.0: Validate function prototype before applying
      */
     private String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
@@ -2819,18 +2683,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
 
     /**
-     * List all external locations (imports, ordinal imports, etc.)
-     */
-    private String listExternalLocations(int offset, int limit, String programName) {
-        return listProgramItems("external_locations", offset, limit, programName);
-    }
-
-    // Backward compatibility overload
-    private String listExternalLocations(int offset, int limit) {
-        return listProgramItems("external_locations", offset, limit);
-    }
-
-    /**
      * Get details of a specific external location
      */
     private String getExternalLocationDetails(String address, String dllName, String programName) {
@@ -2911,28 +2763,28 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
     }
 
+    /**
+     * The Ghidra Server connection, the one thing {@code /server/status} means on both
+     * servers: {@code connected} is whether a server is reachable, never whether a
+     * project is open. The project itself is {@code /get_project_info}.
+     */
     private String getProjectStatusJson() {
         Project project = tool.getProject();
-        if (project == null) {
-            return "{\"connected\": false, \"error\": \"No project open\"}";
-        }
-        ProjectData data = project.getProjectData();
-        RepositoryAdapter repo = getProjectRepository();
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"connected\": true");
-        sb.append(", \"project\": \"").append(escapeJson(project.getName())).append("\"");
-        sb.append(", \"shared\": ").append(repo != null);
+        RepositoryAdapter repo = project != null ? getProjectRepository() : null;
+        Map<String, Object> out = new LinkedHashMap<>();
+        boolean connected = false;
         if (repo != null) {
             try {
-                sb.append(", \"server_connected\": ").append(repo.isConnected());
-                sb.append(", \"server_info\": \"").append(escapeJson(repo.getServerInfo().toString())).append("\"");
+                connected = repo.isConnected();
+                out.put("server_info", repo.getServerInfo().toString());
             } catch (Exception e) {
-                sb.append(", \"server_connected\": false");
+                out.put("last_error", e.getMessage());
             }
+            out.put("repository", repo.getName());
         }
-        sb.append(", \"file_count\": ").append(data.getFileCount());
-        sb.append("}");
-        return sb.toString();
+        out.put("connected", connected);
+        out.put("shared_project", repo != null);
+        return JsonHelper.toJson(out);
     }
 
     private String listProjectFilesJson(String folderPath) {
@@ -3284,67 +3136,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // ==========================================================================
     // PROJECT & TOOL MANAGEMENT HELPERS
     // ==========================================================================
-
-    private String getProjectInfo() {
-        Project project = tool.getProject();
-        if (project == null) {
-            return "{\"error\": \"No project open\"}";
-        }
-        ProjectData data = project.getProjectData();
-        RepositoryAdapter repo = getProjectRepository();
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"project\": \"").append(escapeJson(project.getName())).append("\"");
-        sb.append(", \"shared\": ").append(repo != null);
-        if (repo != null) {
-            try {
-                sb.append(", \"server_connected\": ").append(repo.isConnected());
-                sb.append(", \"server_info\": \"").append(escapeJson(repo.getServerInfo().toString())).append("\"");
-            } catch (Exception e) {
-                sb.append(", \"server_connected\": false");
-            }
-        }
-        sb.append(", \"file_count\": ").append(data.getFileCount());
-
-        // Open programs
-        Program[] openProgs = programProvider.getAllOpenPrograms();
-        sb.append(", \"open_programs\": [");
-        for (int i = 0; i < openProgs.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("\"").append(escapeJson(openProgs[i].getName())).append("\"");
-        }
-        sb.append("]");
-        sb.append(", \"open_program_count\": ").append(openProgs.length);
-
-        // Current program
-        Program current = programProvider.getCurrentProgram();
-        if (current != null) {
-            sb.append(", \"current_program\": \"").append(escapeJson(current.getName())).append("\"");
-        }
-
-        // Running tools
-        try {
-            ghidra.framework.model.ToolManager tm = project.getToolManager();
-            if (tm != null) {
-                PluginTool[] tools = tm.getRunningTools();
-                sb.append(", \"running_tools\": [");
-                boolean hasCodeBrowser = false;
-                for (int i = 0; i < tools.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append("\"").append(escapeJson(tools[i].getName())).append("\"");
-                    if (tools[i].getService(ghidra.app.services.ProgramManager.class) != null) {
-                        hasCodeBrowser = true;
-                    }
-                }
-                sb.append("]");
-                sb.append(", \"codebrowser_active\": ").append(hasCodeBrowser);
-            }
-        } catch (Exception e) {
-            // ToolManager not available
-        }
-
-        sb.append("}");
-        return sb.toString();
-    }
 
     private String getRunningTools() {
         Project project = tool.getProject();

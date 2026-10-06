@@ -131,7 +131,7 @@ public class ServerManager {
         lastScanner = scanner;
         lastGuiEndpoints = guiEndpoints;
         lastConfig = config;
-        server = new McpHttpServer(this::buildInstanceInfo);
+        server = new McpHttpServer("gui", () -> Map.of("tools", tools.size()));
         server.endpoints(scanner);
         // The scanner arrives with its manual descriptors already added (the plugin's
         // buildScanner owns that); adding them here too listed every hand-coded route
@@ -142,51 +142,6 @@ public class ServerManager {
         server.start(config);
     }
 
-    public Map<String, Object> buildInstanceInfo() {
-        PluginTool activeTool = getActiveTool();
-        ghidra.framework.model.Project proj = activeTool != null ? activeTool.getProject() : null;
-
-        var openNames = new java.util.HashSet<String>();
-        if (proj != null) {
-            try {
-                ghidra.framework.model.ToolManager tm = proj.getToolManager();
-                if (tm != null) {
-                    for (PluginTool runningTool : tm.getRunningTools()) {
-                        ghidra.app.services.ProgramManager pm = runningTool.getService(ghidra.app.services.ProgramManager.class);
-                        if (pm != null) {
-                            for (Program p : pm.getAllOpenPrograms()) {
-                                openNames.add(p.getName());
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Msg.warn(this, "Failed to query running tools: " + e.getMessage());
-            }
-        }
-        Map<String, Object> info = instanceInfo(proj, openNames);
-        info.put("tools", tools.size());
-        return info;
-    }
-
-    /**
-     * The project half of the /mcp/instance_info payload the bridge's discovery
-     * reads, shared by the GUI plugin and the headless server.
-     */
-    public static Map<String, Object> instanceInfo(ghidra.framework.model.Project proj,
-            java.util.Set<String> openNames) {
-        var programs = new java.util.ArrayList<Map<String, Object>>();
-        if (proj != null) {
-            collectPrograms(proj.getProjectData().getRootFolder(), openNames, programs);
-        }
-        var info = new LinkedHashMap<String, Object>();
-        info.put("pid", ProcessHandle.current().pid());
-        info.put("project", proj != null ? proj.getName() : "unknown");
-        info.put("project_path", proj != null ? proj.getProjectLocator().toString() : "");
-        info.put("programs", programs);
-        return info;
-    }
-
     private void stopServer() {
         if (server != null) {
             server.stop();
@@ -194,17 +149,4 @@ public class ServerManager {
         }
     }
 
-    private static void collectPrograms(ghidra.framework.model.DomainFolder folder,
-            java.util.Set<String> openNames, java.util.List<Map<String, Object>> out) {
-        for (ghidra.framework.model.DomainFile df : folder.getFiles()) {
-            var entry = new LinkedHashMap<String, Object>();
-            entry.put("name", df.getName());
-            entry.put("path", df.getPathname());
-            entry.put("open", openNames.contains(df.getName()));
-            out.add(entry);
-        }
-        for (ghidra.framework.model.DomainFolder sub : folder.getFolders()) {
-            collectPrograms(sub, openNames, out);
-        }
-    }
 }

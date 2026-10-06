@@ -37,7 +37,7 @@ def failure_message(text: str) -> str | None:
     as a well-formed payload rather than an ``Err``:
 
     * ``{"error": "..."}``            — ``Response.Err`` and the bridge's own failures
-    * ``{"success": false, ...}``     — e.g. /load_program_from_project diagnostics
+    * ``{"success": false, ...}``     — e.g. /open_program diagnostics
     * ``{"status": "rejected", ...}`` — e.g. a plate comment refused by convention
 
     A top-level list, plain text, or an ``error`` nested inside a per-item entry

@@ -251,6 +251,7 @@ NON_CATALOG_COUNTS: list[tuple[str, int, str]] = [
     ("ROADMAP.md", 84, "endpoints in the three default tool groups loaded under --lazy"),
     ("CLAUDE.md", 5, "REST endpoints on the optional external re-kb archive service"),
     ("CLAUDE.md", 22, "debugger proxy tools in the bridge, not catalog endpoints"),
+    ("CLAUDE.md", 27, "historical category-drift example in the match-change table"),
     ("ROADMAP.md", 272, "the pre-consolidation surface; a statement about the past"),
     (
         "CLAUDE.md",

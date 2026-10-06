@@ -222,6 +222,53 @@ public class AnalysisService {
     }
 
     /**
+     * Enable or disable one analyzer on a program.
+     *
+     * <p>Headless-only until 7.0, where it swallowed its own result and answered
+     * {@code success: true} for an analyzer that does not exist. It is plain
+     * program-options code, so both servers serve it now.
+     */
+    @McpTool(path = "/configure_analyzer", method = "POST",
+            description = "Enable or disable one analyzer (a name exactly as list_analyzers reports it) on a program.",
+            category = "analysis", access = ToolAccess.WRITE)
+    public Response configureAnalyzer(
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.") String analyzerName,
+            @Param(value = "enabled", source = ParamSource.BODY, defaultValue = "",
+                   description = "True enables the analyzer, false disables it. Omitting it leaves the current setting alone and only reports it.") Boolean enabled,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
+        if (analyzerName == null || analyzerName.isBlank()) {
+            return Response.err("name is required");
+        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+        if (!options.contains(analyzerName)) {
+            return Response.err("Analyzer not found: " + analyzerName
+                + " (list_analyzers shows the exact names)");
+        }
+        try {
+            if (enabled != null) {
+                threadingStrategy.executeWrite(program, "Configure Analyzer", () -> {
+                    options.setBoolean(analyzerName, enabled);
+                    return null;
+                });
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "analyzer", analyzerName,
+                "enabled", options.getBoolean(analyzerName, false),
+                "changed", enabled != null));
+        } catch (Exception e) {
+            return Response.err("Failed to configure analyzer: " + e.getMessage());
+        }
+    }
+
+    /**
      * Trigger auto-analysis on the current or named program.
      */
     @McpTool(path = "/run_analysis", dryRun = false, method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)

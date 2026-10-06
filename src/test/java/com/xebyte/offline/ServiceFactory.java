@@ -1,34 +1,18 @@
 package com.xebyte.offline;
 
-import com.xebyte.core.AnalysisService;
-import com.xebyte.core.BinaryComparisonService;
-import com.xebyte.core.CommentService;
-import com.xebyte.core.DataTypeService;
+import com.xebyte.core.CoreServices;
 import com.xebyte.core.DebuggerService;
-import com.xebyte.core.DocumentationHashService;
-import com.xebyte.core.FunctionBundleService;
-import com.xebyte.core.FunctionService;
-import com.xebyte.core.ListingService;
-import com.xebyte.core.MalwareSecurityService;
 import com.xebyte.core.ProgramProvider;
-import com.xebyte.core.EmulationService;
-import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.PromptPolicyService;
-import com.xebyte.core.SymbolLabelService;
 import com.xebyte.core.ThreadingStrategy;
-import com.xebyte.core.XrefCallGraphService;
 import com.xebyte.headless.GhidraServerManager;
 import com.xebyte.headless.HeadlessManagementService;
 import com.xebyte.headless.HeadlessProgramProvider;
 
 /**
- * Builds the full set of service instances that {@link com.xebyte.core.ServerManager}
- * normally constructs at plugin startup — but with stub collaborators so the
- * result is safe to scan offline.
- *
- * This mirrors the order and wiring in
- * {@code ServerManager.registerTool(...)} so the offline tests exercise the
- * same surface the running plugin exposes.
+ * Builds every service either server exposes -- {@link CoreServices} plus the GUI's and
+ * the headless server's own -- with stub collaborators, so the result is safe to scan
+ * offline.
  */
 public final class ServiceFactory {
 
@@ -38,51 +22,13 @@ public final class ServiceFactory {
     public static Object[] buildAllServices() {
         ProgramProvider provider = new StubProgramProvider();
         ThreadingStrategy ts = new NoopThreadingStrategy();
-
-        ListingService listingService = new ListingService(provider);
-        CommentService commentService = new CommentService(provider, ts);
-        SymbolLabelService symbolLabelService = new SymbolLabelService(provider, ts);
-        FunctionService functionService = new FunctionService(provider, ts);
-        XrefCallGraphService xrefCallGraphService = new XrefCallGraphService(provider, ts);
-        DataTypeService dataTypeService = new DataTypeService(provider, ts);
-        DocumentationHashService documentationHashService =
-            new DocumentationHashService(provider, ts, new BinaryComparisonService());
-        documentationHashService.setFunctionService(functionService);
-        AnalysisService analysisService = new AnalysisService(provider, ts, functionService);
-        MalwareSecurityService malwareSecurityService = new MalwareSecurityService(provider, ts);
-        ProgramScriptService programScriptService = new ProgramScriptService(provider, ts);
-        EmulationService emulationService = new EmulationService(provider, ts);
-
-        HeadlessManagementService headlessManagementService =
-            new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager());
-
-        // DebuggerService uses PluginTool only at runtime; scanner only reflects on
-        // method signatures, so a null tool is safe for offline scanning.
-        DebuggerService debuggerService = new DebuggerService(provider, ts, null);
-
-        // No collaborators: it only gates Ghidra's own modal prompts. It was missing here,
-        // which left its /prompt_policy endpoint invisible to the access-classification and
-        // catalog-parity tests — the gap ServiceFactoryCoverageTest now prevents.
-        PromptPolicyService promptPolicyService = new PromptPolicyService();
-        FunctionBundleService functionBundleService = new FunctionBundleService(provider, ts, functionService);
-
-        return new Object[] {
-            listingService,
-            functionService,
-            commentService,
-            symbolLabelService,
-            xrefCallGraphService,
-            dataTypeService,
-            analysisService,
-            documentationHashService,
-            malwareSecurityService,
-            programScriptService,
-            emulationService,
-            headlessManagementService,
-            debuggerService,
-            promptPolicyService,
-            functionBundleService,
-        };
+        // The shared set both servers build, plus every server's own additions: the
+        // union is what the catalog describes, and what the parity tests scan.
+        return CoreServices.build(provider, ts).plus(
+            new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager()),
+            // PluginTool is only used at runtime; the scanner reflects on signatures.
+            new DebuggerService(provider, ts, null),
+            new PromptPolicyService());
     }
 
     /** Convenience: build a {@link StubProgramProvider}. */

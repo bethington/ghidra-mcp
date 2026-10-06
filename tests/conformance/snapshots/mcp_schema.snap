@@ -1,5 +1,5 @@
 {
-  "count": 201,
+  "count": 203,
   "tools": [
     {
       "category": "function",
@@ -48,7 +48,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -90,7 +90,7 @@
         },
         {
           "default": "USER_DEFINED",
-          "description": "SourceType: USER_DEFINED (default \u2014 distinct from analyzer refs and survives re-analysis), ANALYSIS, IMPORTED, DEFAULT.",
+          "description": "SourceType: USER_DEFINED (default — distinct from analyzer refs and survives re-analysis), ANALYSIS, IMPORTED, DEFAULT.",
           "name": "source_type",
           "required": false,
           "source": "body",
@@ -106,7 +106,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -129,7 +129,7 @@
           "type": "string"
         },
         {
-          "description": "Name for the new field. The project's Hungarian prefix is applied automatically from field_type, so the stored name can differ from what you send \u2014 the response reports the name actually used, and remove_struct_field accepts either form.",
+          "description": "Name for the new field. The project's Hungarian prefix is applied automatically from field_type, so the stored name can differ from what you send — the response reports the name actually used, and remove_struct_field accepts either form.",
           "name": "field_name",
           "required": true,
           "source": "body",
@@ -185,7 +185,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -224,7 +224,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -248,7 +248,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -264,7 +264,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -346,7 +346,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -368,7 +368,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -377,7 +377,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -407,7 +407,7 @@
         },
         {
           "default": "true",
-          "description": "True (the default) adds `xrefs` \u2014 the sources referencing the entry point \u2014 capped at the first 100. `xref_count` counts what was listed, so a value of exactly 100 may mean 'more than 100'; use get_xrefs_to for the true total.",
+          "description": "True (the default) adds `xrefs` — the sources referencing the entry point — capped at the first 100. `xref_count` counts what was listed, so a value of exactly 100 may mean 'more than 100'; use get_xrefs_to for the true total.",
           "name": "include_xrefs",
           "required": false,
           "source": "query",
@@ -455,7 +455,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -503,7 +503,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -515,7 +515,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale \u2014 the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are \u2014 apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
+      "description": "Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness. Six axes: meaningful name, explanatory plate comment, real type, formatted bytes (core, drive effective_score + DOC_DRAFT) plus enum/equate and struct membership (advanced, forgiven in effective_score). A global with no real type (no defined data, or an undefined* type) is hard-capped at 79 and can never band COMPLETE_80 or above, no matter how good its name and comment are — apply a type with set_global first. Returns raw score, effective_score, COMPLETE_<band>, per-axis breakdown, and which axes are still missing.",
       "method": "GET",
       "params": [
         {
@@ -536,7 +536,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -552,7 +552,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -560,7 +560,7 @@
           "type": "string"
         },
         {
-          "description": "Optional label for the structure being analysed. It does NOT select the type \u2014 that comes from the data already applied at `address` \u2014 and is only echoed back; omit it to use the applied type's own name.",
+          "description": "Optional label for the structure being analysed. It does NOT select the type — that comes from the data already applied at `address` — and is only echoed back; omit it to use the applied type's own name.",
           "name": "struct_name",
           "required": true,
           "source": "body",
@@ -592,7 +592,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -623,7 +623,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object whose required keys depend on `classification`: PRIMITIVE needs {\"type\": \"dword\"}; STRUCTURE needs a name plus a fields array of {name, type} objects; ARRAY needs count plus either element_type or element_struct; STRING takes an optional type. It must be an OBJECT \u2014 a JSON string is rejected.",
+          "description": "JSON object whose required keys depend on `classification`: PRIMITIVE needs {\"type\": \"dword\"}; STRUCTURE needs a name plus a fields array of {name, type} objects; ARRAY needs count plus either element_type or element_struct; STRING takes an optional type. It must be an OBJECT — a JSON string is rejected.",
           "name": "type_definition",
           "required": true,
           "source": "body",
@@ -648,7 +648,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -697,7 +697,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "The whole payload as one JSON STRING, in the shape get_function_documentation emits. Required key: target_address. Optional top-level keys: function_name, return_type, calling_convention, plate_comment, plus the arrays parameters and comments. It is read with a flat string extractor, so those keys must sit at the TOP level \u2014 a nested object wrapping them is not looked into. An empty plate_comment is skipped rather than clearing, and a name, convention or return type that fails to apply is only logged: changes_applied reports what actually landed.",
+          "description": "The whole payload as one JSON STRING, in the shape get_function_documentation emits. Required key: target_address. Optional top-level keys: function_name, return_type, calling_convention, plate_comment, plus the arrays parameters and comments. It is read with a flat string extractor, so those keys must sit at the TOP level — a nested object wrapping them is not looked into. An empty plate_comment is skipped rather than clearing, and a name, convention or return type that fails to apply is only logged: changes_applied reports what actually landed.",
           "name": "json_body",
           "required": true,
           "source": "body",
@@ -838,7 +838,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool \u2014 start every doc pass with this when the function has global xrefs.",
+      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
       "method": "GET",
       "params": [
         {
@@ -969,7 +969,7 @@
             "address",
             "function_address"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "address",
           "required": true,
@@ -1008,7 +1008,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1024,7 +1024,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -1033,7 +1033,7 @@
         },
         {
           "default": "[]",
-          "description": "JSON array of {address, comment} objects setting PRE comments \u2014 the lines the decompiler shows above a statement. Every entry carries its OWN address (0x<hex> or <space>:<hex>); the top-level `address` is the function entry and is not used for these. An entry missing either key, or whose address does not parse, is skipped silently \u2014 compare decompiler_comments_set against what you sent. An empty comment string clears that address's PRE comment.",
+          "description": "JSON array of {address, comment} objects setting PRE comments — the lines the decompiler shows above a statement. Every entry carries its OWN address (0x<hex> or <space>:<hex>); the top-level `address` is the function entry and is not used for these. An entry missing either key, or whose address does not parse, is skipped silently — compare decompiler_comments_set against what you sent. An empty comment string clears that address's PRE comment.",
           "name": "decompiler_comments",
           "required": false,
           "source": "body",
@@ -1041,7 +1041,7 @@
         },
         {
           "default": "[]",
-          "description": "JSON array of {address, comment} objects setting EOL comments \u2014 the trailing comment on a listing line. Same per-entry address rules and the same silent skip as decompiler_comments; an empty comment string clears that address's EOL comment.",
+          "description": "JSON array of {address, comment} objects setting EOL comments — the trailing comment on a listing line. Same per-entry address rules and the same silent skip as decompiler_comments; an empty comment string clears that address's EOL comment.",
           "name": "disassembly_comments",
           "required": false,
           "source": "body",
@@ -1082,7 +1082,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1129,7 +1129,7 @@
         },
         {
           "default": "50",
-          "description": "How many SOURCE functions this page tries to match (default 50) \u2014 it slices the source list, not the matches. 0 returns an EMPTY page; total_source_functions reports the full count to page against.",
+          "description": "How many SOURCE functions this page tries to match (default 50) — it slices the source list, not the matches. 0 returns an EMPTY page; total_source_functions reports the full count to page against.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -1152,7 +1152,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -1161,7 +1161,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1178,9 +1178,43 @@
       "path": "/check_connection"
     },
     {
+      "category": "project",
+      "category_description": "Program management, script execution, memory read, bookmarks, save",
+      "description": "Check a program in to the shared Ghidra Server as a new version. Saves pending edits and closes the program first (a file checked in while open must stay checked out). Requires a shared project and the file checked out. Returns version_before/version/version_bumped.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Project path of the file; empty uses the sole open program",
+          "name": "path",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Checkin comment",
+          "name": "comment",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Keep the file checked out after the new version lands",
+          "name": "keep_checked_out",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/checkin_program",
+      "read_only": false
+    },
+    {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable \u2014 a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code \u2014 inspect the before/after observations and resulting disassembly after every call.",
+      "description": "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
       "method": "POST",
       "params": [
         {
@@ -1202,7 +1236,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1224,7 +1258,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -1233,7 +1267,7 @@
         },
         {
           "default": "true",
-          "description": "True (the default) removes the function's plate comment \u2014 the block above its entry. False leaves it alone.",
+          "description": "True (the default) removes the function's plate comment — the block above its entry. False leaves it alone.",
           "name": "clear_plate",
           "required": false,
           "source": "body",
@@ -1273,7 +1307,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -1282,7 +1316,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1305,7 +1339,7 @@
           "type": "string"
         },
         {
-          "description": "Name for the copy. The clone is independent \u2014 later edits to source_type do not follow it.",
+          "description": "Name for the copy. The clone is independent — later edits to source_type do not follow it.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -1354,7 +1388,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1362,6 +1396,40 @@
         }
       ],
       "path": "/compare_programs_documentation"
+    },
+    {
+      "category": "analysis",
+      "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+      "description": "Enable or disable one analyzer (a name exactly as list_analyzers reports it) on a program.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.",
+          "name": "name",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "True enables the analyzer, false disables it. Omitting it leaves the current setting alone and only reports it.",
+          "name": "enabled",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/configure_analyzer",
+      "read_only": false
     },
     {
       "category": "listing",
@@ -1442,7 +1510,7 @@
         },
         {
           "default": "1",
-          "description": "Array only: number of ELEMENTS, not bytes \u2014 total size is length x sizeof(base_type). Must be positive.",
+          "description": "Array only: number of ELEMENTS, not bytes — total size is length x sizeof(base_type). Must be positive.",
           "name": "length",
           "required": false,
           "source": "body",
@@ -1467,7 +1535,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "New enum type name, e.g. UnitType. Creation FAILS if a type with this name already exists \u2014 delete it first or choose another name.",
+          "description": "New enum type name, e.g. UnitType. Creation FAILS if a type with this name already exists — delete it first or choose another name.",
           "name": "name",
           "required": true,
           "source": "body",
@@ -1482,7 +1550,7 @@
         },
         {
           "default": "4",
-          "description": "Storage width of the enum in BYTES \u2014 1, 2, 4 or 8 only (default 4). Anything else is rejected.",
+          "description": "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). Anything else is rejected.",
           "name": "size",
           "required": false,
           "source": "body",
@@ -1530,7 +1598,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -1539,7 +1607,7 @@
         },
         {
           "default": "",
-          "description": "Optional name for the new function; leave empty to keep Ghidra's generated FUN_<address>. Written directly, so the naming-quality gate does not run here \u2014 use rename_function if you want it to.",
+          "description": "Optional name for the new function; leave empty to keep Ghidra's generated FUN_<address>. Written directly, so the naming-quality gate does not run here — use rename_function if you want it to.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -1555,7 +1623,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1578,7 +1646,7 @@
           "type": "string"
         },
         {
-          "description": "Return type, resolved recursively (pointer chains, arrays, struct names). Required \u2014 pass `void` for no return value.",
+          "description": "Return type, resolved recursively (pointer chains, arrays, struct names). Required — pass `void` for no return value.",
           "name": "return_type",
           "required": true,
           "source": "body",
@@ -1635,7 +1703,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1658,7 +1726,7 @@
           "type": "string"
         },
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -1691,7 +1759,7 @@
         },
         {
           "default": "false",
-          "description": "Execute permission, default FALSE. Set true only for a code region \u2014 leaving it false is what keeps disassembly out of a data or MMIO block.",
+          "description": "Execute permission, default FALSE. Set true only for a code region — leaving it false is what keeps disassembly out of a data or MMIO block.",
           "name": "execute",
           "required": false,
           "source": "body",
@@ -1723,7 +1791,7 @@
         },
         {
           "default": "",
-          "description": "Block contents as a standard base64 string \u2014 preferred over bytes_hex for large or fully binary payloads. Supplying content forces initialized=true. Max 16777216 decoded bytes. Mutually exclusive with bytes_hex.",
+          "description": "Block contents as a standard base64 string — preferred over bytes_hex for large or fully binary payloads. Supplying content forces initialized=true. Max 16777216 decoded bytes. Mutually exclusive with bytes_hex.",
           "name": "bytes_base64",
           "required": false,
           "source": "body",
@@ -1755,7 +1823,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1787,7 +1855,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1849,7 +1917,7 @@
           "type": "string"
         },
         {
-          "description": "JSON array of member objects, same shape as create_struct: required keys name and type; field_name/fieldName and field_type/fieldType/data_type/dataType are accepted as alternates. Any offset key is IGNORED \u2014 union members all start at 0. A member whose type cannot be resolved is skipped and reported under fields_skipped instead of failing the call. Names get the project's Hungarian prefix applied automatically.",
+          "description": "JSON array of member objects, same shape as create_struct: required keys name and type; field_name/fieldName and field_type/fieldType/data_type/dataType are accepted as alternates. Any offset key is IGNORED — union members all start at 0. A member whose type cannot be resolved is skipped and reported under fields_skipped instead of failing the call. Names get the project's Hungarian prefix applied automatically.",
           "name": "fields",
           "required": true,
           "source": "body",
@@ -2155,7 +2223,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -2242,7 +2310,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -2251,7 +2319,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2275,7 +2343,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2317,7 +2385,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2341,7 +2409,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2357,7 +2425,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -2391,7 +2459,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2408,7 +2476,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2424,7 +2492,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address_a",
           "param_type": "address",
           "required": true,
@@ -2432,7 +2500,7 @@
           "type": "string"
         },
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address_b",
           "param_type": "address",
           "required": true,
@@ -2463,7 +2531,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "start_address",
           "param_type": "address",
           "required": true,
@@ -2472,7 +2540,7 @@
         },
         {
           "default": "",
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "end_address",
           "param_type": "address",
           "required": false,
@@ -2513,7 +2581,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2529,7 +2597,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -2538,7 +2606,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2607,7 +2675,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2677,7 +2745,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2701,7 +2769,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2718,7 +2786,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2751,7 +2819,7 @@
         },
         {
           "default": "100",
-          "description": "Maximum gaps returned in this page (default 100). This endpoint slices directly, so 0 returns an EMPTY page rather than everything \u2014 page with offset against the `total` the response reports.",
+          "description": "Maximum gaps returned in this page (default 100). This endpoint slices directly, so 0 returns an EMPTY page rather than everything — page with offset against the `total` the response reports.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -2759,7 +2827,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2825,7 +2893,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2850,7 +2918,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2961,7 +3029,7 @@
         },
         {
           "default": "100",
-          "description": "Page size. 0 means no limit, which on a large binary is a megabytes-long response \u2014 the old list_functions had no pagination at all and returned 1.7MB on a stripped `ls`.",
+          "description": "Page size. 0 means no limit, which on a large binary is a megabytes-long response — the old list_functions had no pagination at all and returned 1.7MB on a stripped `ls`.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -2969,7 +3037,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -2986,7 +3054,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "start_address",
           "param_type": "address",
           "required": true,
@@ -3016,7 +3084,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3048,7 +3116,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3070,7 +3138,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3117,7 +3185,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -3126,7 +3194,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3148,7 +3216,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3157,7 +3225,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3169,12 +3237,12 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "List all physical address spaces in the program. On programs with multiple address spaces (e.g., embedded targets), use the returned space names to prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. Also check addressable_unit_size: a value > 1 means the space is word-addressed (e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word addresses natively for such spaces \u2014 code:001478 is word 0x1478, not byte 0x1478. Do NOT multiply or divide addresses seen in Ghidra output; use them as-is. Overlay spaces are also listed, each marked is_overlay=true with its overlayed_space (base). Address an overlay location as <overlay>::<hex> (e.g., cli.Initial::00010000) \u2014 overlay names are case-sensitive.",
+      "description": "List all physical address spaces in the program. On programs with multiple address spaces (e.g., embedded targets), use the returned space names to prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. Also check addressable_unit_size: a value > 1 means the space is word-addressed (e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. Do NOT multiply or divide addresses seen in Ghidra output; use them as-is. Overlay spaces are also listed, each marked is_overlay=true with its overlayed_space (base). Address an overlay location as <overlay>::<hex> (e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
       "method": "GET",
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3206,7 +3274,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3249,7 +3317,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3267,7 +3335,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3291,7 +3359,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3316,7 +3384,7 @@
         },
         {
           "default": "",
-          "description": "External library name (as list_imports / list_external_locations report it) to scope the search to. Omit to scan every library. It narrows the search only \u2014 it cannot select an entry by itself.",
+          "description": "External library name (as list_imports / list_external_locations report it) to scope the search to. Omit to scan every library. It narrows the search only — it cannot select an entry by itself.",
           "name": "dll_name",
           "required": false,
           "source": "query",
@@ -3324,7 +3392,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3340,7 +3408,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "struct_address",
           "param_type": "address",
           "required": true,
@@ -3398,7 +3466,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3445,7 +3513,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3462,7 +3530,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3484,7 +3552,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3493,7 +3561,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3517,7 +3585,7 @@
             "function_name"
           ],
           "default": "",
-          "description": "Function to hash: a name, or an address as 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous. Omit to hash many functions (offset, limit, filter).",
+          "description": "Function to hash: a name, or an address as 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous. Omit to hash many functions (offset, limit, filter).",
           "name": "function",
           "param_type": "function_ref",
           "required": false,
@@ -3550,7 +3618,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3601,7 +3669,7 @@
     },
     {
       "category": "function",
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need \u2014 omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5\u201310 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included \u2014 call analyze_function_completeness for that.",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3673,7 +3741,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3724,7 +3792,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3750,7 +3818,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3758,6 +3826,16 @@
         }
       ],
       "path": "/get_program_options",
+      "read_only": true
+    },
+    {
+      "category": "project",
+      "category_description": "Program management, script execution, memory read, bookmarks, save",
+      "description": "The open project: name, file count, whether it is bound to a Ghidra Server (and which repository), and which programs are open. A shared project is what /checkin_program and a checkout's content need; project_server_bound=false means local-only. On the GUI also the running tools.",
+      "destructive": false,
+      "method": "GET",
+      "params": [],
+      "path": "/get_project_info",
       "read_only": true
     },
     {
@@ -3776,7 +3854,7 @@
           "type": "string"
         },
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -3785,7 +3863,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3810,7 +3888,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3834,7 +3912,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3846,7 +3924,7 @@
     {
       "category": "getter",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program \u2014 one call instead of four. type=address|function|selection|program|all (default all). Takes NO program parameter: the focused program is an answer this reports, not an input. Headless has no analyst and no cursor, so every facet reports null with a reason there \u2014 use the program parameter on a data endpoint instead. Replaces get_current_address, get_current_function, get_current_selection and get_current_program_info.",
+      "description": "What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program — one call instead of four. type=address|function|selection|program|all (default all). Takes NO program parameter: the focused program is an answer this reports, not an input. Headless has no analyst and no cursor, so every facet reports null with a reason there — use the program parameter on a data endpoint instead. Replaces get_current_address, get_current_function, get_current_selection and get_current_program_info.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3877,7 +3955,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3893,7 +3971,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -3918,7 +3996,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3936,7 +4014,7 @@
       "params": [
         {
           "default": "",
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": false,
@@ -3969,7 +4047,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -3986,7 +4064,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "C declarations \u2014 structs, unions, enums, typedefs \u2014 as one string of source TEXT, not a file path. Passed straight to Ghidra's CParser.",
+          "description": "C declarations — structs, unions, enums, typedefs — as one string of source TEXT, not a file path. Passed straight to Ghidra's CParser.",
           "name": "source",
           "required": true,
           "source": "body",
@@ -4066,7 +4144,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -4091,7 +4169,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4108,7 +4186,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4133,7 +4211,7 @@
         },
         {
           "default": "",
-          "description": "Address filter (omit to return all addresses). Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address filter (omit to return all addresses). Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": false,
@@ -4142,7 +4220,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4159,7 +4237,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4191,7 +4269,7 @@
         },
         {
           "default": "200",
-          "description": "Maximum members returned in this page (default 200). It is clamped to a MINIMUM of 1, so 0 returns one member rather than everything \u2014 page with offset against total_members instead.",
+          "description": "Maximum members returned in this page (default 200). It is clamped to a MINIMUM of 1, so 0 returns one member rather than everything — page with offset against total_members instead.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4211,7 +4289,7 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses \u2014 `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.",
+      "description": "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.",
       "method": "GET",
       "params": [
         {
@@ -4240,7 +4318,7 @@
         },
         {
           "default": "defined",
-          "description": "Symbol-naming axis: `all`, `defined` (default \u2014 only named symbols, preserves legacy behavior), `undefined` (only DAT_*-style and raw unnamed addresses).",
+          "description": "Symbol-naming axis: `all`, `defined` (default — only named symbols, preserves legacy behavior), `undefined` (only DAT_*-style and raw unnamed addresses).",
           "name": "filter",
           "required": false,
           "source": "query",
@@ -4272,7 +4350,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4305,7 +4383,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4317,7 +4395,7 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result \u2014 e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded \u2014 they're not data globals. Each line ends with `xrefs=N` for prioritization.",
+      "description": "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.",
       "method": "GET",
       "params": [
         {
@@ -4362,7 +4440,7 @@
         },
         {
           "default": "false",
-          "description": "By default only data sections (.data/.rdata/.bss and similar) are scanned. Pass true to include every memory section (rare \u2014 picks up .text gaps which are usually padding).",
+          "description": "By default only data sections (.data/.rdata/.bss and similar) are scanned. Pass true to include every memory section (rare — picks up .text gaps which are usually padding).",
           "name": "include_all_sections",
           "required": false,
           "source": "query",
@@ -4378,7 +4456,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4390,7 +4468,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls \u2014 omitting it will silently target the active program, which may not be the intended one.",
+      "description": "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.",
       "method": "GET",
       "params": [],
       "path": "/list_open_programs"
@@ -4398,7 +4476,7 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations \u2014 one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces \u2192 string names; imports|exports \u2192 {address, name}; segments \u2192 {name, start, end, size, readable, writable, executable, initialized}; data_items \u2192 {address, block, label, size, type}; external_locations \u2192 {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values.",
+      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -4427,7 +4505,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4503,7 +4581,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4533,7 +4611,7 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals \u2014 it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
+      "description": "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals — it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
       "method": "GET",
       "params": [
         {
@@ -4603,7 +4681,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4629,18 +4707,18 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Bulk merge: copy ALL RE documentation from one program to another at matching addresses, in a single server-side transaction. Categories: function names + signatures + plate comments + locals + calling convention + no-return + tags; standalone data types; data definitions (typed globals); plate comments at any address; comments at all 4 types (EOL/PRE/POST/REPEATABLE) on instructions AND data; labels & globals (with namespace preservation); external locations (ordinal renames); bookmarks; equates. Designed for the orphan-rescue workflow: source is typically '<name>_recovered', target is the original '<name>.dll'. Idempotent \u2014 re-running on an already-merged target only fills gaps. Set dry_run=true to count without writing.",
+      "description": "Bulk merge: copy ALL RE documentation from one program to another at matching addresses, in a single server-side transaction. Categories: function names + signatures + plate comments + locals + calling convention + no-return + tags; standalone data types; data definitions (typed globals); plate comments at any address; comments at all 4 types (EOL/PRE/POST/REPEATABLE) on instructions AND data; labels & globals (with namespace preservation); external locations (ordinal renames); bookmarks; equates. Designed for the orphan-rescue workflow: source is typically '<name>_recovered', target is the original '<name>.dll'. Idempotent — re-running on an already-merged target only fills gaps. Set dry_run=true to count without writing.",
       "method": "POST",
       "params": [
         {
-          "description": "Source program path or name (read-only \u2014 the rescued copy)",
+          "description": "Source program path or name (read-only — the rescued copy)",
           "name": "source",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Target program path or name (writes go here \u2014 the original .dll)",
+          "description": "Target program path or name (writes go here — the original .dll)",
           "name": "target",
           "required": true,
           "source": "body",
@@ -4787,26 +4865,28 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Open a program from the current project",
-      "method": "GET",
+      "description": "Open a program from the open project (by project path, or by filename when unique) and keep it open. On the GUI it is also shown in a CodeBrowser. Any endpoint's program= opens on demand too; this is for opening deliberately, analysing on open, or getting diagnostics when a file cannot be opened (the paths the project does contain, and whether it is bound to a Ghidra Server).",
+      "destructive": false,
+      "method": "POST",
       "params": [
         {
-          "description": "Program path in project",
+          "description": "Program path in the project, or a unique filename",
           "name": "path",
           "required": true,
-          "source": "query",
+          "source": "body",
           "type": "string"
         },
         {
           "default": "false",
-          "description": "Run auto-analysis",
+          "description": "Run auto-analysis after opening",
           "name": "auto_analyze",
           "required": false,
-          "source": "query",
+          "source": "body",
           "type": "boolean"
         }
       ],
-      "path": "/open_program"
+      "path": "/open_program",
+      "read_only": false
     },
     {
       "category": "headless",
@@ -4836,13 +4916,6 @@
         }
       ],
       "path": "/open_project"
-    },
-    {
-      "category": "project",
-      "description": "Get detailed project info including running tools and open programs",
-      "method": "GET",
-      "params": [],
-      "path": "/project/info"
     },
     {
       "category": "system",
@@ -4879,11 +4952,11 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Read raw memory bytes. Always pass the 'program' argument to target the correct binary \u2014 especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -4900,7 +4973,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4972,7 +5045,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -4984,7 +5057,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition \u2014 use delete_function_tag for that. Replaces batch_remove_function_tags.",
+      "description": "Detach tags from ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Does not delete the program-wide tag definition — use delete_function_tag for that. Replaces batch_remove_function_tags.",
       "method": "POST",
       "params": [
         {
@@ -5020,7 +5093,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5051,7 +5124,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5074,7 +5147,7 @@
           "type": "string"
         },
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -5083,7 +5156,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5095,7 +5168,7 @@
     {
       "category": "xref",
       "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
-      "description": "Remove memory cross-reference(s) from one address to another (the inverse of add_memory_reference). Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references \u2014 the response reports each removed reference's source_type. On multi-space programs, prefix addresses with the space name (mem:1000).",
+      "description": "Remove memory cross-reference(s) from one address to another (the inverse of add_memory_reference). Removes every reference from_address -> to_address regardless of operand by default; pass operand_index >= 0 to remove only the reference on that operand. Removes both user-defined and analyzer-inferred references — the response reports each removed reference's source_type. On multi-space programs, prefix addresses with the space name (mem:1000).",
       "method": "POST",
       "params": [
         {
@@ -5124,7 +5197,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5222,7 +5295,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5258,7 +5331,7 @@
           "type": "string"
         },
         {
-          "description": "The name to apply. A data global should be g_ + Hungarian + descriptor (g_dwPlayerCount); a code label should be snake_case. Convention misses come back as warnings on an otherwise successful write. IMPORTANT: at a CODE address with no defined data, this ADDS a label rather than renaming one \u2014 the existing symbol survives and may stay primary, so the listing can still show the old name after a success. Call delete_label on the old name first when you meant to replace it.",
+          "description": "The name to apply. A data global should be g_ + Hungarian + descriptor (g_dwPlayerCount); a code label should be snake_case. Convention misses come back as warnings on an otherwise successful write. IMPORTANT: at a CODE address with no defined data, this ADDS a label rather than renaming one — the existing symbol survives and may stay primary, so the listing can still show the old name after a success. Call delete_label on the old name first when you meant to replace it.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -5282,7 +5355,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5304,7 +5377,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -5328,7 +5401,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5375,7 +5448,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5391,7 +5464,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Simple name to look for duplicates of (no /path prefix) \u2014 every category is searched for that name.",
+          "description": "Simple name to look for duplicates of (no /path prefix) — every category is searched for that name.",
           "name": "type_name",
           "required": true,
           "source": "body",
@@ -5407,7 +5480,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5424,7 +5497,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5488,7 +5561,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Complete Java source for a GhidraScript, as one string \u2014 not a bare statement. If it declares `public class X` that name is used for the file; otherwise a unique McpInline_<hex> class name is generated. The source is written into ~/ghidra_scripts and compiled by Ghidra, so a compile error surfaces as script output rather than as a request error.",
+          "description": "Complete Java source for a GhidraScript, as one string — not a bare statement. If it declares `public class X` that name is used for the file; otherwise a unique McpInline_<hex> class name is generated. The source is written into ~/ghidra_scripts and compiled by Ghidra, so a compile error surfaces as script output rather than as a request error.",
           "name": "code",
           "required": true,
           "source": "body",
@@ -5529,7 +5602,7 @@
       "params": [
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5561,7 +5634,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5578,7 +5651,7 @@
       "params": [
         {
           "default": "",
-          "description": "Case-insensitive mnemonic match (exact, not substring \u2014 'mov' matches 'MOV' but not 'movsd'). Omit to match any mnemonic.",
+          "description": "Case-insensitive mnemonic match (exact, not substring — 'mov' matches 'MOV' but not 'movsd'). Omit to match any mnemonic.",
           "name": "mnemonic",
           "required": false,
           "source": "query",
@@ -5610,7 +5683,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open).",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open).",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5666,7 +5739,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -5681,7 +5754,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it. The GUI plugin answers that this operation needs headless mode.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it. The GUI plugin answers that this operation needs headless mode.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -5710,14 +5783,14 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Folder to walk recursively, terminating every checkout under it. Defaults to / \u2014 the whole repository or project.",
+          "description": "Folder to walk recursively, terminating every checkout under it. Defaults to / — the whole repository or project.",
           "name": "path",
           "required": false,
           "source": "body",
@@ -5732,7 +5805,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -5782,7 +5855,7 @@
           "type": "string"
         },
         {
-          "description": "Server password. Required \u2014 the call is refused without it.",
+          "description": "Server password. Required — the call is refused without it.",
           "name": "password",
           "required": false,
           "source": "body",
@@ -5797,7 +5870,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Folder to list checkouts under. Defaults to / \u2014 everything.",
+          "description": "Folder to list checkouts under. Defaults to / — everything.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -5848,7 +5921,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
@@ -5870,14 +5943,14 @@
       "method": "GET",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
           "type": "string"
         },
         {
-          "description": "Folder to list. Defaults to / \u2014 the repository or project root.",
+          "description": "Folder to list. Defaults to / — the repository or project root.",
           "name": "path",
           "required": false,
           "source": "query",
@@ -5899,7 +5972,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -5920,7 +5993,7 @@
           "type": "string"
         },
         {
-          "description": "Accepted but not read on this route \u2014 neither handler passes it through. Use /server/version_control/checkin, where it does apply.",
+          "description": "Accepted but not read on this route — neither handler passes it through. Use /server/version_control/checkin, where it does apply.",
           "name": "keepCheckedOut",
           "required": false,
           "source": "body",
@@ -5935,7 +6008,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -5971,7 +6044,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -5993,7 +6066,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "body",
@@ -6015,7 +6088,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Repository name on the Ghidra Server. Read only by the headless server \u2014 the GUI plugin works on the already-open project and ignores it.",
+          "description": "Repository name on the Ghidra Server. Read only by the headless server — the GUI plugin works on the already-open project and ignores it.",
           "name": "repo",
           "required": false,
           "source": "query",
@@ -6038,7 +6111,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -6120,7 +6193,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function_address",
           "param_type": "address",
           "required": true,
@@ -6131,7 +6204,7 @@
           "aliases": [
             "noReturn"
           ],
-          "description": "True marks the function non-returning: its call sites become CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing execution continuing past the call. False clears that back to an ordinary returning function. Required \u2014 there is no default.",
+          "description": "True marks the function non-returning: its call sites become CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing execution continuing past the call. False clears that back to an ordinary returning function. Required — there is no default.",
           "name": "no_return",
           "required": true,
           "source": "body",
@@ -6139,7 +6212,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6151,11 +6224,11 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing \u2014 it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function_address",
           "param_type": "address",
           "required": true,
@@ -6163,7 +6236,7 @@
           "type": "string"
         },
         {
-          "description": "Full C signature as one string, e.g. int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed and then discarded \u2014 it does NOT rename the function, call rename_function for that. A calling convention written here is only recognised before the first '(', so one inside a callback parameter type survives untouched.",
+          "description": "Full C signature as one string, e.g. int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed and then discarded — it does NOT rename the function, call rename_function for that. A calling convention written here is only recognised before the first '(', so one inside a callback parameter type survives untouched.",
           "name": "prototype",
           "required": true,
           "source": "body",
@@ -6171,7 +6244,7 @@
         },
         {
           "default": "",
-          "description": "Convention to apply \u2014 __cdecl, __stdcall, __fastcall, __thiscall and whatever else list_calling_conventions reports for this program's language. When set it OVERRIDES the convention written into the prototype string; omit to use whatever the prototype says.",
+          "description": "Convention to apply — __cdecl, __stdcall, __fastcall, __thiscall and whatever else list_calling_conventions reports for this program's language. When set it OVERRIDES the convention written into the prototype string; omit to use whatever the prototype says.",
           "name": "calling_convention",
           "required": false,
           "source": "body",
@@ -6210,7 +6283,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6257,7 +6330,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type \u2192 rename_data \u2192 batch_set_comments \u2192 create_label).",
+      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -6292,7 +6365,7 @@
           "type": "integer"
         },
         {
-          "description": "Plate comment for the address. First line must be a meaningful one-line summary (\u22654 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.",
+          "description": "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.",
           "name": "plate_comment",
           "required": true,
           "source": "body",
@@ -6316,7 +6389,7 @@
         },
         {
           "default": "false",
-          "description": "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go \u2014 the default exists because a silent clear deletes another global's documentation and still reports success.",
+          "description": "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.",
           "name": "allow_evict",
           "required": false,
           "source": "body",
@@ -6341,7 +6414,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6388,7 +6461,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6413,7 +6486,7 @@
           "type": "string"
         },
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
           "param_type": "address",
           "required": true,
@@ -6430,7 +6503,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6453,7 +6526,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -6476,7 +6549,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6510,7 +6583,7 @@
           "type": "string"
         },
         {
-          "description": "New data type, resolved recursively (pointer chains, array syntax such as dword[8], existing struct/enum names). A type starting with `undefined` is REJECTED whatever the current type is \u2014 swapping one undefined width for another is a no-op, not documentation. For 'this', a bare struct name is auto-suffixed with ' *'.",
+          "description": "New data type, resolved recursively (pointer chains, array syntax such as dword[8], existing struct/enum names). A type starting with `undefined` is REJECTED whatever the current type is — swapping one undefined width for another is a no-op, not documentation. For 'this', a bare struct name is auto-suffixed with ' *'.",
           "name": "new_type",
           "required": true,
           "source": "body",
@@ -6518,7 +6591,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6555,7 +6628,7 @@
           "type": "string"
         },
         {
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": true,
           "source": "query",
@@ -6571,7 +6644,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "struct_address",
           "param_type": "address",
           "required": true,
@@ -6619,7 +6692,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only \u2014 it moves a CodeBrowser window.",
+          "description": "Address to navigate to, as 0x<hex> or <space>:<hex>. GUI mode only — it moves a CodeBrowser window.",
           "name": "address",
           "required": false,
           "source": "body",
@@ -6674,7 +6747,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",
@@ -6696,7 +6769,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs \u2014 particularly embedded/microcontroller targets \u2014 are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -6719,7 +6792,7 @@
         },
         {
           "default": "",
-          "description": "Target program name (omit to use the active program \u2014 always specify when multiple programs are open)",
+          "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
           "required": false,
           "source": "query",

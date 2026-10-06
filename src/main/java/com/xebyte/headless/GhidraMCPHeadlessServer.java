@@ -17,11 +17,14 @@ package com.xebyte.headless;
 
 import com.xebyte.core.HttpExchange;
 import com.xebyte.core.McpHttpServer;
+import com.xebyte.core.AmbiguousProgramException;
 import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.CoreServices;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ThreadingStrategy;
+import com.xebyte.core.VersionInfo;
 import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
 import ghidra.app.script.GhidraScriptUtil;
@@ -52,7 +55,6 @@ import java.util.*;
  */
 public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
-    private static final String VERSION = "7.0.0-headless";
     private static final int DEFAULT_PORT = 8089;
     private static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
 
@@ -67,7 +69,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private boolean scriptingBundleHostAcquired = false;
 
     // Endpoint handler registry
-    private HeadlessEndpointHandler endpointHandler;
+    private CoreServices services;
     private HeadlessManagementService managementService;
     private int registeredEndpointCount;
 
@@ -97,8 +99,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         programProvider = new HeadlessProgramProvider();
         threadingStrategy = new DirectThreadingStrategy();
 
-        // Create endpoint handler
-        endpointHandler = new HeadlessEndpointHandler(programProvider, threadingStrategy);
+        services = CoreServices.build(programProvider, threadingStrategy);
 
         // Create server manager for shared Ghidra server support
         serverManager = new GhidraServerManager();
@@ -119,7 +120,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         ghidra.framework.ShutdownHookRegistry.addShutdownHook(this::stop,
                 ghidra.framework.ShutdownPriority.DISPOSE_DATABASES.before());
 
-        System.out.println("GhidraMCP Headless Server v" + VERSION + " running");
+        System.out.println("GhidraMCP Headless Server v" + VersionInfo.getVersion() + " running");
         System.out.println("Press Ctrl+C to stop");
 
         // Block main thread
@@ -169,7 +170,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                     break;
                 case "--version":
                 case "-v":
-                    System.out.println("GhidraMCP Headless Server v" + VERSION);
+                    System.out.println("GhidraMCP Headless Server v" + VersionInfo.getVersion());
                     System.exit(0);
                     break;
             }
@@ -177,7 +178,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void printUsage() {
-        System.out.println("GhidraMCP Headless Server v" + VERSION);
+        System.out.println("GhidraMCP Headless Server v" + VersionInfo.getVersion());
         System.out.println();
         System.out.println("Usage: java -jar GhidraMCPHeadless.jar [options]");
         System.out.println();
@@ -329,43 +330,49 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // Load from file if specified
         if (filePath != null) {
-            File file = new File(filePath);
-            Program program = programProvider.loadProgramFromFile(file);
-            if (program != null) {
+            try {
+                Program program = programProvider.importFile(new File(filePath), "/", "", "").program();
                 System.out.println("Loaded program: " + program.getName());
-            } else {
-                System.err.println("Failed to load program from: " + filePath);
+            } catch (Exception e) {
+                System.err.println("Failed to load program from " + filePath + ": " + e.getMessage());
             }
         }
 
         // Load from project if specified
         if (projectPath != null) {
-            boolean success = programProvider.openProject(projectPath);
-            if (success) {
-                System.out.println("Opened project: " + programProvider.getProjectName());
+            HeadlessProgramProvider.OpenProjectResult opened =
+                    programProvider.openProject(projectPath, serverManager);
+            if (opened.success) {
+                System.out.println("Opened project: " + programProvider.getProjectName()
+                        + (opened.shared ? " (shared repo " + opened.repository + ")" : ""));
 
                 // If program name specified, load it
                 if (programName != null) {
-                    Program program = programProvider.loadProgramFromProject(programName);
+                    Program program = null;
+                    try {
+                        program = programProvider.openFromProject(programName);
+                    } catch (AmbiguousProgramException e) {
+                        System.err.println(e.getMessage());
+                    }
                     if (program != null) {
                         System.out.println("Loaded program from project: " + program.getName());
                     } else {
                         System.err.println("Failed to load program: " + programName);
-                        // List available programs
                         System.out.println("Available programs:");
-                        for (String p : programProvider.listProjectPrograms()) {
+                        for (String p : programProvider.programPaths(200)) {
                             System.out.println("  " + p);
                         }
                     }
                 }
             } else {
-                System.err.println("Failed to open project: " + projectPath);
+                System.err.println("Failed to open project: "
+                        + (opened.error != null ? opened.error : projectPath));
             }
         }
     }
 
     private void startServer() throws IOException {
-        http = new McpHttpServer(this::instanceInfo);
+        http = new McpHttpServer("headless", Map::of);
         registerEndpoints();
         http.start(new McpHttpServer.Config(true, tcp, bindAddress, port, 1, 10));
         running = true;
@@ -376,42 +383,20 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
     }
 
-    private Map<String, Object> instanceInfo() {
-        var openNames = new HashSet<String>();
-        for (Program p : programProvider.getAllOpenPrograms()) {
-            openNames.add(p.getName());
-        }
-        return com.xebyte.core.ServerManager.instanceInfo(programProvider.getProject(), openNames);
-    }
-
     private void registerEndpoints() {
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
         // ==========================================================================
 
-        // Liveness banner, served by BOTH servers so the doctor has one route
-        // that identifies which of them answered. /health is headless-only and
-        // /mcp/health is GUI-only, so neither can play this role.
-        http.route("/check_connection", exchange -> {
-            sendResponse(exchange, "Connection OK - GhidraMCP Headless Server v" + VERSION);
-        });
-
-        http.route("/health", exchange -> {
-            sendResponse(exchange, endpointHandler.getHealth());
-        });
+        // /check_connection, /mcp/health and /mcp/instance_info are McpHttpServer's own,
+        // identical to the GUI's bar server_kind. /health, headless-only, is retired.
 
         // ==========================================================================
         // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
         // ==========================================================================
 
-        AnnotationScanner scanner = new AnnotationScanner(endpointHandler.getProgramProvider(), threadingStrategy,
-            endpointHandler.getListingService(), endpointHandler.getFunctionService(),
-            endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
-            endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
-            endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
-            endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService(),
-            endpointHandler.getEmulationService(), endpointHandler.getFunctionBundleService(),
-            managementService);
+        AnnotationScanner scanner = new AnnotationScanner(programProvider, threadingStrategy,
+            services.plus(managementService));
 
         http.endpoints(scanner);
 
@@ -423,9 +408,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // GhidraMCPPlugin; see ManualToolDescriptors for the shared metadata
         // source. Found via a live-schema-vs-catalog diff (v6.0.0).
         com.xebyte.core.ManualToolDescriptors.addAll(scanner,
-            "/check_connection", "/configure_analyzer",
-            "/delete_project", "/exit_ghidra", "/health",
-            "/list_projects", "/mcp/schema",
+            "/check_connection", "/exit_ghidra", "/mcp/health", "/mcp/schema",
             "/server/admin/set_permissions", "/server/admin/terminate_all_checkouts",
             "/server/admin/terminate_checkout", "/server/admin/users",
             "/server/checkouts", "/server/connect", "/server/disconnect",
@@ -447,15 +430,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // --- Project Lifecycle --- (/create_project registered via HeadlessManagementService)
 
-        http.route("/delete_project", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.deleteProject(params.get("projectPath")));
-        });
-
-        http.route("/list_projects", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.listProjects(params.get("searchDir")));
-        });
+        // /list_projects and /delete_project are @McpTools on HeadlessManagementService.
 
         // --- Project Organization ---
         // Note: /create_folder, /delete_file, /move_file and /move_folder are
@@ -568,23 +543,30 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 params.get("repo"), params.get("user"), accessLevel));
         });
 
-        // --- Analysis Control ---
-
-        http.route("/configure_analyzer", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            Boolean enabled = params.containsKey("enabled") ?
-                parseBooleanOrDefault(params.get("enabled"), true) : null;
-            sendResponse(exchange, endpointHandler.configureAnalyzer(
-                params.get("program"), params.get("name"), enabled));
-        });
-
         // --- Exit ---
 
         http.route("/exit_ghidra", exchange -> {
-            sendResponse(exchange, endpointHandler.exitServer());
+            sendResponse(exchange, exitServer());
         });
 
         System.out.println("Registered " + countEndpoints() + " REST API endpoints");
+    }
+
+    /**
+     * Save every open program, answer with what was saved, then exit. The GUI's
+     * /exit_ghidra always did this; headless used to exit and leave the saving to the
+     * shutdown hook, after the caller had already been told it was done.
+     */
+    private String exitServer() {
+        Object saved = services.programScript().saveAllOpenPrograms().asEmbeddable();
+        new Thread(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            System.exit(0);
+        }).start();
+        return JsonHelper.toJson(JsonHelper.mapOf(
+            "success", true,
+            "message", "Saving all open programs, then exiting",
+            "save", JsonHelper.mapOf("programs", saved)));
     }
 
     private int countEndpoints() {
@@ -615,9 +597,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         if (programProvider != null) {
             try {
                 System.out.println("Closing programs...");
-                programProvider.closeAllPrograms();
+                programProvider.releaseAll();
             } finally {
-                // Release the .rep project lock. closeAllPrograms() only
+                // Release the .rep project lock. releaseAll() only
                 // releases Program handles; the project lock acquired by
                 // GhidraProject.openProject() is freed by closeProject().
                 // Without this, even a clean shutdown leaves the project
@@ -750,16 +732,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         return Boolean.parseBoolean(value);
     }
 
-    private double parseDoubleOrDefault(String value, double defaultValue) {
-        if (value == null || value.isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return Double.parseDouble(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
 
     // ==========================================================================
     // GETTERS

@@ -1,6 +1,6 @@
 package com.xebyte.offline;
 
-import com.xebyte.core.FrontEndProgramProvider;
+import com.xebyte.core.ProjectProgramProvider;
 import ghidra.program.model.listing.Program;
 import org.junit.Test;
 
@@ -13,12 +13,12 @@ import static org.junit.Assert.*;
 import static org.mockito.Mockito.mock;
 
 /**
- * Unit tests for the LRU victim-selection that bounds FrontEndProgramProvider's on-demand
+ * Unit tests for the LRU victim-selection that bounds ProjectProgramProvider's on-demand
  * program cache (the unbounded cache previously held a consumer reference per documented
  * program and OOM-crashed Ghidra on long multi-binary runs). pickLruVictim is pure, so the
  * eviction decision is verified offline without a live Ghidra.
  */
-public class FrontEndProgramProviderEvictionTest {
+public class ProjectProgramProviderEvictionTest {
 
     private static Program prog() {
         return mock(Program.class);
@@ -36,7 +36,7 @@ public class FrontEndProgramProviderEvictionTest {
         access.put("b", 100L); // oldest
         access.put("c", 200L);
 
-        assertEquals("b", FrontEndProgramProvider.pickLruVictim(programs, access, new HashSet<>()));
+        assertEquals("b", ProjectProgramProvider.pickLruVictim(programs, access, new HashSet<>()));
     }
 
     @Test
@@ -51,7 +51,7 @@ public class FrontEndProgramProviderEvictionTest {
         Set<Program> protectedProgs = new HashSet<>();
         protectedProgs.add(a);
 
-        assertEquals("b", FrontEndProgramProvider.pickLruVictim(programs, access, protectedProgs));
+        assertEquals("b", ProjectProgramProvider.pickLruVictim(programs, access, protectedProgs));
     }
 
     @Test
@@ -67,7 +67,7 @@ public class FrontEndProgramProviderEvictionTest {
         protectedProgs.add(a);
         protectedProgs.add(b);
 
-        assertNull(FrontEndProgramProvider.pickLruVictim(programs, access, protectedProgs));
+        assertNull(ProjectProgramProvider.pickLruVictim(programs, access, protectedProgs));
     }
 
     @Test
@@ -81,12 +81,12 @@ public class FrontEndProgramProviderEvictionTest {
         access.put("a", 500L);
         // "b" has no access entry -> defaults to 0 -> oldest
 
-        assertEquals("b", FrontEndProgramProvider.pickLruVictim(programs, access, new HashSet<>()));
+        assertEquals("b", ProjectProgramProvider.pickLruVictim(programs, access, new HashSet<>()));
     }
 
     @Test
     public void emptyCacheReturnsNull() {
-        assertNull(FrontEndProgramProvider.pickLruVictim(
+        assertNull(ProjectProgramProvider.pickLruVictim(
                 new LinkedHashMap<>(), new LinkedHashMap<>(), new HashSet<>()));
     }
 }

@@ -6,13 +6,13 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**215 tools** — 201 served by the GUI plugin, 191 by the headless server, 177
-by both. Stacked on #567 (`/get_functions` replaced nine function readers);
-this pass folds listing, xref, tag, utility, and GUI-cursor tools. The
-advertised surface went from 272 → 251 in the first consolidation cycle, then
-245 after `/list_shadowed_globals` and `/batch_get_comments`, then 219 after
-`/get_functions`, then **215** after the folds below (including `/get_ui_cursor`
-and folding `/get_version` into `/mcp/health`).
+**211 tools** — 203 served by the GUI plugin, 189 by the headless server, 181
+by both. The advertised surface went from 272 → 251 in the first consolidation
+cycle, then 245 after `/list_shadowed_globals` and `/batch_get_comments`, 219
+after `/get_functions` replaced nine function readers, 215 after the listing,
+xref, tag, utility and GUI-cursor folds, and **211** once both servers shared
+one set of program-operation names (`/load_program`,
+`/load_program_from_project`, `/project/info` and headless `/health` retired).
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -21,6 +21,77 @@ and folding `/get_version` into `/mcp/health`).
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Changed — headless and GUI: one program model, one set of names, one health surface
+
+The GUI had one model of programs; headless had another. Headless kept a map, keyed by bare
+filename, of programs someone had explicitly loaded. So on a headless server
+with the program sitting in its project:
+
+- `get_metadata(program=/fw/gnutrue)` answered `Program not found`.
+- `close_program save=true` released without saving.
+- `switch_program` answered success while doing nothing.
+
+**One program model.** Both providers now extend `ProjectProgramProvider`, a
+path-keyed LRU cache over the project that opens a program the first time any
+endpoint names it. The cache holds at most `GHIDRA_MCP_MAX_CACHED_PROGRAMS`
+programs (default 8, minimum 2); set it in a systemd unit's `Environment=` to
+change it. The GUI adds only its CodeBrowser layer on top.
+
+Resolution is one matcher on both servers, in this order: exact path, exact
+name, the project, and only then a unique name substring. A name two versions
+share is an error listing the candidates, never the first hit. `close_program
+save=false` now really discards on the GUI too; the cache release used to save
+regardless. One `ProgramSaves` helper replaces three save paths that had
+drifted apart.
+
+**One name per operation**, served by both servers, with the old names retired
+and no aliases:
+
+| kept | retired |
+| --- | --- |
+| `/open_program` (now POST with a JSON body) | headless `/load_program_from_project` |
+| `/import_file` | headless `/load_program` |
+| `/get_project_info` | GUI `/project/info` |
+| `/checkin_program` | (was headless-only) |
+
+- `/open_program`: when the path is not found, the failure lists the paths the
+  project does contain and whether it is bound to a server. A program that could
+  only be opened read-only reports `read_only` with the reason. That reason
+  matters: a stale SLEIGH language opens read-only, so `success` alone no longer
+  means the program is current, and `upgrade_project_language --verify` reads
+  the reason.
+- `/import_file`: opens a same-named file already in the folder rather than
+  failing on the duplicate (`reused_existing`).
+- `/checkin_program`: saves, then closes every instance, CodeBrowsers included,
+  before checking in.
+- `/server/status`: means "is a Ghidra Server connected" on both servers. The
+  GUI used to answer `connected: true` for any open project.
+- Headless `/exit_ghidra`: saves and reports what it saved, as the GUI's does.
+
+**One health surface.** `McpHttpServer` builds `/check_connection`,
+`/mcp/health` and `/mcp/instance_info` for both servers:
+
+- `/check_connection` is JSON: `{status, server_kind, version}`, plus
+  `program` when one is current.
+- `instance_info` names the kind, version and endpoint count.
+- `/health` is retired.
+- `VersionInfo` moved to core, so headless stops reporting a hard-coded
+  `7.0.0-headless`.
+- The doctor tool used to tell the servers apart by sniffing two English
+  banners. It now reads `server_kind`, and asks both kinds the same questions.
+
+**Construction.** The shared service set is built once, by `CoreServices`, for
+the plugin, the headless server and the offline tests. `HeadlessEndpointHandler`
+is gone: about 2,150 lines, of which five small route bodies were live. Two of those
+bodies moved to `@McpTool`s:
+
+- `/list_projects` and `/delete_project` now apply the file-root allow-list they
+  skipped.
+- `/configure_analyzer` now reports an unknown analyzer instead of `success:
+  true`, and is served by both servers.
+
+The GUI schema also stopped listing every hand-coded route twice.
 
 ### Changed — one HTTP server for every transport
 
@@ -119,7 +190,7 @@ resolvers disagreed about what a reference meant.
   `int` or `char*` was skipped while the call reported success; it now refuses an unknown
   type before writing anything.
 
-### Changed — fewer listing, xref, tag, and utility tools (stacked on #567)
+### Changed — fewer listing, xref, tag, and utility tools
 
 Further consolidation on the same 7.0.0 line: one search tool, one program
 listing tool, bulk xrefs as a parameter, tags carried on function reads, seventeen

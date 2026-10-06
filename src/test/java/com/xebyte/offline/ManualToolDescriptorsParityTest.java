@@ -44,7 +44,7 @@ public class ManualToolDescriptorsParityTest extends TestCase {
      * MCP tool by an AI agent.
      */
     private static final Set<String> SERVED_BY_MCP_HTTP_SERVER = Set.of(
-        "/mcp/schema", "/mcp/instance_info"
+        "/mcp/schema", "/mcp/instance_info", "/mcp/health", "/check_connection"
     );
 
     private static final Set<String> EXEMPT = Set.of(

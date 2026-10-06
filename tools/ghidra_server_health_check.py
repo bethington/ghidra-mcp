@@ -139,16 +139,27 @@ def _unwrap_json_object(body: str) -> dict[str, Any] | None:
 def _validate_connection(
     status: int, body: str, _headers: Mapping[str, str]
 ) -> tuple[bool, str | None, dict[str, Any]]:
+    """Both servers answer ``{status, server_kind, version}``, plus ``program`` when one
+    is current.
+
+    This used to sniff two different English sentences to tell the servers apart.
+    """
     if status != 200:
         return False, f"unexpected_http_status:{status}", {}
-    lowered = body.lower()
-    if "connected:" in lowered:
-        server_kind = "gui"
-    elif "connection ok" in lowered and "headless" in lowered:
-        server_kind = "headless"
-    else:
-        return False, "unexpected_response", {}
-    return True, None, {"connected": True, "server_kind": server_kind}
+    payload = _unwrap_json_object(body)
+    if payload is None:
+        return False, "invalid_json", {}
+    if payload.get("status") != "ok":
+        return False, "unexpected_response", {"status": payload.get("status")}
+    server_kind = payload.get("server_kind")
+    if server_kind not in {"gui", "headless"}:
+        return False, "unknown_server_kind", {"server_kind": server_kind}
+    return True, None, {
+        "connected": True,
+        "server_kind": server_kind,
+        "version": payload.get("version"),
+        "program_loaded": payload.get("program") is not None,
+    }
 
 
 def _validate_instance_info(
@@ -244,21 +255,6 @@ def _detect_mcp_transport(url: str, requested: str) -> str:
 
 
 DoctorProbe = Callable[[str, float, str, Mapping[str, str] | None], tuple[int, str, Mapping[str, str]]]
-
-
-def _not_applicable_check(name: str, reason: str, details: Mapping[str, Any]) -> dict[str, Any]:
-    """Represent a mode-specific endpoint that must not be requested."""
-
-    return {
-        "name": name,
-        "path": None,
-        "ok": True,
-        "status": None,
-        "attempts": 0,
-        "elapsed_ms": 0.0,
-        "reason": reason,
-        "details": dict(details),
-    }
 
 
 def _run_check(
@@ -428,31 +424,23 @@ def run_doctor(
         effective_kind = inferred_kind
     report["server_kind"] = effective_kind
 
-    if effective_kind == "headless":
-        report["checks"].append(
-            _not_applicable_check(
-                "instance_info",
-                "not_applicable:headless",
-                {"server_kind": "headless"},
-            )
+    # Both servers serve /mcp/instance_info and /mcp/health identically, bar
+    # server_kind; until 7.0 headless had neither and answered /health instead.
+    report["checks"].append(
+        _run_check(
+            name="instance_info",
+            path="/mcp/instance_info",
+            url=_join_url(normalised_base, "/mcp/instance_info"),
+            validator=_validate_instance_info,
+            timeout=timeout,
+            retries=retries,
+            retry_delay=retry_delay,
+            probe=probe_fn,
+            sleep_fn=sleep,
+            headers=request_headers,
         )
-        health_path = "/health"
-    else:
-        report["checks"].append(
-            _run_check(
-                name="instance_info",
-                path="/mcp/instance_info",
-                url=_join_url(normalised_base, "/mcp/instance_info"),
-                validator=_validate_instance_info,
-                timeout=timeout,
-                retries=retries,
-                retry_delay=retry_delay,
-                probe=probe_fn,
-                sleep_fn=sleep,
-                headers=request_headers,
-            )
-        )
-        health_path = "/mcp/health"
+    )
+    health_path = "/mcp/health"
 
     report["checks"].append(
         _run_check(
@@ -484,9 +472,7 @@ def run_doctor(
     )
 
     direct_checks = {check["name"]: check for check in report["checks"] if check["name"] != "url"}
-    required_http_checks = ["plugin_connection", "server_health"]
-    if effective_kind != "headless":
-        required_http_checks.insert(1, "instance_info")
+    required_http_checks = ["plugin_connection", "instance_info", "server_health"]
     report["http_healthy"] = all(direct_checks[name]["ok"] for name in required_http_checks)
 
     if mcp_url is not None:

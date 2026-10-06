@@ -63,7 +63,7 @@ from pathlib import Path
 
 GUI_SERVER = "src/main/java/com/xebyte/GhidraMCPPlugin.java"
 HEADLESS_SERVER = "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java"
-HEADLESS_HANDLER = "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java"
+CORE_SERVICES = "src/main/java/com/xebyte/core/CoreServices.java"
 MANUAL_DESCRIPTORS = "src/main/java/com/xebyte/core/ManualToolDescriptors.java"
 
 #: Scope values written into ``tests/endpoints.json``. Ordered so the emitted
@@ -104,17 +104,8 @@ _GETTER_RE = re.compile(
     r"\bpublic\s+([A-Za-z_][\w.]*)\s+(get[A-Za-z_]\w*)\s*\(\s*\)"
 )
 
-#: `class FrontEndProgramProvider implements ProgramProvider` / `... extends X`.
-_IMPLEMENTS_PROVIDER_RE = re.compile(
-    r"\bclass\s+\w+[^{]*?\b(?:implements|extends)\b[^{]*?\bProgramProvider\b",
-    re.DOTALL,
-)
-
-#: `class DirectThreadingStrategy implements ThreadingStrategy`.
-_IMPLEMENTS_THREADING_STRATEGY_RE = re.compile(
-    r"\bclass\s+\w+[^{]*?\b(?:implements|extends)\b[^{]*?\bThreadingStrategy\b",
-    re.DOTALL,
-)
+#: `class X [<...>] extends A implements B, C {` -- the supertypes named up to the brace.
+_CLASS_HEADER_RE = re.compile(r"\bclass\s+(\w+)([^{;]*)\{")
 
 
 def _repo_root() -> Path:
@@ -268,6 +259,28 @@ def _declared_types(text: str) -> tuple[dict[str, str], dict[str, str]]:
     return fields, getters
 
 
+def _subtypes(src_root: Path, root: str) -> set[str]:
+    """``root`` and every class that extends or implements it, directly or through
+    another subtype -- ``HeadlessProgramProvider extends ProjectProgramProvider`` is a
+    provider though it never names the interface."""
+    supers: dict[str, set[str]] = {}
+    for java in sorted(src_root.rglob("*.java")):
+        for m in _CLASS_HEADER_RE.finditer(_strip_comments(java.read_text(encoding="utf-8"))):
+            header = re.sub(r"<[^{]*?>", "", m.group(2))
+            header = re.sub(r"\b(?:extends|implements)\b", " ", header)
+            named = re.findall(r"[A-Za-z_][\w.]*", header)
+            supers.setdefault(m.group(1), set()).update(_simple(n) for n in named)
+    found = {root}
+    grew = True
+    while grew:
+        grew = False
+        for cls, parents in supers.items():
+            if cls not in found and parents & found:
+                found.add(cls)
+                grew = True
+    return found
+
+
 def _provider_classes(src_root: Path) -> set[str]:
     """Class names that are ``ProgramProvider`` implementations, read from source.
 
@@ -276,14 +289,7 @@ def _provider_classes(src_root: Path) -> set[str]:
     literal name ``ProgramProvider`` is not enough. Derived rather than listed so a
     renamed or added provider needs no edit here.
     """
-    providers = {"ProgramProvider"}
-    for java in sorted(src_root.rglob("*.java")):
-        text = java.read_text(encoding="utf-8")
-        if "ProgramProvider" not in text:
-            continue
-        if _IMPLEMENTS_PROVIDER_RE.search(_strip_comments(text)):
-            providers.add(java.stem)
-    return providers
+    return _subtypes(src_root, "ProgramProvider")
 
 
 def _threading_strategy_classes(src_root: Path) -> set[str]:
@@ -300,28 +306,43 @@ def _threading_strategy_classes(src_root: Path) -> set[str]:
     would silently miss the headless side. Derived rather than listed so a
     renamed or added strategy needs no edit here.
     """
-    strategies = {"ThreadingStrategy"}
-    for java in sorted(src_root.rglob("*.java")):
-        text = java.read_text(encoding="utf-8")
-        if "ThreadingStrategy" not in text:
-            continue
-        if _IMPLEMENTS_THREADING_STRATEGY_RE.search(_strip_comments(text)):
-            strategies.add(java.stem)
-    return strategies
+    return _subtypes(src_root, "ThreadingStrategy")
+
+
+def core_service_classes(repo: Path) -> list[str]:
+    """The shared service classes, read from the ``CoreServices`` record's components.
+
+    Both servers hand ``services.plus(...)`` to their scanner, so the shared set is
+    declared once, in that record, and read from there -- never listed here.
+    """
+    text = _strip_comments((repo / CORE_SERVICES).read_text(encoding="utf-8"))
+    m = re.search(r"\brecord\s+CoreServices\s*\(", text)
+    if m is None:
+        raise ValueError(f"no `record CoreServices(` in {CORE_SERVICES}")
+    body, _ = _balanced(text, m.end() - 1)
+    classes = []
+    for component in _split_args(body):
+        parts = component.split()
+        if len(parts) < 2:
+            raise ValueError(f"{CORE_SERVICES}: cannot read record component {component!r}")
+        classes.append(_simple(parts[-2]))
+    return classes
 
 
 def server_service_classes(repo: Path, server_rel: str) -> list[str]:
     """Resolve one server's ``new AnnotationScanner(...)`` arguments to service class names.
 
-    Argument expressions come in two shapes in practice:
+    Argument expressions come in these shapes in practice:
 
-    * a bare field reference (``listingService``, ``managementService``) — resolved
-      against the server class's own field declarations;
-    * a delegating getter (``endpointHandler.getListingService()``) — resolved
-      against the return type declared on ``HeadlessEndpointHandler``.
+    * a bare field reference (``managementService``) -- resolved against the server
+      class's own field declarations;
+    * ``services.plus(extra, ...)`` or ``services.all()`` on a ``CoreServices`` field --
+      expanded to the record's components (:func:`core_service_classes`) plus each
+      extra argument, resolved the same way;
+    * ``new X(...)`` -- the class named.
 
-    The scanner's leading ``ProgramProvider`` argument is dropped: it is the
-    constructor's provider parameter, not a service to reflect over.
+    The scanner's leading ``ProgramProvider`` and ``ThreadingStrategy`` arguments are
+    dropped: they are routing plumbing, not services to reflect over.
     """
     text = _strip_comments((repo / server_rel).read_text(encoding="utf-8"))
     m = _SCANNER_NEW_RE.search(text)
@@ -330,45 +351,51 @@ def server_service_classes(repo: Path, server_rel: str) -> list[str]:
     body, _ = _balanced(text, m.end() - 1)
 
     own_fields, own_getters = _declared_types(text)
-    handler_text = _strip_comments((repo / HEADLESS_HANDLER).read_text(encoding="utf-8"))
-    _, handler_getters = _declared_types(handler_text)
     src_root = repo / "src" / "main" / "java" / "com" / "xebyte"
     providers = _provider_classes(src_root)
     strategies = _threading_strategy_classes(src_root)
 
     classes: list[str] = []
     for arg in _split_args(body):
-        resolved = _resolve_arg(arg, own_fields, own_getters, handler_getters)
+        resolved = _resolve_arg(repo, arg, own_fields, own_getters)
         if resolved is None:
             raise ValueError(
                 f"{server_rel}: cannot resolve AnnotationScanner argument {arg!r} to a "
                 "declared type. Teach tools/audit_server_scope._resolve_arg about it "
                 "rather than hand-listing the service."
             )
-        if resolved in providers or resolved in strategies:
-            continue
-        classes.append(resolved)
+        classes.extend(c for c in resolved if c not in providers and c not in strategies)
     return classes
 
 
 def _resolve_arg(
+    repo: Path,
     arg: str,
     own_fields: dict[str, str],
     own_getters: dict[str, str],
-    handler_getters: dict[str, str],
-) -> str | None:
+) -> list[str] | None:
     arg = arg.strip()
     if arg in own_fields:
-        return own_fields[arg]
+        return [own_fields[arg]]
     if arg in own_getters:
-        return own_getters[arg]
+        return [own_getters[arg]]
+    core = re.fullmatch(r"(\w+)\.(plus|all)\s*\((.*)\)", arg, re.DOTALL)
+    if core and own_fields.get(core.group(1)) == "CoreServices":
+        out = core_service_classes(repo)
+        inner = core.group(3).strip()
+        for extra in _split_args(inner) if inner else []:
+            resolved = _resolve_arg(repo, extra, own_fields, own_getters)
+            if resolved is None:
+                return None
+            out.extend(resolved)
+        return out
     call = re.fullmatch(r"(?:\w+\.)?(get[A-Za-z_]\w*)\s*\(\s*\)", arg)
     if call:
-        name = call.group(1)
-        return handler_getters.get(name) or own_getters.get(name)
+        got = own_getters.get(call.group(1))
+        return [got] if got else None
     new = re.fullmatch(r"new\s+([A-Za-z_][\w.]*)\s*\(.*\)", arg, re.DOTALL)
     if new:
-        return _simple(new.group(1))
+        return [_simple(new.group(1))]
     return None
 
 
