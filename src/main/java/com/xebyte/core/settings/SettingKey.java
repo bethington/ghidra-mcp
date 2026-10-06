@@ -87,6 +87,9 @@ public record SettingKey(String key, Type type, String defaultRaw, Set<Scope> sc
 
     static List<String> tokens(String raw) {
         List<String> out = new ArrayList<>();
+        if (raw == null) {
+            return out;
+        }
         for (String t : raw.split(",")) {
             if (!t.isBlank()) {
                 out.add(t.trim());

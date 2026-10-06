@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import com.xebyte.core.settings.ProjectStores;
 import ghidra.app.services.CodeViewerService;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.options.OptionType;
@@ -36,6 +37,10 @@ import java.util.concurrent.TimeUnit;
 @McpToolGroup(value = "program", description = "Program management, script execution, memory read, bookmarks, save")
 public class ProgramScriptService {
 
+    private static final String SETTINGS_OPTIONS_REFUSAL = "Option group '" + ProjectStores.OPTIONS_NAME
+        + "' holds GhidraMCP settings; change them with set_setting.";
+    private static final String SETTINGS_ARCHIVE_REFUSAL = ProjectStores.ARCHIVE_PATH
+        + " holds the project's GhidraMCP settings; change them with set_setting.";
     private static final int MAX_SCRIPT_TIMEOUT_SECONDS = 1800;
 
     private final ProgramProvider programProvider;
@@ -319,6 +324,9 @@ public class ProgramScriptService {
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
                    description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
             @Param(value = "program", defaultValue = "") Program program) {
+        if (ProjectStores.isSettingsOptions(group)) {
+            return Response.err(SETTINGS_OPTIONS_REFUSAL);
+        }
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (value == null) return Response.err("value is required");
@@ -401,6 +409,9 @@ public class ProgramScriptService {
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
             @Param(value = "program", defaultValue = "") Program program) {
+        if (ProjectStores.isSettingsOptions(group)) {
+            return Response.err(SETTINGS_OPTIONS_REFUSAL);
+        }
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (!program.getOptionsNames().contains(group)) {
@@ -1428,6 +1439,9 @@ if (map instanceof ObjectPropertyMap) {
             if (!SecurityConfig.getInstance().isPathInProjectScope(file.getPathname())) {
                 continue;
             }
+            if (ProjectStores.isSettingsArchive(file)) {
+                continue;
+            }
             // With version-control state, so a checkout that still holds uncommitted work
             // (modified_since_checkout) can be told from an idle one without reading icons
             // in the Ghidra GUI. This is what the GUI's /server/repository/files reported.
@@ -1479,6 +1493,9 @@ if (map instanceof ObjectPropertyMap) {
             normalized = ProjectPaths.normalize(filePath);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
+        }
+        if (ProjectStores.ARCHIVE_PATH.equals(normalized)) {
+            return Response.err(SETTINGS_ARCHIVE_REFUSAL);
         }
 
         try {
@@ -1542,6 +1559,9 @@ if (map instanceof ObjectPropertyMap) {
             dest = ProjectPaths.folder(project, destFolder, false);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
+        }
+        if (ProjectStores.ARCHIVE_PATH.equals(normalizedFile)) {
+            return Response.err(SETTINGS_ARCHIVE_REFUSAL);
         }
 
         try {

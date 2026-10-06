@@ -57,6 +57,7 @@ ENDPOINT_TIER: dict[str, InvalidationTier] = {
     "/save_program": InvalidationTier.NONE,
     "/save_all_programs": InvalidationTier.NONE,
     "/checkin_program": InvalidationTier.NONE,
+    "/set_setting": InvalidationTier.NONE,
     # Server connection, repository administration and adding a file to version control
     # change nothing a program's resources report.
     "/server/connect": InvalidationTier.NONE,

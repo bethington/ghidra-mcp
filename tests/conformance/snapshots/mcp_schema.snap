@@ -1,5 +1,5 @@
 {
-  "count": 215,
+  "count": 217,
   "tools": [
     {
       "category": "function",
@@ -4537,6 +4537,32 @@
       "read_only": true
     },
     {
+      "category": "program",
+      "description": "Every setting with its effective value, the scope it came from and the scopes that also hold one. Scopes, lowest first: default, server, project (shared with everyone using the project), local (this machine), program, session (the bridge's), call. Guardrails are set by the server operator and can only be made stricter from here; secrets show only whether they are set.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Only keys under this prefix, e.g. 'tools'.",
+          "name": "prefix",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Include this program's own values (the program scope).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/get_settings",
+      "read_only": true
+    },
+    {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
       "description": "Get structure field layout",
@@ -7599,6 +7625,55 @@
         }
       ],
       "path": "/set_property",
+      "read_only": false
+    },
+    {
+      "category": "program",
+      "description": "Set or unset a setting at one scope: 'project' is shared with everyone using the project (versioned with a shared one), 'local' stays on this machine, 'program' is one program's. Returns the effective value afterwards. List settings take '+x,-y' to adjust the scope below, or a plain list to replace it. Guardrails can only be made stricter; secrets cannot be set here.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Setting key, e.g. 'tools.autoload'.",
+          "name": "key",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Raw value; ignored with unset=true.",
+          "name": "value",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "local",
+          "description": "project, local or program.",
+          "name": "scope",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Remove the value at this scope instead of setting one.",
+          "name": "unset",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program for scope=program.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/set_setting",
       "read_only": false
     },
     {

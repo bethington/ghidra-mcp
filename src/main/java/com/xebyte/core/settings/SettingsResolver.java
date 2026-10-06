@@ -63,6 +63,16 @@ public final class SettingsResolver {
      * that does not parse, or a guardrail value that would loosen what is in force.
      */
     public static void checkWrite(SettingKey key, Scope scope, String raw, Resolution current) {
+        checkScope(key, scope);
+        Object next = combine(key, current.value(), raw);
+        if (loosens(key, scope, current.value(), next)) {
+            throw new SettingRefusedException(key.key() + " is a guardrail set by the server operator. "
+                + "From here it can only be made stricter, and '" + raw + "' would loosen it.");
+        }
+    }
+
+    /** Refuse a write or unset at a scope an agent may not touch for this key. */
+    public static void checkScope(SettingKey key, Scope scope) {
         if (key.kind() == Kind.SECRET) {
             throw new SettingRefusedException(
                 key.key() + " is a secret held by the server operator; tools can neither read nor set it.");
@@ -78,11 +88,6 @@ public final class SettingsResolver {
         if (scope == Scope.SESSION) {
             throw new SettingRefusedException(
                 key.key() + "'s session value belongs to the bridge session, not the server.");
-        }
-        Object next = combine(key, current.value(), raw);
-        if (loosens(key, scope, current.value(), next)) {
-            throw new SettingRefusedException(key.key() + " is a guardrail set by the server operator. "
-                + "From here it can only be made stricter, and '" + raw + "' would loosen it.");
         }
     }
 
@@ -100,9 +105,9 @@ public final class SettingsResolver {
 
     /** {@code +x} adds, {@code -x} removes, and any bare name replaces the list below first. */
     static List<String> applyDelta(List<String> below, String raw) {
-        List<String> tokens = SettingKey.tokens(raw == null ? "" : raw);
+        List<String> tokens = SettingKey.tokens(raw);
         List<String> bare = tokens.stream().filter(t -> !t.startsWith("+") && !t.startsWith("-")).toList();
-        List<String> out = new ArrayList<>(bare.isEmpty() && !raw.isBlank() ? below : bare);
+        List<String> out = new ArrayList<>(bare.isEmpty() && !tokens.isEmpty() ? below : bare);
         for (String t : tokens) {
             String name = t.substring(1).trim();
             if (t.startsWith("+") && !name.isEmpty() && !out.contains(name)) {
