@@ -86,6 +86,21 @@ public class BatchEditingGhidraTest {
         assertTrue(types.clearData(builder.addr("0x1040"), -1, program) instanceof Response.Err);
     }
 
+    @Test public void allFiveGenericBatchCommentKindsAndNullClearing() {
+        for (String kind : List.of("pre", "post", "plate", "eol", "repeatable")) {
+            ok(comments.batchSetComments(null, List.of(), List.of(), "null", program,
+                List.of(Map.of("address", "0x1040", "comment", "Comment " + kind)), kind));
+            assertTrue(comments.getComment(builder.addr("0x1040"), "", false, program).toJson().contains("Comment " + kind));
+            Map<String, String> clear = new HashMap<>();
+            clear.put("address", "0x1040");
+            clear.put("comment", null);
+            ok(comments.batchSetComments(null, List.of(), List.of(), "null", program, List.of(clear), kind));
+            assertFalse(comments.getComment(builder.addr("0x1040"), "", false, program).toJson().contains("Comment " + kind));
+        }
+        assertTrue(comments.batchSetComments(null, List.of(), List.of(), "null", program,
+            List.of(Map.of("address", "0x1040", "comment", "text")), "invalid") instanceof Response.Err);
+    }
+
     @Test public void malformedHttpBatchEntriesRejectTheWholeRequest() throws Exception {
         AnnotationScanner scanner = new AnnotationScanner(provider, new DirectThreadingStrategy(), functions, types, comments, symbols);
         String before = program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName();
@@ -106,6 +121,20 @@ public class BatchEditingGhidraTest {
             Map.of("address", "0x1000", "name", "GetFirstValue"), Map.of("address", "0x1010", "name", "Get")));
         assertTrue(response.toJson(), response instanceof Response.Err);
         assertEquals(before, program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName());
+    }
+
+    @Test public void genericPlateCommentsHonorExistingValidationAndMissingIsNotClear() {
+        ok(types.applyDataType(builder.addr("0x1040"), "uint", false, program, null, List.of(), ""));
+        Response response = comments.batchSetComments(null, List.of(), List.of(), "null", program, List.of(
+            Map.of("address", "0x1048", "comment", "A useful existing comment"),
+            Map.of("address", "0x1040", "comment", "counter")), "plate");
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertNull(program.getListing().getComment(ghidra.program.model.listing.CommentType.PLATE, builder.addr("0x1048")));
+        ok(comments.batchSetComments(null, List.of(), List.of(), "null", program, List.of(
+            Map.of("address", "0x1040", "comment", "Number of currently active players")), "plate"));
+        response = comments.batchSetComments(null, List.of(), List.of(), "null", program, List.of(Map.of("address", "0x1040")), "plate");
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertEquals("Number of currently active players", program.getListing().getComment(ghidra.program.model.listing.CommentType.PLATE, builder.addr("0x1040")));
     }
 
     @Test public void namespaceRenameDoesNotRenameAQualifiedFunction() throws Exception {
