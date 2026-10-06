@@ -1016,6 +1016,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `apply_data_type` - Apply data type
 - `audit_global` - Audit a global variable's documentation state
 - `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
+- `clear_data` - Undefine data/code units without changing memory bytes
 - `clone_data_type` - Clone data type
 - `create_data_type_category` - Create data type category
 - `create_derived_type` - Create a type built on another: a typedef alias, an array or a pointer

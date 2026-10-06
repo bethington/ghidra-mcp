@@ -66,6 +66,25 @@ public class BatchEditingGhidraTest {
         assertEquals("final_label", program.getSymbolTable().getPrimarySymbol(builder.addr("0x1040")).getName());
     }
 
+    @Test public void batchDataDefinitionsOptionalLabelsInspectionAndContainingClear() {
+        ok(types.applyDataType("", "", false, "", "off", List.of(
+            Map.of("address", "0x1040", "data_type", "uint", "label", "g_dwCounter"),
+            Map.of("address", "0x1048", "data_type", "uchar[4]")), ""));
+        assertEquals(4, program.getListing().getDefinedDataAt(builder.addr("0x1040")).getLength());
+        assertEquals("g_dwCounter", program.getSymbolTable().getPrimarySymbol(builder.addr("0x1040")).getName());
+        String inspection = analysis.inspectMemoryContent("0x1041", 4, false, "").toJson();
+        assertTrue(inspection, inspection.contains("\"match\":\"containing\""));
+        assertTrue(inspection, inspection.contains("g_dwCounter"));
+        ok(types.clearData("0x1041", 0, ""));
+        assertNull(program.getListing().getDefinedDataAt(builder.addr("0x1040")));
+        assertNotNull(program.getListing().getDefinedDataAt(builder.addr("0x1048")));
+        Response failed = types.applyDataType("", "", false, "", "off", List.of(
+            Map.of("address", "0x1050", "data_type", "uint"), Map.of("address", "0x1058", "data_type", "nonexistent")), "");
+        assertTrue(failed instanceof Response.Err);
+        assertNull(program.getListing().getDefinedDataAt(builder.addr("0x1050")));
+        assertTrue(types.clearData("0x1040", -1, "") instanceof Response.Err);
+    }
+
     @Test public void guiBatchesRunOnEdtWithoutRecursiveInvokeAndWait() throws Exception {
         SymbolLabelService gui = new SymbolLabelService(provider, new SwingThreadingStrategy());
         ok(gui.createLabel("0x1040", "before_label", List.of(), ""));

@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 221,
+  "total_endpoints": 222,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -291,7 +291,9 @@
         "type_name",
         "clear_existing",
         "program",
-        "strict_mode"
+        "strict_mode",
+        "items",
+        "label"
       ],
       "servers": [
         "gui",
@@ -525,6 +527,21 @@
         "headless"
       ],
       "description": "Check an open program back in to the shared Ghidra Server as a new version"
+    },
+    {
+      "path": "/clear_data",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "address",
+        "size",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Undefine data/code units without changing memory bytes. Without size, clears the entire containing data item. Explicit size clears intersecting code units; their full extents may exceed the requested range."
     },
     {
       "path": "/clear_flow_and_repair",

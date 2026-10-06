@@ -1031,13 +1031,13 @@ public class DataTypeService {
      */
     @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.WRITE)
     public Response applyDataType(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "type_name", source = ParamSource.BODY,
+            @Param(value = "type_name", source = ParamSource.BODY, defaultValue = "",
                    description = "Type to apply at the address. Any name the resolver understands: a "
                                + "built-in (uint, char *), an existing struct/enum/typedef name, a pointer "
                                + "chain (int**), or array syntax basetype[count] such as dword[10]. Create "
@@ -1053,10 +1053,18 @@ public class DataTypeService {
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
-                    String strictModeArg) {
+                    String strictModeArg,
+            @Param(value = "items", source = ParamSource.BODY, defaultValue = "[]", description = "Atomic batch [{address,data_type,label?},...]; same type and eviction safeguards as single mode") List<Map<String, String>> items,
+            @Param(value = "label", source = ParamSource.BODY, defaultValue = "", description = "Optional label created in the same transaction") String label) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        if (items != null && !items.isEmpty()) {
+            return BatchOperations.run(program, threadingStrategy, "Apply data types", items,
+                item -> applyDataType(item.get("address"), item.getOrDefault("type_name", item.get("data_type")), clearExisting,
+                    programName, strictModeArg, List.of(), item.get("label")));
+        }
 
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
@@ -1167,6 +1175,7 @@ public class DataTypeService {
 
                     // Apply the data type
                     Data data = listing.createData(address, dataType);
+                    if (label != null && !label.isBlank()) program.getSymbolTable().createLabel(address, label, SourceType.USER_DEFINED);
 
                     // Validate size matches expectation
                     int expectedSize = dataType.getLength();
@@ -1205,6 +1214,10 @@ public class DataTypeService {
     }
 
     /** Four-arg overload preserving the pre-v5.11.2 signature. */
+    public Response applyDataType(String address, String typeName, boolean clearExisting, String programName, String strictMode) {
+        return applyDataType(address, typeName, clearExisting, programName, strictMode, List.of(), "");
+    }
+
     public Response applyDataType(String addressStr, String typeName, boolean clearExisting,
                                    String programName) {
         return applyDataType(addressStr, typeName, clearExisting, programName, null);
@@ -1213,6 +1226,30 @@ public class DataTypeService {
     // Backward compatibility overload
     public Response applyDataType(String addressStr, String typeName, boolean clearExisting) {
         return applyDataType(addressStr, typeName, clearExisting, null, null);
+    }
+
+    @McpTool(path = "/clear_data", method = "POST", description = "Undefine data/code units without changing memory bytes. Without size, clears the entire containing data item. Explicit size clears intersecting code units; their full extents may exceed the requested range.", category = "datatype", access = ToolAccess.DESTRUCTIVE)
+    public Response clearData(
+            @Param(value = "address", source = ParamSource.BODY, paramType = "address", description = "Start address or an address within a data item") String address,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0", description = "Positive byte count, or 0 to clear the containing data item") int size,
+            @Param(value = "program", defaultValue = "", description = "Target program name") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        if (size < 0) return Response.err("size must be nonnegative");
+        try {
+            return threadingStrategy.executeWrite(pe.program(), "Clear data", () -> {
+                Address start = OverrideService.requireAddress(pe.program(), address);
+                Listing listing = pe.program().getListing();
+                Address end;
+                if (size == 0) {
+                    Data data = listing.getDataContaining(start);
+                    if (data != null) { start = data.getMinAddress(); end = data.getMaxAddress(); }
+                    else end = start;
+                } else end = start.addNoWrap(size - 1);
+                listing.clearCodeUnits(start, end, false);
+                return Response.ok(JsonHelper.mapOf("status", "success", "start", start.toString(), "end", end.toString()));
+            });
+        } catch (Exception e) { return Response.err(e.getMessage()); }
     }
 
     /**
