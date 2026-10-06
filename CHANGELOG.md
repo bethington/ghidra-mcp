@@ -4,6 +4,22 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+Changes on `dev` after 7.1.0.
+
+### Changed — type editing preserves layouts and references
+
+- Type creators accept a category path; struct/union members retain comments,
+  validate explicit sizes, and accept array/pointer types. A union member with an
+  unknown type fails the call instead of being skipped. Enum creation also accepts
+  an array of `{name,value}` objects.
+- Function signatures retain named parameters and calling conventions and update
+  in place; invalid parameters roll back. Identical typedef creation is a no-op
+  and conflicting typedefs are rejected.
+- Type resolution honors target ABI sizes and qualified category paths, rejects
+  unknown C pointer targets, and preserves placeholders if replacement fails.
+
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
 **220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by

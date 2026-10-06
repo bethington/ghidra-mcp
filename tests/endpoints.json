@@ -695,7 +695,8 @@
         "name",
         "values",
         "size",
-        "program"
+        "program",
+        "category_path"
       ],
       "servers": [
         "gui",
@@ -740,7 +741,9 @@
         "name",
         "return_type",
         "parameters",
-        "program"
+        "program",
+        "calling_convention",
+        "category_path"
       ],
       "servers": [
         "gui",
@@ -826,7 +829,8 @@
         "name",
         "fields",
         "replace_placeholder",
-        "program"
+        "program",
+        "category_path"
       ],
       "servers": [
         "gui",
@@ -841,7 +845,8 @@
       "params": [
         "name",
         "fields",
-        "program"
+        "program",
+        "category_path"
       ],
       "servers": [
         "gui",
