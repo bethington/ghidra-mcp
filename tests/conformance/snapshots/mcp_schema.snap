@@ -1,5 +1,5 @@
 {
-  "count": 213,
+  "count": 214,
   "tools": [
     {
       "category": "function",
@@ -415,7 +415,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. For a cacheable read of decompile+callers+comments+xrefs prefer ghidra://function/{program}/{address} (or /get_functions). decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -484,14 +484,6 @@
           "default": "",
           "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
           "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
-          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3896,6 +3888,24 @@
       "read_only": true
     },
     {
+      "category": "program",
+      "description": "Return program.getModificationNumber() — a cheap monotonic token that moves on real DB changes (rename, comment, struct edit, undo/redo, GUI writes, scripts) and never on a read. Used by the bridge to invalidate cached function resources after out-of-band edits.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/get_change_token",
+      "read_only": true
+    },
+    {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
       "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.",
@@ -4168,7 +4178,7 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Export all documentation for a function. Prefer ghidra://function/{program}/{address} (or /get_functions) when you want decompile + docs + callers in one cacheable read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "destructive": false,
       "method": "GET",
       "params": [

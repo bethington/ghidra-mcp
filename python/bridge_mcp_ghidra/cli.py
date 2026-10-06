@@ -12,6 +12,8 @@ import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 
+from . import resources  # noqa: F401  (registers MCP resources on import)
+from . import subscriptions  # noqa: F401  (registers subscribe/unsubscribe handlers)
 from . import server
 from . import state
 from .config import AUTH_TOKEN, logger
@@ -592,6 +594,17 @@ def main():
         logger.warning(
             "--json-response/--stateless-http only affect streamable-http; ignored for %s",
             args.transport,
+        )
+    if args.json_response:
+        logger.warning(
+            "--json-response answers POSTs with a single JSON body, so "
+            "resources/updated, resources/list_changed, tools/list_changed and "
+            "progress notifications cannot be delivered on the response stream."
+        )
+    if args.stateless_http:
+        logger.warning(
+            "--stateless-http has no durable session: resources/subscribe is "
+            "refused and subscribe=false is advertised at initialize."
         )
     if args.stateless_http and state._lazy_mode:
         logger.warning(
