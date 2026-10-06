@@ -34,7 +34,7 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
     }
 
     public void testCreateStructRejectsNonArrayFieldsOrRequiresProgram() {
-        Response r = dataTypes.createStruct("MyStruct", "{\"name\":\"a\"}", false, programStub);
+        Response r = dataTypes.createStruct("MyStruct", "{\"name\":\"a\"}", false, programStub, "");
         String msg = r.toJson();
         assertTrue(msg.contains("JSON array"));
     }
