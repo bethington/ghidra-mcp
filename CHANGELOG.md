@@ -24,6 +24,8 @@ Changes on `dev` after 7.1.0.
   defaults to preserving layout (`shrink=true` explicitly shifts fields).
 - Type deletion checks users and applied data (including typedef/pointer
   wrappers and function variables/returns) and refuses unless `force=true`.
+- `search_data_types` gains an optional kind filter and accepts an empty pattern;
+  `get_type_size` reports members, signatures and base types.
 
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
