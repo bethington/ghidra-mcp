@@ -761,7 +761,9 @@
         "address",
         "name",
         "labels",
-        "program"
+        "program",
+        "primary",
+        "namespace"
       ],
       "servers": [
         "gui",
@@ -2551,7 +2553,8 @@
         "kind",
         "old_name",
         "program",
-        "strict_mode"
+        "strict_mode",
+        "renames"
       ],
       "servers": [
         "gui",
