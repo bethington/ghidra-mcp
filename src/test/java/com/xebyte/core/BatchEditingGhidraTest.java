@@ -85,6 +85,21 @@ public class BatchEditingGhidraTest {
         assertTrue(types.clearData("0x1040", -1, "") instanceof Response.Err);
     }
 
+    @Test public void allFiveGenericBatchCommentKindsAndNullClearing() {
+        for (String kind : List.of("pre", "post", "plate", "eol", "repeatable")) {
+            ok(comments.batchSetComments("", List.of(), List.of(), "null", "",
+                List.of(Map.of("address", "0x1040", "comment", "Comment " + kind)), kind));
+            assertTrue(comments.getComment("0x1040", "", false, "").toJson().contains("Comment " + kind));
+            Map<String, String> clear = new HashMap<>();
+            clear.put("address", "0x1040");
+            clear.put("comment", null);
+            ok(comments.batchSetComments("", List.of(), List.of(), "null", "", List.of(clear), kind));
+            assertFalse(comments.getComment("0x1040", "", false, "").toJson().contains("Comment " + kind));
+        }
+        assertTrue(comments.batchSetComments("", List.of(), List.of(), "null", "",
+            List.of(Map.of("address", "0x1040", "comment", "text")), "invalid") instanceof Response.Err);
+    }
+
     @Test public void guiBatchesRunOnEdtWithoutRecursiveInvokeAndWait() throws Exception {
         SymbolLabelService gui = new SymbolLabelService(provider, new SwingThreadingStrategy());
         ok(gui.createLabel("0x1040", "before_label", List.of(), ""));
@@ -117,6 +132,20 @@ public class BatchEditingGhidraTest {
             Map.of("address", "0x1000", "name", "GetFirstValue"), Map.of("address", "0x1010", "name", "Get")));
         assertTrue(response.toJson(), response instanceof Response.Err);
         assertEquals(before, program.getFunctionManager().getFunctionAt(builder.addr("0x1000")).getName());
+    }
+
+    @Test public void genericPlateCommentsHonorExistingValidationAndMissingIsNotClear() {
+        ok(types.applyDataType("0x1040", "uint", false, ""));
+        Response response = comments.batchSetComments("", List.of(), List.of(), "null", "", List.of(
+            Map.of("address", "0x1048", "comment", "A useful existing comment"),
+            Map.of("address", "0x1040", "comment", "counter")), "plate");
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertNull(program.getListing().getComment(ghidra.program.model.listing.CommentType.PLATE, builder.addr("0x1048")));
+        ok(comments.batchSetComments("", List.of(), List.of(), "null", "", List.of(
+            Map.of("address", "0x1040", "comment", "Number of currently active players")), "plate"));
+        response = comments.batchSetComments("", List.of(), List.of(), "null", "", List.of(Map.of("address", "0x1040")), "plate");
+        assertTrue(response.toJson(), response instanceof Response.Err);
+        assertEquals("Number of currently active players", program.getListing().getComment(ghidra.program.model.listing.CommentType.PLATE, builder.addr("0x1040")));
     }
 
     @Test public void namespaceRenameDoesNotRenameAQualifiedFunction() throws Exception {

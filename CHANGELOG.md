@@ -69,6 +69,9 @@ and folding `/get_version` into `/mcp/health`).
 - Added `clear_data`, which undefines data without changing memory bytes and clears
   the complete containing item when no size is given. `inspect_memory_content` now
   reports the containing data item's type, size, label, value and offset.
+- `batch_set_comments` accepts generic `comments` of any of the five listing kinds
+  (`comment_type`), including null/empty clearing and the existing global
+  plate-comment checks.
 - Symbol helpers dispatch through the injected threading strategy, so GUI batches
   no longer call `invokeAndWait` recursively on the EDT.
 - Malformed batch entries fail the whole request before dispatch instead of
