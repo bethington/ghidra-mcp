@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 215,
+  "total_endpoints": 211,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -513,13 +513,14 @@
     {
       "path": "/checkin_program",
       "method": "POST",
-      "category": "headless",
+      "category": "project",
       "params": [
         "path",
         "comment",
         "keep_checked_out"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Check an open program back in to the shared Ghidra Server as a new version"
@@ -636,6 +637,7 @@
         "program"
       ],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Configure an analysis plugin"
@@ -1776,9 +1778,10 @@
     {
       "path": "/get_project_info",
       "method": "GET",
-      "category": "headless",
+      "category": "project",
       "params": [],
       "servers": [
+        "gui",
         "headless"
       ],
       "description": "Get info about the currently open project"
@@ -1885,16 +1888,6 @@
         "headless"
       ],
       "description": "Get references to address"
-    },
-    {
-      "path": "/health",
-      "method": "GET",
-      "category": "utility",
-      "params": [],
-      "servers": [
-        "headless"
-      ],
-      "description": "Health check endpoint for headless server"
     },
     {
       "path": "/import_data_types",
@@ -2187,38 +2180,13 @@
       "description": "List defined strings"
     },
     {
-      "path": "/load_program",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "file",
-        "language",
-        "compiler_spec"
-      ],
-      "servers": [
-        "headless"
-      ],
-      "description": "Load a binary file into the headless server for analysis. For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary with the requested processor. When `language` is omitted, the loader auto-detects the format."
-    },
-    {
-      "path": "/load_program_from_project",
-      "method": "POST",
-      "category": "headless",
-      "params": [
-        "path"
-      ],
-      "servers": [
-        "headless"
-      ],
-      "description": "Load program from Ghidra project (headless)"
-    },
-    {
       "path": "/mcp/health",
       "method": "GET",
       "category": "utility",
       "params": [],
       "servers": [
-        "gui"
+        "gui",
+        "headless"
       ],
       "description": "HTTP server health: pool stats, uptime, memory, active request count"
     },
@@ -2310,7 +2278,7 @@
     },
     {
       "path": "/open_program",
-      "method": "GET",
+      "method": "POST",
       "category": "program",
       "params": [
         "path",
@@ -2336,16 +2304,6 @@
         "headless"
       ],
       "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
-    },
-    {
-      "path": "/project/info",
-      "method": "GET",
-      "category": "project",
-      "params": [],
-      "servers": [
-        "gui"
-      ],
-      "description": "Get detailed project info including running tools and open programs"
     },
     {
       "path": "/prompt_policy",

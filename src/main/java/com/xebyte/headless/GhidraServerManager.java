@@ -866,4 +866,42 @@ public class GhidraServerManager {
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
     }
+
+    /**
+     * Ensure a live {@link RepositoryServerAdapter} for the given host:port.
+     * Reuses the existing connection when it matches; refuses a host/port
+     * mismatch rather than silently talking to the wrong server.
+     */
+    public synchronized RepositoryServerAdapter ensureConnectedTo(String targetHost, int targetPort)
+            throws IOException {
+        if (targetHost == null || targetHost.isBlank()) {
+            throw new IOException("server host required");
+        }
+        if (targetPort <= 0) {
+            throw new IOException("server port must be positive: " + targetPort);
+        }
+        if (connected && serverAdapter != null && serverAdapter.isConnected()) {
+            if (!host.equalsIgnoreCase(targetHost) || port != targetPort) {
+                throw new IOException("Already connected to " + host + ":" + port
+                        + " but URL targets " + targetHost + ":" + targetPort
+                        + ". /server/disconnect first, or set GHIDRA_SERVER_HOST/PORT to match.");
+            }
+            return serverAdapter;
+        }
+        if (!host.equalsIgnoreCase(targetHost) || port != targetPort) {
+            throw new IOException("URL targets " + targetHost + ":" + targetPort
+                    + " but GHIDRA_SERVER_HOST/PORT is " + host + ":" + port
+                    + ". Align the env vars (or reconnect) before /open_project.");
+        }
+        connect();
+        if (!connected || serverAdapter == null || !serverAdapter.isConnected()) {
+            throw new IOException(lastError != null ? lastError : "connect failed");
+        }
+        return serverAdapter;
+    }
+
+    /** Open (and cache) a repository on the connected server. */
+    public synchronized RepositoryAdapter openRepository(String repoName) throws IOException {
+        return getRepository(repoName);
+    }
 }

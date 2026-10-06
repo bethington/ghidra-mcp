@@ -58,8 +58,8 @@ public class GzfExportImportTest {
         when(common.getName()).thenReturn("Common.dll");
         Program d2common = mock(Program.class);
         when(d2common.getName()).thenReturn("D2Common.dll");
-        provider.setCurrentProgram(d2common);
-        provider.setCurrentProgram(common);
+        provider.trackOpenProgram(d2common);
+        provider.trackOpenProgram(common);
 
         Path dir = Files.createTempDirectory("gzf-export-test");
         File out = new File(dir.toFile(), "out.gzf");

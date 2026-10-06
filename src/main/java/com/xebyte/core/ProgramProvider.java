@@ -55,15 +55,13 @@ public interface ProgramProvider {
     void setCurrentProgram(Program program);
 
     /**
-     * Close a program when the provider owns the program lifecycle.
-     *
-     * <p>GUI providers usually close through Ghidra's ProgramManager, so the
-     * default is a no-op. Headless providers should override this.
+     * Release this provider's handle on a program it holds.
      *
      * @param program The program to close
-     * @return true if the provider closed the program
+     * @param save    save unsaved changes first; false discards them
+     * @return true if the provider held the program and released it
      */
-    default boolean closeProgram(Program program) {
+    default boolean closeProgram(Program program, boolean save) {
         return false;
     }
 
@@ -142,23 +140,31 @@ public interface ProgramProvider {
      * enough to release the file.
      *
      * @param nameOrPath Program name or project path
+     * @param save       save unsaved changes first; false discards them -- a close
+     *                   that was asked to discard must not have its edits saved on
+     *                   the way out by a cached handle
      * @return true if a cached handle was released
      */
-    default boolean releaseCachedProgram(String nameOrPath) {
+    default boolean releaseCachedProgram(String nameOrPath, boolean save) {
         return false;
     }
 
     /**
-     * Get a program by name, falling back to current program if name is null or empty.
+     * Resolve a program by name, or the current program when {@code name} is
+     * null or empty.
+     *
+     * <p>A non-blank name that misses must return null — falling back to the
+     * current program made a typo (or a closed program) silently operate on
+     * the wrong binary. Callers that need a hard error on miss should use
+     * {@link ServiceUtils#getProgramOrError}.
      *
      * @param name The program name (may be null)
-     * @return The resolved program
+     * @return The resolved program, or null when a non-blank name misses
      */
     default Program resolveProgram(String name) {
         if (name == null || name.isEmpty()) {
             return getCurrentProgram();
         }
-        Program program = getProgram(name);
-        return program != null ? program : getCurrentProgram();
+        return getProgram(name);
     }
 }

@@ -127,6 +127,8 @@ def _fake_repo(tmp_path, gui_args, headless_args, gui_manual=(), headless_manual
     )
     (xb / "headless" / "GhidraMCPHeadlessServer.java").write_text(
         "public class GhidraMCPHeadlessServer {\n"
+        "    private StubProvider programProvider;\n"
+        "    private CoreServices services;\n"
         "    private GammaService gammaService;\n"
         "    void start() {\n"
         f"        AnnotationScanner scanner = new AnnotationScanner({headless_args});\n"
@@ -134,10 +136,10 @@ def _fake_repo(tmp_path, gui_args, headless_args, gui_manual=(), headless_manual
         "    }\n}\n",
         encoding="utf-8",
     )
-    (xb / "headless" / "HeadlessEndpointHandler.java").write_text(
-        "public class HeadlessEndpointHandler {\n"
-        "    public StubProvider getProgramProvider() { return provider; }\n"
-        "    public AlphaService getAlphaService() { return alphaService; }\n"
+    # The shared set both servers build; the resolver reads its components.
+    (xb / "core" / "CoreServices.java").write_text(
+        "public record CoreServices(\n"
+        "        AlphaService alpha) {\n"
         "}\n",
         encoding="utf-8",
     )
@@ -149,7 +151,7 @@ def test_provider_argument_is_dropped_by_its_declared_type(tmp_path):
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService, betaService",
-        headless_args="endpointHandler.getProgramProvider(), endpointHandler.getAlphaService()",
+        headless_args="programProvider, services.all()",
     )
     assert audit.server_service_classes(repo, audit.GUI_SERVER) == [
         "AlphaService",
@@ -158,11 +160,12 @@ def test_provider_argument_is_dropped_by_its_declared_type(tmp_path):
     assert audit.server_service_classes(repo, audit.HEADLESS_SERVER) == ["AlphaService"]
 
 
-def test_delegating_getter_resolves_through_the_handler(tmp_path):
+def test_core_services_expand_to_the_record_components_plus_extras(tmp_path):
+    """``services.plus(x)`` is the shared set read from ``CoreServices`` plus ``x``."""
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService",
-        headless_args="endpointHandler.getProgramProvider(), endpointHandler.getAlphaService(), gammaService",
+        headless_args="programProvider, services.plus(gammaService)",
     )
     assert audit.server_service_classes(repo, audit.HEADLESS_SERVER) == [
         "AlphaService",
@@ -175,7 +178,7 @@ def test_unresolvable_scanner_argument_is_loud(tmp_path):
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService, somethingUndeclared",
-        headless_args="endpointHandler.getProgramProvider()",
+        headless_args="programProvider",
     )
     with pytest.raises(ValueError, match="cannot resolve AnnotationScanner argument"):
         audit.server_service_classes(repo, audit.GUI_SERVER)
@@ -185,7 +188,7 @@ def test_manual_paths_skip_the_scanner_argument(tmp_path):
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService",
-        headless_args="endpointHandler.getProgramProvider()",
+        headless_args="programProvider",
         gui_manual=("/one", "/two"),
     )
     assert audit.server_manual_paths(repo, audit.GUI_SERVER) == ["/one", "/two"]
@@ -202,7 +205,7 @@ def test_scope_unions_both_registration_mechanisms(tmp_path):
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService",
-        headless_args="endpointHandler.getProgramProvider(), gammaService",
+        headless_args="programProvider, gammaService",
         gui_manual=("/gamma",),
     )
     scope = audit.derive_scope(repo)["scope"]
@@ -216,7 +219,7 @@ def test_scope_order_is_stable_regardless_of_discovery_order(tmp_path):
     repo = _fake_repo(
         tmp_path,
         gui_args="programProvider, alphaService",
-        headless_args="endpointHandler.getProgramProvider(), endpointHandler.getAlphaService()",
+        headless_args="programProvider, services.all()",
     )
     assert audit.derive_scope(repo)["scope"]["/alpha"] == list(audit.SERVERS)
 

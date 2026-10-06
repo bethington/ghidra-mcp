@@ -593,7 +593,7 @@ class TestFailureDetection(unittest.TestCase):
         )
 
     def test_success_false_payload_is_a_failure(self):
-        # /load_program_from_project reports this way through Response.ok.
+        # /open_program reports this way through Response.ok.
         msg = self._msg('{"success": false, "error": "not checked out", "diagnostics": {}}')
         self.assertEqual(msg, "not checked out")
 

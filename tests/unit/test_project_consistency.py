@@ -134,8 +134,13 @@ class TestVersionConsistency(unittest.TestCase):
                     f"VersionInfo VERSION={match.group(1)} != pom.xml {pom_version}")
 
     def test_user_visible_tool_counts_match_endpoint_catalog(self):
-        """Marketing/extension metadata should not drift from endpoints.json."""
-        expected = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["total_endpoints"]
+        """Marketing/extension metadata should not drift from agent-visible endpoints.
+
+        Internal HTTP routes stay in endpoints.json (bridge still calls them) but
+        are omitted from /mcp/schema and from the advertised MCP tool count.
+        """
+        catalog = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
+        expected = sum(1 for e in catalog["endpoints"] if not e.get("internal"))
         checks = {
             "README.md": PROJECT_ROOT / "README.md",
             "CLAUDE.md": PROJECT_ROOT / "CLAUDE.md",
@@ -304,27 +309,28 @@ class TestJavaArchitecture(unittest.TestCase):
                 re.findall(r'@McpTool\(\s*(?:path\s*=\s*)?"([^"]+)"', java_file.read_text())
             )
 
+        # /check_connection, /mcp/health and /mcp/instance_info are McpHttpServer's own,
+        # served by both servers and registered via http.route by neither.
         gui_only_expected = {
             "/batch_apply_documentation",
-            "/mcp/health",
-            "/project/info",
             "/server/authenticate",
             "/tool/goto_address",
             "/tool/launch_codebrowser",
             "/tool/running_tools",
         }
-        headless_only_expected = {
-            "/configure_analyzer",
-            "/delete_project",
-            "/health",
-            "/list_projects",
+            # /health was the last one: headless-only liveness, retired for the
+            # shared /mcp/health.
+            # /configure_analyzer, /list_projects and /delete_project were hand-routed
+            # here until they became @McpTools (AnalysisService, on both servers; and
+            # HeadlessManagementService). Hand-routed, they skipped the file-root
+            # allow-list and /configure_analyzer answered success for any name.
             # /move_file and /move_folder used to be listed here. They were
             # hand-routed headless-only while tests/endpoints.json advertised
             # them globally, so a FrontEnd-mode /mcp/schema never served them
             # and every bridge call 404'd. They are now @McpTool methods on
             # ProgramScriptService, i.e. `annotated`, and must NOT come back
             # to this set -- see ProjectMoveEndpointsOfflineTest.
-        }
+        headless_only_expected: set[str] = set()
 
         self.assertEqual(gui - headless - annotated, gui_only_expected)
         self.assertEqual(headless - gui - annotated, headless_only_expected)

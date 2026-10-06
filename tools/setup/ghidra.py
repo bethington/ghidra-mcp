@@ -952,14 +952,14 @@ def wait_for_mcp(
     deadline = time.monotonic() + timeout_seconds
     last_error: Exception | None = None
     while time.monotonic() < deadline:
-        for path in ("/mcp/health", "/health", "/check_connection"):
-            try:
-                status, _payload = _mcp_request(repo_root, mcp_url, path, timeout=5)
-                if status == 200:
-                    print(f"MCP ready at {mcp_url} ({path}).")
-                    return
-            except Exception as exc:
-                last_error = exc
+        # Both servers serve /mcp/health; headless used to answer only /health.
+        try:
+            status, _payload = _mcp_request(repo_root, mcp_url, "/mcp/health", timeout=5)
+            if status == 200:
+                print(f"MCP ready at {mcp_url}.")
+                return
+        except Exception as exc:
+            last_error = exc
         time.sleep(2)
     raise RuntimeError(f"MCP did not become ready at {mcp_url}: {last_error}")
 
@@ -1831,7 +1831,7 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
         # OLD resume-only approach, before this launcher-kill existed.
         # Tried a settle delay before severing the connection, on the theory
         # this was a narrow timing race the same way the analogous
-        # program-save race is (see ProgramScriptService.saveWithRetry) --
+        # program-save race is (see ProgramSaves.withRetry) --
         # measured, live, that it made no difference: the lock reproduced on
         # literally the first debugger cycle after a completely fresh
         # deploy, delay or no delay. This is not a rare race to narrow; it

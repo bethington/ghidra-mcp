@@ -66,9 +66,10 @@ class TestServerHealth:
         """Server should return version info."""
         response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        text = response.text
-        # Should contain version info
-        assert "version" in text.lower() or "ghidra" in text.lower()
+        data = response.json()
+        assert data.get("status") == "ok"
+        if "version" in data:
+            assert data["version"]
 
 
 class TestProgramInfo:
@@ -833,8 +834,7 @@ class TestCurrentSelection:
     def test_get_ui_cursor_selection(self, http_client):
         """Get current cursor/selection in Ghidra."""
         response = http_client.get("/get_ui_cursor", params={"type": "selection"})
-        # May be 404 if selection endpoint not available / headless
-        assert response.status_code in [200, 404]
+        assert response.status_code == 200
 
 
 class TestBytePatternSearch:
@@ -853,15 +853,12 @@ class TestResponseFormats:
     """Verify response format consistency."""
 
     def test_version_is_json_parseable(self, http_client):
-        """Version response should be JSON."""
+        """Health response should be JSON."""
         response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        try:
-            data = json.loads(response.text)
-            assert isinstance(data, dict)
-        except json.JSONDecodeError:
-            # Plain text is also acceptable
-            assert len(response.text) > 0
+        data = json.loads(response.text)
+        assert isinstance(data, dict)
+        assert data.get("status") == "ok"
 
     def test_list_functions_parseable(self, http_client):
         """Function list should be parseable."""

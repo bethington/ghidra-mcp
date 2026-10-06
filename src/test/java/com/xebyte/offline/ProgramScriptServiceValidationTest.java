@@ -35,7 +35,7 @@ public class ProgramScriptServiceValidationTest extends TestCase {
     }
 
     public void testOpenProgramFromProjectRequiresPath() {
-        Response r = scripts.openProgramFromProject("");
+        Response r = scripts.openProgramFromProject("", false);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Program path is required"));
     }

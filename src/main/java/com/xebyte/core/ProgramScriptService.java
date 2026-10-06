@@ -12,6 +12,8 @@ import ghidra.program.model.address.OverlayAddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.util.ProgramLocation;
+import ghidra.program.util.ProgramSelection;
 import ghidra.program.model.util.IntPropertyMap;
 import ghidra.program.model.util.LongPropertyMap;
 import ghidra.program.model.util.ObjectPropertyMap;
@@ -129,10 +131,10 @@ public class ProgramScriptService {
                 }
                 mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
                 // Through the guarded helper, never mgr.waitForAnalysis
-                // directly -- see awaitAnyPendingAnalysis. An unguarded call
+                // directly -- see ProgramSaves.awaitAnalysis. An unguarded call
                 // here is one of the two paths that wedged all three HTTP
                 // threads for 7.8 CPU-hours on 2026-08-11.
-                awaitAnyPendingAnalysis(program);
+                ProgramSaves.awaitAnalysis(program);
                 ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 txOk = true;
             } finally {
@@ -172,119 +174,7 @@ public class ProgramScriptService {
             return;
         }
         program.flushEvents();
-        saveWithRetry(program, () -> program.save(reason, ghidra.util.task.TaskMonitor.DUMMY));
-    }
-
-    @FunctionalInterface
-    private interface ThrowingSave {
-        void run() throws IOException, ghidra.util.exception.CancelledException;
-    }
-
-    /**
-     * Save a program, retrying if the attempt races Ghidra's own
-     * auto-analysis transaction management.
-     *
-     * <p>{@link AutoAnalysisManager} registers its own
-     * {@code DomainObjectListener} on every program and schedules a
-     * background "Auto Analysis" task whenever the program changes (a
-     * rename, a signature edit, a new function) -- entirely independent of
-     * any analysis this class explicitly starts. If that background task's
-     * transaction is still open when a save runs, the save throws
-     * {@code IOException: Unable to lock due to active transaction}.
-     * Confirmed via Ghidra's own application.log: the same stack trace,
-     * through {@code saveCurrentProgram}, recurring since at least
-     * 2026-07-08 -- weeks before any code path here explicitly triggered
-     * analysis, so it is not specific to this class's own analysis calls.</p>
-     *
-     * <p>Waiting for {@link AutoAnalysisManager#waitForAnalysis} to return
-     * first narrows the window but does not close it: Ghidra logs the task
-     * as complete and this save's lock failure in the same instant, meaning
-     * the completion notification and the background task's own transaction
-     * teardown are not perfectly synchronized with each other. A short
-     * backoff-and-retry on that specific message is the pragmatic fix for a
-     * race that waiting alone cannot fully eliminate.</p>
-     */
-    private void saveWithRetry(Program program, ThrowingSave saveAction)
-            throws IOException, ghidra.util.exception.CancelledException {
-        final int maxAttempts = 4;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            awaitAnyPendingAnalysis(program);
-            try {
-                saveAction.run();
-                return;
-            } catch (IOException e) {
-                String msg = e.getMessage();
-                boolean isLockRace = msg != null && msg.contains("Unable to lock due to active transaction");
-                if (!isLockRace || attempt == maxAttempts) {
-                    throw e;
-                }
-                Msg.warn(this, "Save raced Ghidra's own auto-analysis transaction (attempt "
-                        + attempt + "/" + maxAttempts + "), retrying: " + msg);
-                try {
-                    Thread.sleep(150L * attempt);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw e;
-                }
-            }
-        }
-    }
-
-    /**
-     * Re-entrancy guard for {@link AutoAnalysisManager#waitForAnalysis}.
-     *
-     * <p>{@code waitForAnalysis(null, monitor)} can re-enter ITSELF. Measured
-     * from a live thread dump on 2026-08-11, after Ghidra had been
-     * unresponsive for hours:</p>
-     *
-     * <pre>
-     *   AutoAnalysisManager.scheduleWorker(1350)
-     *     -&gt; waitForAnalysis(518)
-     *       -&gt; analysisWorkerCallback(523)
-     *         -&gt; AnalysisWorkerCommand.applyTo(1694)
-     *           -&gt; applyToWithTransaction
-     *             -&gt; scheduleWorker(1350)   ... and round again
-     * </pre>
-     *
-     * <p>All THREE GhidraMCP-HTTP threads -- the entire pool -- were stuck in
-     * that loop, 317 frames deep, having burned ~9,400 CPU-seconds EACH
-     * (7.8 CPU-hours between them). They never return, so the pool is
-     * permanently consumed and every one of the 253 endpoints times out. The
-     * symptom presents as "Ghidra is slow", not as an error, and the only
-     * recovery is a restart.</p>
-     *
-     * <p>A thread that is already inside a wait does not need to start
-     * another one: the outer call is still going to wait for the same
-     * analysis to finish. So a nested call on the same thread returns
-     * immediately and the recursion cannot form. This is deliberately the
-     * smallest fix that provably terminates -- it changes no semantics for
-     * the outer wait, and if it is wrong the failure mode is a save racing
-     * analysis, which {@code saveWithRetry} already handles and which is
-     * vastly preferable to a wedged server.</p>
-     */
-    // Package-visible on purpose: FrontEndProgramProvider shares this ONE
-    // guard. Two separate ThreadLocals would not guard each other, and the
-    // recursion can cross both classes on a single thread.
-    static final ThreadLocal<Boolean> IN_ANALYSIS_WAIT =
-            ThreadLocal.withInitial(() -> Boolean.FALSE);
-
-    private void awaitAnyPendingAnalysis(Program program) {
-        if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
-            // Already waiting further up this same thread's stack. Starting
-            // another wait here is what forms the infinite recursion above.
-            return;
-        }
-        IN_ANALYSIS_WAIT.set(Boolean.TRUE);
-        try {
-            AutoAnalysisManager.getAnalysisManager(program)
-                    .waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
-        } catch (Exception | LinkageError e) {
-            // Best-effort: let the save call itself surface any real failure
-            // rather than mask it with a wait-side error here.
-            Msg.warn(this, "awaitAnyPendingAnalysis failed, proceeding to save anyway: " + e.getMessage());
-        } finally {
-            IN_ANALYSIS_WAIT.set(Boolean.FALSE);
-        }
+        ProgramSaves.withRetry(program, () -> program.save(reason, ghidra.util.task.TaskMonitor.DUMMY));
     }
 
     // ========================================================================
@@ -1025,7 +915,7 @@ public class ProgramScriptService {
                         ));
                         return;
                     }
-                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                     resultData.set(JsonHelper.mapOf(
                         "success", true,
                         "program", program.getName(),
@@ -1110,7 +1000,7 @@ public class ProgramScriptService {
                         errors.get().add(info);
                         continue;
                     }
-                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                     saved.get().add(info);
                 } catch (Throwable e) {
                     info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
@@ -1144,14 +1034,16 @@ public class ProgramScriptService {
     /**
      * List all currently open programs in Ghidra.
      */
-    @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.", category = "program", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one is listed, pass program= on subsequent tool calls — omitting it returns an error naming every open program (guessing is never acceptable with multiple candidates).", category = "program", access = ToolAccess.READ_ONLY)
     public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
             return Response.ok(JsonHelper.mapOf("programs", List.of(), "count", 0, "current_program", ""));
         }
 
-        Program currentProgram = programProvider.resolveProgram(null);
+        // Active program only for the is_current flag — this endpoint's
+        // contract is the open set, not a guessed target for later tools.
+        Program currentProgram = programProvider.getCurrentProgram();
 
         List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
@@ -1199,32 +1091,46 @@ public class ProgramScriptService {
         }
 
         String search = name.trim();
+        Program target;
+        try {
+            // The provider's matcher -- the same one every endpoint resolves with. The
+            // old one here also took a path SUBSTRING and closed every hit, so closing
+            // /x/a.dll closed /x/a.dll.orig as well.
+            target = ProjectProgramProvider.match(
+                java.util.Arrays.asList(programProvider.getAllOpenPrograms()), search);
+        } catch (AmbiguousProgramException e) {
+            return Response.err(e.getMessage());
+        }
+        if (target == null) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", true, "closed_count", 0, "released_cache", false, "name", search));
+        }
+
         AtomicInteger closedCount = new AtomicInteger(0);
         AtomicReference<String> error = new AtomicReference<>();
-
+        ghidra.framework.model.DomainFile targetFile = target.getDomainFile();
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     for (ProgramManager pm : findAllProgramManagers()) {
                         for (Program program : pm.getAllOpenPrograms()) {
-                            if (!programMatches(program, search)) {
+                            boolean same = program == target || (targetFile != null
+                                && program.getDomainFile() != null
+                                && program.getDomainFile().getPathname().equals(targetFile.getPathname()));
+                            if (!same) {
                                 continue;
                             }
                             if (save && program.isChanged()) {
                                 ghidra.framework.model.DomainFile df = program.getDomainFile();
                                 if (df != null && df.isInWritableProject()) {
-                                    saveWithRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+                                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                                 }
                             }
-                            // ignoreChanges=true unconditionally: we have already
-                            // decided the fate of any unsaved edits above (saved,
-                            // or deliberately left to be discarded), so Ghidra must
-                            // never fall back to its own interactive "Save
-                            // changes?" dialog here -- that call blocks the Swing
-                            // event thread (and with it every other MCP request,
-                            // since they all funnel through invokeAndWait) until a
-                            // human clicks it, which is exactly the hang this
-                            // parameter exists to prevent.
+                            // ignoreChanges=true unconditionally: the fate of unsaved edits
+                            // was decided above (saved, or deliberately discarded), so Ghidra
+                            // must never fall back to its interactive "Save changes?" dialog,
+                            // which blocks the Swing thread -- and every MCP request behind
+                            // it -- until a human clicks.
                             pm.closeProgram(program, true);
                             closedCount.incrementAndGet();
                         }
@@ -1237,20 +1143,16 @@ public class ProgramScriptService {
             return Response.err("Failed to close program: " +
                     (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
-
-        if (closedCount.get() == 0) {
-            for (Program program : programProvider.getAllOpenPrograms()) {
-                if (programMatches(program, search) && programProvider.closeProgram(program)) {
-                    closedCount.incrementAndGet();
-                }
-            }
-        }
-
         if (error.get() != null) {
             return Response.err("Failed to close program: " + error.get());
         }
 
-        boolean releasedCache = programProvider.releaseCachedProgram(search);
+        // The provider's own handle, with the same save choice. Releasing it used to
+        // save unconditionally, so save=false in the GUI still saved the discarded edits.
+        boolean releasedCache = programProvider.closeProgram(target, save);
+        if (closedCount.get() == 0 && releasedCache) {
+            closedCount.incrementAndGet();
+        }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
@@ -1551,7 +1453,17 @@ public class ProgramScriptService {
      * The program the cursor is in — derived, never supplied.
      *
      * <p>This tool answers "what is the analyst looking at", so the program is an
-     * answer, not a question.
+     * ANSWER, not a question. It briefly took a {@code program} parameter, which
+     * could only be redundant (you named the focused one) or a lie (you named
+     * another and got its details labelled as cursor state). Worse, omitting it
+     * with several programs open produced "'program' is required" — nonsense
+     * here: if the analyst is looking at something there is exactly one answer,
+     * and if they are not, no argument can conjure one.
+     *
+     * <p>Headless has no analyst and no cursor, so this reports unavailable
+     * rather than falling back to the sole open program. "Which program is
+     * focused" and "which program should I default to" are different questions;
+     * conflating them is what the ambiguity rule exists to stop.
      */
     private CursorPart cursorProgramPart() {
         PluginTool tool = getToolFromProvider();
@@ -1574,7 +1486,7 @@ public class ProgramScriptService {
             description = "What the analyst is looking at right now: cursor address, the "
                     + "function under it, the listing selection, and the focused program — one "
                     + "call instead of four. type=address|function|selection|program|all "
-                    + "(default all). Takes no program parameter: the focused program is an "
+                    + "(default all). Takes NO program parameter: the focused program is an "
                     + "answer this reports, not an input. Headless has no analyst and no cursor, "
                     + "so every facet reports null with a reason there — use the program "
                     + "parameter on a data endpoint instead. Replaces get_current_address, "
@@ -1634,24 +1546,11 @@ public class ProgramScriptService {
             return Response.err("No programs are currently open");
         }
 
-        Program targetProgram = null;
-
-        // Find program by name (case-insensitive match)
-        for (Program prog : programs) {
-            if (prog.getName().equalsIgnoreCase(programName.trim())) {
-                targetProgram = prog;
-                break;
-            }
-        }
-
-        // If not found by exact name, try partial match on path
-        if (targetProgram == null) {
-            for (Program prog : programs) {
-                if (prog.getDomainFile().getPathname().toLowerCase().contains(programName.toLowerCase())) {
-                    targetProgram = prog;
-                    break;
-                }
-            }
+        Program targetProgram;
+        try {
+            targetProgram = ProjectProgramProvider.match(java.util.Arrays.asList(programs), programName.trim());
+        } catch (AmbiguousProgramException e) {
+            return Response.err(e.getMessage());
         }
 
         if (targetProgram == null) {
@@ -1665,13 +1564,21 @@ public class ProgramScriptService {
             ));
         }
 
-        // Switch to the target program
         programProvider.setCurrentProgram(targetProgram);
+        // Headless keeps no current program by design (a sticky one made a 17-program
+        // survey report one binary's numbers seventeen times), and a GUI program no
+        // CodeBrowser shows cannot outrank the one that does. This used to answer
+        // success anyway.
+        if (programProvider.getCurrentProgram() != targetProgram) {
+            return Response.err("This server did not switch to " + targetProgram.getName()
+                + ": it has no settable current program here. Pass program=\""
+                + ProjectProgramProvider.keyFor(targetProgram) + "\" on each call instead.");
+        }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
             "switched_to", targetProgram.getName(),
-            "path", targetProgram.getDomainFile().getPathname()
+            "path", ProjectProgramProvider.keyFor(targetProgram)
         ));
     }
 
@@ -1985,23 +1892,9 @@ public class ProgramScriptService {
     }
 
     private void closeOpenProgramForFile(PluginTool tool, String filePath) {
-        if (programProvider.closeProgramByPath(filePath)) {
-            return;
-        }
-        if (tool == null) {
-            // Headless: close exactly this file, the same rule the GUI branch
-            // below uses. Not closeProgram(filePath, false) -- its matcher falls
-            // back to a SUBSTRING test and closes every hit, and the headless
-            // provider's close is a bare release with no save, so deleting
-            // /x/a.dll would also close /x/a.dll.orig and discard its unsaved
-            // edits while still reporting success.
-            for (Program prog : programProvider.getAllOpenPrograms()) {
-                ghidra.framework.model.DomainFile df = prog.getDomainFile();
-                if (df != null && df.getPathname().equalsIgnoreCase(filePath)) {
-                    programProvider.closeProgram(prog);
-                    return;
-                }
-            }
+        // Releases the provider's own handle on both servers (and closes it in every
+        // CodeBrowser on the GUI), by exact path.
+        if (programProvider.closeProgramByPath(filePath) || tool == null) {
             return;
         }
         // Close paths must NEVER spawn a CodeBrowser — there is nothing useful
@@ -2027,124 +1920,123 @@ public class ProgramScriptService {
         }
     }
 
-    /**
-     * Open a program from the current project by path.
-     */
-    public Response openProgramFromProject(String path) {
-        return openProgramFromProject(path, false);
+    /** The provider as a project-backed one, or null for a bare test double. */
+    private ProjectProgramProvider projectProvider() {
+        return programProvider instanceof ProjectProgramProvider ppp ? ppp : null;
     }
 
-    @McpTool(path = "/open_program", dryRun = false, description = "Open a program from the current project", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/open_program", dryRun = false, method = "POST",
+            description = "Open a program from the open project (by project path, or by filename when unique) "
+                + "and keep it open. On the GUI it is also shown in a CodeBrowser. Any endpoint's "
+                + "program= opens on demand too; this is for opening deliberately, analysing on open, "
+                + "or getting diagnostics when a file cannot be opened (the paths the project does "
+                + "contain, and whether it is bound to a Ghidra Server).",
+            category = "program", access = ToolAccess.WRITE)
     public Response openProgramFromProject(
-            @Param(value = "path", description = "Program path in project") String path,
-            @Param(value = "auto_analyze", defaultValue = "false", description = "Run auto-analysis") boolean autoAnalyze) {
+            @Param(value = "path", source = ParamSource.BODY, description = "Program path in the project, or a unique filename") String path,
+            @Param(value = "auto_analyze", source = ParamSource.BODY, defaultValue = "false", description = "Run auto-analysis after opening") boolean autoAnalyze) {
         if (path == null || path.trim().isEmpty()) {
             return Response.err("Program path is required");
         }
+        ProjectProgramProvider provider = projectProvider();
+        if (provider == null || provider.getProject() == null) {
+            return Response.err("No project open. Call /open_project first.");
+        }
 
+        ghidra.framework.model.DomainFile domainFile;
+        Program program;
+        try {
+            domainFile = provider.findDomainFile(path);
+            if (domainFile == null) {
+                return openFailure(provider, path, "Program not found in project: " + path, true);
+            }
+            program = provider.openDomainFile(domainFile);
+        } catch (AmbiguousProgramException e) {
+            return Response.err(e.getMessage());
+        } catch (Exception e) {
+            return openFailure(provider, path, "Failed to open program: " + describeOpenFailure(e, path), false);
+        }
+
+        boolean analyzed = false;
+        if (autoAnalyze) {
+            analyzed = runAutoAnalysisAndPersistFlags(program, true);
+        } else {
+            try {
+                suppressAnalysisPrompt(program);
+            } catch (Exception e) {
+                Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+            }
+        }
+
+        String shown = showInCodeBrowser(program);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", true);
+        out.put("name", program.getName());
+        out.put("path", domainFile.getPathname());
+        // The writable open failed and the read-only fallback took it: edits cannot be
+        // saved, and the caller must hear why (a stale SLEIGH language is the usual cause).
+        out.put("read_only", !program.isChangeable());
+        Exception whyReadOnly = provider.readOnlyReason(program);
+        if (whyReadOnly != null) {
+            out.put("read_only_reason", describeOpenFailure(whyReadOnly, domainFile.getPathname()));
+        }
+        out.put("auto_analyzed", analyzed);
+        out.put("function_count", program.getFunctionManager().getFunctionCount());
+        if (shown != null) {
+            out.put("codebrowser", shown);
+        }
+        return Response.ok(out);
+    }
+
+    /**
+     * A structured open failure: the caller can tell a path typo (the project's actual
+     * program paths) from a project that is not bound to the server it checked out on.
+     */
+    private static Response openFailure(ProjectProgramProvider provider, String path, String error,
+            boolean listPaths) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("project_name", provider.getProject().getName());
+        ProjectProgramProvider.ServerBinding binding = provider.serverBinding();
+        if (binding != null) {
+            diagnostics.put("project_server_bound", binding.bound());
+            if (binding.bound()) {
+                diagnostics.put("server_repo", binding.repository());
+            }
+        }
+        if (listPaths) {
+            diagnostics.put("available_program_paths", provider.programPaths(50));
+        }
+        diagnostics.put("suggestion", provider.describeServerBinding());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", false);
+        body.put("error", error);
+        body.put("requested_path", path);
+        body.put("diagnostics", diagnostics);
+        return Response.ok(body);
+    }
+
+    /**
+     * On the GUI, show the program in a CodeBrowser (reusing a running one). The
+     * CodeBrowser takes its own consumer; the provider's cached reference stays and is
+     * what close and eviction release. Returns null headless, else "shown" or why not.
+     */
+    private String showInCodeBrowser(Program program) {
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
-            return Response.err("Opening programs requires GUI mode (PluginTool not available)");
+            return null;
         }
-
-        ghidra.framework.model.Project project = tool.getProject();
-        if (project == null) {
-            return Response.err("No project is currently open");
+        ProgramManager pm = findOrCreateProgramManager(tool);
+        if (pm == null) {
+            return "no CodeBrowser could be found or launched";
         }
-
-        ghidra.framework.model.ProjectData projectData = project.getProjectData();
-        ghidra.framework.model.DomainFile domainFile = projectData.getFile(path);
-
-        if (domainFile == null) {
-            return Response.err("File not found in project: " + path);
-        }
-
-        // Check if already open
-        Program[] openPrograms = programProvider.getAllOpenPrograms();
-        for (Program prog : openPrograms) {
-            if (prog.getDomainFile().getPathname().equals(path)) {
-                // Already open, just switch to it
-                try {
-                    suppressAnalysisPrompt(prog);
-                } catch (Exception e) {
-                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
-                }
-                programProvider.setCurrentProgram(prog);
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "message", "Program already open, switched to it",
-                    "name", prog.getName(),
-                    "path", path
-                ));
-            }
-        }
-
-        // Open the program
         try {
-            // Find a ProgramManager from an existing CodeBrowser, or launch one
-            ProgramManager pm = findOrCreateProgramManager(tool);
-            if (pm == null) {
-                return Response.err("Could not find or create a CodeBrowser tool");
-            }
-
-            Program program = (Program) domainFile.getDomainObject(
-                tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
-            if (program == null) {
-                return Response.err("Failed to open program: " + path);
-            }
-
-            // getDomainObject registered US (tool) as a consumer. ProgramManager
-            // takes its OWN consumer in openProgram below, so ours must be handed
-            // back -- otherwise the DomainObject keeps a consumer forever and the
-            // DomainFile stays permanently "in use": undoCheckout then fails with
-            // "<name> is in use" and keeps failing until Ghidra restarts, while
-            // close_program reports success with released_cache=false because
-            // neither the ProgramManager nor the provider cache holds the stray
-            // reference. Measured 2026-08-10: 140 exclusive checkouts stranded on
-            // a shared project by a read-only verification sweep, clearable only
-            // by restarting Ghidra.
-            try {
-                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
-
-                boolean analyzed = false;
-                if (autoAnalyze) {
-                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
-                } else {
-                    try {
-                        suppressAnalysisPrompt(program);
-                    } catch (Exception e) {
-                        Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
-                    }
-                }
-
-                // Capture before releasing: after the release our only guarantee
-                // that the Program is still alive is the ProgramManager's consumer.
-                String programName = program.getName();
-                int functionCount = program.getFunctionManager().getFunctionCount();
-
-                // Open after the analysis flags are persisted so CodeBrowser does not prompt.
-                Program finalProgram = program;
-                SwingUtilities.invokeAndWait(() -> {
-                    pm.openProgram(finalProgram);
-                    pm.setCurrentProgram(finalProgram);
-                });
-
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "message", "Program opened successfully",
-                    "name", programName,
-                    "path", path,
-                    "auto_analyzed", analyzed,
-                    "function_count", functionCount
-                ));
-            } finally {
-                // Unconditional: on the failure paths nothing else holds the
-                // program, so releasing is both correct and the only way the
-                // checkout can ever be undone.
-                program.release(tool);
-            }
+            SwingUtilities.invokeAndWait(() -> {
+                pm.openProgram(program);
+                pm.setCurrentProgram(program);
+            });
+            return "shown";
         } catch (Exception e) {
-            return Response.err("Failed to open program: " + describeOpenFailure(e, path));
+            return "failed: " + (e.getMessage() != null ? e.getMessage() : e.toString());
         }
     }
 
@@ -2183,103 +2075,51 @@ public class ProgramScriptService {
     // Import & Analysis
 
     @McpTool(path = "/import_file", dryRun = false, method = "POST",
-            description = "Import a binary file from disk into the current Ghidra project and open it. "
-                + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+            description = "Import a binary file from disk into the open project and open it. If the "
+                + "destination folder already holds a file of that name, that file is opened instead "
+                + "(reused_existing: true). For raw firmware binaries, specify language (e.g. "
+                + "'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
             category = "program", access = ToolAccess.WRITE)
     public Response importFile(
             @Param(value = "file_path", source = ParamSource.BODY, description = "Absolute path to the binary file on disk") String filePath,
             @Param(value = "project_folder", source = ParamSource.BODY, defaultValue = "/", description = "Destination folder in the Ghidra project") String projectFolder,
             @Param(value = "language", source = ParamSource.BODY, defaultValue = "", description = "Language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). If omitted, auto-detect.") String languageId,
             @Param(value = "compiler_spec", source = ParamSource.BODY, defaultValue = "", description = "Compiler spec ID (e.g. 'default', 'gcc', 'windows'). If omitted, uses language default.") String compilerSpecId,
-            @Param(value = "auto_analyze", source = ParamSource.BODY, defaultValue = "true", description = "Start auto-analysis after import") boolean autoAnalyze) {
+            @Param(value = "auto_analyze", source = ParamSource.BODY, defaultValue = "true", description = "Run auto-analysis after import (not run on a reused existing file)") boolean autoAnalyze) {
 
         if (filePath == null || filePath.trim().isEmpty()) {
             return Response.err("file_path is required");
         }
 
-        // Enforce GHIDRA_MCP_FILE_ROOT (when configured) for this filesystem-path endpoint,
-        // matching the headless import path. No-op when the root is unset (paths accepted
-        // as-is), so default localhost behavior is unchanged.
+        // GHIDRA_MCP_FILE_ROOT, when configured. The configured root stays in the server
+        // log, out of a response an untrusted caller reads.
         SecurityConfig security = SecurityConfig.getInstance();
         java.nio.file.Path resolved = security.resolveWithinFileRoot(filePath);
         if (resolved == null) {
-            return Response.err("Path is outside the allowed file root ("
-                    + security.getFileRoot() + "): " + filePath);
+            Msg.warn(this, "Rejected /import_file for '" + filePath
+                + "': outside configured GHIDRA_MCP_FILE_ROOT (" + security.getFileRoot() + ")");
+            return Response.err("Access denied: path is outside the configured file root");
         }
-
         File file = resolved.toFile();
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }
 
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Import requires GUI mode (PluginTool not available)");
+        ProjectProgramProvider provider = projectProvider();
+        if (provider == null) {
+            return Response.err("This server cannot import programs");
         }
-
-        ghidra.framework.model.Project project = tool.getProject();
-        if (project == null) {
-            return Response.err("No project is currently open");
-        }
-
-        boolean hasLanguage = languageId != null && !languageId.isEmpty();
 
         try {
-            MessageLog log = new MessageLog();
-            Program program;
-
-            if (hasLanguage) {
-                // Resolve language and compiler spec
-                ghidra.program.model.lang.LanguageService langService =
-                    ghidra.program.util.DefaultLanguageService.getLanguageService();
-                ghidra.program.model.lang.Language language = langService.getLanguage(
-                    new ghidra.program.model.lang.LanguageID(languageId));
-
-                ghidra.program.model.lang.CompilerSpec compilerSpec;
-                if (compilerSpecId != null && !compilerSpecId.isEmpty()) {
-                    compilerSpec = language.getCompilerSpecByID(
-                        new ghidra.program.model.lang.CompilerSpecID(compilerSpecId));
-                } else {
-                    compilerSpec = language.getDefaultCompilerSpec();
-                }
-
-                // Import as raw binary with explicit language/compiler spec
-                ghidra.app.util.opinion.Loaded<Program> loaded = AutoImporter.importAsBinary(
-                    file, project, projectFolder, language, compilerSpec,
-                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
-
-                if (loaded == null) {
-                    return Response.err("Import failed: no results. Log: " + log);
-                }
-                // getDomainObject(consumer) registers us as a consumer so the program stays open
-                program = loaded.getDomainObject(this);
-                if (program == null) {
-                    return Response.err("Import failed: no primary program. Log: " + log);
-                }
-                // Save to project folder (creates DomainFile)
-                loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
-            } else {
-                // Auto-detect format
-                LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
-                    file, project, projectFolder,
-                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
-
-                if (loadResults == null) {
-                    return Response.err("Import failed: no load spec found. Specify 'language' for raw binaries. Log: " + log);
-                }
-                program = loadResults.getPrimaryDomainObject();
-                if (program == null) {
-                    return Response.err("Import failed: no primary program. Log: " + log);
-                }
-                // Save to project folder before releasing (prevents "Database is closed")
-                loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
-            }
+            ProjectProgramProvider.Imported imported =
+                provider.importFile(file, projectFolder, languageId, compilerSpecId);
+            Program program = imported.program();
 
             // NOTE: do NOT call markProgramNotToAskToAnalyze here, ahead of the
             // branches below. It mutates the program DB, and AutoAnalysisManager's
             // own DomainObjectListener reacts to *any* program change by scheduling
             // a background "Auto Analysis" task (the same mechanism documented on
-            // saveWithRetry above) -- confirmed root cause of a real, intermittent
+            // ProgramSaves) -- confirmed root cause of a real, intermittent
             // bug: that premature background pass could already be "actively
             // running" by the time runAutoAnalysisAndPersistFlags below called its
             // own startAnalysis(), which per its own javadoc is then a no-op
@@ -2290,9 +2130,8 @@ public class ProgramScriptService {
             // analyzed:true and no error anywhere. Both branches below already set
             // this flag themselves, inside their own transaction, so the call here
             // was pure redundant risk with no benefit.
-
             boolean autoAnalyzed = false;
-            if (autoAnalyze) {
+            if (autoAnalyze && !imported.reusedExisting()) {
                 // force=true (reAnalyzeAll first): unconditionally re-queues every
                 // analyzer regardless of anything Ghidra's own listeners may have
                 // already scheduled, closing the race described above. Matches
@@ -2306,31 +2145,23 @@ public class ProgramScriptService {
                 }
             }
 
-            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
-            ProgramManager pm = findOrCreateProgramManager(tool);
-            if (pm == null) {
-                return Response.err("Could not find or create a CodeBrowser tool");
+            String shown = showInCodeBrowser(program);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("success", true);
+            out.put("name", program.getName());
+            out.put("path", ProjectProgramProvider.keyFor(program));
+            out.put("language", program.getLanguageID().getIdAsString());
+            out.put("reused_existing", imported.reusedExisting());
+            out.put("auto_analyzed", autoAnalyzed);
+            out.put("function_count", program.getFunctionManager().getFunctionCount());
+            if (shown != null) {
+                out.put("codebrowser", shown);
             }
-
-            Program finalProgram = program;
-            SwingUtilities.invokeAndWait(() -> {
-                pm.openProgram(finalProgram);
-                pm.setCurrentProgram(finalProgram);
-            });
-
-            return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "name", program.getName(),
-                "path", program.getDomainFile().getPathname(),
-                "language", program.getLanguageID().getIdAsString(),
-                "analyzing", false,
-                "auto_analyzed", autoAnalyzed
-            ));
+            return Response.ok(out);
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null || msg.isEmpty()) {
                 msg = e.getClass().getName();
-                // Include cause if available
                 if (e.getCause() != null) {
                     msg += ": " + (e.getCause().getMessage() != null
                         ? e.getCause().getMessage() : e.getCause().getClass().getName());
@@ -2339,6 +2170,75 @@ public class ProgramScriptService {
             Msg.error(this, "Import failed", e);
             return Response.err("Import failed: " + msg);
         }
+    }
+
+    @McpTool(path = "/get_project_info",
+            description = "The open project: name, file count, whether it is bound to a Ghidra Server "
+                + "(and which repository), and which programs are open. A shared project is what "
+                + "/checkin_program and a checkout's content need; project_server_bound=false means "
+                + "local-only. On the GUI also the running tools.",
+            category = "project", access = ToolAccess.READ_ONLY)
+    public Response getProjectInfo() {
+        ghidra.framework.model.Project project = programProvider.getProject();
+        if (project == null) {
+            return Response.ok(JsonHelper.mapOf("has_project", false));
+        }
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("has_project", true);
+        info.put("project_name", project.getName());
+        info.put("file_count", project.getProjectData().getFileCount());
+
+        ProjectProgramProvider provider = projectProvider();
+        ProjectProgramProvider.ServerBinding binding = provider != null ? provider.serverBinding() : null;
+        if (binding != null) {
+            info.put("project_server_bound", binding.bound());
+            if (binding.bound()) {
+                info.put("server_repo", binding.repository());
+                info.put("server_info", binding.serverInfo());
+                info.put("server_connected", binding.connected());
+            }
+        }
+
+        List<String> open = new ArrayList<>();
+        for (Program p : programProvider.getAllOpenPrograms()) {
+            open.add(ProjectProgramProvider.keyFor(p));
+        }
+        info.put("open_programs", open);
+        info.put("open_program_count", open.size());
+        Program current = programProvider.getCurrentProgram();
+        if (current != null) {
+            info.put("current_program", ProjectProgramProvider.keyFor(current));
+        }
+
+        PluginTool tool = getToolFromProvider();
+        if (tool != null && project.getToolManager() != null) {
+            List<String> tools = new ArrayList<>();
+            boolean codeBrowser = false;
+            for (PluginTool running : project.getToolManager().getRunningTools()) {
+                tools.add(running.getName());
+                codeBrowser |= running.getService(ProgramManager.class) != null;
+            }
+            info.put("running_tools", tools);
+            info.put("codebrowser_active", codeBrowser);
+        }
+        return Response.ok(info);
+    }
+
+    @McpTool(path = "/checkin_program", dryRun = false, method = "POST",
+            description = "Check a program in to the shared Ghidra Server as a new version. Saves pending "
+                + "edits and closes the program first (a file checked in while open must stay checked "
+                + "out). Requires a shared project and the file checked out. Returns "
+                + "version_before/version/version_bumped.",
+            category = "project", access = ToolAccess.WRITE)
+    public Response checkinProgram(
+            @Param(value = "path", source = ParamSource.BODY, description = "Project path of the file; empty uses the sole open program") String path,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "", description = "Checkin comment") String comment,
+            @Param(value = "keep_checked_out", source = ParamSource.BODY, defaultValue = "false", description = "Keep the file checked out after the new version lands") boolean keepCheckedOut) {
+        ProjectProgramProvider provider = projectProvider();
+        if (provider == null) {
+            return Response.err("This server has no project to check in from");
+        }
+        return Response.ok(provider.checkinProgram(path, comment, keepCheckedOut));
     }
 
     @McpTool(path = "/reanalyze", dryRun = false, method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
@@ -2371,9 +2271,21 @@ public class ProgramScriptService {
             return Response.err("No programs are currently open");
         }
 
+        Program only = null;
+        if (programName != null && !programName.isEmpty()) {
+            try {
+                only = ProjectProgramProvider.match(java.util.Arrays.asList(allPrograms), programName.trim());
+            } catch (AmbiguousProgramException e) {
+                return Response.err(e.getMessage());
+            }
+            if (only == null) {
+                return Response.err("Program not open: " + programName);
+            }
+        }
+
         List<Map<String, Object>> results = new ArrayList<>();
         for (Program prog : allPrograms) {
-            if (programName != null && !programName.isEmpty() && !programMatches(prog, programName)) {
+            if (only != null && prog != only) {
                 continue;
             }
             boolean analyzing = false;
@@ -2404,21 +2316,6 @@ public class ProgramScriptService {
             return Response.ok(results.get(0));
         }
         return Response.ok(JsonHelper.mapOf("programs", results));
-    }
-
-    private boolean programMatches(Program prog, String programName) {
-        if (prog == null || programName == null || programName.isEmpty()) {
-            return true;
-        }
-        String searchName = programName.trim();
-        if (prog.getName().equalsIgnoreCase(searchName)) {
-            return true;
-        }
-        if (prog.getDomainFile() != null) {
-            String path = prog.getDomainFile().getPathname();
-            return path.equalsIgnoreCase(searchName) || path.toLowerCase().contains(searchName.toLowerCase());
-        }
-        return false;
     }
 
     // ========================================================================

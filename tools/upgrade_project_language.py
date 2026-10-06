@@ -48,11 +48,12 @@ Consequence: run this once after a Ghidra upgrade. Do not re-run it as a
 verification step -- a whole-project ``--apply`` refuses if another ran within
 24h unless ``--force`` is given.
 
-``--verify`` is the verification step: it writes no versions. It does, however,
-LEAK an exclusive checkout per probed program, because ``open_program`` registers
-a ``DomainObject`` consumer that nothing releases -- so keep ``--verify-sample``
-small, and clear the leftovers with a Ghidra restart followed by
-``--release-checkouts``.
+``--verify`` is the verification step: it writes no versions. It takes an
+exclusive checkout per probed program and closes the program before undoing it;
+a checkout still "in use" after that survives until Ghidra restarts (measured
+2026-08-10, before ``close_program`` could release the server's own reference:
+140 of 152). Keep ``--verify-sample`` small, and clear any leftovers with a
+Ghidra restart followed by ``--release-checkouts``.
 
 USAGE
 -----
@@ -310,8 +311,8 @@ def resolve_server_and_repo(
 ) -> tuple[str | None, str | None, str]:
     """Discover the Ghidra Server host:port and repository name.
 
-    Order: explicit flags, then the live Ghidra instance (``/project/info``
-    reports ``server_info`` and ``project`` for a shared project), then
+    Order: explicit flags, then the live Ghidra instance (``/get_project_info``
+    reports ``server_info`` and ``server_repo`` for a shared project), then
     ``<ghidra_dir>/.env``. Returns (server, repo, source-label); either element
     may be None, and the caller must refuse rather than guess.
     """
@@ -321,17 +322,17 @@ def resolve_server_and_repo(
 
     if not (server and repo):
         try:
-            info = mcp_get(mcp_base, "project/info", timeout=60.0)
+            info = mcp_get(mcp_base, "get_project_info", timeout=60.0)
         except Exception:  # noqa: BLE001 - fall through to .env
             info = None
         if isinstance(info, dict):
             if not server and info.get("server_info"):
                 server = str(info["server_info"])
-                sources.append("live Ghidra /project/info")
-            if not repo and info.get("project"):
-                repo = str(info["project"])
-                if "live Ghidra /project/info" not in sources:
-                    sources.append("live Ghidra /project/info")
+                sources.append("live Ghidra /get_project_info")
+            if not repo and info.get("server_repo"):
+                repo = str(info["server_repo"])
+                if "live Ghidra /get_project_info" not in sources:
+                    sources.append("live Ghidra /get_project_info")
 
     if not server:
         env = read_dotenv(ghidra_dir / ".env")
@@ -460,18 +461,20 @@ def probe_language_state(base: str, path: str, leaked: list[str] | None = None) 
     read-ONLY perfectly happily, so the probe must force a read-WRITE open --
     which needs an exclusive checkout.
 
-    ``open_program`` goes through ``FrontEndProgramProvider``, which passes
-    ``okToUpgrade=false``, so a stale program surfaces as
-    ``Minor language change 4.6 -> 4.7`` instead of being silently upgraded.
+    ``open_program`` on the GUI passes ``okToUpgrade=false``, so a stale program
+    cannot be silently upgraded. The writable open fails with
+    ``Minor language change 4.6 -> 4.7`` and the server falls back to a
+    read-only open, reporting ``read_only: true`` with that failure in
+    ``read_only_reason``. So ``success`` alone says nothing here: a stale
+    program opens successfully, read-only.
 
-    LEAKS A CHECKOUT, unavoidably. ``open_program`` registers the CodeBrowser
-    tool as a ``DomainObject`` consumer and nothing releases it, so afterwards
-    ``undo_checkout`` fails with "<name> is in use" and keeps failing until
-    Ghidra restarts -- ``close_program`` reports ``closed_count: 0,
-    released_cache: false`` and cannot help. Measured 2026-08-10: a 152-program
-    probe left 140 stray exclusive checkouts. Anything this function could not
-    release is appended to ``leaked`` so the caller can report it LOUDLY rather
-    than leave the project quietly worse than it found it.
+    May leak a checkout. ``open_program`` keeps the program open (the server's
+    cache and a CodeBrowser), and ``undo_checkout`` fails with "<name> is in
+    use" while it is. :func:`undo_checkout` closes it first, which releases
+    both. Measured 2026-08-10, before that close could release the server's own
+    reference: a 152-program probe left 140 stray exclusive checkouts. Anything
+    this function could not release is appended to ``leaked``, so the caller can
+    report it LOUDLY rather than leave the project quietly worse than it found it.
     """
     took_checkout = False
     try:
@@ -485,12 +488,12 @@ def probe_language_state(base: str, path: str, leaked: list[str] | None = None) 
                 return "unknown", f"checkout failed: {out}"
             took_checkout = True
 
-        opened = mcp_get(base, "open_program", path=path, auto_analyze="false")
+        opened = mcp_post(base, "open_program", path=path, auto_analyze=False)
         detail = json.dumps(opened) if not isinstance(opened, str) else opened
-        if isinstance(opened, dict) and opened.get("success"):
-            state = "current"
-        elif RE_LANG_MISMATCH.search(detail):
+        if RE_LANG_MISMATCH.search(detail):
             state = "stale"
+        elif isinstance(opened, dict) and opened.get("success") and not opened.get("read_only"):
+            state = "current"
         else:
             state = "unknown"
         return state, detail
@@ -698,7 +701,7 @@ def main() -> int:
         print(
             "\nERROR: could not determine the Ghidra Server host:port and repository.\n"
             "       Pass --server host:port --repo NAME, or start Ghidra connected to\n"
-            "       the shared project so /project/info can report them.",
+            "       the shared project so /get_project_info can report them.",
             file=sys.stderr,
         )
         return 2
@@ -860,8 +863,8 @@ def main() -> int:
         print("\n[3/3] Probing read-write openability (no versions written) ...")
         print(
             "      NOTE: probing forces a read-WRITE open, which needs an exclusive\n"
-            "      checkout, and open_program leaks a DomainObject consumer so the\n"
-            "      checkout cannot be released until Ghidra restarts. Any checkout\n"
+            "      checkout. A checkout still in use after the probe closes the\n"
+            "      program cannot be released until Ghidra restarts. Any checkout\n"
             "      left behind is listed at the end. Keep --verify-sample small."
         )
         stale: list[str] = []

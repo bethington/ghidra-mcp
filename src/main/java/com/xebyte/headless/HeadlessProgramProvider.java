@@ -15,15 +15,14 @@
  */
 package com.xebyte.headless;
 
+import com.xebyte.core.AmbiguousProgramException;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.ProjectProgramProvider;
 import com.xebyte.core.WriteTx;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.plugin.core.archive.HeadlessArchiveBridge;
-import ghidra.app.util.importer.AutoImporter;
-import ghidra.app.util.importer.MessageLog;
-import ghidra.app.util.opinion.Loaded;
-import ghidra.app.util.opinion.LoadResults;
 import ghidra.base.project.GhidraProject;
+import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
@@ -31,24 +30,16 @@ import ghidra.framework.model.ProjectData;
 import ghidra.framework.model.ProjectLocator;
 import ghidra.framework.model.ProjectManager;
 import ghidra.framework.project.DefaultProjectManager;
+import ghidra.framework.store.LockException;
 import ghidra.program.model.address.AddressSetView;
-import ghidra.program.model.lang.CompilerSpec;
-import ghidra.program.model.lang.CompilerSpecID;
-import ghidra.program.model.lang.Language;
-import ghidra.program.model.lang.LanguageID;
-import ghidra.program.model.lang.LanguageService;
 import ghidra.program.model.listing.Program;
-import ghidra.program.util.DefaultLanguageService;
 import ghidra.util.Msg;
-import ghidra.util.task.ConsoleTaskMonitor;
-import ghidra.util.task.TaskMonitor;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Headless mode implementation of ProgramProvider.
@@ -56,11 +47,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Manages programs directly without relying on GUI services like ProgramManager.
  * Programs can be loaded from files or Ghidra project folders.
  */
-public class HeadlessProgramProvider implements ProgramProvider {
+public class HeadlessProgramProvider extends ProjectProgramProvider {
 
-    private final Map<String, Program> openPrograms = new ConcurrentHashMap<>();
-    private volatile Program currentProgram;
-    private final TaskMonitor monitor;
     private Project project;
     private GhidraProject ghidraProject;  // For headless project management
 
@@ -68,7 +56,14 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * Create a new HeadlessProgramProvider.
      */
     public HeadlessProgramProvider() {
-        this.monitor = new ConsoleTaskMonitor();
+        // okToUpgrade: headless may upgrade a program's stored format on open. The GUI
+        // may not -- an upgrade needs an exclusive checkout it must not take silently.
+        super(null, true);
+    }
+
+    @Override
+    protected Project project() {
+        return project;
     }
 
     /**
@@ -83,747 +78,20 @@ public class HeadlessProgramProvider implements ProgramProvider {
 
     @Override
     public Program getCurrentProgram() {
-        return currentProgram;
-    }
-
-    @Override
-    public Program getProgram(String name) {
-        if (name == null || name.trim().isEmpty()) {
-            return getCurrentProgram();
-        }
-
-        String searchName = name.trim();
-
-        // Try exact name match first
-        Program exact = openPrograms.get(searchName);
-        if (exact != null) {
-            return exact;
-        }
-
-        // Try case-insensitive match
-        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
-            if (entry.getKey().equalsIgnoreCase(searchName)) {
-                return entry.getValue();
-            }
-        }
-
-        // Try partial match
-        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
-            if (entry.getKey().toLowerCase().contains(searchName.toLowerCase())) {
-                return entry.getValue();
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Whether a program with exactly this name is currently loaded in memory.
-     *
-     * <p>Unlike {@link #getProgram(String)} this does <em>not</em> fall back to
-     * partial matching — overwrite protection must key off the precise
-     * destination name, not a fuzzy substring hit. Exact and case-insensitive
-     * matches both count as "open".
-     */
-    private boolean isProgramOpen(String name) {
-        return exactOpenProgram(name) != null;
-    }
-
-    /**
-     * Exact (then case-insensitive) lookup of a loaded program by name.
-     *
-     * <p>Unlike {@link #getProgram(String)} this never falls back to fuzzy
-     * substring matching — callers that resolve a precise destination
-     * (overwrite protection, GZF export) must not silently act on a similarly
-     * named program.
-     *
-     * @return the matching open Program, or {@code null} when none matches
-     */
-    private Program exactOpenProgram(String name) {
-        if (name == null || name.isEmpty()) {
-            return null;
-        }
-        Program exact = openPrograms.get(name);
-        if (exact != null) {
-            return exact;
-        }
-        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
-            if (entry.getKey().equalsIgnoreCase(name)) {
-                return entry.getValue();
-            }
-        }
-        return null;
-    }
-
-    @Override
-    public Program[] getAllOpenPrograms() {
-        return openPrograms.values().toArray(new Program[0]);
+        // Headless has no GUI focus. Exactly one open program is unambiguous;
+        // zero or many leaves nothing honest to return — inventing sticky
+        // "current" state is what made a 17-program survey return one binary's
+        // numbers seventeen times (headless never reassigned after the first load,
+        // and /switch_program is not even registered headless).
+        Program[] open = getAllOpenPrograms();
+        return (open != null && open.length == 1) ? open[0] : null;
     }
 
     @Override
     public void setCurrentProgram(Program program) {
-        if (program != null) {
-            this.currentProgram = program;
-            // Ensure it's in our map
-            registerProgram(program);
-        }
-    }
-
-    /**
-     * Track a newly-opened Program in {@link #openPrograms}, releasing any
-     * prior different instance held under the same name.
-     * <p>
-     * {@code Program.getName()} is just the leaf filename (e.g.
-     * {@code D2Client.dll}), so importing two versions of the same binary —
-     * or the same filename from two folders — would otherwise overwrite the
-     * earlier map entry without {@code release()}ing it. The orphaned
-     * Program's DomainObject consumer reference and DB buffers then stay
-     * live for the JVM's lifetime, invisibly accumulating toward the
-     * ~5-open-program crash ceiling.
-     */
-    private void registerProgram(Program program) {
-        String name = program.getName();
-        Program prior = openPrograms.put(name, program);
-        if (prior != null && prior != program) {
-            Msg.warn(this, "Program name collision on '" + name
-                + "' — releasing previously-tracked instance to avoid a leak. "
-                + "Consider closing the earlier program explicitly before "
-                + "loading another with the same filename.");
-            try {
-                prior.release(this);
-            } catch (Exception e) {
-                Msg.warn(this, "Error releasing displaced program '" + name
-                    + "': " + e.getMessage());
-            }
-            if (currentProgram == prior) {
-                currentProgram = program;
-            }
-        }
-    }
-
-    /**
-     * Load a program from a binary file.
-     *
-     * @param file The binary file to import
-     * @return The loaded Program, or null on failure
-     */
-    public Program loadProgramFromFile(File file) {
-        if (!file.exists()) {
-            Msg.error(this, "File not found: " + file.getAbsolutePath());
-            return null;
-        }
-
-        try {
-            // When a project is open, prefer opening an existing DomainFile with
-            // the same name (idempotent re-load) over re-importing — AutoImporter
-            // would otherwise throw DuplicateNameException on subsequent calls.
-            if (project != null) {
-                Program existing = openExistingByName(file.getName());
-                if (existing != null) {
-                    Msg.info(this, "Reopened existing program from project: "
-                        + existing.getName() + " (" + file.getAbsolutePath() + ")");
-                    return existing;
-                }
-            }
-
-            MessageLog log = new MessageLog();
-            LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
-                file,
-                project,  // pass active project so the DomainFile has a real location
-                          // (was null → DomainFileProxy → df.save() throws
-                          // "Location does not exist for a save operation!")
-                "/",   // folder path (ignored when project is null → in-memory)
-                this,  // consumer
-                log,
-                monitor
-            );
-
-            // AutoImporter returns Loaded<T> wrappers whose DomainFile is still a
-            // transient proxy until save() materialises them into the project tree.
-            // Without this step, /save_all_programs later throws ReadOnlyException:
-            // "Location does not exist for a save operation!".
-            if (loadResults != null && project != null) {
-                loadResults.save(monitor);
-            }
-
-            Program program = null;
-            if (loadResults != null) {
-                program = loadResults.getPrimaryDomainObject();
-            }
-
-            if (program != null) {
-                registerProgram(program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
-                Msg.info(this, "Loaded program: " + program.getName() +
-                    " (" + file.getAbsolutePath() + ")");
-            } else {
-                Msg.error(this, "Failed to load program from: " + file.getAbsolutePath());
-                if (!log.toString().isEmpty()) {
-                    Msg.error(this, "Import log: " + log.toString());
-                }
-            }
-
-            return program;
-        } catch (Exception e) {
-            Msg.error(this, "Error loading program from file: " + file.getAbsolutePath(), e);
-            return null;
-        }
-    }
-
-    /**
-     * Load a raw binary with an explicit language / compiler spec.
-     *
-     * Used for firmware blobs and other raw images where AutoImporter's best-guess
-     * format detection has no header to latch onto (e.g. ARM Cortex-M .mem dumps).
-     * Mirrors {@link #loadProgramFromFile(File)} for openPrograms / currentProgram
-     * bookkeeping so subsequent /list_functions, /decompile_function, etc. resolve
-     * the result transparently.
-     *
-     * @param file         The raw binary file
-     * @param languageId   Ghidra language ID, e.g. "ARM:LE:32:Cortex"
-     * @param compilerSpecId Optional compiler-spec ID; empty/null falls back to the language default
-     * @return The loaded Program, or null on failure
-     */
-    public Program loadProgramFromFileWithLanguage(File file, String languageId, String compilerSpecId) {
-        if (!file.exists()) {
-            Msg.error(this, "File not found: " + file.getAbsolutePath());
-            return null;
-        }
-        if (languageId == null || languageId.trim().isEmpty()) {
-            Msg.error(this, "loadProgramFromFileWithLanguage requires a non-empty languageId");
-            return null;
-        }
-        // Normalize before constructing IDs: a doc-copied " ARM:LE:32:Cortex "
-        // passes the non-empty check above but fails the LanguageID lookup.
-        languageId = languageId.trim();
-        String normalizedCompilerSpecId =
-            (compilerSpecId == null) ? "" : compilerSpecId.trim();
-
-        try {
-            // Same idempotency guard as loadProgramFromFile: if a project is
-            // open and a same-named DomainFile already exists, reopen it
-            // rather than re-importing (which would throw DuplicateNameException).
-            if (project != null) {
-                Program existing = openExistingByName(file.getName());
-                if (existing != null) {
-                    Msg.info(this, "Reopened existing raw binary from project: "
-                        + existing.getName() + " (" + file.getAbsolutePath() + ")");
-                    return existing;
-                }
-            }
-
-            LanguageService langService = DefaultLanguageService.getLanguageService();
-            Language language = langService.getLanguage(new LanguageID(languageId));
-
-            CompilerSpec compilerSpec;
-            if (!normalizedCompilerSpecId.isEmpty()) {
-                compilerSpec = language.getCompilerSpecByID(new CompilerSpecID(normalizedCompilerSpecId));
-            } else {
-                compilerSpec = language.getDefaultCompilerSpec();
-            }
-
-            MessageLog log = new MessageLog();
-            Loaded<Program> loaded = AutoImporter.importAsBinary(
-                file,
-                project, // pass active project so the DomainFile has a real location
-                         // (was null → DomainFileProxy → df.save() throws
-                         // "Location does not exist for a save operation!")
-                "/",    // folder path (ignored when project is null → in-memory)
-                language,
-                compilerSpec,
-                this,   // consumer
-                log,
-                monitor
-            );
-
-            // Materialise the Loaded into the project tree — see twin block in
-            // loadProgramFromFile for the full rationale.
-            if (loaded != null && project != null) {
-                loaded.save(monitor);
-            }
-
-            Program program = null;
-            if (loaded != null) {
-                program = loaded.getDomainObject(this);
-            }
-
-            if (program != null) {
-                registerProgram(program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
-                Msg.info(this, "Loaded raw binary: " + program.getName()
-                    + " (" + file.getAbsolutePath() + ") as " + languageId);
-            } else {
-                Msg.error(this, "Failed to load raw binary from: " + file.getAbsolutePath());
-                if (!log.toString().isEmpty()) {
-                    Msg.error(this, "Import log: " + log.toString());
-                }
-            }
-
-            return program;
-        } catch (Exception e) {
-            Msg.error(this, "Error loading raw binary from file: " + file.getAbsolutePath()
-                + " (language=" + languageId + ")", e);
-            return null;
-        }
-    }
-
-    /**
-     * Look up a program already imported into the open project by file name and
-     * return an opened {@link Program} backed by its {@link DomainFile}.
-     *
-     * <p>Used by {@link #loadProgramFromFile(File)} and
-     * {@link #loadProgramFromFileWithLanguage(File, String, String)} to make
-     * repeated load calls idempotent — re-importing under the same name would
-     * otherwise throw {@code DuplicateNameException}.
-     *
-     * @param name DomainFile name (typically {@code file.getName()})
-     * @return the opened Program if an entry exists in the project tree, or
-     *         {@code null} when no project is open or no match is found
-     */
-    private Program openExistingByName(String name) {
-        if (project == null || name == null || name.isEmpty()) return null;
-        try {
-            // Hot path: already opened in this session.
-            Program cached = openPrograms.get(name);
-            if (cached != null) return cached;
-
-            // Idempotency is scoped to the import location (root): the loaders
-            // always import under folder "/", so a recursive search could reopen
-            // a same-named program from a different folder and break the
-            // intended "reload the file I just imported" contract.
-            ProjectData pd = project.getProjectData();
-            DomainFile df = pd.getFile("/" + name);
-            if (df == null) return null;
-
-            Program program = (Program) df.getDomainObject(this, true, false, monitor);
-            if (program != null) {
-                openPrograms.put(program.getName(), program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
-            }
-            return program;
-        } catch (Exception e) {
-            Msg.warn(this, "openExistingByName failed for '" + name + "': " + e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Load a program from a Ghidra project.
-     *
-     * Back-compat wrapper: returns just the Program (null on failure).
-     * Callers that want diagnostics on failure should use
-     * {@link #loadProgramFromProjectDetailed(String)} which returns a
-     * {@link ProgramLoadResult} with structured failure information.
-     *
-     * @param projectPath Path to the program within the project (e.g., "/D2Client.dll")
-     * @return The loaded Program, or null on failure
-     */
-    public Program loadProgramFromProject(String projectPath) {
-        return loadProgramFromProjectDetailed(projectPath).program;
-    }
-
-    /**
-     * Load a program from a Ghidra project with structured diagnostics.
-     *
-     * Discussion #119 surfaced the recurring "checkout succeeded, can't open"
-     * pattern: users connect a headless Docker container to a remote Ghidra
-     * server, run /server/version_control/checkout (which acquires the
-     * server-side lock on the standalone {@link GhidraServerManager}
-     * connection), then call /load_program_from_project and get a flat
-     * "Program not found" error. The usual root cause is one of:
-     *
-     *   1. The locally-open project is a standalone project, not a shared
-     *      project bound to the server. /server/version_control/checkout
-     *      operates on the GhidraServerManager's standalone connection,
-     *      which doesn't sync content to a non-shared local project.
-     *
-     *   2. The path doesn't match the project's folder hierarchy (case,
-     *      leading slash, server folder layout vs container folder layout).
-     *
-     *   3. The project IS shared but the file hasn't been pulled to the
-     *      local cache yet — opening it triggers the server fetch but the
-     *      first call can fail if the server is unreachable.
-     *
-     * This method returns a structured result so the endpoint handler can
-     * surface what actually went wrong rather than the legacy bare null.
-     */
-    public ProgramLoadResult loadProgramFromProjectDetailed(String projectPath) {
-        if (project == null) {
-            return ProgramLoadResult.failure(
-                "No project open. Call /open_project first, pointing at the .gpr "
-                + "or project directory you want to work against.");
-        }
-
-        ProjectData projectData;
-        try {
-            projectData = project.getProjectData();
-        } catch (Exception e) {
-            return ProgramLoadResult.failure(
-                "Could not access project data: " + e.getMessage());
-        }
-
-        DomainFile domainFile;
-        try {
-            domainFile = projectData.getFile(projectPath);
-        } catch (Exception e) {
-            return ProgramLoadResult.failure(
-                "Path lookup failed: " + e.getMessage());
-        }
-
-        if (domainFile == null) {
-            // Build a diagnostic with the project's actual file layout so the
-            // user can see what's available instead of guessing.
-            List<String> available = new ArrayList<>();
-            try {
-                collectProgramPaths(projectData.getRootFolder(), "", available, 50);
-            } catch (Exception e) {
-                // Best-effort — diagnostic shouldn't itself fail.
-            }
-
-            String serverHint = describeServerBinding(projectData);
-            return ProgramLoadResult.notFound(projectPath, available, serverHint);
-        }
-
-        try {
-            Program program = (Program) domainFile.getDomainObject(this, true, false, monitor);
-            if (program == null) {
-                String serverHint = describeServerBinding(projectData);
-                return ProgramLoadResult.failure(
-                    "domainFile.getDomainObject returned null for: " + projectPath
-                    + (serverHint.isEmpty() ? "" : " (" + serverHint + ")"));
-            }
-            registerProgram(program);
-            if (currentProgram == null) {
-                currentProgram = program;
-            }
-            Msg.info(this, "Loaded program from project: " + program.getName());
-            return ProgramLoadResult.success(program);
-        } catch (Exception e) {
-            String serverHint = describeServerBinding(projectData);
-            Msg.error(this, "Error loading program from project: " + projectPath, e);
-            return ProgramLoadResult.failure(
-                "Open failed (" + e.getClass().getSimpleName() + "): " + e.getMessage()
-                + (serverHint.isEmpty() ? "" : ". " + serverHint));
-        }
-    }
-
-    /** Walk the project tree collecting *Program* paths, capped at maxResults. */
-    private void collectProgramPaths(DomainFolder folder, String pathPrefix, List<String> out, int maxResults) {
-        if (out.size() >= maxResults) return;
-        try {
-            for (DomainFile file : folder.getFiles()) {
-                if (out.size() >= maxResults) return;
-                if ("Program".equals(file.getContentType())) {
-                    out.add(pathPrefix + "/" + file.getName());
-                }
-            }
-            for (DomainFolder subfolder : folder.getFolders()) {
-                if (out.size() >= maxResults) return;
-                collectProgramPaths(subfolder, pathPrefix + "/" + subfolder.getName(), out, maxResults);
-            }
-        } catch (Exception ignore) {
-            // best-effort
-        }
-    }
-
-    /**
-     * Describe whether the open project is server-bound, for inclusion in
-     * error diagnostics. Empty string when not server-bound (the standalone
-     * case). Used by both {@link #loadProgramFromProjectDetailed} and
-     * {@link #getProjectServerInfo} so the description is consistent.
-     */
-    private String describeServerBinding(ProjectData projectData) {
-        try {
-            ghidra.framework.client.RepositoryAdapter repo = projectData.getRepository();
-            if (repo == null) {
-                return "Project is local-only (not bound to a Ghidra Server). "
-                    + "If you intended a server-checked-out file, the local project "
-                    + "must be a shared project — create one via Ghidra GUI or "
-                    + "`analyzeHeadless -connect ghidra://host:port/repo` and "
-                    + "mount it into this container, then reopen it via "
-                    + "/open_project.";
-            }
-            // Only RepositoryAdapter.getName() is touched here — the
-            // server host:port lives behind getServer().getServerInfo(),
-            // whose return type differs across Ghidra 12.0.x point builds
-            // (String on some, ServerInfo on others) and broke the CI
-            // build. The repo name + "bound to a server" is the
-            // diagnostic the operator actually needs; they configured the
-            // host:port themselves.
-            return "Project is bound to a Ghidra Server (repo '" + repo.getName() + "')";
-        } catch (Exception e) {
-            return "Server binding probe failed: " + e.getClass().getSimpleName();
-        }
-    }
-
-    /**
-     * Server-binding info for the open project, or {@code null} when no
-     * project is open. Exposed to the management service so /get_project_info
-     * can surface "is this project shared?" without re-implementing the
-     * probe.
-     */
-    public ServerBindingInfo getProjectServerInfo() {
-        if (project == null) return null;
-        try {
-            ghidra.framework.client.RepositoryAdapter repo = project.getProjectData().getRepository();
-            if (repo == null) {
-                return new ServerBindingInfo(false, null, null);
-            }
-            // serverInfo (host:port) is intentionally left null — see
-            // describeServerBinding: getServer().getServerInfo()'s return
-            // type isn't stable across Ghidra 12.0.x point builds. The
-            // serverBound flag + repo name are the load-bearing fields.
-            return new ServerBindingInfo(true, null, repo.getName());
-        } catch (Exception e) {
-            return new ServerBindingInfo(false, null, null);
-        }
-    }
-
-    /** Structured result from {@link #loadProgramFromProjectDetailed}. */
-    public static class ProgramLoadResult {
-        public final boolean success;
-        public final Program program;          // null on failure
-        public final String error;             // null on success
-        public final List<String> availablePaths; // null unless notFound
-        public final String serverHint;        // null unless server-relevant
-
-        private ProgramLoadResult(boolean success, Program program, String error,
-                                  List<String> availablePaths, String serverHint) {
-            this.success = success;
-            this.program = program;
-            this.error = error;
-            this.availablePaths = availablePaths;
-            this.serverHint = serverHint;
-        }
-
-        public static ProgramLoadResult success(Program program) {
-            return new ProgramLoadResult(true, program, null, null, null);
-        }
-
-        public static ProgramLoadResult failure(String error) {
-            return new ProgramLoadResult(false, null, error, null, null);
-        }
-
-        public static ProgramLoadResult notFound(String requestedPath, List<String> available, String serverHint) {
-            String msg = "Program not found in project: " + requestedPath;
-            if (available != null && !available.isEmpty()) {
-                msg += " (project contains " + available.size() + " program file(s); first few: "
-                    + String.join(", ", available.subList(0, Math.min(5, available.size()))) + ")";
-            } else if (available != null) {
-                msg += " (project has no program files)";
-            }
-            return new ProgramLoadResult(false, null, msg, available, serverHint);
-        }
-    }
-
-    /** Shared-project / server binding state for {@link #getProjectServerInfo}. */
-    public static class ServerBindingInfo {
-        public final boolean serverBound;
-        public final String serverInfo;  // host:port string, or null when not bound
-        public final String repoName;    // repo name on the server, or null
-
-        public ServerBindingInfo(boolean serverBound, String serverInfo, String repoName) {
-            this.serverBound = serverBound;
-            this.serverInfo = serverInfo;
-            this.repoName = repoName;
-        }
-    }
-
-    /**
-     * Close a specific program.
-     *
-     * @param program The program to close
-     */
-    @Override
-    public boolean closeProgram(Program program) {
-        if (program == null) {
-            return false;
-        }
-
-        openPrograms.remove(program.getName());
-
-        if (currentProgram == program) {
-            // Switch to another open program, or null if none
-            currentProgram = openPrograms.isEmpty() ? null :
-                openPrograms.values().iterator().next();
-        }
-
-        try {
-            program.release(this);
-        } catch (Exception e) {
-            Msg.warn(this, "Error releasing program: " + e.getMessage());
-        }
-        return true;
-    }
-
-    /**
-     * Save modified programs, then close all open programs.
-     */
-    public void closeAllPrograms() {
-        for (Program program : openPrograms.values()) {
-            // Runs on shutdown (SIGTERM from systemd included) and on project
-            // switch; release() alone would silently discard every unsaved edit.
-            // Saving lands in the local working copy only -- checkin stays explicit.
-            if (program.isChanged()) {
-                if (program.canSave()) {
-                    try {
-                        program.save("saved on close", monitor);
-                    } catch (Exception e) {
-                        Msg.error(this, "Unsaved changes LOST in " + program.getName() + ": " + e.getMessage());
-                    }
-                } else {
-                    Msg.error(this, "Unsaved changes LOST in " + program.getName()
-                            + ": opened read-only (check it out to keep edits)");
-                }
-            }
-            try {
-                program.release(this);
-            } catch (Exception e) {
-                Msg.warn(this, "Error releasing program " + program.getName() + ": " + e.getMessage());
-            }
-        }
-        openPrograms.clear();
-        currentProgram = null;
-    }
-
-    /**
-     * Get the task monitor for this provider.
-     *
-     * @return The TaskMonitor
-     */
-    public TaskMonitor getMonitor() {
-        return monitor;
-    }
-
-    /**
-     * Check a program back in to the shared Ghidra Server, creating a new
-     * server version. This closes the #119 gap: GhidraServerManager.checkinFile
-     * cannot commit (RepositoryAdapter exposes no checkin), so a checkin must
-     * run through DomainFile.checkin() on the open shared project.
-     *
-     * Any pending edits on the open DomainObject are saved into the local
-     * project database, then the object is released BEFORE checkin. Releasing
-     * first matters: checking in while the program is still open forces
-     * keepCheckedOut=true regardless of the handler (Ghidra logs "File
-     * currently open - must keep checked-out"), so keepCheckedOut=false only
-     * actually drops the server checkout once the object is closed.
-     *
-     * @param path            project path of the file (e.g. "/scratch/writetest");
-     *                        null/empty uses the current program's own file
-     * @param comment         checkin comment (also used for the pre-checkin save)
-     * @param keepCheckedOut  keep the file checked out after the new version lands
-     * @return result map with status/version_before/version/version_bumped, or error
-     */
-    public Map<String, Object> checkinProgram(String path, String comment, boolean keepCheckedOut) {
-        Map<String, Object> out = new LinkedHashMap<>();
-        if (project == null) {
-            out.put("success", false);
-            out.put("error", "No project open. Call /open_project first.");
-            return out;
-        }
-        if (comment == null) {
-            comment = "";
-        }
-
-        ProjectData projectData;
-        try {
-            projectData = project.getProjectData();
-        } catch (Exception e) {
-            out.put("success", false);
-            out.put("error", "Could not access project data: " + e.getMessage());
-            return out;
-        }
-
-        Program prog;
-        DomainFile file;
-        if (path == null || path.isEmpty()) {
-            prog = currentProgram;
-            if (prog == null) {
-                out.put("success", false);
-                out.put("error", "No current program open; supply 'path'.");
-                return out;
-            }
-            file = prog.getDomainFile();
-            path = file.getPathname();
-        } else {
-            try {
-                file = projectData.getFile(path);
-            } catch (Exception e) {
-                out.put("success", false);
-                out.put("error", "Path lookup failed: " + e.getMessage());
-                return out;
-            }
-            if (file == null) {
-                out.put("success", false);
-                out.put("error", "File not found in project: " + path);
-                return out;
-            }
-            // Only treat a same-named open program as ours if its DomainFile matches.
-            Program candidate = openPrograms.get(file.getName());
-            prog = (candidate != null && file.equals(candidate.getDomainFile())) ? candidate : null;
-        }
-
-        if (!file.isVersioned()) {
-            out.put("success", false);
-            out.put("error", "File is not under version control: " + path
-                + " (add it first, or check out a versioned file)");
-            return out;
-        }
-        if (!file.isCheckedOut()) {
-            out.put("success", false);
-            out.put("error", "File is not checked out: " + path);
-            return out;
-        }
-
-        try {
-            // Save pending edits into the local project DB, then release the
-            // open object so the checkout can be dropped on checkin.
-            if (prog != null) {
-                try {
-                    if (prog.isChanged()) {
-                        prog.save(comment.isEmpty() ? "checkin" : comment, monitor);
-                    }
-                } catch (Exception e) {
-                    out.put("success", false);
-                    out.put("error", "Save before checkin failed: " + e.getMessage());
-                    return out;
-                }
-                closeProgram(prog);
-            }
-
-            int versionBefore = file.getVersion();
-            final String cmt = comment;
-            final boolean keep = keepCheckedOut;
-            file.checkin(new ghidra.framework.data.CheckinHandler() {
-                public boolean keepCheckedOut() { return keep; }
-                public String getComment() { return cmt; }
-                public boolean createKeepFile() { return false; }
-            }, monitor);
-            int versionAfter = file.getVersion();
-
-            out.put("success", true);
-            out.put("status", "checked_in");
-            out.put("path", path);
-            out.put("version_before", versionBefore);
-            out.put("version", versionAfter);
-            out.put("version_bumped", versionAfter > versionBefore);
-            out.put("checked_out", file.isCheckedOut());
-            out.put("comment", comment);
-            out.put("keep_checked_out", keepCheckedOut);
-            Msg.info(this, "Checked in " + path + " (v" + versionBefore + " -> v" + versionAfter + ")");
-            return out;
-        } catch (Exception e) {
-            Msg.error(this, "Checkin failed for " + path, e);
-            out.put("success", false);
-            out.put("error", "Checkin failed (" + e.getClass().getSimpleName() + "): " + e.getMessage());
-            return out;
-        }
+        // Explicit no-op: headless has no current-program concept. GUI providers
+        // implement this against ProgramManager / CodeBrowser focus; pretending
+        // here would reintroduce sticky omit-program state with no way to steer it.
     }
 
     /**
@@ -852,52 +120,72 @@ public class HeadlessProgramProvider implements ProgramProvider {
     }
 
     /**
-     * List all available programs in the current project.
-     *
-     * @return Array of program paths in the project
+     * Result of {@link #openProject(String, GhidraServerManager)}. Structured so a
+     * malformed {@code ghidra://} URL surfaces as an error instead of a boolean
+     * false that looked like "file not found".
      */
-    public String[] listProjectPrograms() {
-        if (project == null) {
-            return new String[0];
+    public static final class OpenProjectResult {
+        public final boolean success;
+        public final String error;
+        public final String projectName;
+        public final boolean shared;
+        public final String repository;
+        public final String localProjectDir;
+
+        private OpenProjectResult(boolean success, String error, String projectName,
+                                  boolean shared, String repository, String localProjectDir) {
+            this.success = success;
+            this.error = error;
+            this.projectName = projectName;
+            this.shared = shared;
+            this.repository = repository;
+            this.localProjectDir = localProjectDir;
         }
 
-        try {
-            ProjectData projectData = project.getProjectData();
-            DomainFolder rootFolder = projectData.getRootFolder();
-            return listFolderContents(rootFolder, "").toArray(new String[0]);
-        } catch (Exception e) {
-            Msg.error(this, "Error listing project programs", e);
-            return new String[0];
-        }
-    }
-
-    private List<String> listFolderContents(DomainFolder folder, String path) {
-        List<String> results = new ArrayList<>();
-
-        try {
-            // Add files in this folder
-            for (DomainFile file : folder.getFiles()) {
-                results.add(path + "/" + file.getName());
-            }
-
-            // Recurse into subfolders
-            for (DomainFolder subfolder : folder.getFolders()) {
-                results.addAll(listFolderContents(subfolder, path + "/" + subfolder.getName()));
-            }
-        } catch (Exception e) {
-            Msg.warn(this, "Error reading folder: " + path);
+        public static OpenProjectResult ok(String projectName, boolean shared,
+                                           String repository, String localProjectDir) {
+            return new OpenProjectResult(true, null, projectName, shared, repository, localProjectDir);
         }
 
-        return results;
+        public static OpenProjectResult fail(String error) {
+            return new OpenProjectResult(false, error, null, false, null, null);
+        }
     }
 
     /**
-     * Open a Ghidra project from a .gpr file path.
+     * Open a local {@code .gpr} or a shared Ghidra Server repository URL.
+     *
+     * <p>When {@code projectPath} is a {@code ghidra://} URL, opens (or creates)
+     * a persistent shared project bound to that repository. A plain filesystem
+     * path keeps the pre-existing local {@code .gpr} behaviour exactly.
+     *
+     * @param projectPath {@code .gpr}/directory path, or {@code ghidra://host[:port]/repo}
+     * @param serverManager required for URL opens (connected adapter + credentials)
+     */
+    public OpenProjectResult openProject(String projectPath, GhidraServerManager serverManager) {
+        if (projectPath == null || projectPath.isBlank()) {
+            return OpenProjectResult.fail("Project path required");
+        }
+        // Any ghidra: string must parse as a server URL or fail — never fall
+        // through to the local .gpr branch (that would mkdir a project named
+        // after the URL string).
+        if (SharedProjectLocator.isGhidraUrl(projectPath)) {
+            return openSharedProject(projectPath.trim(), serverManager);
+        }
+        return openLocalProject(projectPath.trim());
+    }
+
+    /**
+     * Open a Ghidra project from a .gpr file path (local-only).
      *
      * @param projectPath Path to the .gpr file (e.g., "/projects/MyProject.gpr")
      * @return true if project was opened successfully
      */
     public boolean openProject(String projectPath) {
+        return openProject(projectPath, null).success;
+    }
+
+    private OpenProjectResult openLocalProject(String projectPath) {
         try {
             File projectFile = new File(projectPath);
 
@@ -915,14 +203,15 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 File[] gprFiles = projectDir.listFiles((dir, name) -> name.endsWith(".gpr"));
                 if (gprFiles == null || gprFiles.length == 0) {
                     Msg.error(this, "No .gpr file found in: " + projectPath);
-                    return false;
+                    return OpenProjectResult.fail("No .gpr file found in: " + projectPath);
                 }
                 projectName = gprFiles[0].getName().replace(".gpr", "");
             }
 
             if (!projectDir.exists()) {
                 Msg.error(this, "Project directory not found: " + projectDir.getAbsolutePath());
-                return false;
+                return OpenProjectResult.fail(
+                        "Project directory not found: " + projectDir.getAbsolutePath());
             }
 
             // Close existing project if any
@@ -945,15 +234,104 @@ public class HeadlessProgramProvider implements ProgramProvider {
 
             if (project != null) {
                 Msg.info(this, "Opened project: " + projectName + " from " + projectDir.getAbsolutePath());
-                return true;
-            } else {
-                Msg.error(this, "Failed to open project: " + projectPath);
-                return false;
+                return OpenProjectResult.ok(projectName, false, null, projectDir.getAbsolutePath());
             }
+            Msg.error(this, "Failed to open project: " + projectPath);
+            return OpenProjectResult.fail("Failed to open project: " + projectPath);
+        } catch (LockException e) {
+            // Two JVMs cannot share one project dir — fail loud, don't corrupt.
+            Msg.error(this, "Project locked (another Ghidra instance holds it): " + projectPath, e);
+            return OpenProjectResult.fail(
+                    "Project locked by another Ghidra instance: " + e.getMessage());
         } catch (Exception e) {
             Msg.error(this, "Error opening project: " + projectPath, e);
-            return false;
+            return OpenProjectResult.fail(
+                    "Error opening project: " + e.getMessage());
         }
+    }
+
+    /**
+     * Open-or-create a shared project bound to a Ghidra Server repository.
+     *
+     * <p>Same door as local open: the agent writes, so we need a real local
+     * {@code .rep} for working copies — not a transient URL view.
+     */
+    private OpenProjectResult openSharedProject(String ghidraUrl, GhidraServerManager serverManager) {
+        if (serverManager == null) {
+            return OpenProjectResult.fail(
+                    "Opening a ghidra:// URL requires the headless server manager "
+                            + "(credentials via GHIDRA_SERVER_USER/PASSWORD, then /server/connect)");
+        }
+
+        final SharedProjectLocator.Parsed parsed;
+        try {
+            parsed = SharedProjectLocator.parseServerUrl(ghidraUrl);
+        } catch (IllegalArgumentException e) {
+            return OpenProjectResult.fail(e.getMessage());
+        }
+
+        final Path projectParent;
+        try {
+            projectParent = SharedProjectLocator.resolveProjectDir(parsed);
+            Files.createDirectories(projectParent);
+        } catch (IllegalArgumentException e) {
+            return OpenProjectResult.fail(e.getMessage());
+        } catch (Exception e) {
+            return OpenProjectResult.fail(
+                    "Cannot create shared project directory: " + e.getMessage());
+        }
+
+        final RepositoryAdapter repo;
+        try {
+            serverManager.ensureConnectedTo(parsed.host(), parsed.port());
+            repo = serverManager.openRepository(parsed.repo());
+            if (repo == null) {
+                return OpenProjectResult.fail("Repository not found: " + parsed.repo());
+            }
+        } catch (Exception e) {
+            return OpenProjectResult.fail(
+                    "Server connection failed for " + parsed.host() + ":" + parsed.port()
+                            + ": " + e.getMessage());
+        }
+
+        if (project != null) {
+            closeProject();
+        }
+
+        // Parent is keyed by host_port_repo; project name stays the repo name
+        // so DomainFile paths match what analyzeHeadless imported.
+        ProjectLocator locator =
+                new ProjectLocator(projectParent.toAbsolutePath().toString(), parsed.repo());
+        ProjectManager pm = new HeadlessProjectManager();
+        ghidraProject = null;
+
+        try {
+            if (locator.exists() || pm.projectExists(locator)) {
+                project = pm.openProject(locator, /*restoreDefault*/ true, /*resetOwner*/ true);
+                Msg.info(this, "Opened shared project '" + parsed.repo()
+                        + "' from " + projectParent);
+            } else {
+                // false = durable project (GUI "New Shared Project"), not transient.
+                project = pm.createProject(locator, repo, false);
+                Msg.info(this, "Created shared project '" + parsed.repo()
+                        + "' at " + projectParent);
+            }
+        } catch (LockException e) {
+            return OpenProjectResult.fail(
+                    "Shared project directory locked by another Ghidra instance at "
+                            + projectParent + ": " + e.getMessage()
+                            + " (each JVM needs its own GHIDRA_MCP_SHARED_PROJECT_DIR)");
+        } catch (Exception e) {
+            Msg.error(this, "Failed to open/create shared project for " + ghidraUrl, e);
+            return OpenProjectResult.fail(
+                    "Failed to open/create shared project: " + e.getMessage());
+        }
+
+        if (project == null) {
+            return OpenProjectResult.fail("ProjectManager returned null for " + ghidraUrl);
+        }
+        return OpenProjectResult.ok(
+                parsed.repo(), true, parsed.repo(), projectParent.toAbsolutePath().toString());
     }
 
     /**
@@ -963,7 +341,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
         if (ghidraProject != null) {
             try {
                 // Close all programs from this project first
-                closeAllPrograms();
+                releaseAll();
                 ghidraProject.close();
                 Msg.info(this, "Closed project");
             } catch (Exception e) {
@@ -973,7 +351,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             project = null;
         } else if (project != null) {
             try {
-                closeAllPrograms();
+                releaseAll();
                 project.close();
                 Msg.info(this, "Closed project");
             } catch (Exception e) {
@@ -983,128 +361,9 @@ public class HeadlessProgramProvider implements ProgramProvider {
         }
     }
 
-    /**
-     * List all programs available in the current project.
-     *
-     * @return List of ProjectFileInfo objects with program details
-     */
-    public List<ProjectFileInfo> listProjectFiles() {
-        List<ProjectFileInfo> files = new ArrayList<>();
-
-        if (project == null) {
-            return files;
-        }
-
-        try {
-            ProjectData projectData = project.getProjectData();
-            DomainFolder rootFolder = projectData.getRootFolder();
-            collectProjectFiles(rootFolder, "", files);
-        } catch (Exception e) {
-            Msg.error(this, "Error listing project files", e);
-        }
-
-        return files;
-    }
-
-    private void collectProjectFiles(DomainFolder folder, String path, List<ProjectFileInfo> results) {
-        try {
-            for (DomainFile file : folder.getFiles()) {
-                String filePath = path.isEmpty() ? "/" + file.getName() : path + "/" + file.getName();
-                results.add(new ProjectFileInfo(
-                    file.getName(),
-                    filePath,
-                    file.getContentType(),
-                    file.isReadOnly()
-                ));
-            }
-
-            for (DomainFolder subfolder : folder.getFolders()) {
-                String subPath = path.isEmpty() ? "/" + subfolder.getName() : path + "/" + subfolder.getName();
-                collectProjectFiles(subfolder, subPath, results);
-            }
-        } catch (Exception e) {
-            Msg.warn(this, "Error reading folder: " + path);
-        }
-    }
-
-    /**
-     * Information about a file in a Ghidra project.
-     */
-    public static class ProjectFileInfo {
-        public final String name;
-        public final String path;
-        public final String contentType;
-        public final boolean readOnly;
-
-        public ProjectFileInfo(String name, String path, String contentType, boolean readOnly) {
-            this.name = name;
-            this.path = path;
-            this.contentType = contentType;
-            this.readOnly = readOnly;
-        }
-    }
-
     // ========================================================================
     // GZF export / import (Ghidra packed-database format)
     // ========================================================================
-
-    /**
-     * Resolve a DomainFile in the open project by exact path or by leading-slash
-     * path. When neither matches, fall back to a bare program-name search across
-     * all folders. Returns null when no project is open or when no match is
-     * found.
-     *
-     * @throws AmbiguousProgramException when a bare name matches files in more
-     *     than one folder \u2014 the caller must supply a full project path to
-     *     disambiguate rather than have us guess the wrong program.
-     */
-    private DomainFile findDomainFile(String programIdent) throws AmbiguousProgramException {
-        if (project == null || programIdent == null || programIdent.isEmpty()) return null;
-        List<DomainFile> matches = new ArrayList<>();
-        try {
-            ProjectData pd = project.getProjectData();
-            DomainFile f = pd.getFile(programIdent);
-            if (f != null) return f;
-            if (!programIdent.startsWith("/")) {
-                f = pd.getFile("/" + programIdent);
-                if (f != null) return f;
-            }
-            collectByName(pd.getRootFolder(), programIdent, matches);
-        } catch (Exception e) {
-            Msg.warn(this, "findDomainFile failed for '" + programIdent + "': " + e.getMessage());
-            return null;
-        }
-        if (matches.isEmpty()) return null;
-        if (matches.size() > 1) {
-            throw new AmbiguousProgramException(programIdent, matches.size());
-        }
-        return matches.get(0);
-    }
-
-    private void collectByName(DomainFolder folder, String name, List<DomainFile> out) {
-        try {
-            for (DomainFile f : folder.getFiles()) {
-                if (name.equals(f.getName())) out.add(f);
-            }
-            for (DomainFolder sub : folder.getFolders()) {
-                collectByName(sub, name, out);
-            }
-        } catch (Exception ignore) {
-            // best-effort
-        }
-    }
-
-    /**
-     * Raised when a bare program name matches files in multiple project folders,
-     * so resolving it would have to guess which one the caller meant.
-     */
-    private static final class AmbiguousProgramException extends Exception {
-        AmbiguousProgramException(String ident, int matchCount) {
-            super("'" + ident + "' is ambiguous: " + matchCount
-                + " programs share this filename in different project folders. "
-                + "Pass a full project path (e.g. /folder/" + ident + ") to disambiguate.");
-        }
-    }
 
     /**
      * Resolve a DomainFolder by path, optionally creating missing intermediate folders.
@@ -1171,7 +430,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
         // Prefer the live in-memory program — it includes unsaved analyst edits.
         // Exact match only: getProgram()'s fuzzy substring fallback could pack
         // the wrong program when several open names overlap.
-        Program live = exactOpenProgram(programIdent);
+        Program live = openProgramNamed(programIdent);
         if (live != null) {
             try {
                 live.saveToPackedFile(output, monitor);
@@ -1254,7 +513,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             // from setName/delete would leave the file half-renamed depending
             // on Ghidra's locking, so check the open-program bookkeeping first
             // and fail with a clear structured error that mutates nothing.
-            if (existing != null && isProgramOpen(chosenName)) {
+            if (existing != null && openProgramNamed(chosenName) != null) {
                 return ImportResult.failure("cannot overwrite '"
                     + folder.getPathname() + "/" + chosenName
                     + "': program is currently loaded in memory. "
@@ -1799,10 +1058,8 @@ public class HeadlessProgramProvider implements ProgramProvider {
             }
             // Close it if currently open
             String fileName = domainFile.getName();
-            Program openProg = openPrograms.get(fileName);
-            if (openProg != null) {
-                closeProgram(openProg);
-            }
+            // Deleting it: nothing to save for.
+            closeProgramByPath(filePath);
             domainFile.delete();
             Msg.info(this, "Deleted file: " + filePath);
             return true;

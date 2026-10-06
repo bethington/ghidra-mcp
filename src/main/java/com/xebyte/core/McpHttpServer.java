@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -21,9 +22,14 @@ import java.util.function.Supplier;
  * over TCP.
  *
  * <p>The GUI plugin and the headless server serve the same thing: an
- * {@link AnnotationScanner}'s endpoints, some hand-written routes, {@code /mcp/schema}
- * and {@code /mcp/instance_info}. They differ only in which routes they register;
- * transports, request guarding and bridge discovery live here, once.
+ * {@link AnnotationScanner}'s endpoints, some hand-written routes, and the identity
+ * routes built here -- {@code /mcp/schema}, {@code /mcp/instance_info},
+ * {@code /mcp/health} and {@code /check_connection}. They differ only in which other
+ * routes they register; transports, request guarding, bridge discovery and "who are
+ * you, and are you alive" live here, once. Those answers used to be written twice:
+ * plain text in two different formats for {@code /check_connection}, and a health
+ * route under a different name on each server, so no probe could ask both the same
+ * question.
  */
 public final class McpHttpServer {
 
@@ -41,11 +47,13 @@ public final class McpHttpServer {
             int workers) {}
 
     /** Liveness probes stay token-less. Exact match: a prefix would let traversal inherit it. */
-    private static final Set<String> AUTH_EXEMPT = Set.of("/mcp/health", "/health", "/check_connection");
+    private static final Set<String> AUTH_EXEMPT = Set.of("/mcp/health", "/check_connection");
     private static final long SLOW_HANDLER_WARN_MS = 2000;
 
     private final Map<String, UdsHttpServer.Handler> routes = new LinkedHashMap<>();
-    private final Supplier<Map<String, Object>> instanceInfo;
+    private final String serverKind;
+    private final Supplier<Map<String, Object>> instanceExtras;
+    private long startMillis;
     private final AtomicInteger activeRequests = new AtomicInteger();
     private AnnotationScanner scanner;
     private java.util.concurrent.ThreadPoolExecutor executor;
@@ -54,12 +62,13 @@ public final class McpHttpServer {
     private volatile int tcpPort = -1;
 
     /**
-     * @param instanceInfo the {@code /mcp/instance_info} payload. {@code tcp_port} is this
-     *                     server's own unless the supplier sets it -- the GUI's socket and
-     *                     TCP are separate servers, and both must advertise the TCP port.
+     * @param serverKind     {@code "gui"} or {@code "headless"}, reported by every identity route
+     * @param instanceExtras server-specific additions to {@code /mcp/instance_info}
+     *                       (the GUI's registered tool count); may return an empty map
      */
-    public McpHttpServer(Supplier<Map<String, Object>> instanceInfo) {
-        this.instanceInfo = instanceInfo;
+    public McpHttpServer(String serverKind, Supplier<Map<String, Object>> instanceExtras) {
+        this.serverKind = serverKind;
+        this.instanceExtras = instanceExtras;
     }
 
     /** Serve every endpoint of {@code scanner}, and its schema as {@code /mcp/schema}. */
@@ -89,16 +98,18 @@ public final class McpHttpServer {
     }
 
     public synchronized void start(Config config) throws IOException {
-        if (scanner != null) {
-            // Generated at start, not in endpoints(): callers add manual descriptors in between.
-            String schemaJson = scanner.generateSchema();
-            routes.put("/mcp/schema", exchange -> sendJson(exchange, schemaJson));
-        }
-        routes.put("/mcp/instance_info", exchange -> {
-            Map<String, Object> info = new LinkedHashMap<>(instanceInfo.get());
-            info.put("tcp_port", tcpPort);
-            sendJson(exchange, Response.ok(info).toJson());
-        });
+        startMillis = System.currentTimeMillis();
+        ProgramProvider provider = scanner != null ? scanner.getProgramProvider() : null;
+        // Generated at start, not in endpoints(): callers add manual descriptors in between.
+        String schemaJson = scanner != null ? scanner.generateSchema() : "{\"tools\": []}";
+        int endpointCount = scanner != null ? scanner.getDescriptors().size() : 0;
+        routes.put("/mcp/schema", exchange -> sendJson(exchange, schemaJson));
+        routes.put("/mcp/instance_info", exchange ->
+            sendJson(exchange, Response.ok(instanceInfo(provider, endpointCount)).toJson()));
+        routes.put("/mcp/health", exchange ->
+            sendJson(exchange, Response.ok(health(provider, endpointCount)).toJson()));
+        routes.put("/check_connection", exchange ->
+            sendJson(exchange, Response.ok(checkConnection(provider)).toJson()));
         AtomicInteger threadNo = new AtomicInteger(1);
         executor = (java.util.concurrent.ThreadPoolExecutor) Executors.newFixedThreadPool(config.workers(), r -> {
             Thread t = new Thread(r, "GhidraMCP-HTTP-" + threadNo.getAndIncrement());
@@ -133,6 +144,95 @@ public final class McpHttpServer {
             throw first != null ? first
                     : new IOException("No transport was requested");
         }
+    }
+
+    /**
+     * Liveness and identity, cheap and auth-exempt: which kind of server answered, which
+     * build, and whether a program is current. The doctor tool used to tell the two
+     * servers apart by sniffing two different English sentences.
+     */
+    private Map<String, Object> checkConnection(ProgramProvider provider) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "ok");
+        out.put("server_kind", serverKind);
+        out.put("version", VersionInfo.getVersion());
+        out.put("program", currentProgramName(provider));
+        return out;
+    }
+
+    /** {@link #checkConnection} plus load and build detail, for dashboards and smoke tests. */
+    private Map<String, Object> health(ProgramProvider provider, int endpointCount) {
+        Runtime rt = Runtime.getRuntime();
+        long mb = 1024L * 1024L;
+        Map<String, Object> out = checkConnection(provider);
+        out.put("connected", true);
+        out.put("open_program_count", provider != null ? provider.getAllOpenPrograms().length : 0);
+        out.put("uptime_seconds", (System.currentTimeMillis() - startMillis) / 1000L);
+        out.put("active_requests", activeRequests.get());
+        out.put("version", JsonHelper.mapOf(
+            "plugin_version", VersionInfo.getVersion(),
+            "plugin_name", VersionInfo.getAppName(),
+            "full_version", VersionInfo.getFullVersion(),
+            "build_timestamp", VersionInfo.getBuildTimestamp(),
+            "build_number", VersionInfo.getBuildNumber(),
+            "ghidra_version", VersionInfo.getGhidraVersion(),
+            "java_version", System.getProperty("java.version"),
+            "endpoint_count", endpointCount));
+        out.put("http_pool", poolStats());
+        out.put("memory_mb", JsonHelper.mapOf(
+            "used", (rt.totalMemory() - rt.freeMemory()) / mb,
+            "total", rt.totalMemory() / mb,
+            "max", rt.maxMemory() / mb));
+        return out;
+    }
+
+    /**
+     * What the bridge's discovery reads: the project, its programs with {@code open}
+     * marking the ones this server has open (by path: two versions of one DLL share a
+     * name), and how to reach this server.
+     */
+    private Map<String, Object> instanceInfo(ProgramProvider provider, int endpointCount) {
+        ghidra.framework.model.Project project = provider != null ? provider.getProject() : null;
+        java.util.Set<String> openPaths = new java.util.HashSet<>();
+        if (provider != null) {
+            for (ghidra.program.model.listing.Program p : provider.getAllOpenPrograms()) {
+                openPaths.add(ProjectProgramProvider.keyFor(p));
+            }
+        }
+        List<Map<String, Object>> programs = new java.util.ArrayList<>();
+        if (project != null) {
+            collectPrograms(project.getProjectData().getRootFolder(), openPaths, programs);
+        }
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("pid", ProcessHandle.current().pid());
+        info.put("server_kind", serverKind);
+        info.put("version", VersionInfo.getVersion());
+        info.put("endpoint_count", endpointCount);
+        info.put("project", project != null ? project.getName() : "unknown");
+        info.put("project_path", project != null ? project.getProjectLocator().toString() : "");
+        info.put("programs", programs);
+        info.putAll(instanceExtras.get());
+        info.put("tcp_port", tcpPort);
+        return info;
+    }
+
+    private static void collectPrograms(ghidra.framework.model.DomainFolder folder,
+            java.util.Set<String> openPaths, List<Map<String, Object>> out) {
+        for (ghidra.framework.model.DomainFile df : folder.getFiles()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", df.getName());
+            entry.put("path", df.getPathname());
+            entry.put("open", openPaths.contains(df.getPathname()));
+            out.add(entry);
+        }
+        for (ghidra.framework.model.DomainFolder sub : folder.getFolders()) {
+            collectPrograms(sub, openPaths, out);
+        }
+    }
+
+    private static String currentProgramName(ProgramProvider provider) {
+        ghidra.program.model.listing.Program current = provider != null ? provider.getCurrentProgram() : null;
+        return current != null ? current.getName() : null;
     }
 
     public synchronized void stop() {
@@ -213,7 +313,8 @@ public final class McpHttpServer {
             try {
                 tcp = com.sun.net.httpserver.HttpServer.create(
                         new InetSocketAddress(config.bindAddress(), candidate), 0);
-                tcpPort = candidate;
+                // The bound port, not the candidate: port 0 asks the OS to pick one.
+                tcpPort = tcp.getAddress().getPort();
                 break;
             } catch (java.net.BindException e) {
                 lastBindException = e;
@@ -223,7 +324,7 @@ public final class McpHttpServer {
             throw new IOException("No free TCP port in " + config.port() + "-" + last
                     + " on " + config.bindAddress(), lastBindException);
         }
-        if (tcpPort != config.port()) {
+        if (config.port() != 0 && tcpPort != config.port()) {
             Msg.warn(this, "Port " + config.port() + " was in use; bound " + tcpPort
                     + " instead. The bridge discovers it via /mcp/instance_info.");
         }

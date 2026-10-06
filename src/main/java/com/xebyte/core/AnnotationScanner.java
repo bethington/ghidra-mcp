@@ -120,6 +120,11 @@ public class AnnotationScanner {
         descriptors.sort(Comparator.comparing(ToolDescriptor::path));
     }
 
+    /** The provider every scanned endpoint resolves programs through; null for a bare scanner. */
+    public ProgramProvider getProgramProvider() {
+        return programProvider;
+    }
+
     /** Returns all discovered endpoints. */
     public List<EndpointDef> getEndpoints() {
         return Collections.unmodifiableList(endpoints);
