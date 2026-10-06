@@ -234,6 +234,28 @@ public class DataTypeService {
         out.put("size", dataType.getLength());
         out.put("alignment", dataType.getAlignment());
         out.put("path", dataType.getPathName());
+        out.put("kind", getDataTypeName(dataType));
+        if (dataType instanceof Composite composite) {
+            List<Map<String, Object>> members = new ArrayList<>();
+            for (DataTypeComponent member : composite.getDefinedComponents()) {
+                members.add(JsonHelper.mapOf("name", member.getFieldName(), "offset", member.getOffset(),
+                    "size", member.getLength(), "type", member.getDataType().getPathName(), "comment", member.getComment()));
+            }
+            out.put("fields", members);
+        } else if (dataType instanceof FunctionDefinition definition) {
+            out.put("return_type", definition.getReturnType().getPathName());
+            out.put("calling_convention", definition.getCallingConventionName());
+            out.put("varargs", definition.hasVarArgs());
+            List<Map<String, Object>> parameters = new ArrayList<>();
+            for (ParameterDefinition parameter : definition.getArguments())
+                parameters.add(JsonHelper.mapOf("name", parameter.getName(), "type", parameter.getDataType().getPathName()));
+            out.put("parameters", parameters);
+        } else if (dataType instanceof TypeDef typedef) out.put("base_type", typedef.getBaseDataType().getPathName());
+        else if (dataType instanceof Pointer pointer && pointer.getDataType() != null) out.put("base_type", pointer.getDataType().getPathName());
+        else if (dataType instanceof Array array) {
+            out.put("base_type", array.getDataType().getPathName());
+            out.put("element_count", array.getNumElements());
+        }
         return Response.ok(out);
     }
 

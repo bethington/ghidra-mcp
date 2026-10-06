@@ -80,6 +80,17 @@ public class DataTypeEditingGhidraTest {
         ok(service.deleteDataType("S", false, "", true));
     }
 
+    @Test public void enumArrayInputUnionDetailsAndKindSearch() {
+        ok(service.createEnum("Mode", "[{\"name\":\"MODE_A\",\"value\":1}]", 4, "", "/Types"));
+        ok(service.createUnion("U", "[{\"name\":\"bytes\",\"type\":\"uchar[4]\"},{\"name\":\"number\",\"type\":\"uint\"}]", "", "/Types"));
+        String details = service.getTypeSize("U", "").toJson();
+        assertTrue(details, details.contains("\"fields\""));
+        assertTrue(details, details.contains("\"size\":4"));
+        String search = service.findDataTypes("", "", "union", false, 0, 100, "").toJson();
+        assertTrue(search, search.contains("/Types/U"));
+        assertFalse(search, search.contains("/Types/Mode"));
+    }
+
     @Test public void namedUndefinedPaddingCanBeCarvedAndTailFieldsCanGrow() {
         ok(service.createStruct("S", "[{\"name\":\"padding\",\"type\":\"undefined[16]\"}]", false, "", "/Types"));
         ok(service.addStructField("S", "", "", -1, "", "[{\"name\":\"inside\",\"type\":\"uint\",\"offset\":4}]", false));

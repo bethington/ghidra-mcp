@@ -45,6 +45,8 @@ and folding `/get_version` into `/mcp/health`).
   wrappers and function variables/returns) and refuses unless `force=true`.
 - Type resolution honors target ABI sizes and qualified category paths, rejects
   unknown C pointer targets, and preserves placeholders if replacement fails.
+- `search_data_types` gains an optional kind filter and accepts an empty pattern;
+  `get_type_size` reports members, signatures and base types.
 
 ### Changed — one call reads a function: `/get_functions` replaces nine readers
 
