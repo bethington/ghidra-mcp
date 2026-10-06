@@ -246,6 +246,36 @@ def _detect_mcp_transport(url: str, requested: str) -> str:
 DoctorProbe = Callable[[str, float, str, Mapping[str, str] | None], tuple[int, str, Mapping[str, str]]]
 
 
+def _is_connection_refused(exc: BaseException) -> bool:
+    """True when the peer actively refused the connection.
+
+    A refusal means nothing is listening. Retrying it only burns the delay
+    budget. Timeouts and other transport errors stay retryable.
+    """
+
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if isinstance(current, ConnectionRefusedError):
+            return True
+        errno = getattr(current, "errno", None)
+        winerror = getattr(current, "winerror", None)
+        if winerror == 10061 or errno in {61, 111}:
+            return True
+        linked = (
+            getattr(current, "reason", None),
+            current.__cause__,
+            current.__context__,
+        )
+        pending.extend(item for item in linked if isinstance(item, BaseException))
+    return False
+
+
 def _not_applicable_check(name: str, reason: str, details: Mapping[str, Any]) -> dict[str, Any]:
     """Represent a mode-specific endpoint that must not be requested."""
 
@@ -294,11 +324,13 @@ def _run_check(
             ok, reason, details = validator(status, body, response_headers)
         except Exception as exc:  # noqa: BLE001 - doctor must return a stable report
             ok, reason, details = False, f"transport_error:{type(exc).__name__}", {}
+            if _is_connection_refused(exc):
+                details = {"retryable": False}
         result["elapsed_ms"] = round(max(0.0, time.monotonic() - started) * 1000, 1)
         result["ok"] = ok
         result["reason"] = reason
         result["details"] = details
-        if ok:
+        if ok or details.get("retryable") is False:
             break
         if attempt < retries:
             sleep_fn(retry_delay)
@@ -421,6 +453,13 @@ def run_doctor(
         headers=request_headers,
     )
     report["checks"].append(connection_check)
+    if not connection_check["ok"]:
+        # Nothing listening is the common case. Do not spend the retry budget
+        # on instance, health, schema, or MCP probes the connection cannot reach.
+        report["ok"] = False
+        report["http_healthy"] = False
+        report["recommended_next_action"] = "Inspect the Ghidra/plugin listener, URL, authentication, or lifecycle."
+        return report
 
     inferred_kind = connection_check["details"].get("server_kind")
     effective_kind = server_kind

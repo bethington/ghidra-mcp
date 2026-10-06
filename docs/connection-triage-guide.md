@@ -69,7 +69,10 @@ not initialize an MCP session, call a tool, restart a process, edit
 configuration, or change project state. Therefore `mcp_initialize_healthy` is
 `null` unless a future explicit session probe is added. Exit code `0` means
 every requested check passed; exit code `1` preserves the failing layer and
-the recommended next action in the report.
+the recommended next action in the report. If `/check_connection` fails, the
+doctor returns immediately and does not probe instance info, health, schema,
+or the optional MCP route. An active connection refusal is not retried;
+timeouts and unexpected HTTP statuses still are.
 
 The default `--server-kind auto` recognizes the GUI and headless
 `/check_connection` responses. For a headless server it checks `/health` and
