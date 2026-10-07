@@ -460,16 +460,14 @@ Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
 `debugger_watch_{memory,stop,log}` (plus dbgeng versions of status/step/breakpoint/
 registers/memory/stack/modules).
 
-**Registration is platform-gated** (`_debugger_enabled()` in the bridge): on non-Windows
-hosts with a local `GHIDRA_DEBUGGER_URL` these tools are **not registered** (they could
-never work), which also frees the shared `debugger_*` names for the TraceRmi family above.
-They register when: running on Windows, `GHIDRA_DEBUGGER_URL` points at a remote
-(Windows) host running the server, or `GHIDRA_DEBUGGER_TOOLS=1` forces them on.
+**These tools are off by default** (`_debugger_enabled()` in the bridge). They register
+only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`;
+`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set.
 
 > Naming note: where the two families share a name (e.g. `debugger_status`), only one
-> can hold the clean name. On non-Windows the TraceRmi tool wins; on Windows (both
-> active) the dbgeng proxy holds the clean name and the TraceRmi endpoint is suffixed
-> `_2` (e.g. `debugger_status_2`).
+> is registered. With the proxies off, the TraceRmi tool holds the name. With them on,
+> the dbgeng proxy replaces it and the TraceRmi version is not reachable — so do not
+> mix the two families against one target.
 
 Use either family for: ground-truth validation after static analysis. After emulation
 resolves a hash, set a breakpoint on the resolved API and confirm the process calls it.

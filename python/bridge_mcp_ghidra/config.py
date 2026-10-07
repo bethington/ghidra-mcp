@@ -121,9 +121,10 @@ MANAGEMENT_TOOL_NAMES = {
 # GHIDRA_DEBUGGER_URL is set or GHIDRA_DEBUGGER_TOOLS is truthy; see
 # debugger._debugger_enabled(). The names are always listed in
 # _ALL_STATIC_TOOL_NAMES (validated at import, counted by the catalog tests);
-# collision detection uses the ACTIVE set (STATIC_TOOL_NAMES), so while the
-# proxies are off Ghidra's own TraceRmi /debugger/status keeps its clean name,
-# and it becomes debugger_status_2 only when the proxies are enabled.
+# collision handling uses the ACTIVE set (STATIC_TOOL_NAMES): while the proxies
+# are off, Ghidra's own TraceRmi /debugger/status registers as debugger_status;
+# when they are on, the proxy holds that name and registry._register_tool_def
+# skips the TraceRmi tool (no _2 suffix is assigned for exact matches).
 DEBUGGER_TOOL_NAMES = {
     "debugger_attach",
     "debugger_detach",

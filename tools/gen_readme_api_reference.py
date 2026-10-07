@@ -54,9 +54,10 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
     "server": ("Ghidra Server & Version Control", ""),
     "debugger": (
         "Debugger (Ghidra TraceRmi)",
-        "On Windows hosts where the bridge's WinDbg debugger proxy is active"
-        " (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix"
-        " (e.g. `debugger_status_2`).",
+        "When the bridge's opt-in WinDbg debugger proxies are enabled"
+        " (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a proxy tool with"
+        " the same name (e.g. `debugger_status`) replaces the TraceRmi tool"
+        " below. Leave the proxies off to use these.",
     ),
     "system": ("System", ""),
 }
