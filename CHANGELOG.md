@@ -6,17 +6,23 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186 by
-both. The advertised surface went from 272 → 251 in the first consolidation
-cycle, then 245 after `/list_shadowed_globals` and `/batch_get_comments`, 219
-after `/get_functions` replaced nine function readers, 215 after the listing,
-xref, tag, utility and GUI-cursor folds, 211 once both servers shared one set of
-program-operation names (`/load_program`, `/load_program_from_project`,
-`/project/info` and headless `/health` retired), 209 once version control and
-the CodeBrowser tools became shared services (`/server/version_control/checkin`
-and `/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and
-**209** once `/apply_documentation` replaced `/apply_function_documentation` and
-`/batch_apply_documentation`.
+**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
+by both. The advertised surface went from 272 → 251 in the first consolidation
+cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
+7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
+nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
+folds, 211 once both servers shared one set of program-operation names
+(`/load_program`, `/load_program_from_project`, `/project/info` and headless
+`/health` retired), 209 once version control and the CodeBrowser tools
+became shared services (`/server/version_control/checkin` and
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and **209** once `/apply_documentation` replaced
+`/apply_function_documentation` and `/batch_apply_documentation` — 53 tools
+removed and 9 added since rc.1,
+every one named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+
+Entries further down quote the catalog as it stood when they landed (251, 253,
+the 235-tool schema recording); the figures above are the current ones.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -142,7 +148,9 @@ both).
 **UI threading** — services that must touch Swing go through
 `ThreadingStrategy.runOnUi` (the Swing thread on the GUI, the calling thread headless)
 instead of calling `SwingUtilities` directly; the analyst's windows are reached through
-`Workbench`.
+`Workbench`. Note that the plugin is still wired with `DirectThreadingStrategy`, not
+`SwingThreadingStrategy`, so today `runOnUi` runs on the calling thread on the GUI too;
+`Workbench` and `GuiToolService` hop to the Swing thread themselves.
 
 **Ghidra Server repositories** — headless `open_project` accepts `ghidra://` repository
 URLs via `SharedProjectLocator` (local `.gpr` paths still use the file-root allow-list on
@@ -177,9 +185,10 @@ them.
 | `/server/version_control/checkin` | `/checkin_program` |
 | `/tool/launch_codebrowser` | `/open_project` (project/CodeBrowser launch options) |
 
-Catalog: **235** endpoints — **231** on the GUI plugin, **214** headless, **210** on both
-(two routes removed, four archive/import routes gained `gui` in `servers`, and
-`/batch_apply_documentation` and `/server/authenticate` gained headless).
+Catalog: **209** endpoints — **205** on the GUI plugin, **190** headless, **186** on both,
+from 211 / 203 / 189 / 181 (two routes removed, four archive/import routes gained `gui`
+in `servers`, and `/batch_apply_documentation` and `/server/authenticate` gained
+headless).
 
 ### Changed — headless and GUI: one program model, one set of names, one health surface
 
@@ -317,7 +326,7 @@ structural metrics only `/get_function_signature` returned (`basic_block_count`,
 `cyclomatic_complexity`, instruction count, immediate values, string constants) are no
 longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
 
-### Changed — one parameter, and one meaning, for "which function"
+### Changed — one parameter, and one meaning, for "which function" ([#566](https://github.com/bethington/ghidra-mcp/pull/566))
 
 Function-scoped tools spelled the same locator four ways (`address`, `name`,
 `function_name`, `function_address`), five carried two of them at once, and two
@@ -356,25 +365,28 @@ listing tool, bulk xrefs as a parameter, tags carried on function reads, sevente
 small tools folded into siblings, version identity on `/mcp/health`, and one GUI
 cursor tool.
 
-- **`/find_functions`** replaces four listing/search tools (`list_functions`,
-  `search_functions`, `search_functions_by_name`, `search_functions_by_tag`). Tag
-  filters and name patterns share one surface; results include each function's
-  `tags` when present.
-- **`/list_program_items`** with `kind=` replaces eight list-* endpoints (methods,
-  data, segments, memory blocks, imports, exports, namespaces, strings).
+- **`/find_functions`** replaces five listing/search tools (`list_functions`,
+  `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`,
+  `search_functions_by_tag`). Tag filters and name patterns share one surface;
+  results include each function's `tags` when present.
+- **`/list_program_items`** with `kind=` replaces eight list-* endpoints (classes,
+  methods, namespaces, imports, exports, segments, data items, external
+  locations).
 - **`/get_xrefs_to`** accepts `addresses=` (comma-separated) for the old bulk xref
   scan; `get_bulk_xrefs` is gone.
 - **Function tags** are a field on `/get_functions` (`fields=tags`) and a filter on
   `/find_functions` (`tag=`); `get_function_tags`, `search_functions_by_tag`, and
   `create_function_tag` as a standalone attach path are removed (definitions still
   via `list_function_tags` / `add_function_tag`).
-- **Seventeen tools** folded into siblings (struct/type helpers, `find_data_types`,
+- **Fifteen tools** folded into siblings (struct/type helpers, `find_data_types`,
   comment/hash bulk modes, debugger step kinds, program options/properties) — see
   `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` "Folds after the
   consolidation".
-- **`/mcp/health`** (GUI) and **`/health`** (headless) now carry the nested
-  `version` block and `endpoint_count` formerly on `/get_version`. `/check_connection`
-  stays a separate liveness route on both servers.
+- **`/get_version` is gone.** `/check_connection` returns
+  `{status, server_kind, version}` on both servers, and `/mcp/health` carries the
+  nested `version` block plus pool and memory detail. (This pass first moved the
+  version onto `/mcp/health` and headless `/health`; the server-model change
+  above then retired `/health` and gave both servers the same identity routes.)
 - **`/get_ui_cursor`** (`type=address|function|selection|program|all`) replaces the
   four `get_current_*` tools; headless reports unavailable facets with reasons instead
   of faking a GUI cursor.
@@ -386,7 +398,7 @@ cursor tool.
 | `get_bulk_xrefs` | `get_xrefs_to(addresses=…)` |
 | `get_function_tags` | `get_functions(fields=tags)` |
 | `create_function_tag` | `add_function_tag` (attaching creates the tag; `tag_comments` describes a new one) |
-| `get_version` | `version` in `/mcp/health` (GUI) or `/health` (headless) |
+| `get_version` | `check_connection` (read `.version`) |
 | `get_current_address`, `get_current_function`, `get_current_selection`, `get_current_program_info` | `get_ui_cursor(type=…)` |
 | `batch_get_comments` | `get_comment(addresses=…)` |
 | `create_array_type`, `create_pointer_type`, `create_typedef` | `create_derived_type(kind=…)` |
@@ -397,11 +409,12 @@ cursor tool.
 | `list_property_maps` | `list_properties` |
 | `debugger/step_into`, `debugger/step_over`, `debugger/step_out` | `debugger/step(kind=…)` |
 
-`apply_documentation` (replacing `apply_function_documentation` and
-`batch_apply_documentation`) is **not** in this PR — it depends on the server-model
-refactor (`DocumentationBatchService` shared wiring) landing separately.
+`apply_function_documentation` and `batch_apply_documentation` stay separate tools
+in 7.0.0. Merging them into one `apply_documentation` was deferred; the shared
+`DocumentationBatchService` wiring it waited on has since landed (see the
+shared-services entry above).
 
-### Fixed — writes that lost work or reported success for what did not happen
+### Fixed — writes that lost work or reported success for what did not happen ([#569](https://github.com/bethington/ghidra-mcp/pull/569))
 
 - **A nested write no longer rolls back the enclosing transaction.** Ghidra nests by
   counting entries on one transaction, so an inner `commit=false` aborted everything the
@@ -440,6 +453,43 @@ refactor (`DocumentationBatchService` shared wiring) landing separately.
 - **`rename_symbol` takes `strict_mode`** (`enforce`/`warn`/`off`) per call, like
   `rename_function`, so a deliberate name outside the convention (a datasheet register
   name) can be applied; a refusal names the override.
+
+### Changed — the bridge follows the MCP protocol where it used to approximate it ([#553](https://github.com/bethington/ghidra-mcp/pull/553))
+
+Measured against the spec and against what real clients do with each field.
+
+- **Failures set `isError`.** Every failure — `{"error": ...}`, a naming refusal
+  (`{"status": "rejected", ...}`), a failed load (`{"success": false, ...}`), a
+  transport error — used to come back as an ordinary result, so a client
+  branching on `isError` saw every call succeed. Detection stops at the top level:
+  a per-entry error inside a bulk result is still a successful call. A refusal
+  quotes the server's message and suggestion, not just its code.
+- **Every tool declares `readOnlyHint` / `destructiveHint`.** `@McpTool` gained
+  `access = ToolAccess.READ_ONLY | WRITE | DESTRUCTIVE`; the scanner publishes it
+  in `/mcp/schema` and the bridge maps it onto the tool annotations, as do the
+  static, debugger and oracle tools. Declared per tool, never inferred from the
+  HTTP method: `/switch_program`, `/save_program` and `/open_program` were GETs
+  that mutate. Without it, Claude Code prompted for every tool in plan mode and
+  would not run any of them concurrently.
+- **No false capabilities.** The blanket `outputSchema {"result": string}` is
+  gone, and `prompts` / `resources` are no longer advertised while empty.
+- **Progress while a call is in flight.** A call whose client sent a
+  `progressToken` gets a notification every 5 seconds, sent with the request id
+  so a POST-only streamable-http client actually receives it.
+- **Transport fixes.** A bare `OPTIONS /mcp` is answered `204` with the real
+  `Allow` list (#399), and session-less requests no longer each leave a session
+  behind: 50 bare `OPTIONS` plus 50 session-less pings used to leave 100
+  permanent sessions; they now leave none.
+- **New, opt-in:** `GHIDRA_MCP_INBOUND_TOKEN` requires `Authorization: Bearer`
+  on the HTTP transports (a non-loopback bind without it warns);
+  `--json-response` and `--stateless-http` expose the SDK's two
+  streamable-http modes; `--tools-page-size N` pages `tools/list`.
+- Also: `run_script_inline` no longer poisons its script directory with a
+  failed caller-named class that Ghidra replayed onto every later script's
+  output, and refuses to overwrite a hand-written script of the same name; an
+  offline test fails when an annotated service is missing from the test
+  `ServiceFactory`, so a service can no longer sit outside the parity checks
+  unnoticed.
 
 ### Added
 
@@ -493,7 +543,8 @@ mocked `Program.startTransaction` that throws if called outside
 ### Added — two endpoints, after the consolidation pass
 
 Both landed in the 7.0.0 cycle after the 272 → 251 consolidation, which is why
-the shipped catalog is 253 rather than 251.
+rc.1 shipped 253 rather than 251. `/batch_get_comments` was folded into
+`get_comment(addresses=…)` after rc.1; `/list_shadowed_globals` remains.
 
 - **`/list_shadowed_globals`** (GET, `listing`) — named global DATA symbols
   that have no type of their own because a larger unit starting earlier covers
@@ -531,7 +582,8 @@ Dockerfile nothing builds is a file, not a deployment.
   disagreed with `tests/endpoints.json` and with each other — 272, 267, 251,
   243, 225/175/183/196. All now derive from the catalog, and each says *which*
   count it is (`extension.properties` and `@PluginInfo` describe the GUI
-  extension, so they say 239, not 253). `tests/unit/test_published_counts.py`
+  extension, so they carry the GUI plugin's count — 239 then, 205 now — not the
+  catalog's). `tests/unit/test_published_counts.py`
   pins every one of them with no fallback: an unmatched marker fails rather
   than passing quietly. It also caught a **control character shipping since
   v5.17.0** — a bulk count bump had rewritten `Provides 256 MCP tools for` as
@@ -550,7 +602,10 @@ Dockerfile nothing builds is a file, not a deployment.
   `tests/unit/test_migration_guide_successors.py` reads
   `MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` and checks all 23 removals against
   the shipped catalog. 7.0.0 has no aliases, so that guide is the only
-  migration path there is.
+  migration path there is. `tests/unit/test_migration_guide_coverage.py` later
+  extended this to every tool removed since 6.0.0, against a frozen 6.0.0
+  catalog fixture, because the post-rc.1 passes had removed dozens of tools
+  the guide did not name.
 - **Dependency and action bumps** carried by Dependabot: `gradle-wrapper`
   9.6.1 → 9.7.1, `actions/setup-java` 5.6.0 → 6.0.0, `astral-sh/setup-uv`
   9.0.0 → 10.0.1, `github/codeql-action`, `DavidAnson/markdownlint-

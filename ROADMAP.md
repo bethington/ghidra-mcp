@@ -10,8 +10,7 @@ slips, and this project has one maintainer. What it does carry is a status per
 theme, and a section for work that is explicitly **not planned**, which is the
 part that lets someone stop waiting.
 
-_Last updated: 2026-09-18, against `dev` during the 7.0.0 release
-preparation. For the tool inventory see
+_Last updated: 2026-10-07, against `dev` while preparing 7.0.0-rc.2. For the tool inventory see
 [`tests/endpoints.json`](tests/endpoints.json); for architecture see
 [`CLAUDE.md`](CLAUDE.md); for how to build and test see
 [`CONTRIBUTING.md`](CONTRIBUTING.md)._
@@ -43,7 +42,13 @@ should be spending on the binary.
 tools it has not loaded; `check_tools`; a `--lazy` / `--no-lazy` startup flag and
 `--default-groups`; and the 7.0.0 consolidation pass, which folded 272 tools
 down to 251 by merging redundant ones into "one-or-many" survivors, without
-removing any capability. The catalog stands at 209 today. See `CHANGELOG.md` and
+removing any capability. A second pass after 7.0.0-rc.1 took the 253 that rc.1
+shipped to 209: one function reader (`get_functions`), one function search
+(`find_functions`), one program-inventory tool (`list_program_items`), one GUI
+cursor tool (`get_ui_cursor`), one health answer (`check_connection`), and one
+name per program operation on both servers, plus `set_memory_block`, and one documentation writer (`apply_documentation`). The
+catalog stands at 209 today. See
+`CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.
 
@@ -53,12 +58,11 @@ reading the docs. The core groups loaded on connect are `listing`, `function`
 and `program` — 67 endpoints plus the 8 static bridge tools. `--no-lazy`
 restores eager registration for clients that ignore `tools/list_changed`.
 
-Issue #440 is still open: the fix is on `dev` and has not shipped in a tagged
-release yet.
+Issue #440 is still open: the fix shipped in the 7.0.0-rc.1 pre-release and
+has not reached a stable release yet.
 
-**Next.** Auditing for tools that overlap enough to merge now that
-`search_tools` makes discovery cheap. This is a judgement pass, not a mechanical
-one, and it moves in the 8.0.0 breaking window rather than piecemeal.
+**Next.** The post-rc.1 pass was that audit. Further merges wait for the 8.0.0
+breaking window rather than landing piecemeal.
 
 ### 2. Transport correctness for non-Anthropic clients
 
@@ -83,13 +87,19 @@ client's `PATH` does not include `~/.local/bin` and the failure surfaced only as
 `spawn ENOENT` (#441, PR #456). `preflight` now resolves and prints the absolute
 launcher path to put in a client config.
 
-Issues #399 and #441 are still open; both fixes are on `dev` and unreleased.
+Issues #399 and #441 are still open; both fixes shipped in 7.0.0-rc.1 and
+neither has reached a stable release.
 
-**In flight.** Community PR #438 on unauthenticated non-loopback binding
-overlaps this area and has to be reconciled with the above. It matters more now
-that the bridge ships as a container: a published port cannot reach a loopback
-bind, so the containerised bridge binds `0.0.0.0` while holding a credential for
-Ghidra, and an unauthenticated bridge in that position is a confused deputy.
+Also done, after rc.1 (#553): a bare `OPTIONS /mcp` is answered rather than
+refused, session-less probes no longer leave sessions behind, failures carry
+`isError`, every tool declares `readOnlyHint` / `destructiveHint`, and
+`--json-response`, `--stateless-http` and `--tools-page-size` expose the
+transport options some clients need. Community PR #438 (unauthenticated
+non-loopback binding) merged before rc.1, and #553 added an opt-in inbound
+bearer token, `GHIDRA_MCP_INBOUND_TOKEN`, with a warning on a non-loopback bind
+without one. That matters for the container: a published port cannot reach a
+loopback bind, so the containerised bridge binds `0.0.0.0` while holding a
+credential for Ghidra.
 
 **Not started.** A written support matrix stating which clients are tested
 against and which are best-effort. Right now that distinction exists only in the
@@ -112,10 +122,10 @@ wired up or removed — a switch the schema offers and the handler never reads i
 worse than no switch. `@Param` aliases are published in `/mcp/schema`, so a
 valid spelling is no longer one the schema declines to mention.
 
-**In flight.** Community PR #425, propagating `@Param` descriptions into the MCP
-`inputSchema`.
+Community PR #425 propagates `@Param` descriptions into the MCP `inputSchema`
+(merged before rc.1).
 
-**Next.** Nothing queued beyond that PR. Report a parameter whose description is
+**Next.** Nothing queued. Report a parameter whose description is
 wrong or missing and it gets fixed; there is no larger schema project waiting
 behind it.
 
@@ -127,8 +137,8 @@ contributor who does not keep a Ghidra project full of binaries. The visible
 cost: two separate contributors reported the test suite as broken when it was
 not — they had run a live tier without a server.
 
-**Done.** The Python unit tier (1,048 tests, no Ghidra), the offline Java tier
-(549 tests across 56 classes, needs a Ghidra install but no server), the Pester
+**Done.** The Python unit tier (1,218 tests, no Ghidra), the offline Java tier
+(726 tests across 78 classes, needs a Ghidra install but no server), the Pester
 tier, a Windows CI leg so both sides of every platform branch execute, and an
 MCP-protocol conformance suite that drives a real MCP client instead of raw
 HTTP.
@@ -138,10 +148,11 @@ HTTP.
 `tests/endpoints.json`, validates parameters against the recorded `/mcp/schema`,
 and replays conformance snapshots, so the real bridge runs end to end over a
 real socket with **no Ghidra installed**. The read-only integration file runs
-against it (61 pass, 11 documented gaps). Its limits are written down in
+against it (55 pass, 16 skip, 12 of them documented gaps). Its limits are written down in
 `tests/offline/README.md` and matter: it proves the bridge speaks the protocol
 and that shapes match the recordings, and it proves nothing about what Ghidra
-does today. The issue is still open pending a tagged release.
+does today. The issue is still open pending a stable release (it shipped in
+7.0.0-rc.1).
 
 That tier immediately earned itself. An AST check of every integration HTTP
 call against the catalog and schema found **ten** wrong parameter names in the
@@ -156,8 +167,8 @@ missing log4j class, and with it unset every test self-skipped — and
 sat in a package CI's Surefire glob could not select, so they were compiled,
 committed and never run. Both routes are now asserted rather than commented.
 
-**In flight.** Nothing structural. Recent work has been paying off coverage debt
-(PR #453) rather than extending the offline surface.
+**In flight.** Nothing structural. Coverage debt was paid off rather than the
+floor lowered (PR #453, merged; the floor is now 70%).
 
 ### 5. Docker and headless deployment
 
@@ -178,8 +189,9 @@ holding different projects. **Not yet verified against a live engine** — the
 invariants are pinned by tests that need no daemon, but a first
 `docker compose up` is still owed.
 
-**In flight.** The image fails to build when GID 1000 is already taken (#416,
-community PR #449 addresses the fixed container UIDs). `ensure-prereqs`
+**In flight.** The image failing to build when GID 1000 is already taken (#416):
+community PR #449, which stops fixing the container UIDs, merged before rc.1, and
+the issue stays open until a stable release carries it. `ensure-prereqs`
 uninstalling a pip that protobuf requires (#434).
 
 **Next.** No further container work is planned beyond fixing what is reported.
@@ -253,9 +265,11 @@ ignored — it has been decided.
 - **Backward-compatibility aliases for the 7.0.0 tool consolidation.** 7.0.0 is
   the breaking boundary and is a clean break by design. The old-to-new mapping
   is in `CHANGELOG.md` and in
-  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`, and
-  `tests/unit/test_migration_guide_successors.py` fails if any of the 23
-  removals loses its successor. The aliases are not coming back.
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`;
+  `tests/unit/test_migration_guide_coverage.py` fails if a tool removed since
+  6.0.0 is missing from the guide, and
+  `tests/unit/test_migration_guide_successors.py` if a named successor is not in
+  the catalog. The aliases are not coming back.
 - **Prose responses from any endpoint.** Everything returns JSON as of 7.0.0.
   Tooling that parsed stdout as English needs to read the envelope.
 - **Supporting multiple Ghidra versions at once.** The project targets one

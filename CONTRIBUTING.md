@@ -50,11 +50,12 @@ plugin and it is reasonable to assume nothing can be run without it.
 | Python unit (`tests/unit/`) | No | No | Yes — gating |
 | Offline Java (`com.xebyte.offline.*`, `com.xebyte.core.*`) | Yes, for the jars to compile against | No | Yes — gating |
 | Pester (`tests/pester/`) | No | No | Yes — gating |
+| Offline HTTP tier (`tests/offline/`, plus the read-only integration file replayed against its fake) | No | No | Yes — gating |
 | Java integration (`GhidraMCPPluginTest`, `EndpointRegistrationTest`, `AppTest`) | Yes | Yes | No |
 | Python integration (`tests/integration/`) | Yes | Yes, with a program loaded | No |
 | Conformance (`tests/conformance/`) | Yes | Yes | No |
 
-Everything CI gates on is in the top three rows. **You can contribute a
+Everything CI gates on is in the top four rows. **You can contribute a
 reviewable, mergeable change without ever launching Ghidra**, as long as you
 stay out of the live tiers. If a change genuinely needs the live tiers, say so
 in the PR and the maintainer will run them — you are not expected to own a
@@ -223,26 +224,28 @@ Verified both ways:
 
 ## Test
 
-### Python unit tests — no Ghidra, ~17 seconds
+### Python unit tests — no Ghidra, about a minute
 
 ```text
 uv run pytest tests/unit/ --no-cov
 ```
 
-Verified: 568 tests, 560 passed, 8 skipped, 0 failures, about 17 seconds. The
-skips are platform forks (`AF_UNIX` is absent on Windows CPython, and the
-debugger proxy registration differs), not failures.
+Verified on Windows: 1,218 tests, 1,206 passed, 12 skipped, 0 failures, a
+little over a minute. The skips are platform forks (`AF_UNIX` is absent on
+Windows CPython, and the debugger proxy registration differs), not failures.
 
-Add `--frozen` (`uv run --frozen pytest ...`) if you want `uv.lock` left alone —
-see the gotcha below, it currently gets rewritten by any plain `uv run`.
+Add `--frozen` (`uv run --frozen pytest ...`) if you want `uv.lock` left alone
+whatever happens to the dependency declarations.
 
-Drop `--no-cov` to run the same coverage gate CI runs:
+Drop `--no-cov` and pass CI's floor to run the same coverage gate CI runs
+(`pyproject.toml` turns coverage on but sets no floor, so without the flag
+nothing fails on a low number):
 
 ```text
-uv run pytest tests/unit/
+uv run pytest tests/unit/ --cov-fail-under=70
 ```
 
-Verified: `Required test coverage of 55% reached. Total coverage: 57.33%`. The
+Verified: `Required test coverage of 70% reached. Total coverage: 74.86%`. The
 `--cov-fail-under` floor lives in `.github/workflows/tests.yml` and is a
 ratchet — it is raised as coverage improves and is never lowered to make a build
 pass.
@@ -257,8 +260,8 @@ pass.
 mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
-Verified: 444 tests via Maven (44 suites) and 445 via Gradle (45 suites), 0
-failures either way. The one-test difference is not a discrepancy: Maven's
+Verified under Gradle: 726 tests in 78 suites, 0 failures. Maven selects one
+suite and one test fewer, and that is not a discrepancy: Maven's
 `*Test` filter excludes the `RegenerateEndpointsJson` helper class, while
 Gradle's `com.xebyte.offline.*` matches it. It is inert unless you pass
 `-Dregenerate=true`, **which Gradle cannot do** — see the catalog-regeneration
@@ -324,12 +327,13 @@ benchmark binary in the active project — that is why they are opt-in.
 
 | Job | Gates the build? | What it does |
 | --- | --- | --- |
-| Java Build (Maven) | **Yes** | Downloads Ghidra 12.1.4, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate |
+| Java Build (Maven) | **Yes** | Downloads Ghidra 12.1.4, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate, then the real-Ghidra tier (and fails if it skipped) |
 | Python Tests (pytest) | **Yes** | `tests/unit/` on Python 3.10, 3.11, 3.12, 3.13 with the coverage floor |
 | Python Tests (pytest, Windows) | **Yes** | `tests/unit/` on Windows, no coverage floor — it exists so both sides of every `os.name == "nt"` branch execute |
+| Offline HTTP Tier (no Ghidra) | **Yes** | `tests/offline/` (the fake server + the real bridge, end to end), then `tests/integration/test_readonly_endpoints.py` replayed against the fake |
 | Pester | **Yes** | `tests/pester/Run-Tests.ps1 -CI` |
 | Documentation Quality | **Yes** | markdownlint over every tracked `.md`, using `.markdownlint-cli2.jsonc` |
-| Build Status | **Yes** | Aggregate of the five above — this is the check to watch |
+| Build Status | **Yes** | Aggregate of the six above — this is the check to watch |
 | Code Quality | No | flake8 and black, advisory: every step ends in `\|\| true` |
 | CodeQL | No | Separate workflow; static analysis for Java and Python, findings land in the Security tab |
 
@@ -392,6 +396,7 @@ second one in the other language. Run both:
 
 ```text
 mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
+python -m tools.audit_server_scope --write       # stamps `servers` on new entries
 python -m tools.gen_readme_api_reference --write
 ```
 
@@ -413,30 +418,21 @@ exits 1 on drift, which is what you want in a pre-push hook.
 The regeneration preserves hand-authored descriptions and hand-registered
 routes, so do not hand-edit the generated block in `README.md`.
 
-### A plain `uv run` rewrites `uv.lock` — do not commit that
+### Only commit a `uv.lock` change when dependencies are the point
 
-The committed `uv.lock` is currently ahead of `pyproject.toml` by 23 packages
-(`flask`, `bidict`, `blinker`, `claude-agent-sdk` and friends) left behind when
-a subsystem moved out of this repository. No dependency group declares them any
-more, so the first `uv run` you type re-resolves and prunes them, and `git
-status` shows `uv.lock` modified with a 653-line deletion you did not ask for.
+`uv.lock` is in step with `pyproject.toml` (`uv lock --check` passes), so a
+plain `uv run` leaves it alone. If a run does rewrite it, that is a dependency
+change you did not intend: `git checkout -- uv.lock` puts it back, and
+`uv run --frozen ...` keeps it from happening.
 
-Use `--frozen` for anything that should not touch the lock:
+### Name the target program on every call
 
-```text
-uv run --frozen pytest tests/unit/ --no-cov
-```
-
-Verified: 560 passed, 8 skipped, `uv.lock` unchanged. If you already dirtied it,
-`git checkout -- uv.lock` puts it back. Only commit a lockfile change when
-changing dependencies is the actual point of your PR.
-
-### `program` is a query parameter, not a body field
-
-`@Param(value = "program")` defaults to `ParamSource.QUERY`. A POST endpoint
-that receives `program` in the JSON body silently ignores it and operates on
-whichever program is focused in the UI. This has caused writes to land on the
-wrong binary.
+`program` may go in the query string or the JSON body: `@Param` defaults to
+`ParamSource.QUERY`, and the scanner falls back to the body when the query does
+not carry it. It used not to, and a body `program` was silently ignored, so
+writes landed in whichever program happened to be current. Without `program`
+at all, that is still what happens — pass it explicitly, as a full project path
+when two programs share a name.
 
 ### Plate comments need real newlines
 
@@ -446,18 +442,14 @@ Pass actual multi-line text.
 ### GUI work from an HTTP thread must hop to Swing
 
 Anything touching Ghidra's UI from a request handler needs
-`SwingUtilities.invokeAndWait()`.
+`SwingUtilities.invokeAndWait()`. Do not rely on `threadingStrategy.runOnUi`
+for this: both servers are wired with `DirectThreadingStrategy`, whose
+`runOnUi` runs on the calling thread.
 
 ### Ghidra transactions must be committed
 
 Database changes are lost otherwise, and a failed create can leave a transaction
 open. Save after a batch of creates.
-
-### Two tests read source files relative to the working directory
-
-*(Placeholder — a fix is in flight. This section will name the tests and the
-correct invocation once that lands. If you hit a test that fails only when you
-run pytest from outside the repository root, that is this, and it is known.)*
 
 ## Adding an MCP tool
 
@@ -468,7 +460,12 @@ bridge registers whatever the schema advertises.
 
 1. Add an `@McpTool` + `@Param` annotated method to the appropriate service
    class in `src/main/java/com/xebyte/core/`.
-2. Regenerate the catalog and the README section (see the gotcha above).
+2. Regenerate the catalog, stamp which servers serve the new tool
+   (`python -m tools.audit_server_scope --write`), and refresh the README
+   section (see the gotcha above). The service class you picked decides the
+   servers: the shared services are on both, `DebuggerService`,
+   `PromptPolicyService` and `GuiToolService` only on the GUI, and
+   `HeadlessManagementService` only headless.
 3. Route any naming or convention validation through `NamingConventions.java`
    rather than reimplementing it. This project deliberately enforces RE
    documentation conventions in the tool layer instead of in prompts; see
@@ -481,7 +478,8 @@ bridge registers whatever the schema advertises.
 Only add a static `@mcp.tool()` in `python/bridge_mcp_ghidra/static_tools.py`
 when the tool needs bridge-side logic that has no server-side equivalent —
 retries, multi-call orchestration, instance discovery. Those names must also be
-listed in `STATIC_TOOL_NAMES` in `config.py`.
+listed in `MANAGEMENT_TOOL_NAMES` in `config.py`, from which
+`STATIC_TOOL_NAMES` is built.
 
 ## Code style
 

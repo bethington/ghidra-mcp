@@ -11,18 +11,53 @@ For the release preparation runbook, see
 
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
-**Major release, breaking.** The consolidation pass took the advertised surface
-from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
-variable-type setters into `set_variable_type`, six `batch_*` tools into their
-one-or-many survivors, and the comment family into `set_comment` / `get_comment`
-with an explicit kind. Two endpoints were added later in the same cycle
-(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 209 tools**
-— 205 served by the GUI plugin, 190 by the headless server, 186 by both. No
-capability is removed — every operation the deleted tools performed is
-reachable through the survivor — and there are no backward-compatibility
-aliases. `tests/unit/test_migration_guide_successors.py` proves that: all 23
-removals are named in the migration guide and all 23 successors are in the
-shipped catalog.
+**Major release, breaking.** The first consolidation pass took the advertised
+surface from **272 to 251 tools**: five rename tools collapse into
+`rename_symbol`, four variable-type setters into `set_variable_type`, six
+`batch_*` tools into their one-or-many survivors, and the comment family into
+`set_comment` / `get_comment` with an explicit kind. Two endpoints were added in
+the same cycle (`/list_shadowed_globals`, `/batch_get_comments`), and rc.1
+shipped 253.
+
+After rc.1 a second pass removed 53 more tools and added 9, so
+**7.0.0 ships 209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186 by both:
+
+- **`get_functions`** reads one function, or up to 20, with `fields=` choosing
+  what comes back. It replaces `decompile_function` and eight other per-function
+  readers. Every function-scoped tool now takes `function=` (a name or an
+  address); `address`, `name`, `function_name` and `function_address` remain
+  aliases.
+- **`find_functions`** replaces `list_functions`, `list_functions_enhanced`,
+  `search_functions`, `search_functions_enhanced` and `search_functions_by_tag`.
+- **`list_program_items(kind=...)`** replaces the eight program inventories
+  (`list_classes`, `list_imports`, `list_exports`, `list_segments`, ...).
+- **`get_ui_cursor(type=...)`** replaces the four `get_current_*` tools.
+- **`check_connection`** returns `{status, server_kind, version}` on both
+  servers and replaces `get_version` and headless `/health`.
+- **One program model and one name per operation on both servers:**
+  `import_file` replaces headless `load_program`, `open_program` replaces
+  `load_program_from_project`, `get_project_info` replaces GUI `project/info`,
+  `checkin_program` replaces `server/version_control/checkin`. Either server
+  opens a program the first time any endpoint names it.
+- **`apply_documentation`** replaces `apply_function_documentation` and
+  `batch_apply_documentation`, and takes what `get_function_documentation`
+  exports (one function, or `entries=[...]` for many).
+- Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
+  `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
+  `create_derived_type`, `debugger/step(kind=)`.
+
+No capability is removed — every operation the deleted tools performed is
+reachable through a survivor — and there are no backward-compatibility aliases.
+`tests/unit/test_migration_guide_coverage.py` fails if any tool removed since
+6.0.0 is missing from the migration guide, and
+`tests/unit/test_migration_guide_successors.py` if a named successor is not in
+the shipped catalog.
+
+The same cycle fixed writes that lost work or reported success for what did
+not happen (#569): a nested write rolled back its caller's transaction,
+`dry_run` was offered where a rollback cannot undo the effect, headless closed
+modified programs without saving, and `import_program(overwrite=true)` deleted
+the new import.
 
 Every endpoint that answered in prose now answers **JSON**. List-shaped tools
 return a named plural key plus `count`/`total`; errors are `{"error": ...}`.
@@ -33,11 +68,17 @@ contract is in
 A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
+The bridge itself now follows the protocol more closely (#553): failures come
+back with `isError` set, every tool declares `readOnlyHint` / `destructiveHint`,
+long calls send progress notifications, a bare `OPTIONS` is answered and no
+longer leaks a session, and the HTTP transports gain an optional bearer token
+(`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
+`--tools-page-size`.
 
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (84 endpoints plus 8
+called. The bridge now loads `listing,function,program` (67 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 

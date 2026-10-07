@@ -15,12 +15,12 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 - `python/bridge_mcp_ghidra/` — Python MCP bridge package (`bridge-mcp-ghidra` console script / `python -m bridge_mcp_ghidra`)
 - `pyproject.toml` + `uv.lock` — uv project (ships the `ghidra-mcp-bridge` wheel; deps via PEP 735 groups)
 - `docs/` — Documentation and workflow prompts
-- `tests/` — Python unit tests and endpoint catalog
+- `tests/` — Python unit, offline and integration tests, and the endpoint catalog (`tests/endpoints.json`); Java tests are under `src/test/java/`
 - `CHANGELOG.md` — Version history
 
 ## Current Priorities
 
-1. Maintain headless server parity with GUI plugin endpoints
+1. Keep the GUI plugin and headless server on one service set (`CoreServices`) and one program model (`ProjectProgramProvider`); the catalog's `servers` field records the deliberate differences
 2. Keep `tests/endpoints.json` in sync with Java endpoint registrations
 3. Maintain CI/CD pipeline health
 4. Community PR reviews
@@ -40,7 +40,9 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 straight out of the installation, so there is no `install-file` step, and it is
 the only backend that works without Maven. **CI still builds and gates with
 Maven**, so Maven is a maintained peer, not a fallback — see `CLAUDE.md`'s
-"Build & Deploy" for the two commands that are Maven-only.
+"Build & Deploy" for the three things that are Maven-only: regenerating
+`tests/endpoints.json`, the JaCoCo coverage gate, and the `headless`/`docker`
+build profiles.
 
 In Git Bash use a **forward-slash** Ghidra path; a backslash path is mangled
 before Gradle sees it and produces ~100 misleading "package does not exist"

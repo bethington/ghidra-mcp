@@ -175,7 +175,8 @@ Search the consumer for each item.
 
 ## Readers, listings and the server model
 
-Three passes after rc.1 removed 41 more tools. Function reads became one call, listings
+Passes after rc.1 removed 51 tools. 13 are in the fold table above; this section covers
+the other 38. Function reads became one call, listings
 became one call per question, and the GUI and headless servers now share one program
 model and one name per operation. Every removed tool's data is still available.
 
