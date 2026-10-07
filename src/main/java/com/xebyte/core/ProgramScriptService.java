@@ -3233,14 +3233,8 @@ public class ProgramScriptService {
             return Response.err(ServiceUtils.getLastParseError());
         }
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Create memory block");
-                boolean txSuccess = false;
-                try {
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Create memory block", () -> {
                     // Overlay blocks land in a freshly created overlay address space,
                     // so overlapping the existing physical blocks is the point rather
                     // than an error. Only guard the non-overlay case.
@@ -3249,9 +3243,8 @@ public class ProgramScriptService {
                         for (MemoryBlock existing : program.getMemory().getBlocks()) {
                             if (existing.contains(addr) || existing.contains(end) ||
                                 (addr.compareTo(existing.getStart()) <= 0 && end.compareTo(existing.getEnd()) >= 0)) {
-                                errorMsg.set("Address range overlaps with existing block '" + existing.getName() +
+                                throw new Refusal("Address range overlaps with existing block '" + existing.getName() +
                                              "' (" + existing.getStart() + " - " + existing.getEnd() + ")");
-                                return;
                             }
                         }
                     }
@@ -3278,10 +3271,8 @@ public class ProgramScriptService {
                         block.setComment(comment);
                     }
 
-                    txSuccess = true;
-
                     String permissions = (read ? "r" : "-") + (write ? "w" : "-") + (execute ? "x" : "-");
-                    Map<String, Object> out = JsonHelper.mapOf(
+                    return JsonHelper.mapOf(
                         "success", true,
                         "name", name,
                         "start", block.getStart().toString(),
@@ -3297,25 +3288,11 @@ public class ProgramScriptService {
                         "fill_byte", plan.fillByte(),
                         "message", "Memory block '" + name + "' created at " + block.getStart()
                     );
-                    resultData.set(out);
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error creating memory block", e);
-                } finally {
-                    tx.end(txSuccess);
-                }
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(resultData);
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return Response.err(ServiceUtils.failureMessage(e));
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
@@ -3371,31 +3348,23 @@ public class ProgramScriptService {
             final String finalCategory = category;
             final String finalComment = comment;
 
-            WriteTx tx = WriteTx.begin(program, "Set bookmark at " + addressStr);
-            boolean txSuccess = false;
             try {
-                // Check if bookmark already exists at this address with this category
-                Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
-                if (existing != null) {
-                    // Remove existing to update
-                    bookmarkManager.removeBookmark(existing);
-                }
+                return threadingStrategy.executeWrite(program, "Set bookmark at " + addressStr, () -> {
+                    Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
+                    if (existing != null) {
+                        bookmarkManager.removeBookmark(existing);
+                    }
+                    bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
 
-                // Create new bookmark
-                bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
-                txSuccess = true;
-
-                Map<String, Object> bmResult = new LinkedHashMap<>();
-                bmResult.put("success", true);
-                bmResult.putAll(ServiceUtils.addressToJson(addr, program));
-                bmResult.put("category", finalCategory);
-                bmResult.put("comment", finalComment);
-                return Response.ok(bmResult);
-
+                    Map<String, Object> bmResult = new LinkedHashMap<>();
+                    bmResult.put("success", true);
+                    bmResult.putAll(ServiceUtils.addressToJson(addr, program));
+                    bmResult.put("category", finalCategory);
+                    bmResult.put("comment", finalComment);
+                    return Response.ok(bmResult);
+                });
             } catch (Exception e) {
-                throw e;
-            } finally {
-                tx.end(txSuccess);
+                return Response.err(ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
@@ -3512,30 +3481,26 @@ public class ProgramScriptService {
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
 
-            WriteTx tx = WriteTx.begin(program, "Delete bookmark at " + addressStr);
-            boolean txSuccess = false;
             try {
-                int deleted = 0;
-                Bookmark[] bms = bookmarkManager.getBookmarks(addr);
+                return threadingStrategy.executeWrite(program, "Delete bookmark at " + addressStr, () -> {
+                    int deleted = 0;
+                    Bookmark[] bms = bookmarkManager.getBookmarks(addr);
 
-                for (Bookmark bm : bms) {
-                    if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                        bookmarkManager.removeBookmark(bm);
-                        deleted++;
+                    for (Bookmark bm : bms) {
+                        if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
+                            bookmarkManager.removeBookmark(bm);
+                            deleted++;
+                        }
                     }
-                }
 
-                txSuccess = true;
-                Map<String, Object> delResult = new LinkedHashMap<>();
-                delResult.put("success", true);
-                delResult.put("deleted", deleted);
-                delResult.putAll(ServiceUtils.addressToJson(addr, program));
-                return Response.ok(delResult);
-
+                    Map<String, Object> delResult = new LinkedHashMap<>();
+                    delResult.put("success", true);
+                    delResult.put("deleted", deleted);
+                    delResult.putAll(ServiceUtils.addressToJson(addr, program));
+                    return Response.ok(delResult);
+                });
             } catch (Exception e) {
-                throw e;
-            } finally {
-                tx.end(txSuccess);
+                return Response.err(ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
@@ -3712,58 +3677,36 @@ public class ProgramScriptService {
             return Response.err("address parameter required");
         }
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Set image base");
-                boolean txSuccess = false;
-                try {
-                    Address oldBase = program.getImageBase();
-                    Address newBase = ServiceUtils.parseAddress(program, addressStr);
-                    if (newBase == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
-                    program.setImageBase(newBase, true);
-                    txSuccess = true;
-
-                    // Trigger re-analysis since all addresses shifted
-                    boolean reanalyzing = false;
-                    try {
-                        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-                        mgr.reAnalyzeAll(null);
-                        mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                        reanalyzing = true;
-                    } catch (Exception ae) {
-                        Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
-                    }
-
-                    resultData.set(JsonHelper.mapOf(
-                        "success", true,
-                        "old_base", oldBase.toString(),
-                        "new_base", newBase.toString(),
-                        "analyzing", reanalyzing,
-                        "message", "Image base changed from " + oldBase + " to " + newBase
-                    ));
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error setting image base", e);
-                } finally {
-                    tx.end(txSuccess);
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Set image base", () -> {
+                Address oldBase = program.getImageBase();
+                Address newBase = ServiceUtils.parseAddress(program, addressStr);
+                if (newBase == null) {
+                    throw new Refusal("Invalid address: " + addressStr);
                 }
+                program.setImageBase(newBase, true);
+
+                boolean reanalyzing = false;
+                try {
+                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                    mgr.reAnalyzeAll(null);
+                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                    reanalyzing = true;
+                } catch (Exception ae) {
+                    Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
+                }
+
+                return JsonHelper.mapOf(
+                    "success", true,
+                    "old_base", oldBase.toString(),
+                    "new_base", newBase.toString(),
+                    "analyzing", reanalyzing,
+                    "message", "Image base changed from " + oldBase + " to " + newBase
+                );
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(resultData);
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return Response.err(ServiceUtils.failureMessage(e));
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }
