@@ -8,8 +8,9 @@ survivor.
 
 > **Where it landed.** This table describes the consolidation pass only. Two
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
-> `/batch_get_comments` — and `/get_functions` then replaced nine function readers, so
-> the shipped catalog is **215**, not 251. The
+> `/batch_get_comments` — and three later passes removed more (see
+> [Readers, listings and the server model](#readers-listings-and-the-server-model)),
+> so the shipped catalog is **209**, not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.
@@ -171,6 +172,99 @@ Search the consumer for each item.
   `create_function_tag` are gone (`doc_lint`, `conformance_dashboard`, `fun_doc`,
   `battletest_promoter`, `adversarial_reproof` and `golden_bench` call them). Reads are
   `get_functions(fields="tags")` and `find_functions(tag=...)`; `list_function_tags` stays.
+
+## Readers, listings and the server model
+
+Three passes after rc.1 removed 41 more tools. Function reads became one call, listings
+became one call per question, and the GUI and headless servers now share one program
+model and one name per operation. Every removed tool's data is still available.
+
+### Function reads: `get_functions`
+
+`get_functions(function=...)` returns everything about one function, and
+`get_functions(functions="a,b,c")` returns up to 20. `fields=` picks what comes back;
+omit it for all fields. A selection that needs no decompiled text does not decompile.
+
+Every function-scoped tool now takes `function=` (a name or an address). The old
+spellings `address`, `name`, `function_name` and `function_address` still work as
+aliases. A name two functions share is an error that lists both.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `decompile_function(address)` | `get_functions` | `get_functions(function=..., fields="decompiled_code")` |
+| `get_function_by_address(address)` | `get_functions` | `get_functions(function=..., fields="signature,entry_point,body_start,body_end")` |
+| `get_function_signature(address)` | `get_functions` | `get_functions(function=..., fields="signature,return_type,parameters")` |
+| `get_function_variables(function_name)` | `get_functions` | `get_functions(function=..., fields="parameters,locals")` |
+| `get_function_callers(name)` | `get_functions` | `get_functions(function=..., fields="callers")` |
+| `get_function_callees(name)` | `get_functions` | `get_functions(function=..., fields="callees")` |
+| `get_function_xrefs(name)` | `get_functions` | `get_functions(function=..., fields="xrefs")` |
+| `get_function_labels(name)` | `get_functions` | `get_functions(function=..., fields="labels")` |
+| `get_function_jump_targets(name)` | `get_functions` | `get_functions(function=..., fields="jump_targets")` |
+| `get_function_tags(function)` | `get_functions` | `get_functions(function=..., fields="tags")` |
+
+The full field list is `signature`, `classification`, `return_type`, `entry_point`,
+`body_start`, `body_end`, `decompiled_code`, `plate_comment`, `comments`, `labels`,
+`tags`, `parameters`, `locals`, `callers`, `call_context`, `callees`, `xrefs`,
+`disassembly`, `jump_targets` and `refs`.
+
+### Finding functions: `find_functions`
+
+Every filter is optional, so with none it lists the whole program a page at a time.
+Every result lists its tags.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `list_functions()` | `find_functions` | `find_functions(offset, limit)` |
+| `list_functions_enhanced(offset, limit)` | `find_functions` | `find_functions(offset, limit)` |
+| `search_functions(name_pattern)` | `find_functions` | `find_functions(name_pattern=...)` |
+| `search_functions_enhanced(...)` | `find_functions` | same filters: `name_pattern`, `regex`, `min_xrefs`, `max_xrefs`, `calling_convention`, `has_custom_name`, `is_thunk`, `is_external`, `sort_by` |
+| `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)` |
+
+### Program inventories: `list_program_items`
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `list_classes()` | `list_program_items` | `list_program_items(kind="classes")` |
+| `list_methods()` | `list_program_items` | `list_program_items(kind="methods")` |
+| `list_namespaces()` | `list_program_items` | `list_program_items(kind="namespaces")` |
+| `list_imports()` | `list_program_items` | `list_program_items(kind="imports")` |
+| `list_exports()` | `list_program_items` | `list_program_items(kind="exports")` |
+| `list_segments()` | `list_program_items` | `list_program_items(kind="segments")` |
+| `list_data_items()` | `list_program_items` | `list_program_items(kind="data_items")` |
+| `list_external_locations()` | `list_program_items` | `list_program_items(kind="external_locations")` |
+
+### Cross-references and tags
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `get_bulk_xrefs(addresses)` | `get_xrefs_to` | `get_xrefs_to(addresses="a,b,c")` |
+| `create_function_tag(name, comment)` | `add_function_tag` | attaching a tag creates it; set its description with `set_function_tag_comment(name, comment)` |
+
+### What the analyst is looking at: `get_ui_cursor`
+
+GUI only, as before.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `get_current_address()` | `get_ui_cursor` | `get_ui_cursor(type="address")` |
+| `get_current_function()` | `get_ui_cursor` | `get_ui_cursor(type="function")` |
+| `get_current_selection()` | `get_ui_cursor` | `get_ui_cursor(type="selection")` |
+| `get_current_program_info()` | `get_ui_cursor` | `get_ui_cursor(type="program")` |
+
+### One program model, one name per operation
+
+Both servers now open any program in the project the first time an endpoint names it, so
+headless no longer needs a separate load step.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `load_program(file, language, compiler_spec)` (headless) | `import_file` | `import_file(file_path=..., language, compiler_spec)` |
+| `load_program_from_project(path)` (headless) | `open_program` | `open_program(path=...)`, or just pass `program=<path>` to any endpoint |
+| `project/info` (GUI) | `get_project_info` | `get_project_info()` on both servers |
+| `server/version_control/checkin` | `checkin_program` | `checkin_program(path, comment, keep_checked_out)` |
+| `tool/launch_codebrowser` | `open_program` | `open_program(path=...)` opens the program; CodeBrowser follows the project's open options |
+| `health` (headless) | `check_connection` | returns `{status, server_kind, version}`; pool and memory stats are on `mcp/health` |
+| `get_version()` | `check_connection` | `check_connection()`, then read `.version` |
 
 ## Call-shape changes worth knowing
 
