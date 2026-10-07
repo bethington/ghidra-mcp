@@ -140,8 +140,7 @@ RELEASE_CONTRACT_TOOLS = SMOKE_REQUIRED_TOOLS | {
     "delete_file",
     "import_file",
     "list_project_files",
-    "list_functions",
-    "search_functions",
+    "find_functions",
     "get_address_spaces",
     "list_program_items",
     "list_strings",
@@ -1209,11 +1208,11 @@ def _list_benchmark_functions(repo_root: Path, mcp_url: str) -> list[tuple[str, 
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/list_functions",
-        params={"program": DEFAULT_BENCHMARK_PROGRAM},
+        "/find_functions",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 10000},
         timeout=60,
     )
-    _ensure_mcp_ok("/list_functions", payload)
+    _ensure_mcp_ok("/find_functions", payload)
     functions: list[tuple[str, str]] = []
     if isinstance(payload, dict):
         raw_functions = payload.get("functions") or payload.get("results") or []
@@ -1324,7 +1323,7 @@ def _find_benchmark_function(repo_root: Path, mcp_url: str, *, require_variable:
     _status, payload = _mcp_request(
         repo_root,
         mcp_url,
-        "/search_functions",
+        "/find_functions",
         params={
             "program": DEFAULT_BENCHMARK_PROGRAM,
             "name_pattern": DEFAULT_BENCHMARK_FUNCTION,
@@ -1334,7 +1333,7 @@ def _find_benchmark_function(repo_root: Path, mcp_url: str, *, require_variable:
     )
     functions = []
     if isinstance(payload, dict):
-        _ensure_mcp_ok("/search_functions", payload)
+        _ensure_mcp_ok("/find_functions", payload)
         functions = payload.get("results") or payload.get("functions") or []
     for function in functions:
         if isinstance(function, dict) and DEFAULT_BENCHMARK_FUNCTION in str(function.get("name") or ""):
@@ -1419,9 +1418,9 @@ def run_benchmark_extended_read_test(repo_root: Path, mcp_url: str) -> None:
     read_calls = [
         ("/list_project_files", {"folder": DEFAULT_BENCHMARK_FOLDER}),
         ("/analysis_status", {"program": DEFAULT_BENCHMARK_PROGRAM}),
-        ("/list_functions", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/find_functions", {"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 100}),
         (
-            "/search_functions",
+            "/find_functions",
             {"program": DEFAULT_BENCHMARK_PROGRAM, "name_pattern": "FUN_", "limit": 10},
         ),
         ("/get_address_spaces", {"program": DEFAULT_BENCHMARK_PROGRAM}),
