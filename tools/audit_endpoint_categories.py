@@ -59,7 +59,7 @@ SCANNED_SERVICES = (
     "VersionControlService",
     "ServerLifecycleService",
     "GuiToolService",
-    "DocumentationBatchService",
+    "DocumentationApplyService",
     "ProjectLifecycleService",
 )
 

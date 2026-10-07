@@ -1,5 +1,5 @@
 {
-  "count": 206,
+  "count": 205,
   "tools": [
     {
       "category": "function",
@@ -719,29 +719,156 @@
       "read_only": false
     },
     {
-      "category": "documentation",
-      "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "category": "analysis",
+      "description": "Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...]). Per function, every step is optional and independent and the response reports each one: rename, signature, variable types and renames, comments, labels, then a completeness score. It accepts what get_function_documentation exports (with target_address), so documentation copied between versions applies as it is. The signature is applied before the comments on purpose, because setting a prototype wipes the plate comment.",
       "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "The whole payload as one JSON STRING, in the shape get_function_documentation emits. Required key: target_address. Optional top-level keys: function_name, return_type, calling_convention, plate_comment, plus the arrays parameters and comments. It is read with a flat string extractor, so those keys must sit at the TOP level — a nested object wrapping them is not looked into. An empty plate_comment is skipped rather than clearing, and a name, convention or return type that fails to apply is only logged: changes_applied reports what actually landed.",
-          "name": "json_body",
-          "required": true,
+          "aliases": [
+            "target_address"
+          ],
+          "default": "",
+          "description": "Function entry address, as 0x<hex> or <space>:<hex> (single mode). Every step is applied to the function at this address. Omit when using entries[].",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "[]",
+          "description": "Bulk mode: array of objects, each taking the same fields as the top level (address, name, prototype, ...). When non-empty, the top-level fields are ignored and the response lists one result per entry. One entry failing does not stop the rest.",
+          "name": "entries",
+          "required": false,
+          "source": "body",
+          "type": "array"
+        },
+        {
+          "default": "false",
+          "description": "True navigates the CodeBrowser to the function before anything else. Needs a window, so it fails on a headless server.",
+          "name": "goto",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "aliases": [
+            "function_name"
+          ],
+          "default": "",
+          "description": "New function name. Omit or leave empty to skip the rename step.",
+          "name": "name",
+          "required": false,
           "source": "body",
           "type": "string"
         },
         {
           "default": "",
-          "description": "Target program name",
+          "description": "Full C signature. Exclusive with return_type. Applied BEFORE the comment step on purpose.",
+          "name": "prototype",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Calling convention, e.g. __stdcall. Goes with the prototype when there is one, and is applied on its own otherwise.",
+          "name": "calling_convention",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Return type name, for when there is no prototype. A type that does not resolve is reported, not skipped; undefined* is skipped, as in an export.",
+          "name": "return_type",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "aliases": [
+            "parameters"
+          ],
+          "default": "[]",
+          "description": "Array of {ordinal, name, type} as get_function_documentation exports them. A generic name (param_N) and an undefined type are skipped, so an export applies back without reverting anything. Reported under variable_renames and variable_types.",
+          "name": "params",
+          "required": false,
+          "source": "body",
+          "type": "array"
+        },
+        {
+          "description": "Object mapping a variable's CURRENT name to its new type. Each is applied on its own; the step reports set/failed counts plus per-variable errors.",
+          "name": "variable_types",
+          "required": true,
+          "source": "body",
+          "type": "object"
+        },
+        {
+          "description": "Object mapping each variable's CURRENT name to its new name.",
+          "name": "variable_renames",
+          "required": true,
+          "source": "body",
+          "type": "object"
+        },
+        {
+          "default": "",
+          "description": "Plate comment for the function. Pass real multi-line text: an escaped newline sequence is stored as those two literal characters, not as a line break. Empty is skipped; clear one with set_comment.",
+          "name": "plate_comment",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "[]",
+          "description": "Array of {address | relative_offset, pre_comment, eol_comment}: PRE (the decompiler's line above) and EOL (the listing's trailing) comments. relative_offset counts from the function entry, as the export writes it. An empty string clears that comment.",
+          "name": "comments",
+          "required": false,
+          "source": "body",
+          "type": "array"
+        },
+        {
+          "default": "[]",
+          "description": "Array of {address | relative_offset, name}. A label already there with that name is left alone.",
+          "name": "labels",
+          "required": false,
+          "source": "body",
+          "type": "array"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated function tags to attach (in an entry, a string or an array of names). A tag that does not exist is created. Tags are only added here; remove one with remove_function_tag.",
+          "name": "tags",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "Object mapping a tag name to its description, used for a tag this call creates; an existing tag keeps its description.",
+          "name": "tag_comments",
+          "required": true,
+          "source": "body",
+          "type": "object"
+        },
+        {
+          "default": "",
+          "description": "True appends a compact completeness score to each function. Default: true for one function, false for entries[], where it costs a decompile each.",
+          "name": "score",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program name or project path. Every step runs against it. Omit to use the active program; always specify it on a headless server or when several programs are open.",
           "name": "program",
           "required": false,
           "source": "query",
           "type": "string"
         }
       ],
-      "path": "/apply_function_documentation",
+      "path": "/apply_documentation",
       "read_only": false
     },
     {
@@ -929,110 +1056,6 @@
       ],
       "path": "/audit_globals_in_function",
       "read_only": true
-    },
-    {
-      "category": "analysis",
-      "description": "Apply all documentation to a function in one call: rename, prototype, variable types, variable renames and comments, then a compact completeness score. Every step is optional and independent, and the response reports each one. The prototype is applied before the comments on purpose, because setting a prototype wipes the plate comment.",
-      "destructive": false,
-      "method": "POST",
-      "params": [
-        {
-          "description": "Function entry address, as 0x<hex> or <space>:<hex>. Required: every step is applied to the function at this address.",
-          "name": "address",
-          "param_type": "address",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "false",
-          "description": "True navigates the CodeBrowser to address before anything else. Needs a window, so it fails on a headless server.",
-          "name": "goto",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        },
-        {
-          "default": "",
-          "description": "New function name. Omit or leave empty to skip the rename step.",
-          "name": "name",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Full C signature. Applied BEFORE the comment step on purpose.",
-          "name": "prototype",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Convention for the prototype step, e.g. __stdcall. Read only when prototype is also given.",
-          "name": "calling_convention",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "Object mapping variable name to new type. Each is applied on its own; the step reports set/failed counts plus per-variable errors.",
-          "name": "variable_types",
-          "required": true,
-          "source": "body",
-          "type": "object"
-        },
-        {
-          "description": "Object mapping each variable's CURRENT name to its new name.",
-          "name": "variable_renames",
-          "required": true,
-          "source": "body",
-          "type": "object"
-        },
-        {
-          "default": "",
-          "description": "Plate comment for the function. Pass real multi-line text: an escaped newline sequence is stored as those two literal characters, not as a line break.",
-          "name": "plate_comment",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "[]",
-          "description": "Array of {address, comment} objects setting PRE comments. Each entry carries its own address; the top-level address is the function entry only.",
-          "name": "decompiler_comments",
-          "required": false,
-          "source": "body",
-          "type": "array"
-        },
-        {
-          "default": "[]",
-          "description": "Array of {address, comment} objects setting EOL comments. Each entry carries its own address.",
-          "name": "disassembly_comments",
-          "required": false,
-          "source": "body",
-          "type": "array"
-        },
-        {
-          "default": "true",
-          "description": "True (the default) appends a compact completeness score.",
-          "name": "score",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        },
-        {
-          "default": "",
-          "description": "Target program name or project path. Every step runs against it. Omit to use the active program; always specify it on a headless server or when several programs are open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/batch_apply_documentation",
-      "read_only": false
     },
     {
       "category": "function",
