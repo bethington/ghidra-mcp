@@ -80,17 +80,15 @@ AUTH_TOKEN = (os.getenv("GHIDRA_MCP_AUTH_TOKEN") or "").strip()
 # having to set GHIDRA_MCP_URL per instance. See issue #175 + Copilot review.
 TCP_PORT_SCAN_RANGE = 16
 
-# Debugger proxy target (the debugger server, which lives in the d2-game-exe
-# repo since 2026-08-11). Empty/default points at the
-# standalone debugger server's default port.
-DEBUGGER_URL = os.getenv("GHIDRA_DEBUGGER_URL", "http://127.0.0.1:8099")
-
-# D2Debugger in-process oracle (D2MOO's D2Debugger.dll, compiled into the running
-# Game.exe and serving 127.0.0.1:8790). Unlike DEBUGGER_URL this is not a debugger
-# at all -- it is an HTTP surface *inside* the live game, so it answers while the
-# game runs and needs no elevation on the client side (loopback TCP is not gated
-# by integrity level). Env name matches the one fun-doc/D2MOO tooling already uses.
-ORACLE_URL = os.getenv("D2DBG_MCP_URL", "http://127.0.0.1:8790")
+# Debugger proxy target: an external dbgeng (WinDbg engine) debugger server,
+# not part of this repo. DEBUGGER_URL_EXPLICIT records whether the operator
+# actually set GHIDRA_DEBUGGER_URL: the 22 debugger proxy tools are off by
+# default and only register when it is set (or GHIDRA_DEBUGGER_TOOLS is truthy).
+# The fallback URL below is a default port, not evidence that a server exists.
+# A blank value counts as unset.
+_DEBUGGER_URL_ENV = (os.getenv("GHIDRA_DEBUGGER_URL") or "").strip()
+DEBUGGER_URL_EXPLICIT = bool(_DEBUGGER_URL_ENV)
+DEBUGGER_URL = _DEBUGGER_URL_ENV or "http://127.0.0.1:8099"
 
 # ==========================================================================
 # Logging
@@ -118,12 +116,14 @@ MANAGEMENT_TOOL_NAMES = {
     "import_file",
 }
 
-# WinDbg debugger proxy tools (Phase 1+2+3). The standalone debugger server
-# (in the d2-game-exe repo) wraps dbgeng via pybag and only runs on Windows, so these
-# are registered conditionally — see debugger._debugger_enabled(). The names stay
-# reserved in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming is
-# identical everywhere (a Ghidra /debugger/status endpoint -> debugger_status_2
-# regardless of whether our proxy is active on this host).
+# WinDbg debugger proxy tools. They forward to an external dbgeng debugger
+# server (not part of this repo) and are OFF BY DEFAULT: registered only when
+# GHIDRA_DEBUGGER_URL is set or GHIDRA_DEBUGGER_TOOLS is truthy; see
+# debugger._debugger_enabled(). The names are always listed in
+# _ALL_STATIC_TOOL_NAMES (validated at import, counted by the catalog tests);
+# collision detection uses the ACTIVE set (STATIC_TOOL_NAMES), so while the
+# proxies are off Ghidra's own TraceRmi /debugger/status keeps its clean name,
+# and it becomes debugger_status_2 only when the proxies are enabled.
 DEBUGGER_TOOL_NAMES = {
     "debugger_attach",
     "debugger_detach",
@@ -149,25 +149,13 @@ DEBUGGER_TOOL_NAMES = {
     "debugger_watch_log",
 }
 
-# D2Debugger in-process oracle proxy tools. Registered conditionally (see
-# oracle._oracle_enabled()) for the same reason as the debugger names: reserved
-# in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming stays
-# identical everywhere, but only registered where the oracle can actually exist.
-ORACLE_TOOL_NAMES = {
-    "oracle_status",
-    "oracle_modules",
-    "oracle_read_memory",
-    "oracle_call_function",
-    "oracle_prove_function",
-}
-
 # Full structural set: every tool name the bridge may define. Used for
-# name-collision detection / reservation so dynamic tool names are platform-stable.
-_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES | ORACLE_TOOL_NAMES
+# name validation and the catalog tests; collision detection uses STATIC_TOOL_NAMES.
+_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES
 
 # Active set: static tools actually registered with this process. Debugger names
-# are added by bridge_mcp_ghidra.debugger (once DEBUGGER_URL is known) only when
-# the debugger backend is usable on this host. Used for runtime availability
+# are added by bridge_mcp_ghidra.debugger only when the debugger proxy is
+# enabled (see debugger._debugger_enabled()). Used for runtime availability
 # reporting (check_tools etc.). Mutated in place (|=), never rebound, so modules
 # that imported this name earlier still see the update.
 STATIC_TOOL_NAMES = set(MANAGEMENT_TOOL_NAMES)

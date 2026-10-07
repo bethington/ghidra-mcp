@@ -965,7 +965,7 @@ class TestStaticToolsAreAllClassified(unittest.TestCase):
         for name in sorted(config.STATIC_TOOL_NAMES):
             tool = mcp._tool_manager._tools.get(name)
             if tool is None:
-                continue  # not registered on this platform (debugger proxies)
+                continue  # not registered in this process (debugger proxies are off by default)
             if tool.annotations is None or tool.annotations.readOnlyHint is None:
                 missing.append(name)
         self.assertEqual(missing, [])

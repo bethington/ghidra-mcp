@@ -231,7 +231,7 @@ uv run pytest tests/unit/ --no-cov
 
 Verified: 568 tests, 560 passed, 8 skipped, 0 failures, about 17 seconds. The
 skips are platform forks (`AF_UNIX` is absent on Windows CPython, and the
-debugger/oracle proxy gating differs), not failures.
+debugger proxy registration differs), not failures.
 
 Add `--frozen` (`uv run --frozen pytest ...`) if you want `uv.lock` left alone —
 see the gotcha below, it currently gets rewritten by any plain `uv run`.

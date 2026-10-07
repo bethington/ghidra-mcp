@@ -61,7 +61,7 @@ def live_tool_paths(http_session, server_url):
     function-scoped `http_client`: the schema is one fetch that every test here
     shares, and a module-scoped fixture cannot depend on a function-scoped one.
     The timeout is generous on purpose -- /mcp/schema is a large response and
-    this call can queue behind a busy fun-doc worker fleet.
+    this call can queue behind a busy client running long batch jobs.
     """
     response = http_session.get(f"{server_url}/mcp/schema", timeout=90)
     assert response.status_code == 200, (

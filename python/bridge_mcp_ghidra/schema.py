@@ -31,7 +31,7 @@ def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
         sanitized_name = sanitize_tool_name(raw_name)
 
         # Collision detection uses the ACTIVE static set: when the WinDbg debugger
-        # proxies are suppressed on this host, their names are free, so Ghidra's own
+        # proxies are off (the default), their names are free, so Ghidra's own
         # TraceRmi /debugger/* endpoints (System B) keep clean names instead of _2.
         #
         # Preserve the existing behavior for valid dynamic names that exactly

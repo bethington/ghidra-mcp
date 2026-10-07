@@ -31,7 +31,7 @@ _PROGRESS_INTERVAL_SECONDS = 5.0
 
 # Fail fast at import time if any static tool name is not CAPI-safe. Validates
 # every structurally-possible name (including debugger tools), not just the
-# ones active on this platform.
+# ones active in this process.
 for _static_tool_name in _ALL_STATIC_TOOL_NAMES:
     validate_tool_name(_static_tool_name)
 

@@ -102,13 +102,14 @@ _PARAM_KWARGS = ("params", "json", "data", "json_data")
 HTTP_RECEIVERS = frozenset({"http_client", "http_session", "requests"})
 NON_HTTP_RECEIVERS = frozenset({"by_path"})
 
-# For the `f"{base}/path"` form, which base variables address THIS server. The
-# tier also probes the fun-doc dashboard on a different port
-# (`requests.get(f"{DASHBOARD_URL}/api/worker/status")`), and checking that
-# against the Ghidra endpoint catalog would report a permanent, meaningless
-# `no_such_endpoint`.
+# For the `f"{base}/path"` form, which base variables address THIS server.
+# FOREIGN_URL_NAMES lists base variables that address some OTHER service: a
+# call through one of those is skipped, because checking it against the Ghidra
+# endpoint catalog would report a permanent, meaningless `no_such_endpoint`.
+# The tier currently calls no foreign service, so it is empty; an unknown base
+# still fails test_every_receiver_is_classified rather than being dropped.
 SERVER_URL_NAMES = frozenset({"server_url", "base_url"})
-FOREIGN_URL_NAMES = frozenset({"DASHBOARD_URL"})
+FOREIGN_URL_NAMES: frozenset[str] = frozenset()
 
 
 def _read_json(path: Path):
