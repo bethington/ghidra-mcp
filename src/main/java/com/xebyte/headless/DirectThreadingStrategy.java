@@ -67,7 +67,9 @@ public class DirectThreadingStrategy implements ThreadingStrategy {
                 success = true;
                 return result;
             } catch (Exception e) {
-                Msg.error(this, "Error during transaction '" + txName + "'", e);
+                if (!com.xebyte.core.Refusal.is(e)) {
+                    Msg.error(this, "Error during transaction '" + txName + "'", e);
+                }
                 throw e;
             } finally {
                 if (tx != null) {

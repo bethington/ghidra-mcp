@@ -782,6 +782,12 @@ public final class ServiceUtils {
         return lastParseError.get();
     }
 
+    /** A failure's message for a Response: the cause an ExecutionException wraps, else its class name when it has none. */
+    public static String failureMessage(Throwable e) {
+        Throwable t = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
+        return t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+    }
+
     /**
      * Parse an address string using the program's AddressFactory.
      * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00",

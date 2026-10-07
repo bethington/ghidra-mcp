@@ -896,9 +896,6 @@ public class DocumentationHashService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         Runnable mergeTask = () -> {
-            // Dry run writes nothing, so it needs no transaction at all.
-            WriteTx tx = dryRun ? null : WriteTx.begin(target, "Merge from " + source.getName());
-            boolean commit = false;
             try {
                 // ----- 1. Standalone data types (must precede signature/data def merges) -----
                 ghidra.program.model.data.DataTypeManager srcDtm = source.getDataTypeManager();
@@ -1250,16 +1247,25 @@ public class DocumentationHashService {
                     } else { cc[1]++; }
                 }
 
-                commit = true;
             } catch (Throwable t) {
                 errorMsg.set(t.getClass().getSimpleName() + ": " + t.getMessage());
-            } finally {
-                if (tx != null) tx.end(commit);
             }
         };
 
         try {
-            threadingStrategy.runOnUi(mergeTask);
+            if (dryRun) {
+                threadingStrategy.runOnUi(mergeTask);
+            } else {
+                threadingStrategy.executeWrite(target, "Merge from " + source.getName(), () -> {
+                    mergeTask.run();
+                    if (errorMsg.get() != null) {
+                        throw new Refusal(errorMsg.get());
+                    }
+                    return null;
+                });
+            }
+        } catch (Refusal r) {
+            // errorMsg already says why
         } catch (Throwable t) {
             return Response.err("Merge invocation failed: " + t.getMessage());
         }

@@ -73,7 +73,9 @@ public class SwingThreadingStrategy implements ThreadingStrategy {
                 success = true;
             } catch (Exception e) {
                 error.set(e);
-                Msg.error(this, "Error during transaction '" + txName + "'", e);
+                if (!Refusal.is(e)) {
+                    Msg.error(this, "Error during transaction '" + txName + "'", e);
+                }
             } finally {
                 tx.end(success);
             }

@@ -4,6 +4,27 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+Changes on `dev` after 7.0.0.
+
+### Fixed — every program write takes the headless write lock
+
+21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request
+thread, instead of going through `executeWrite`. On the headless server that skipped the lock
+that serializes writes, so comments, labels, bookmarks, memory blocks, the image base, variable
+renames and types, prototypes and the documentation merge could interleave with any other write.
+They all go through `executeWrite` now, and `WritesTakeTheWriteLockTest` fails on a transaction
+opened inside `runOnUi` or `executeRead`.
+
+- **A tool's own "cannot do that" is a refusal, not an error.** No function there, nothing to
+  disassemble: the write rolls back, the caller gets the message, and neither server logs a
+  stack trace for it, including when the tool runs inside a dry run.
+- **`set_function_prototype` is one unit.** A calling convention that fails to apply rolls the
+  prototype back too, instead of leaving it applied under an error response.
+- **`rename_variables` keeps what its fallback renamed.** When the batch failed and it retried
+  variable by variable, the outer rollback discarded those renames while reporting them done.
+
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
 **209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186

@@ -5,15 +5,9 @@ import com.google.gson.GsonBuilder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.*;
-import ghidra.util.Msg;
-
-import javax.swing.SwingUtilities;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for comment operations: set/get/clear decompiler, disassembly, and plate comments.
@@ -62,47 +56,33 @@ public class CommentService {
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, transactionName);
-                try {
-                    // Empty means REMOVE, which is what a caller passing "" is asking for and
-                    // what batch_set_comments already does. Storing "" instead leaves a comment
-                    // record that reads as "no comment" through get_comment (has_comment:false)
-                    // but is very much present: the decompiler renders it as a bare `//` line,
-                    // so every "clear" left a blank comment in the pseudocode.
-                    program.getListing().setComment(addr, commentType,
-                        comment == null || comment.isEmpty() ? null : comment);
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
-                } finally {
-                    tx.end(success.get());
-                }
+            threadingStrategy.executeWrite(program, transactionName, () -> {
+                // Empty means REMOVE, which is what a caller passing "" is asking for and
+                // what batch_set_comments already does. Storing "" instead leaves a comment
+                // record that reads as "no comment" through get_comment (has_comment:false)
+                // but is very much present: the decompiler renders it as a bare `//` line,
+                // so every "clear" left a blank comment in the pseudocode.
+                program.getListing().setComment(addr, commentType,
+                    comment == null || comment.isEmpty() ? null : comment);
+                return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
 
-        if (success.get()) {
-            // Parity with the former set_plate_comment: plate writes propagate to the
-            // decompiler cache and surface structural warnings (Algorithm/Parameters/Returns).
-            if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
-                program.flushEvents();
-                List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
-                if (!plateWarnings.isEmpty()) {
-                    return Response.ok(JsonHelper.mapOf("status", "success",
-                            "message", "Set plate comment at " + addressStr, "warnings", plateWarnings));
-                }
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addressStr));
+        // Parity with the former set_plate_comment: plate writes propagate to the
+        // decompiler cache and surface structural warnings (Algorithm/Parameters/Returns).
+        if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
+            program.flushEvents();
+            List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
+            if (!plateWarnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf("status", "success",
+                        "message", "Set plate comment at " + addressStr, "warnings", plateWarnings));
             }
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addressStr));
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addressStr));
         }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+        return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addressStr));
     }
 
     public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
@@ -310,17 +290,14 @@ public class CommentService {
             }
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicInteger decompilerCount = new AtomicInteger(0);
-        final AtomicInteger disassemblyCount = new AtomicInteger(0);
-        final AtomicBoolean plateSet = new AtomicBoolean(false);
-        final AtomicInteger overwrittenCount = new AtomicInteger(0);
-
+        record BatchCommentCounts(int decompilerCount, int disassemblyCount, boolean plateSet, int overwrittenCount) {}
+        BatchCommentCounts counts;
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Set Comments");
-                try {
+            counts = threadingStrategy.executeWrite(program, "Batch Set Comments", () -> {
+                int decompilerCount = 0;
+                int disassemblyCount = 0;
+                boolean plateSet = false;
+                int overwrittenCount = 0;
                     // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
                     // - Function target → use Function.setComment (existing behavior).
                     // - Data-global target → use Listing.setComment(addr, PLATE_COMMENT, …).
@@ -333,10 +310,10 @@ public class CommentService {
                         if (func != null) {
                             String existingPlate = func.getComment();
                             if (existingPlate != null && !existingPlate.isEmpty()) {
-                                overwrittenCount.incrementAndGet();
+                                overwrittenCount++;
                             }
                             func.setComment(plateComment.isEmpty() ? null : plateComment);
-                            plateSet.set(true);
+                            plateSet = true;
                         } else {
                             // Data-global path. Previously gated on
                             // `getDefinedDataAt(funcAddr) != null` which
@@ -353,13 +330,13 @@ public class CommentService {
                             String existingPlate = dataListing.getComment(
                                     CodeUnit.PLATE_COMMENT, funcAddr);
                             if (existingPlate != null && !existingPlate.isEmpty()) {
-                                overwrittenCount.incrementAndGet();
+                                overwrittenCount++;
                             }
                             dataListing.setComment(
                                     funcAddr,
                                     CodeUnit.PLATE_COMMENT,
                                     plateComment.isEmpty() ? null : plateComment);
-                            plateSet.set(true);
+                            plateSet = true;
                         }
                     }
 
@@ -374,10 +351,10 @@ public class CommentService {
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.PRE_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
-                                        overwrittenCount.incrementAndGet();
+                                        overwrittenCount++;
                                     }
                                     listing.setComment(address, CodeUnit.PRE_COMMENT, cmt.isEmpty() ? null : cmt);
-                                    decompilerCount.incrementAndGet();
+                                    decompilerCount++;
                                 }
                             }
                         }
@@ -393,49 +370,37 @@ public class CommentService {
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.EOL_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
-                                        overwrittenCount.incrementAndGet();
+                                        overwrittenCount++;
                                     }
                                     listing.setComment(address, CodeUnit.EOL_COMMENT, cmt.isEmpty() ? null : cmt);
-                                    disassemblyCount.incrementAndGet();
+                                    disassemblyCount++;
                                 }
                             }
                         }
                     }
 
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error in batch set comments", e);
-                } finally {
-                    tx.end(success.get());
-                }
+                return new BatchCommentCounts(decompilerCount, disassemblyCount, plateSet, overwrittenCount);
             });
 
             // Force event processing to ensure changes propagate to decompiler cache
-            if (success.get()) {
-                program.flushEvents();
-                try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            }
+            program.flushEvents();
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        if (!success.get()) {
-            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+            return Response.err(ServiceUtils.failureMessage(e));
         }
 
         // Validate plate comment structure (apply + warn)
-        List<String> plateWarnings = (plateSet.get() && plateComment != null && !plateComment.isEmpty())
+        List<String> plateWarnings = (counts.plateSet() && plateComment != null && !plateComment.isEmpty())
                 ? NamingConventions.validatePlateCommentStructure(plateComment)
                 : List.of();
 
         Map<String, Object> resultMap = new LinkedHashMap<>();
         resultMap.put("success", true);
-        resultMap.put("decompiler_comments_set", decompilerCount.get());
-        resultMap.put("disassembly_comments_set", disassemblyCount.get());
-        resultMap.put("plate_comment_set", plateSet.get());
-        resultMap.put("plate_comment_cleared", plateSet.get() && plateComment != null && plateComment.isEmpty());
-        resultMap.put("comments_overwritten", overwrittenCount.get());
+        resultMap.put("decompiler_comments_set", counts.decompilerCount());
+        resultMap.put("disassembly_comments_set", counts.disassemblyCount());
+        resultMap.put("plate_comment_set", counts.plateSet());
+        resultMap.put("plate_comment_cleared", counts.plateSet() && plateComment != null && plateComment.isEmpty());
+        resultMap.put("comments_overwritten", counts.overwrittenCount());
         if (!plateWarnings.isEmpty()) {
             resultMap.put("warnings", plateWarnings);
         }
@@ -480,74 +445,59 @@ public class CommentService {
         Address resolvedAddr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicInteger preCleared = new AtomicInteger(0);
-        final AtomicInteger eolCleared = new AtomicInteger(0);
-        final AtomicBoolean plateCleared = new AtomicBoolean(false);
-
+        record ClearCommentCounts(boolean plateCleared, int preCleared, int eolCleared) {}
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Clear Function Comments");
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
-                    if (func == null) {
-                        errorMsg.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    if (clearPlate && func.getComment() != null) {
-                        func.setComment(null);
-                        plateCleared.set(true);
-                    }
-
-                    Listing listing = program.getListing();
-                    AddressSetView body = func.getBody();
-                    InstructionIterator instrIter = listing.getInstructions(body, true);
-
-                    while (instrIter.hasNext()) {
-                        Instruction instr = instrIter.next();
-                        Address instrAddr = instr.getAddress();
-
-                        if (clearPre) {
-                            String existing = listing.getComment(CodeUnit.PRE_COMMENT, instrAddr);
-                            if (existing != null) {
-                                listing.setComment(instrAddr, CodeUnit.PRE_COMMENT, null);
-                                preCleared.incrementAndGet();
-                            }
-                        }
-
-                        if (clearEol) {
-                            String existing = listing.getComment(CodeUnit.EOL_COMMENT, instrAddr);
-                            if (existing != null) {
-                                listing.setComment(instrAddr, CodeUnit.EOL_COMMENT, null);
-                                eolCleared.incrementAndGet();
-                            }
-                        }
-                    }
-
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error clearing function comments", e);
-                } finally {
-                    tx.end(success.get());
+            ClearCommentCounts cleared = threadingStrategy.executeWrite(program, "Clear Function Comments", () -> {
+                Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
+                if (func == null) {
+                    throw new Refusal("No function at address: " + functionAddress);
                 }
+
+                boolean plateCleared = false;
+                int preCleared = 0;
+                int eolCleared = 0;
+
+                if (clearPlate && func.getComment() != null) {
+                    func.setComment(null);
+                    plateCleared = true;
+                }
+
+                Listing listing = program.getListing();
+                AddressSetView body = func.getBody();
+                InstructionIterator instrIter = listing.getInstructions(body, true);
+
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    Address instrAddr = instr.getAddress();
+
+                    if (clearPre) {
+                        String existing = listing.getComment(CodeUnit.PRE_COMMENT, instrAddr);
+                        if (existing != null) {
+                            listing.setComment(instrAddr, CodeUnit.PRE_COMMENT, null);
+                            preCleared++;
+                        }
+                    }
+
+                    if (clearEol) {
+                        String existing = listing.getComment(CodeUnit.EOL_COMMENT, instrAddr);
+                        if (existing != null) {
+                            listing.setComment(instrAddr, CodeUnit.EOL_COMMENT, null);
+                            eolCleared++;
+                        }
+                    }
+                }
+
+                return new ClearCommentCounts(plateCleared, preCleared, eolCleared);
             });
+            return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "plate_comment_cleared", cleared.plateCleared(),
+                    "pre_comments_cleared", cleared.preCleared(),
+                    "eol_comments_cleared", cleared.eolCleared()
+            ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
-        }
-
-        return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "plate_comment_cleared", plateCleared.get(),
-                "pre_comments_cleared", preCleared.get(),
-                "eol_comments_cleared", eolCleared.get()
-        ));
     }
 
     public Response clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
