@@ -89,8 +89,10 @@ AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> McpHttpServer (in the GU
   stays here is the **bridge proxy** — 22 tools in
   `python/bridge_mcp_ghidra/debugger.py` that forward to whatever
   `GHIDRA_DEBUGGER_URL` names. They are OFF BY DEFAULT and register only when
-  `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS` is truthy
-  (`GHIDRA_DEBUGGER_TOOLS=0` wins over a URL); the host platform plays no part.
+  `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS` is
+  truthy (`GHIDRA_DEBUGGER_TOOLS=0` wins over a URL); the proxy refuses any
+  non-loopback URL, so forward a remote server's port. The host platform plays
+  no part.
   The debugger's HTTP surface is now a contract between two repos: a route or
   payload change there breaks these proxies with no single CI run to catch it.
 - **Headless**: `src/main/java/com/xebyte/headless/` -- standalone server without GUI. `HeadlessManagementService` carries only the project lifecycle (create/open/close/delete/list projects); GZF/GAR export, import, archive and restore are `ProjectLifecycleService`, on both servers. Opening, importing and checking in programs are shared (`ProgramScriptService` over `ProjectProgramProvider`, which both providers extend). The identity routes (`/check_connection`, `/mcp/health`, `/mcp/instance_info`) are `McpHttpServer`'s own, identical on both servers bar `server_kind`.

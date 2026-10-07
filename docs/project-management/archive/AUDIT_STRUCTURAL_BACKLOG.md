@@ -1,3 +1,5 @@
+> **Archived 2026-10-07.** Deferred items from the 2026-06 project audit; several are resolved and the fun-doc items left this repo with fun-doc (now in `d2-game-exe`), so it no longer tracks current work.
+
 # Structural / Tech-Debt Backlog (2026-06 audit)
 
 Deferred items from the 2026-06 project audit. The acute fixes (threading, recreate_struct

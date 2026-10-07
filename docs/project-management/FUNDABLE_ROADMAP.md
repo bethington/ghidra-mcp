@@ -3,6 +3,12 @@
 **Status**: Draft for community discussion  
 **Purpose**: Collect large, community-reviewable Ghidra MCP efforts that need meaningful design, implementation, testing, and maintenance time.
 
+> **Status note, 2026-10-07.** `fun-doc`, which the Function Documentation at
+> Scale milestone builds on, now lives in the `d2-game-exe` repository. The
+> Headless Parity milestone's first step shipped as the `servers` field in
+> `tests/endpoints.json` (`tools/audit_server_scope.py`), and the Gradle
+> migration listed below as a candidate is done for local work.
+
 ## Why This Exists
 
 Ghidra MCP has more good ideas than maintainer hours. Some features are quick fixes, but others are real engineering projects: they cut across the Python bridge, Java plugin, headless server, debugger integration, CI, docs, and release testing.
@@ -128,7 +134,7 @@ These may become RFCs later, but need more clarification or may be absorbed into
 | --- | --- | --- |
 | Offline/disposable CI test fixtures | GitHub issue `#112`, `docs/TESTING.md` | Could become a CI Reliability RFC or fold into Headless Parity |
 | Cross-client discovery/connectivity hardening | GitHub issue `#170` | Could become a Client Compatibility RFC or fold into Recovery/Native MCP |
-| Gradle migration completion | `GRADLE_MIGRATION_CHECKLIST.md` | Could become Build and Release Modernization milestone |
+| Gradle migration completion | `GRADLE_MIGRATION_CHECKLIST.md` | Done for local work: Gradle is the default local backend and Maven stays as CI's peer (see the checklist's Status) |
 
 Older backlog items such as composable batch queries and P-code dataflow analysis appear to have been mostly addressed by existing endpoints like `analyze_function_complete`, `analyze_for_documentation`, and `analyze_dataflow`.
 

@@ -612,6 +612,14 @@ rather than appearing and failing. The host platform plays no part.
 Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
 ...) are separate: they live in the GUI plugin and need no extra server.
 
+Calls are only ever proxied to a loopback URL (`127.0.0.1`, `localhost` or
+`::1`), so a non-loopback `GHIDRA_DEBUGGER_URL` does not register the tools. To
+reach a debugger server on another machine, forward its port to loopback (for
+example an SSH tunnel) and point `GHIDRA_DEBUGGER_URL` there.
+
+The bridge reads these from its own process environment (the MCP client's
+`env` block, or your shell); it does not read a `.env` file.
+
 #### In Ghidra
 
 1. Start Ghidra and open your project

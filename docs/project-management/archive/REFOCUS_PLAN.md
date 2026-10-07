@@ -1,3 +1,5 @@
+> **Archived 2026-10-07.** The record of the 2026-08-11 move of game-side tooling (debugger server, fun-doc, D2 scripts) to `d2-game-exe`; executed, and kept as provenance for that move.
+
 # Refocus — reducing this repo to the Ghidra MCP server
 
 **Status:** executed 2026-08-11. This is the record of what moved, what stayed,

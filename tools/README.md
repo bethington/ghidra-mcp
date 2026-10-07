@@ -20,14 +20,15 @@ tools/
 └── launch-ghidra-scoped.ps1       # launch Ghidra with GHIDRA_MCP_PROJECT_FOLDER set
 ```
 
-## Looking for the function-documentation CLI?
+## Legacy function-documentation scripts
 
 Three older scripts (`scan_undocumented_functions.py`,
-`scan_functions_mcp.py`, `document_function.py`) used to live here.
-They were archived to
-[`docs/archive/legacy-tools/`](../docs/archive/legacy-tools/) in v5.10.
-Automated function documentation is not part of this repository: drive
-the MCP tools directly from your AI client (see
+`scan_functions_mcp.py`, `document_function.py`) were archived to
+`docs/archive/legacy-tools/` in v5.10 and **removed in 7.0.0**: they called
+endpoints the 7.0.0 tool consolidation removed, so they no longer ran. They
+survive in git history (`git log --all -- docs/archive/legacy-tools`).
+Automated function documentation is not part of this repository: drive the MCP
+tools directly from your AI client (see
 [`docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md`](../docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md))
 or from your own orchestration on top of the HTTP API.
 
@@ -55,11 +56,12 @@ workflow including the Gradle alternative.
 
 If you have a one-off script that genuinely doesn't fit inside
 `tools/setup/` or `ghidra_scripts/`, drop a standalone file here with a
-clear docstring and add it to the tree above. Most of the time, though,
-the right home for new utility code is one of those two existing
-locations.
+clear docstring and add a line to the tree above. Most of the time,
+though, the right home for new utility code is one of those two
+existing locations.
 
 ---
 
-All tools that talk to a running server connect to Ghidra MCP Server via
-HTTP (default: `http://127.0.0.1:8089`).
+The scripts that talk to a running server (the health check, the language
+upgrade's `--verify`) use its HTTP endpoint (default: `http://127.0.0.1:8089`).
+The audit and render scripts read the repository only.

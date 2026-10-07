@@ -1,3 +1,5 @@
+> **Archived 2026-10-07.** The 2026-07 tool audit and consolidation proposal behind 7.0.0; it has been carried out, and the current tool list and every removal are in `tests/endpoints.json` and `../MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`.
+
 # Tool Audit, Behavior Testing & Consolidation Proposal
 
 **Status:** implemented — see [§6 Execution status](#6-execution-status). Merges, bug
@@ -16,9 +18,9 @@ tools without losing functionality.
 
 ## 1. Documentation parity audit — RESULT: CLEAN
 
-The README API Reference is **auto-generated** from [`tests/endpoints.json`](../../tests/endpoints.json)
-by [`tools/gen_readme_api_reference.py`](../../tools/gen_readme_api_reference.py), and
-[`tests/unit/test_project_consistency.py`](../../tests/unit/test_project_consistency.py)
+The README API Reference is **auto-generated** from [`tests/endpoints.json`](../../../tests/endpoints.json)
+by [`tools/gen_readme_api_reference.py`](../../../tools/gen_readme_api_reference.py), and
+[`tests/unit/test_project_consistency.py`](../../../tests/unit/test_project_consistency.py)
 fails CI on any drift. Verified against the live server:
 
 | Comparison | Result |
@@ -30,7 +32,7 @@ fails CI on any drift. Verified against the live server:
 | README generator drift check | up to date |
 
 - The 272 − 256 = 16 gap is the **headless-only** lifecycle tools; each verified present
-  in [`src/main/java/com/xebyte/headless/`](../../src/main/java/com/xebyte/headless/) and
+  in [`src/main/java/com/xebyte/headless/`](../../../src/main/java/com/xebyte/headless/) and
   correctly labeled "Available on the standalone headless server."
 - 8 bridge static tools and 22 WinDbg-proxy `debugger_*` tools are correctly represented
   (the proxy tools in aggregate).
@@ -77,7 +79,7 @@ read-only defects.**
 ### 2c. BUGS & footguns found
 
 - **BUG-1 — `validate_data_type_exists` is broken for bare names.** It calls
-  `DataTypeManager.getDataType(name)` ([`DataTypeService.java:432`](../../src/main/java/com/xebyte/core/DataTypeService.java#L432)),
+  `DataTypeManager.getDataType(name)` ([`DataTypeService.java:432`](../../../src/main/java/com/xebyte/core/DataTypeService.java#L432)),
   which needs a full path. `int`→`{"exists":false}`, `/int`→`{"exists":true}`. Every natural
   LLM input (`int`, `DWORD`, `char *`) returns a false negative. `get_type_size` resolves bare
   names fine — so the fix is to reuse that resolver.

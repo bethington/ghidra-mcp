@@ -4,6 +4,13 @@
 **Audience**: Ghidra MCP users, reverse engineers, debugger workflow users, and sponsors  
 **Scope**: Live debugger evidence capture for validating and expanding the Ghidra knowledge corpus
 
+> **Status note, 2026-10-07.** The standalone Python debugger server moved to
+> the `d2-game-exe` repository on 2026-08-11. This repository keeps the bridge's
+> 22 proxy tools (`python/bridge_mcp_ghidra/debugger.py`), which forward to
+> `GHIDRA_DEBUGGER_URL` and register by default on Windows (elsewhere only with
+> `GHIDRA_DEBUGGER_TOOLS=1`), plus the GUI-only Java `DebuggerService`
+> (`/debugger/*`, Trace RMI).
+
 ## Summary
 
 Ghidra MCP has static analysis, documentation, emulation, and live debugger tooling. The next step is to connect those pieces into a higher-level workflow: use runtime evidence to verify, correct, and expand the knowledge already documented in Ghidra.

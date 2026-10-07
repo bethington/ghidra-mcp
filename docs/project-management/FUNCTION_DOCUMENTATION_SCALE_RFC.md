@@ -4,6 +4,12 @@
 **Audience**: Ghidra MCP users, AI workflow operators, reverse-engineering teams, and sponsors  
 **Scope**: Reliable batch documentation, review UX, quality gates, provider policy, and dashboard workflows
 
+> **Status note, 2026-10-07.** `fun-doc`, the internal tool this RFC builds on,
+> moved to the `d2-game-exe` repository on 2026-08-11 and is no longer part of
+> this repository. It still drives this server through its HTTP API, so the
+> design below still applies; references to "the existing `fun-doc` dashboard"
+> now point into that repository.
+
 ## Summary
 
 Ghidra MCP already enables AI-assisted function documentation through its tool surface, and the external `fun-doc` workflow (a separate project, not part of this repository) has exercised it at scale. The next step is to turn the lessons from that workflow into a community-reviewed, fundable roadmap for documenting large binaries reliably.

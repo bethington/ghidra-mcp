@@ -4,6 +4,12 @@
 **Audience**: Ghidra MCP users, contributors, and automation workflow authors  
 **Scope**: Python MCP bridge recovery orchestration plus Java health/status detail
 
+> **Status note, 2026-10-07.** The bridge this RFC refers to as
+> `bridge_mcp_ghidra.py` is now the `python/bridge_mcp_ghidra` package, run as
+> the `bridge-mcp-ghidra` console script. The hooks named below live in its
+> `discovery` (`discover_instances()`) and `dispatch` (`_try_reconnect()`,
+> `dispatch_get()`, `dispatch_post()`) modules.
+
 ## Summary
 
 Ghidra MCP currently reports failures cleanly when the bridge cannot reach Ghidra, but unattended workflows can get stuck in repeated `ghidra_offline` results until a human restarts Ghidra and reconnects the bridge.
@@ -107,7 +113,7 @@ Accessibility is the source of truth. A running process does not prove Ghidra MC
 
 Useful existing hooks:
 
-- Python bridge UDS/TCP routing in `bridge_mcp_ghidra.py`
+- Python bridge UDS/TCP routing in the `python/bridge_mcp_ghidra` package (`transport`, `discovery`)
 - Python `discover_instances()`
 - Python `_try_reconnect()`
 - Python `dispatch_get()` and `dispatch_post()`
@@ -227,7 +233,7 @@ Enhance `/mcp/instance_info` or `/mcp/health` to include richer recovery state:
 Keep recovery code isolated instead of growing the bridge dispatch functions:
 
 ```text
-bridge_mcp_ghidra.py
+python/bridge_mcp_ghidra/
 recovery/
   config.py
   state.py

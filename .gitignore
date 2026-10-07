@@ -92,17 +92,9 @@ test-reports/
 
 # Application logs
 *.log
-logs/*.log
-logs/*.json
-logs/production_deploy_*.log
-logs/advanced_dev_cycle_*.log
-logs/comprehensive_mcp_test_*.json
-logs/documentation_evaluation_*.json
-
-# Keep log directory structure but ignore contents
-logs/*
-!logs/.gitkeep
-!logs/README.md
+# The tracked logs/ directory was removed in 7.0.0; anything a tool still
+# writes there is local output.
+logs/
 
 # Runtime and temporary files
 *.tmp
@@ -542,3 +534,6 @@ ghidra_scripts/db.env
 # already goes to /dist/; this catches strays like packaging-*.whl that
 # otherwise sit in `git status` forever and invite being committed by accident.
 /*.whl
+
+# Local MCP client config: machine-specific paths. Copy .mcp.json.example.
+.mcp.json

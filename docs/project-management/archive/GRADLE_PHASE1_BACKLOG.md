@@ -1,3 +1,5 @@
+> **Archived 2026-10-07.** The Phase 1 backlog for the Gradle migration; it shipped, and Gradle is now the default local backend (see `../GRADLE_MIGRATION_CHECKLIST.md`).
+
 # Gradle Migration — Phase 1 Implementation Backlog
 
 **Scope**: Make Gradle the canonical build backend for the plugin jar and extension ZIP.

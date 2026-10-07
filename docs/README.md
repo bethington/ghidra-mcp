@@ -47,14 +47,10 @@ docs/
 ├── STRUCT_RESIZE_WORKFLOW.md
 ├── THIS_POINTER_TYPING.md
 ├── GHIDRA_VARIABLE_APIS_EXPLAINED.md
-├── JAVA_HANDLER_REFACTORING.md
-├── MAVEN_VERSION_MANAGEMENT.md
-├── MULTI_PROGRAM_SUPPORT_ANALYSIS.md
-├── ORGANIZATION_SUMMARY.md
 ├── Context-Window-Analysis.md
-├── MARKDOWN_NAMING.md
-├── archive/
-├── project-management/
+├── archive/                 # history: retired designs and session notes
+├── project-management/      # RFCs, migration guide, response contract
+│   └── archive/             # history: finished plans and backlogs
 ├── prompts/
 └── releases/
 ```
@@ -78,7 +74,13 @@ docs/
 
 ### Project History
 
-- Older organization and project-management notes kept for context
+- `archive/` holds retired designs, analyses and session notes (handler
+  refactoring, multi-program survey, Maven version management, the
+  documentation-propagation session notes). Each opens with an archive banner
+  saying why it is no longer current.
+- `project-management/archive/` holds finished plans and backlogs: the 7.0.0
+  tool audit, the 2026-08 refocus, the 2026-06 structural backlog and Gradle
+  Phase 1, among older ones.
 
 ## Current Command Surface
 
