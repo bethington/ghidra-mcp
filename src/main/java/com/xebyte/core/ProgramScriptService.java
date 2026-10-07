@@ -3050,6 +3050,88 @@ public class ProgramScriptService {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
+    @McpTool(path = "/set_memory_block", method = "POST",
+            description = "Change an existing memory block's permissions or volatility. The one that "
+                + "matters most: firmware loaders often mark the flash block writable, and the decompiler "
+                + "then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of "
+                + "folding it into the constant it holds; marking flash read-only lets peripheral and "
+                + "RAM addresses show as constants or their labels.",
+            category = "program", access = ToolAccess.WRITE)
+    public Response setMemoryBlock(
+            @Param(value = "block", source = ParamSource.BODY, defaultValue = "",
+                   description = "Block name as the memory map shows it (e.g. ram, FLASH). Give this or "
+                               + "address.") String blockName,
+            @Param(value = "address", paramType = Param.ADDRESS, source = ParamSource.BODY, defaultValue = "",
+                   description = "Any address inside the block, 0x<hex> or <space>:<hex>. Give this or "
+                               + "block.") String addressStr,
+            @Param(value = "read", source = ParamSource.BODY, defaultValue = "",
+                   description = "New read permission; omit to leave it as it is.") Boolean read,
+            @Param(value = "write", source = ParamSource.BODY, defaultValue = "",
+                   description = "New write permission; omit to leave it as it is. false on a flash "
+                               + "block is what makes literal-pool constants fold.") Boolean write,
+            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "",
+                   description = "New execute permission; omit to leave it as it is.") Boolean execute,
+            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "",
+                   description = "New volatile flag (contents change outside program flow, e.g. MMIO); "
+                               + "omit to leave it as it is.") Boolean isVolatile,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        if (read == null && write == null && execute == null && isVolatile == null) {
+            return Response.err("nothing to change: give read, write, execute or volatile");
+        }
+        boolean byName = blockName != null && !blockName.isBlank();
+        boolean byAddress = addressStr != null && !addressStr.isBlank();
+        if (byName == byAddress) {
+            return Response.err("give exactly one of block or address");
+        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        MemoryBlock block;
+        if (byName) {
+            block = program.getMemory().getBlock(blockName.trim());
+            if (block == null) {
+                return Response.err("No memory block named '" + blockName + "'");
+            }
+        } else {
+            Address at = ServiceUtils.parseAddress(program, addressStr);
+            if (at == null) {
+                return Response.err(ServiceUtils.getLastParseError());
+            }
+            block = program.getMemory().getBlock(at);
+            if (block == null) {
+                return Response.err("No memory block contains " + addressStr);
+            }
+        }
+        String before = blockPermissions(block);
+        try {
+            threadingStrategy.executeWrite(program, "Set memory block " + block.getName(), () -> {
+                if (read != null) block.setRead(read);
+                if (write != null) block.setWrite(write);
+                if (execute != null) block.setExecute(execute);
+                if (isVolatile != null) block.setVolatile(isVolatile);
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to change memory block: "
+                + (e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", true);
+        out.put("name", block.getName());
+        out.put("start", block.getStart().toString());
+        out.put("end", block.getEnd().toString());
+        out.put("before", before);
+        out.put("after", blockPermissions(block));
+        return Response.ok(out);
+    }
+
+    /** {@code rwx} plus {@code v} when volatile, dashes for what is off. */
+    private static String blockPermissions(MemoryBlock block) {
+        return (block.isRead() ? "r" : "-") + (block.isWrite() ? "w" : "-")
+            + (block.isExecute() ? "x" : "-") + (block.isVolatile() ? "v" : "-");
+    }
+
     /**
      * Backward-compatible entry point predating byte contents: creates an
      * uninitialized, non-overlay block.

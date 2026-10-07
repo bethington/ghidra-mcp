@@ -251,9 +251,12 @@ def _try_reconnect(
     with state._tool_registry_lock:
         promoted = state.maybe_promote_connection_snapshot(base, candidate)
         if promoted is not None:
+            # The same project came back (a Ghidra restart): keep every group this session
+            # had loaded, not only the defaults. Dropping them turned the next call to a
+            # load_tool_group()-ed tool into "Unknown tool" in the middle of a task.
             registry.register_tools_from_schema(
                 schema,
-                groups=None if not state._lazy_mode else state._default_groups,
+                groups=None if not state._lazy_mode else state._default_groups | state._loaded_groups,
             )
             state.notify_tools_changed_from_worker()
             target = promoted.active_socket or promoted.active_tcp

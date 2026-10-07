@@ -98,8 +98,13 @@ public class SharedProjectLocatorTest extends TestCase {
                 p, null, SecurityConfig.getInstance());
         assertTrue(dir.isAbsolute());
         assertEquals("127.0.0.1_13100_firmware-shared", dir.getFileName().toString());
-        assertTrue(dir.toString().contains(".ghidra-mcp"));
-        assertTrue(dir.toString().contains("shared-projects"));
+        assertTrue(dir.toString().contains("ghidra-shared-projects"));
+        // No path element may start with '.': Ghidra 12.1.3's ProjectLocator
+        // rejects those outright, so a dotted default silently breaks every
+        // shared-project open on that version.
+        for (Path part : dir) {
+            assertFalse("dotted path element: " + part, part.toString().startsWith("."));
+        }
     }
 
     public void testResolveProjectDirOverrideMustBeAbsolute() {

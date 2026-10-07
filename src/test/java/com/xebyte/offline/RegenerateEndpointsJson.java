@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.ManualToolDescriptors;
 import com.xebyte.core.ProgramProvider;
 import junit.framework.TestCase;
 
@@ -94,12 +95,19 @@ public class RegenerateEndpointsJson extends TestCase {
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (AnnotationScanner.ParamDescriptor p : tool.params()) {
             names.add(p.name());
-            // Aliases are accepted argument names, so they belong in the catalog; a
-            // function reference implies the standard set.
+            // Aliases are accepted argument names, so they belong in the catalog.
+            // Without them the additive merge below was the ONLY thing keeping
+            // e.g. /decompile_function's `address` listed -- which meant the merge
+            // could never drop a genuinely removed parameter either.
             names.addAll(p.aliases());
         }
         List<String> retained = new ArrayList<>();
-        if (existing != null && existing.has("params")) {
+        // Only fall back to the catalog when the scanner knows of no params at
+        // all: a hand-registered route with no descriptor to speak for it.
+        // Retaining unconditionally makes the list grow-only, so a parameter
+        // deleted from an @McpTool would be advertised forever (measured: the
+        // `program` argument removed from /get_ui_cursor kept coming back).
+        if (names.isEmpty() && existing != null && existing.has("params")) {
             for (JsonElement el : existing.getAsJsonArray("params")) {
                 String name = el.getAsString();
                 if (names.add(name)) {
@@ -157,6 +165,13 @@ public class RegenerateEndpointsJson extends TestCase {
         // 2. Scan services for annotation-backed endpoints.
         ProgramProvider provider = ServiceFactory.stubProvider();
         AnnotationScanner scanner = new AnnotationScanner(provider, ServiceFactory.buildAllServices());
+        // Hand-registered routes are a SECOND authoritative source: /open_project,
+        // for instance, is an @McpTool taking only `path` AND a GUI route taking
+        // `path, headless, program`. Without these descriptors the regenerator sees
+        // half the parameters and the catalog's own entries were the only record of
+        // the rest -- which is why the param merge had to be grow-only, and why a
+        // deleted parameter could never be removed.
+        ManualToolDescriptors.addAll(scanner, ManualToolDescriptors.knownPaths());
 
         // 3. Merge. Keyed by path so hand-registered entries survive untouched.
         Map<String, JsonObject> merged = new TreeMap<>(existingByPath);

@@ -461,12 +461,14 @@ public class DebuggerService {
         }
 
         try {
-            ghidra.program.model.listing.Program program =
-                    programProvider.resolveProgram(programName);
+            ServiceUtils.ProgramOrError pe =
+                    ServiceUtils.getProgramOrError(programProvider, programName);
+            if (pe.hasError()) return pe.error();
+            ghidra.program.model.listing.Program program = pe.program();
             Collection<TraceRmiLaunchOffer> offers = launcherSvc.getOffers(program);
             if (offers.isEmpty()) {
                 return Response.err("No debugger launch offers are available for " +
-                        (program != null ? program.getName() : "the current program") +
+                        program.getName() +
                         ". Install/enable a backend such as Ghidra's dbgeng agent and " +
                         "open the executable in CodeBrowser first.");
             }
@@ -1191,11 +1193,10 @@ public class DebuggerService {
         }
 
         try {
-            ghidra.program.model.listing.Program program =
-                    programProvider.resolveProgram(programName);
-            if (program == null) {
-                return Response.err("Program not found: " + programName);
-            }
+            ServiceUtils.ProgramOrError pe =
+                    ServiceUtils.getProgramOrError(programProvider, programName);
+            if (pe.hasError()) return pe.error();
+            ghidra.program.model.listing.Program program = pe.program();
 
             Address staticAddr = program.getAddressFactory().getAddress(
                     addressStr.startsWith("0x") ? addressStr.substring(2) : addressStr);
@@ -1300,11 +1301,10 @@ public class DebuggerService {
         }
 
         try {
-            ghidra.program.model.listing.Program program =
-                    programProvider.resolveProgram(programName);
-            if (program == null) {
-                return Response.err("No program available. Open a program first.");
-            }
+            ServiceUtils.ProgramOrError pe =
+                    ServiceUtils.getProgramOrError(programProvider, programName);
+            if (pe.hasError()) return pe.error();
+            ghidra.program.model.listing.Program program = pe.program();
 
             var offers = launcherSvc.getOffers(program);
             List<Map<String, Object>> result = new ArrayList<>();

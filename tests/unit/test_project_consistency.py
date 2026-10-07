@@ -347,7 +347,7 @@ class TestJavaArchitecture(unittest.TestCase):
             "/server/version_control/checkout": {"path", "exclusive"},
             "/server/version_control/undo_checkout": {"path", "keep"},
             "/server/version_control/add": {"path", "comment", "keep_checked_out"},
-            "/checkin_program": {"path", "comment", "keep_checked_out"},
+            "/checkin_program": {"path", "comment", "keep_checked_out", "dry_run"},
         }
         for path, params in expected_params.items():
             self.assertIn(path, catalog)

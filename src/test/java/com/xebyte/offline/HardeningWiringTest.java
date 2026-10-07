@@ -145,8 +145,6 @@ public class HardeningWiringTest extends TestCase {
     public void testRequestBodiesAreBounded() throws IOException {
         assertTrue("JsonHelper.parseBody must bound the read via readNBytes",
                 read("core", "JsonHelper.java").contains("readNBytes"));
-        assertTrue("GUI parsePostParams must bound the read",
-                read("GhidraMCPPlugin.java").contains("readNBytes"));
         assertTrue("GUI hand-coded routes must read bodies through the bounded JsonHelper.parseBody",
                 read("GhidraMCPPlugin.java").contains("JsonHelper.parseBody("));
         assertTrue("McpHttpServer must reject an oversized Content-Length (413)",
