@@ -1214,12 +1214,18 @@ Map<String, Object> out = new LinkedHashMap<>();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
-            threadingStrategy.executeRead(() -> {
+            threadingStrategy.executeWrite(program, "Set function prototype", () -> {
                 applyFunctionPrototype(program, functionAddrStr, finalPrototype, finalConvention, success, errorMessage);
+                if (!success.get()) {
+                    // The prototype and the convention are one request: a failed step rolls back both.
+                    throw new Refusal(errorMessage.toString());
+                }
                 return null;
             });
+        } catch (Refusal r) {
+            // errorMessage already says why
         } catch (Exception e) {
-            String msg = "Failed to set function prototype on Swing thread: " + e.getMessage();
+            String msg = "Failed to set function prototype: " + ServiceUtils.failureMessage(e);
             errorMessage.append(msg);
             Msg.error(this, msg, e);
         }
@@ -1574,7 +1580,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
-            threadingStrategy.executeRead(() -> {
+            threadingStrategy.executeWrite(program, "Set variable type", () -> {
                 try {
                     // Find the function
                     Function func = ServiceUtils.getFunctionForAddress(program, addr);
@@ -3310,19 +3316,12 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
         final Address resolvedEnd = parsedEnd;
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
             Msg.debug(this, "disassembleBytes: Starting disassembly at " + startAddress +
                      (length != null ? " with length " + length : "") +
                      (endAddress != null ? " to " + endAddress : ""));
 
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Disassemble Bytes");
-                boolean success = false;
-
-                try {
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Disassemble Bytes", () -> {
                     // Determine end address
                     Address end;
                     if (resolvedEnd != null) {
@@ -3330,16 +3329,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                         try {
                             end = resolvedEnd.subtract(1);
                         } catch (Exception e) {
-                            errorMsg.set("End address calculation failed: " + e.getMessage());
-                            return;
+                            throw new Refusal("End address calculation failed: " + e.getMessage());
                         }
                     } else if (length != null && length > 0) {
                         // Use length to calculate end address
                         try {
                             end = start.add(length - 1);
                         } catch (Exception e) {
-                            errorMsg.set("End address calculation from length failed: " + e.getMessage());
-                            return;
+                            throw new Refusal("End address calculation from length failed: " + e.getMessage());
                         }
                     } else {
                         // Auto-detect length (scan until we hit existing code/data)
@@ -3370,8 +3367,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
 
                         if (count == 0) {
-                            errorMsg.set("No undefined bytes found at address (already disassembled or defined data)");
-                            return;
+                            throw new Refusal("No undefined bytes found at address (already disassembled or defined data)");
                         }
 
                         // end is now one past the last undefined byte
@@ -3455,39 +3451,21 @@ Map<String, Object> out = new LinkedHashMap<>();
                                 result.put("truncated", false);
                             }
                         }
-                        resultData.set(result);
-                        success = true;
-                    } else {
-                        errorMsg.set("Disassembly failed: " + cmd.getStatusMsg());
-                        Msg.error(this, "disassembleBytes: Disassembly command failed - " + cmd.getStatusMsg());
+                        return result;
                     }
-
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set("Exception during disassembly: " + msg);
-                    Msg.error(this, "disassembleBytes: Exception during disassembly", e);
-                } finally {
-                    tx.end(success);
-                }
+                    throw new Refusal("Disassembly failed: " + cmd.getStatusMsg());
             });
 
             Msg.debug(this, "disassembleBytes: invokeAndWait completed");
-
-            if (errorMsg.get() != null) {
-                Msg.error(this, "disassembleBytes: Returning error response - " + errorMsg.get());
-                return Response.err(errorMsg.get());
-            }
+            Msg.debug(this, "disassembleBytes: Returning success response");
+            return Response.ok(resultData);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            String msg = ServiceUtils.failureMessage(e);
             Msg.error(this, "disassembleBytes: Exception in outer try block", e);
             return Response.err(msg);
         }
-
-        if (resultData.get() != null) {
-            Msg.debug(this, "disassembleBytes: Returning success response");
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown failure");
     }
 
     /**
@@ -3858,19 +3836,17 @@ Map<String, Object> out = new LinkedHashMap<>();
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Rename Variables");
-                // Suppress events during batch operation to prevent re-analysis on each rename
+            threadingStrategy.executeWrite(program, "Batch Rename Variables", () -> {
                 WriteTx eventTx = WriteTx.begin(program, "Suppress Events");
                 program.flushEvents();
+                boolean batchSuccess = false;
 
                 try {
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     funcRef.set(func);
                     if (func == null) {
-                        errorRef.set("No function at address: " + functionAddress);
-                        return;
+                        throw new Refusal("No function at address: " + functionAddress);
                     }
 
                     if (variableRenames != null && !variableRenames.isEmpty()) {
@@ -3981,7 +3957,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
 
-                    success.set(true);
+                    batchSuccess = true;
                 } catch (Exception e) {
                     // If batch operation fails, try individual operations as fallback
                     Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
@@ -3995,12 +3971,11 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 } finally {
                     // ALWAYS close transactions — nested transactions must be closed inner-first
-                    eventTx.end(success.get());
+                    eventTx.end(batchSuccess);
                     program.flushEvents();
-                    tx.end(success.get());
 
                     // Invalidate decompiler cache after successful renames
-                    if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
+                    if (batchSuccess && variablesRenamed.get() > 0 && funcRef.get() != null) {
                         try {
                             DecompInterface tempDecomp = null;
                             try {
@@ -4018,9 +3993,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
                 }
+                return null;
             });
 
-            // Return fallback result if used
             if (fallbackResult.get() != null) {
                 return fallbackResult.get();
             }
@@ -4029,24 +4004,20 @@ Map<String, Object> out = new LinkedHashMap<>();
                 return Response.err(errorRef.get());
             }
 
-            if (success.get()) {
-                Map<String, Object> resultMap = new LinkedHashMap<>();
-                resultMap.put("success", true);
-                resultMap.put("method", "batch");
-                resultMap.put("variables_renamed", variablesRenamed.get());
-                resultMap.put("variables_failed", variablesFailed.get());
-                if (!errors.isEmpty()) {
-                    resultMap.put("errors", errors);
-                }
-                if (!warnings.isEmpty()) {
-                    resultMap.put("warnings", warnings);
-                }
-                return Response.ok(resultMap);
+            Map<String, Object> resultMap = new LinkedHashMap<>();
+            resultMap.put("success", true);
+            resultMap.put("method", "batch");
+            resultMap.put("variables_renamed", variablesRenamed.get());
+            resultMap.put("variables_failed", variablesFailed.get());
+            if (!errors.isEmpty()) {
+                resultMap.put("errors", errors);
             }
-
-            return Response.err("Unknown failure");
+            if (!warnings.isEmpty()) {
+                resultMap.put("warnings", warnings);
+            }
+            return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
     }
 
@@ -4148,22 +4119,20 @@ Map<String, Object> out = new LinkedHashMap<>();
                 "message", "No variables to set (empty payload)"));
         }
 
-        final AtomicInteger typesSet = new AtomicInteger(0);
-        final AtomicInteger namesSet = new AtomicInteger(0);
-        final AtomicInteger failed = new AtomicInteger(0);
-        final List<String> warnings = new ArrayList<>();
-        final List<String> errors = new ArrayList<>();
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
-
+        record SetVariablesOutcome(int typesSet, int namesSet, int failed, List<String> warnings, List<String> errors) {}
+        SetVariablesOutcome outcome;
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Set Variables");
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorRef.set("No function at address: " + functionAddress);
-                        return;
-                    }
+            outcome = threadingStrategy.executeWrite(program, "Set Variables", () -> {
+                int typesSetLocal = 0;
+                int namesSetLocal = 0;
+                int failedLocal = 0;
+                List<String> warningsLocal = new ArrayList<>();
+                List<String> errorsLocal = new ArrayList<>();
+
+                Function func = program.getFunctionManager().getFunctionAt(addr);
+                if (func == null) {
+                    throw new Refusal("No function at address: " + functionAddress);
+                }
 
                     // Phase 1: Set types
                     for (Map.Entry<String, Map<String, String>> entry : variables.entrySet()) {
@@ -4182,31 +4151,31 @@ Map<String, Object> out = new LinkedHashMap<>();
                             }
                         }
                         if (target == null) {
-                            errors.add("Variable not found: " + oldName);
-                            failed.incrementAndGet();
+                            errorsLocal.add("Variable not found: " + oldName);
+                            failedLocal++;
                             continue;
                         }
 
                         // Reject undefined -> undefined
                         String oldType = target.getDataType().getName();
                         if (NamingConventions.isUndefinedToUndefined(oldType, newType)) {
-                            errors.add("Rejected: " + oldName + " type " + oldType + " -> " + newType + " (still undefined)");
-                            failed.incrementAndGet();
+                            errorsLocal.add("Rejected: " + oldName + " type " + oldType + " -> " + newType + " (still undefined)");
+                            failedLocal++;
                             continue;
                         }
 
                         try {
                             DataType dt = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
                             if (dt == null) {
-                                errors.add("Unknown type '" + newType + "' for " + oldName);
-                                failed.incrementAndGet();
+                                errorsLocal.add("Unknown type '" + newType + "' for " + oldName);
+                                failedLocal++;
                                 continue;
                             }
                             target.setDataType(dt, SourceType.USER_DEFINED);
-                            typesSet.incrementAndGet();
+                            typesSetLocal++;
                         } catch (Exception e) {
-                            errors.add("Failed to set type on " + oldName + ": " + e.getMessage());
-                            failed.incrementAndGet();
+                            errorsLocal.add("Failed to set type on " + oldName + ": " + e.getMessage());
+                            failedLocal++;
                         }
                     }
 
@@ -4216,13 +4185,13 @@ Map<String, Object> out = new LinkedHashMap<>();
                         decomp = ServiceUtils.createConfiguredDecompiler(program);
                         DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                         if (decompResult == null || !decompResult.decompileCompleted()) {
-                            errors.add("Decompilation failed after type changes; renames skipped");
-                            return;
+                            errorsLocal.add("Decompilation failed after type changes; renames skipped");
+                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
                         }
                         HighFunction highFunction = decompResult.getHighFunction();
                         if (highFunction == null) {
-                            errors.add("No HighFunction after decompile; renames skipped");
-                            return;
+                            errorsLocal.add("No HighFunction after decompile; renames skipped");
+                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
                         }
 
                         // Commit params if needed
@@ -4254,16 +4223,16 @@ Map<String, Object> out = new LinkedHashMap<>();
                             String actualType = symbol.getDataType().getName();
                             String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
                             if (hungarianWarning != null) {
-                                warnings.add(hungarianWarning);
+                                warningsLocal.add(hungarianWarning);
                             }
 
                             try {
                                 HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                                namesSet.incrementAndGet();
+                                namesSetLocal++;
                                 renamedHere.add(currentName);
                             } catch (Exception e) {
-                                errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
-                                failed.incrementAndGet();
+                                errorsLocal.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
+                                failedLocal++;
                             }
                         }
 
@@ -4284,11 +4253,11 @@ Map<String, Object> out = new LinkedHashMap<>();
                                 if (newName == null || newName.isEmpty() || newName.equals(oldName)) continue;
                                 try {
                                     lowVar.setName(newName, SourceType.USER_DEFINED);
-                                    namesSet.incrementAndGet();
+                                    namesSetLocal++;
                                     renamedHere.add(oldName);
                                 } catch (Exception e) {
-                                    errors.add("Failed to rename storage variable " + oldName + " -> " + newName + ": " + e.getMessage());
-                                    failed.incrementAndGet();
+                                    errorsLocal.add("Failed to rename storage variable " + oldName + " -> " + newName + ": " + e.getMessage());
+                                    failedLocal++;
                                 }
                             }
                         } catch (Exception e) {
@@ -4305,9 +4274,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                             String requestedNew = spec.get("name");
                             if (requestedNew == null || requestedNew.isEmpty() || requestedNew.equals(oldName)) continue;
                             if (!renamedHere.contains(oldName)) {
-                                errors.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
+                                errorsLocal.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
                                         + "name unchanged. Re-fetch with get_functions(fields=parameters,locals) before retrying.");
-                                failed.incrementAndGet();
+                                failedLocal++;
                             }
                         }
                     } finally {
@@ -4315,25 +4284,19 @@ Map<String, Object> out = new LinkedHashMap<>();
                             try { decomp.dispose(); } catch (Exception ignored) {}
                         }
                     }
-                } catch (Exception e) {
-                    errorRef.set(e.getMessage());
-                } finally {
-                    tx.end(errorRef.get() == null);
-                }
+                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
             });
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
-
-        if (errorRef.get() != null) return Response.err(errorRef.get());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
-        result.put("types_set", typesSet.get());
-        result.put("names_set", namesSet.get());
-        result.put("failed", failed.get());
-        if (!warnings.isEmpty()) result.put("warnings", warnings);
-        if (!errors.isEmpty()) result.put("errors", errors);
+        result.put("types_set", outcome.typesSet());
+        result.put("names_set", outcome.namesSet());
+        result.put("failed", outcome.failed());
+        if (!outcome.warnings().isEmpty()) result.put("warnings", outcome.warnings());
+        if (!outcome.errors().isEmpty()) result.put("errors", outcome.errors());
         return Response.ok(result);
     }
 

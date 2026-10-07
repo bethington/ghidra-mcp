@@ -225,22 +225,21 @@ public class SymbolLabelService {
                 }
             }
 
-            WriteTx tx = WriteTx.begin(program, "Rename Label");
+            final Symbol labelToRename = targetSymbol;
             try {
-                targetSymbol.setName(newName, SourceType.USER_DEFINED);
-                List<String> labelWarnings = NamingConventions.validateLabelName(newName);
-                if (labelWarnings.isEmpty()) {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                            "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
-                } else {
+                return threadingStrategy.executeWrite(program, "Rename Label", () -> {
+                    labelToRename.setName(newName, SourceType.USER_DEFINED);
+                    List<String> labelWarnings = NamingConventions.validateLabelName(newName);
+                    if (labelWarnings.isEmpty()) {
+                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                                "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
+                    }
                     return Response.ok(JsonHelper.mapOf("status", "success", "message",
                             "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr,
                             "warnings", labelWarnings));
-                }
+                });
             } catch (Exception e) {
-                return Response.err("Error renaming label: " + e.getMessage());
-            } finally {
-                tx.end(true);
+                return Response.err("Error renaming label: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
@@ -305,26 +304,23 @@ public class SymbolLabelService {
                 }
             }
 
-            WriteTx tx = WriteTx.begin(program, "Create Label");
             try {
-                Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
-                if (newSymbol != null) {
-                    List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
-                    if (labelWarnings.isEmpty()) {
-                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                                "Created label '" + labelName + "' at address " + addressStr));
-                    } else {
+                return threadingStrategy.executeWrite(program, "Create Label", () -> {
+                    Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
+                    if (newSymbol != null) {
+                        List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
+                        if (labelWarnings.isEmpty()) {
+                            return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                                    "Created label '" + labelName + "' at address " + addressStr));
+                        }
                         return Response.ok(JsonHelper.mapOf("status", "success", "message",
                                 "Created label '" + labelName + "' at address " + addressStr,
                                 "warnings", labelWarnings));
                     }
-                } else {
                     return Response.err("Failed to create label '" + labelName + "' at address " + addressStr);
-                }
+                });
             } catch (Exception e) {
-                return Response.err("Error creating label: " + e.getMessage());
-            } finally {
-                tx.end(true);
+                return Response.err("Error creating label: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
@@ -350,16 +346,18 @@ public class SymbolLabelService {
             return Response.err("No labels provided");
         }
 
-        final AtomicInteger successCount = new AtomicInteger(0);
-        final AtomicInteger skipCount = new AtomicInteger(0);
-        final AtomicInteger errorCount = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        int successCount;
+        int skipCount;
+        int errorCount;
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Create Labels");
-                try {
-                    SymbolTable symbolTable = program.getSymbolTable();
+            record BatchCreateCounts(int successCount, int skipCount, int errorCount) {}
+            BatchCreateCounts tallies = threadingStrategy.executeWrite(program, "Batch Create Labels", () -> {
+                int successCountLocal = 0;
+                int skipCountLocal = 0;
+                int errorCountLocal = 0;
+                SymbolTable symbolTable = program.getSymbolTable();
 
                     for (Map<String, String> labelEntry : labels) {
                         String addressStr = labelEntry.get("address");
@@ -367,12 +365,12 @@ public class SymbolLabelService {
 
                         if (addressStr == null || addressStr.isEmpty()) {
                             errors.add("Missing address in label entry");
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
                         if (labelName == null || labelName.isEmpty()) {
                             errors.add("Missing name for address " + addressStr);
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
 
@@ -380,7 +378,7 @@ public class SymbolLabelService {
                             Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
                                 errors.add(ServiceUtils.getLastParseError());
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                                 continue;
                             }
 
@@ -394,44 +392,42 @@ public class SymbolLabelService {
                             }
 
                             if (labelExists) {
-                                skipCount.incrementAndGet();
+                                skipCountLocal++;
                                 continue;
                             }
 
                             Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                             if (newSymbol != null) {
-                                successCount.incrementAndGet();
+                                successCountLocal++;
                                 // Validate label naming convention
                                 List<String> lw = NamingConventions.validateLabelName(labelName);
                                 if (!lw.isEmpty()) errors.addAll(lw);  // Surface as errors for visibility
                             } else {
                                 errors.add("Failed to create label '" + labelName + "' at " + addressStr);
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                             }
 
                         } catch (Exception e) {
                             errors.add("Error at " + addressStr + ": " + e.getMessage());
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             Msg.error(this, "Error creating label at " + addressStr, e);
                         }
                     }
 
-                } catch (Exception e) {
-                    errors.add("Transaction error: " + e.getMessage());
-                    Msg.error(this, "Error in batch create labels transaction", e);
-                } finally {
-                    tx.end(successCount.get() > 0);
-                }
+                return new BatchCreateCounts(successCountLocal, skipCountLocal, errorCountLocal);
             });
+            successCount = tallies.successCount();
+            skipCount = tallies.skipCount();
+            errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
                 "success", true,
-                "labels_created", successCount.get(),
-                "labels_skipped", skipCount.get(),
-                "labels_failed", errorCount.get()
+                "labels_created", successCount,
+                "labels_skipped", skipCount,
+                "labels_failed", errorCount
         );
         if (!errors.isEmpty()) {
             result.put("errors", errors);
@@ -559,13 +555,14 @@ public class SymbolLabelService {
                         "No symbols found at address " + addressStr));
             }
 
-            final AtomicInteger deletedCount = new AtomicInteger(0);
             final List<String> deletedNames = new ArrayList<>();
             final List<String> errors = new ArrayList<>();
 
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Delete Label");
-                try {
+            record DeleteLabelResult(boolean success, int deletedCount, List<String> deletedNames, List<String> errors) {}
+            DeleteLabelResult outcome;
+            try {
+                outcome = threadingStrategy.executeWrite(program, "Delete Label", () -> {
+                    int deletedCount = 0;
                     for (Symbol symbol : symbols) {
                         if (symbol.getSymbolType() != SymbolType.LABEL) {
                             continue;
@@ -579,26 +576,25 @@ public class SymbolLabelService {
                         String name = symbol.getName();
                         boolean deleted = symbol.delete();
                         if (deleted) {
-                            deletedCount.incrementAndGet();
+                            deletedCount++;
                             deletedNames.add(name);
                         } else {
                             errors.add("Failed to delete label: " + name);
                         }
                     }
-                } catch (Exception e) {
-                    errors.add("Error during deletion: " + e.getMessage());
-                } finally {
-                    tx.end(deletedCount.get() > 0);
-                }
-            });
+                    return new DeleteLabelResult(deletedCount > 0, deletedCount, List.copyOf(deletedNames), List.copyOf(errors));
+                });
+            } catch (Exception e) {
+                return Response.err(ServiceUtils.failureMessage(e));
+            }
 
             Map<String, Object> result = JsonHelper.mapOf(
-                    "success", deletedCount.get() > 0,
-                    "deleted_count", deletedCount.get(),
-                    "deleted_names", deletedNames
+                    "success", outcome.success(),
+                    "deleted_count", outcome.deletedCount(),
+                    "deleted_names", outcome.deletedNames()
             );
-            if (!errors.isEmpty()) {
-                result.put("errors", errors);
+            if (!outcome.errors().isEmpty()) {
+                result.put("errors", outcome.errors());
             }
             return Response.ok(result);
 
@@ -625,24 +621,26 @@ public class SymbolLabelService {
             return Response.err("No labels provided");
         }
 
-        final AtomicInteger deletedCount = new AtomicInteger(0);
-        final AtomicInteger skippedCount = new AtomicInteger(0);
-        final AtomicInteger errorCount = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        int deletedCount;
+        int skippedCount;
+        int errorCount;
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Delete Labels");
-                try {
-                    SymbolTable symbolTable = program.getSymbolTable();
+            record BatchDeleteCounts(int deletedCount, int skippedCount, int errorCount) {}
+            BatchDeleteCounts tallies = threadingStrategy.executeWrite(program, "Batch Delete Labels", () -> {
+                int deletedCountLocal = 0;
+                int skippedCountLocal = 0;
+                int errorCountLocal = 0;
+                SymbolTable symbolTable = program.getSymbolTable();
 
-                    for (Map<String, String> labelEntry : labels) {
+                for (Map<String, String> labelEntry : labels) {
                         String addressStr = labelEntry.get("address");
                         String labelNameEntry = labelEntry.get("name");
 
                         if (addressStr == null || addressStr.isEmpty()) {
                             errors.add("Missing address in label entry");
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
 
@@ -650,13 +648,13 @@ public class SymbolLabelService {
                             Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
                                 errors.add(ServiceUtils.getLastParseError());
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                                 continue;
                             }
 
                             Symbol[] symbols = symbolTable.getSymbols(address);
                             if (symbols == null || symbols.length == 0) {
-                                skippedCount.incrementAndGet();
+                                skippedCountLocal++;
                                 continue;
                             }
 
@@ -672,32 +670,31 @@ public class SymbolLabelService {
 
                                 boolean deleted = symbol.delete();
                                 if (deleted) {
-                                    deletedCount.incrementAndGet();
+                                    deletedCountLocal++;
                                 } else {
                                     errors.add("Failed to delete at " + addressStr);
-                                    errorCount.incrementAndGet();
+                                    errorCountLocal++;
                                 }
                             }
                         } catch (Exception e) {
                             errors.add("Error at " + addressStr + ": " + e.getMessage());
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                         }
                     }
-                } catch (Exception e) {
-                    errors.add("Transaction error: " + e.getMessage());
-                } finally {
-                    tx.end(deletedCount.get() > 0);
-                }
+                return new BatchDeleteCounts(deletedCountLocal, skippedCountLocal, errorCountLocal);
             });
+            deletedCount = tallies.deletedCount();
+            skippedCount = tallies.skippedCount();
+            errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e));
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
                 "success", true,
-                "labels_deleted", deletedCount.get(),
-                "labels_skipped", skippedCount.get(),
-                "errors_count", errorCount.get()
+                "labels_deleted", deletedCount,
+                "labels_skipped", skippedCount,
+                "errors_count", errorCount
         );
         if (!errors.isEmpty()) {
             result.put("errors", errors.subList(0, Math.min(errors.size(), 10)));
@@ -774,58 +771,38 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicReference<String> successMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Rename data");
-                try {
-                    Listing listing = program.getListing();
-                    Data data = listing.getDefinedDataAt(addr);
+            String successMsg = threadingStrategy.executeWrite(program, "Rename data", () -> {
+                Listing listing = program.getListing();
+                Data data = listing.getDefinedDataAt(addr);
 
-                    if (data != null) {
-                        SymbolTable symTable = program.getSymbolTable();
-                        Symbol symbol = symTable.getPrimarySymbol(addr);
-                        if (symbol != null) {
-                            // Idempotent on name: if the address already has the
-                            // requested name, skip setName (Ghidra throws
-                            // DuplicateNameException for same-name reassignment).
-                            if (newName.equals(symbol.getName())) {
-                                successMsg.set("Defined data at " + addressStr + " is already named '" + newName + "' (no-op)");
-                            } else {
-                                symbol.setName(newName, SourceType.USER_DEFINED);
-                                successMsg.set("Renamed defined data at " + addressStr + " to '" + newName + "'");
-                            }
-                            success.set(true);
-                        } else {
-                            symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
-                            successMsg.set("Created label '" + newName + "' at " + addressStr);
-                            success.set(true);
-                        }
-                    } else {
-                        errorMsg.set("No defined data at address " + addressStr + ". Use create_label for undefined addresses.");
-                    }
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Rename data error", e);
-                } finally {
-                    tx.end(success.get());
+                if (data == null) {
+                    throw new Refusal("No defined data at address " + addressStr + ". Use create_label for undefined addresses.");
                 }
-            });
-        } catch (Exception e) {
-            return Response.err("Failed to execute rename on Swing thread: " + e.getMessage());
-        }
 
-        if (success.get()) {
-            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message", successMsg.get());
+                SymbolTable symTable = program.getSymbolTable();
+                Symbol symbol = symTable.getPrimarySymbol(addr);
+                if (symbol != null) {
+                    // Idempotent on name: if the address already has the
+                    // requested name, skip setName (Ghidra throws
+                    // DuplicateNameException for same-name reassignment).
+                    if (newName.equals(symbol.getName())) {
+                        return "Defined data at " + addressStr + " is already named '" + newName + "' (no-op)";
+                    }
+                    symbol.setName(newName, SourceType.USER_DEFINED);
+                    return "Renamed defined data at " + addressStr + " to '" + newName + "'";
+                }
+                symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
+                return "Created label '" + newName + "' at " + addressStr;
+            });
+            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message", successMsg);
             if (!enforcementWarnings.isEmpty()) {
                 result.put("warnings", enforcementWarnings);
             }
             return Response.ok(result);
+        } catch (Exception e) {
+            return Response.err(ServiceUtils.failureMessage(e));
         }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
     }
 
     /** Three-arg overload preserving the pre-v5.11.2 signature. */
@@ -898,41 +875,35 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        WriteTx tx = WriteTx.begin(program, "Rename Global Variable");
-        boolean success = false;
         try {
-            Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
-            if (symbol == null) {
-                return Response.err("Global variable '" + oldName + "' not found");
-            }
-            Address symbolAddr = symbol.getAddress();
-            // Idempotent: oldName == newName is a no-op success rather than
-            // a DuplicateNameException. Workers re-running rename_symbol
-            // after a successful prior call hit this; treat as already-applied.
-            if (newName.equals(symbol.getName())) {
-                success = true;
+            return threadingStrategy.executeWrite(program, "Rename Global Variable", () -> {
+                Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
+                if (symbol == null) {
+                    throw new Refusal("Global variable '" + oldName + "' not found");
+                }
+                Address symbolAddr = symbol.getAddress();
+                // Idempotent: oldName == newName is a no-op success rather than
+                // a DuplicateNameException. Workers re-running rename_symbol
+                // after a successful prior call hit this; treat as already-applied.
+                if (newName.equals(symbol.getName())) {
+                    Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
+                            "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)");
+                    if (!enforcementWarnings.isEmpty()) {
+                        result.put("warnings", enforcementWarnings);
+                    }
+                    return Response.ok(result);
+                }
+                symbol.setName(newName, SourceType.USER_DEFINED);
+
                 Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                        "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)");
+                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr);
                 if (!enforcementWarnings.isEmpty()) {
                     result.put("warnings", enforcementWarnings);
                 }
                 return Response.ok(result);
-            }
-            symbol.setName(newName, SourceType.USER_DEFINED);
-
-            success = true;
-            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                    "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr);
-            if (!enforcementWarnings.isEmpty()) {
-                result.put("warnings", enforcementWarnings);
-            }
-            return Response.ok(result);
-
+            });
         } catch (Exception e) {
-            Msg.error(this, "Error renaming global variable: " + e.getMessage());
-            return Response.err(e.getMessage());
-        } finally {
-            tx.end(success);
+            return Response.err(ServiceUtils.failureMessage(e));
         }
         } catch (Exception e) {
             // try-with-resources close() can throw Exception (checked).
@@ -999,37 +970,21 @@ public class SymbolLabelService {
                         final ExternalLocation finalExtLoc = extLoc;
                         final String oldName = extLoc.getLabel();
 
-                        AtomicBoolean success = new AtomicBoolean(false);
-                        AtomicReference<String> errorMsg = new AtomicReference<>();
-
                         try {
-                            threadingStrategy.runOnUi(() -> {
-                                WriteTx tx = WriteTx.begin(program, "Rename external location");
-                                try {
-                                    Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
-                                    finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
-                                    success.set(true);
-                                    Msg.info(this, "Renamed external location: " + oldName + " -> " + newName);
-                                } catch (Exception e) {
-                                    errorMsg.set(e.getMessage());
-                                    Msg.error(this, "Error renaming external location: " + e.getMessage());
-                                } finally {
-                                    tx.end(success.get());
-                                }
+                            threadingStrategy.executeWrite(program, "Rename external location", () -> {
+                                Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
+                                finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
+                                Msg.info(this, "Renamed external location: " + oldName + " -> " + newName);
+                                return null;
                             });
-                        } catch (Exception e) {
-                            errorMsg.set(e.getMessage());
-                        }
-
-                        if (success.get()) {
                             return Response.ok(JsonHelper.mapOf(
                                     "success", true,
                                     "old_name", oldName,
                                     "new_name", newName,
                                     "dll", finalLibName
                             ));
-                        } else {
-                            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
+                        } catch (Exception e) {
+                            return Response.err(ServiceUtils.failureMessage(e));
                         }
                     }
                 }
