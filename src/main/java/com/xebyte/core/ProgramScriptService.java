@@ -2370,8 +2370,7 @@ public class ProgramScriptService {
                     }
 
                     // Set up script state
-                    ghidra.program.util.ProgramLocation location = new ghidra.program.util.ProgramLocation(program, program.getMinAddress());
-                    ghidra.app.script.GhidraState scriptState = scriptState(workbench, program, location);
+                    ghidra.app.script.GhidraState scriptState = scriptState(workbench, program);
 
                     ghidra.util.task.TaskMonitor scriptMonitor;
                     if (timeoutSeconds > 0) {
@@ -2491,9 +2490,13 @@ public class ProgramScriptService {
     /**
      * The state a script runs with. Headless has no tool, but the project is real: scripts
      * reach other files through {@code getState().getProject()}, which was null here.
+     * The location is the program's first address; a program with no memory has none, and
+     * Ghidra reports a null-address ProgramLocation as an error (a dialog in the GUI).
      */
-    ghidra.app.script.GhidraState scriptState(Workbench workbench, Program program,
-            ghidra.program.util.ProgramLocation location) {
+    ghidra.app.script.GhidraState scriptState(Workbench workbench, Program program) {
+        ghidra.program.model.address.Address start = program.getMinAddress();
+        ghidra.program.util.ProgramLocation location =
+            start == null ? null : new ghidra.program.util.ProgramLocation(program, start);
         if (workbench != null) {
             return workbench.scriptState(program, location);
         }
