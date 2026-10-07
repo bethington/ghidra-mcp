@@ -1073,8 +1073,8 @@ public class ListingService {
                                + "<space>:<hex> (e.g. mem:1000). This is the selector: matching is done "
                                + "on the address alone, so a dll_name with no address finds nothing.") String address,
             @Param(value = "dll_name", defaultValue = "",
-                   description = "External library name (as list_imports / list_external_locations report "
-                               + "it) to scope the search to. Omit to scan every library. It narrows the "
+                   description = "External library name (as list_program_items(kind=imports) or "
+                               + "kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the "
                                + "search only — it cannot select an entry by itself.") String dllName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);

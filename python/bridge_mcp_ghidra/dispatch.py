@@ -45,7 +45,7 @@ def failure_message(text: str) -> str | None:
     * ``{"status": "rejected", ...}`` — e.g. a plate comment refused by convention
 
     A top-level list, plain text, or an ``error`` nested inside a per-item entry
-    (``/get_bulk_xrefs`` reports "No instruction at address" that way) is not a
+    (bulk ``/get_functions`` reports a function it cannot find that way) is not a
     call failure and must stay a success.
     """
     stripped = text.strip() if text else ""

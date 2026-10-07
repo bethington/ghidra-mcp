@@ -24,8 +24,8 @@ import java.util.List;
 public class Document_FunctionWithClaude extends GhidraScript {
     
     private static final String PLATE_COMMENT_PROMPT = 
-        "First, call get_ui_cursor(type="function") function to retrieve the function at the current cursor position in Ghidra.\n\n" +
-        "Then, create a comprehensive function header comment using set_plate_comment following the exact format template from Format Template. " +
+        "First, call get_ui_cursor(type=\"function\") to retrieve the function at the current cursor position in Ghidra.\n\n" +
+        "Then, create a comprehensive function header comment using set_comment(type=\"plate\") following the exact format template from Format Template. " +
         "The plate comment must use plain text format WITHOUT any decorative borders - Ghidra adds all formatting automatically. " +
         "The format includes: a one-line function summary, an Algorithm section with numbered steps describing each major operation in the function, " +
         "a Parameters section listing each parameter with its type and purpose, a Returns section documenting return values and conditions, " +
@@ -89,12 +89,12 @@ public class Document_FunctionWithClaude extends GhidraScript {
         }
 
         println("Analyzing function: " + currentFunction.getName() + " @ " + currentFunction.getEntryPoint());
-        println("Claude will retrieve full function details via get_ui_cursor(type="function") MCP tool");
+        println("Claude will retrieve full function details via get_ui_cursor(type=\"function\") MCP tool");
 
         // Build the complete prompt
         String fullPrompt = PLATE_COMMENT_PROMPT +
-            "Please analyze the current function retrieved via get_ui_cursor(type="function") and generate a comprehensive plate comment following the format template. " +
-            "Use the MCP tool set_plate_comment to apply the comment to the function's address. " +
+            "Please analyze the current function retrieved via get_ui_cursor(type=\"function\") and generate a comprehensive plate comment following the format template. " +
+            "Use the MCP tool set_comment with type=\"plate\" to apply the comment at the function's address. " +
             "Remember: provide ONLY plain text without decorative borders - Ghidra adds formatting automatically.";
 
         println("\n=== Calling Claude AI ===");

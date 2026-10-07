@@ -308,8 +308,8 @@ def debugger_list_breakpoints() -> str:
 def debugger_continue() -> str:
     """Resume execution of the debugged process.
 
-    Returns immediately. The process runs until a breakpoint is hit,
-    an exception occurs, or debugger_interrupt() is called.
+    Returns immediately. The process runs until a breakpoint is hit
+    or an exception occurs.
     """
     return _debugger_request("POST", "/debugger/go")
 

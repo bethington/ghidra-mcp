@@ -23,13 +23,15 @@ import java.util.*;
  *
  * <h3>Typical agent workflow for API hash resolution</h3>
  * <pre>{@code
- * 1. decompile_function(hash_func_addr) → understand calling convention
- * 2. get_function_variables(hash_func) → identify input/output registers
+ * 1. get_functions(function=hash_func_addr, fields="decompiled_code,signature")
+ *    → understand calling convention
+ * 2. get_functions(function=hash_func_addr, fields="parameters,locals")
+ *    → identify input/output registers
  * 3. emulate_function(hash_func_addr, registers={ECX: string_ptr},
  *        memory=[{addr: string_ptr, data: "CreateProcessW\0"}])
  *    → returns {EAX: 0x7C0DFCAA}
  * 4. Compare 0x7C0DFCAA against target hash → match!
- * 5. batch_set_comments(hash_call_addr, "Resolved: CreateProcessW")
+ * 5. set_comment(hash_call_addr, "Resolved: CreateProcessW", type="eol")
  * }</pre>
  *
  * <h3>Batch mode for brute-forcing</h3>

@@ -1851,7 +1851,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 resultMsg.append(alreadyInClass ? "Confirmed " : "Moved ").append(func.getName())
                         .append(alreadyInClass ? " in class " : " into class ").append(className)
                         .append("; 'this' types as ").append(resolvedName)
-                        .append(" (auto-storage). Call get_decompiled_code or force_decompile to refresh output.");
+                        .append(" (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.");
                 return null;
             });
         } catch (Exception e) {
