@@ -47,8 +47,10 @@ import java.util.*;
  * - Server-side reverse engineering
  *
  * Usage:
- *   java -jar GhidraMCPHeadless.jar --port 8089 --project /path/to/project
- *   java -jar GhidraMCPHeadless.jar --port 8089 --file /path/to/binary.exe
+ *   java -cp "<ghidra-mcp jar>:<Ghidra jars>" com.xebyte.headless.GhidraMCPHeadlessServer  *       --port 8089 --project /path/to/project
+ *
+ * The jar does not bundle Ghidra, so there is no runnable {@code java -jar} form;
+ * docker/entrypoint.sh builds the classpath from a Ghidra installation.
  */
 public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
@@ -178,7 +180,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private void printUsage() {
         System.out.println("GhidraMCP Headless Server v" + VersionInfo.getVersion());
         System.out.println();
-        System.out.println("Usage: java -jar GhidraMCPHeadless.jar [options]");
+        System.out.println("Usage: java -cp <ghidra-mcp jar><sep><Ghidra jars> com.xebyte.headless.GhidraMCPHeadlessServer [options]");
+        System.out.println("  (no java -jar form: the jar does not bundle Ghidra; see docker/entrypoint.sh)");
         System.out.println();
         System.out.println("Options:");
         System.out.println("  --port, -p <port>      Also serve TCP on this port (default: Unix socket only)");
@@ -195,13 +198,13 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         System.out.println();
         System.out.println("Examples:");
         System.out.println("  # Start server with no initial program");
-        System.out.println("  java -jar GhidraMCPHeadless.jar --port 8089");
+        System.out.println("  ... GhidraMCPHeadlessServer --port 8089");
         System.out.println();
         System.out.println("  # Start server accessible from Docker network");
-        System.out.println("  java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089");
+        System.out.println("  ... GhidraMCPHeadlessServer --bind 0.0.0.0 --port 8089");
         System.out.println();
         System.out.println("  # Start server with a binary file");
-        System.out.println("  java -jar GhidraMCPHeadless.jar --file /path/to/binary.exe");
+        System.out.println("  ... GhidraMCPHeadlessServer --file /path/to/binary.exe");
         System.out.println();
         System.out.println("Always serves on $XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock, where the");
         System.out.println("bridge discovers it; TCP additionally at http://<address>:<port>/ when asked.");

@@ -36,6 +36,7 @@ _TRUTHY = {"1", "true", "yes", "on"}
 def _debugger_enabled(
     url_explicit: bool = DEBUGGER_URL_EXPLICIT,
     override: str | None = None,
+    url: str = DEBUGGER_URL,
 ) -> bool:
     """Whether to register the 22 debugger proxy tools in this process.
 
@@ -49,8 +50,14 @@ def _debugger_enabled(
         It wins over the URL, so ``GHIDRA_DEBUGGER_TOOLS=0`` turns the tools
         off even with a URL configured.
       - Otherwise the tools register only when ``GHIDRA_DEBUGGER_URL`` was
-        explicitly set in the environment. The built-in default URL does not
-        count: having a default port is not evidence that a server exists.
+        explicitly set in the environment AND the call path would accept it.
+        The built-in default URL does not count: having a default port is not
+        evidence that a server exists. A non-loopback URL does not register
+        either, because _debugger_request refuses every non-loopback URL
+        (these primitives attach to processes and write memory), so it would
+        advertise 22 tools that every call rejects. To reach a debugger on
+        another machine, forward its port to loopback and set
+        ``GHIDRA_DEBUGGER_TOOLS=1``.
 
     The host platform plays no part: being on Windows says nothing about
     whether a debugger server is running.
@@ -63,7 +70,17 @@ def _debugger_enabled(
         override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
     if override is not None and override.strip():
         return override.strip().lower() in _TRUTHY
-    return bool(url_explicit)
+    if not url_explicit:
+        return False
+    if not validate_server_url(url):
+        logger.warning(
+            "GHIDRA_DEBUGGER_URL=%s is not a loopback http://host:port URL; the debugger "
+            "proxy refuses those, so its tools are not registered. Forward the port to "
+            "127.0.0.1 and point GHIDRA_DEBUGGER_URL there, or set GHIDRA_DEBUGGER_TOOLS=1.",
+            url,
+        )
+        return False
+    return True
 
 
 _DEBUGGER_ACTIVE = _debugger_enabled()

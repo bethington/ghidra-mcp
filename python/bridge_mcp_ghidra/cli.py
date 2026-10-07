@@ -596,8 +596,8 @@ def main():
     if args.stateless_http and state._lazy_mode:
         logger.warning(
             "Stateless HTTP cannot deliver tools/list_changed, so a group loaded by "
-            "load_tool_group() stays invisible to the client. Use --no-lazy (the "
-            "default) when running stateless."
+            "load_tool_group() stays invisible to the client. Pass --no-lazy (or set "
+            "GHIDRA_MCP_LAZY=0) when running stateless; lazy loading is the default."
         )
 
     _host = args.mcp_host

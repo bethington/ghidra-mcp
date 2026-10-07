@@ -529,7 +529,9 @@ export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
 export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
 
-java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
+# The jar does not bundle Ghidra; put both on the classpath, as docker/entrypoint.sh does
+java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadlessServer \r
+    --bind 0.0.0.0 --port 8089
 ```
 
 ---

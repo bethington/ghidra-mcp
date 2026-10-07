@@ -2048,6 +2048,22 @@ class TestDebuggerEnabled(unittest.TestCase):
 
         self.assertTrue(_debugger_enabled(url_explicit=False, override="1"))
 
+    def test_explicit_remote_url_does_not_register(self):
+        """A remote URL is refused at call time (loopback only), so it must not register."""
+        from bridge_mcp_ghidra import _debugger_enabled
+
+        self.assertFalse(_debugger_enabled(url_explicit=True, url="http://winbox.lan:8099", override=None))
+
+    def test_override_enables_a_tunnelled_loopback_url(self):
+        """The supported route to another machine: forward the port to loopback, then opt in."""
+        from bridge_mcp_ghidra import _debugger_enabled
+        from bridge_mcp_ghidra.validation import validate_server_url
+
+        url = "http://127.0.0.1:18099"
+        self.assertTrue(_debugger_enabled(url_explicit=True, url=url, override=None))
+        self.assertTrue(_debugger_enabled(url_explicit=False, url=url, override="1"))
+        self.assertTrue(validate_server_url(url), "the call path must accept what registration enables")
+
     def test_tools_flag_accepts_truthy_spellings(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
