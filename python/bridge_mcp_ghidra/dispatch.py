@@ -29,6 +29,10 @@ class GhidraToolError(Exception):
     """
 
 
+# How much of a failed call's console output to quote when it gave no other reason.
+_FAILURE_OUTPUT_TAIL = 1500
+
+
 def failure_message(text: str) -> str | None:
     """Return the error message if this response body reports a failure.
 
@@ -68,6 +72,12 @@ def failure_message(text: str) -> str | None:
             parts.append(value.strip())
     if parts:
         return " — ".join(parts)
+    # No reason field: the explanation, if any, is in the output (a failed script once
+    # reached the agent as a bare "the server reported failure" with its NPE in here).
+    output = payload.get("console_output")
+    if isinstance(output, str) and output.strip():
+        tail = output.strip()[-_FAILURE_OUTPUT_TAIL:]
+        return "the server reported failure; end of its output:\n" + tail
     status = payload.get("status")
     return status if isinstance(status, str) and status.strip() else "the server reported failure"
 

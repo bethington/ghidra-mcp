@@ -24,6 +24,19 @@ control and the CodeBrowser tools became shared services
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Fixed — headless scripts get the project; failed scripts say why
+
+- **A script run by the headless server had no project.** Its state was built with a null
+  project, so `getState().getProject().getProjectData()` threw a `NullPointerException` in any
+  script that opened another project file. Found live: an agent's label-sync script died on
+  that line.
+- **A failed script reached the caller as "the server reported failure".** The exception was
+  only in `console_output`, which the bridge did not report, so the agent guessed a cause
+  ("scripts may not open server files") and abandoned the approach. A failed
+  `run_script_inline` / `run_ghidra_script` now carries `error`: the exception and the
+  script's own line (`NullPointerException: ... (SyncLabels2.java:15)`), and the bridge quotes
+  the end of `console_output` for any failed call that gives no other reason.
+
 ### Changed — shared services on both servers (version control, lifecycle, GUI tools, batch docs)
 
 The GUI plugin and headless server still built overlapping logic in the plugin class,

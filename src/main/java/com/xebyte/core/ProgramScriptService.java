@@ -2241,6 +2241,8 @@ public class ProgramScriptService {
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
+        // Why the run failed, in one line, so a caller gets the reason and not only a flag.
+        final AtomicReference<String> failure = new AtomicReference<>();
         final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
         final PrintStream originalOut = System.out;
         final PrintStream originalErr = System.err;
@@ -2369,12 +2371,7 @@ public class ProgramScriptService {
 
                     // Set up script state
                     ghidra.program.util.ProgramLocation location = new ghidra.program.util.ProgramLocation(program, program.getMinAddress());
-                    ghidra.app.script.GhidraState scriptState;
-                    if (workbench != null) {
-                        scriptState = workbench.scriptState(program, location);
-                    } else {
-                        scriptState = new ghidra.app.script.GhidraState(null, null, program, location, null, null);
-                    }
+                    ghidra.app.script.GhidraState scriptState = scriptState(workbench, program, location);
 
                     ghidra.util.task.TaskMonitor scriptMonitor;
                     if (timeoutSeconds > 0) {
@@ -2422,6 +2419,7 @@ public class ProgramScriptService {
                     }
                     resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
                     resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
+                    failure.set(failureReason(e, new File(scriptPath).getName()));
 
                     StringWriter sw = new StringWriter();
                     PrintWriter pw = new PrintWriter(sw);
@@ -2476,12 +2474,53 @@ public class ProgramScriptService {
             });
         } catch (Exception e) {
             resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
+            failure.compareAndSet(null, "Failed to execute on the UI thread: " + e.getMessage());
             Msg.error(this, "Failed to execute on Swing thread", e);
         }
 
-        return Response.ok(JsonHelper.mapOf(
-                "success", success.get(),
-                "console_output", resultMsg.toString()));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("success", success.get());
+        if (!success.get()) {
+            out.put("error", failure.get() != null ? failure.get()
+                : "The script did not complete; see console_output.");
+        }
+        out.put("console_output", resultMsg.toString());
+        return Response.ok(out);
+    }
+
+    /**
+     * The state a script runs with. Headless has no tool, but the project is real: scripts
+     * reach other files through {@code getState().getProject()}, which was null here.
+     */
+    ghidra.app.script.GhidraState scriptState(Workbench workbench, Program program,
+            ghidra.program.util.ProgramLocation location) {
+        if (workbench != null) {
+            return workbench.scriptState(program, location);
+        }
+        return new ghidra.app.script.GhidraState(
+            null, programProvider.getProject(), program, location, null, null);
+    }
+
+    /**
+     * {@code NullPointerException: <message> (MyScript.java:15)}: the exception and the
+     * script's own line where it surfaced, the two facts a caller needs to act on it.
+     */
+    static String failureReason(Throwable e, String scriptFileName) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        StringBuilder sb = new StringBuilder(root.getClass().getSimpleName());
+        if (root.getMessage() != null) {
+            sb.append(": ").append(root.getMessage());
+        }
+        for (StackTraceElement frame : root.getStackTrace()) {
+            if (scriptFileName.equals(frame.getFileName())) {
+                sb.append(" (").append(frame.getFileName()).append(':').append(frame.getLineNumber()).append(')');
+                break;
+            }
+        }
+        return sb.toString();
     }
 
     @McpTool(path = "/run_script_inline", dryRun = false, method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
@@ -3533,9 +3572,11 @@ public class ProgramScriptService {
             // Extract the structured result from runGhidraScript's own response
             // rather than string-matching its serialized JSON.
             boolean succeeded = false;
+            Object error = null;
             String output = scriptResponse.toJson();
             if (scriptResponse instanceof Response.Ok ok && ok.data() instanceof Map<?, ?> dataMap) {
                 succeeded = Boolean.TRUE.equals(dataMap.get("success"));
+                error = dataMap.get("error");
                 Object consoleOutput = dataMap.get("console_output");
                 if (consoleOutput != null) output = consoleOutput.toString();
             } else if (scriptResponse instanceof Response.Err err) {
@@ -3551,6 +3592,9 @@ public class ProgramScriptService {
             boolean emitOutput = captureOutput || !succeeded;
             Map<String, Object> scriptResult = new LinkedHashMap<>();
             scriptResult.put("success", succeeded);
+            if (error != null) {
+                scriptResult.put("error", error);
+            }
             scriptResult.put("script_name", scriptName);
             scriptResult.put("script_path", scriptFile.getAbsolutePath());
             scriptResult.put("execution_time_seconds", Double.parseDouble(String.format("%.2f", executionTime)));
