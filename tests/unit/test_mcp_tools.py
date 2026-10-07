@@ -611,6 +611,19 @@ class TestFailureDetection(unittest.TestCase):
                         '"suggestion": "Prepend g_."}')
         self.assertEqual(msg, "name_quality — Global 'x' must start with 'g_'. — Prepend g_.")
 
+    def test_a_failed_script_reports_its_reason(self):
+        """Found live: run_script_inline failed with an NPE and the agent saw only
+        "the server reported failure", then guessed the cause and gave up."""
+        body = ('{"success": false, "error": "NullPointerException: Cannot invoke '
+                '\\"Project.getProjectData()\\" (SyncLabels2.java:15)", "console_output": "..."}')
+        self.assertIn("SyncLabels2.java:15", self._msg(body))
+
+    def test_without_a_reason_field_the_end_of_the_output_is_quoted(self):
+        output = "x" * 5000 + "\nError: NullPointerException: getProject() is null"
+        msg = self._msg(json.dumps({"success": False, "console_output": output}))
+        self.assertIn("NullPointerException: getProject() is null", msg)
+        self.assertLess(len(msg), 2000)
+
     def test_successful_payloads_are_not_failures(self):
         for body in (
             '{"status": "success", "message": "renamed"}',
