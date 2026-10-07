@@ -18,6 +18,7 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.pcode.*;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.exception.CancelledException;
+import java.util.Iterator;
 
 public class Repair_CustomRegisters extends GhidraScript {
 
@@ -47,8 +48,8 @@ public class Repair_CustomRegisters extends GhidraScript {
                 if (highFunc != null) {
                     LocalSymbolMap lsm = highFunc.getLocalSymbolMap();
 
-                    HighFunctionDBUtil.commitParamsToDatabase(highFunc, true, SourceType.USER_DEFINED);
-                    HighFunctionDBUtil.commitReturnToDatabase(highFunc, SourceType.USER_DEFINED);
+                    HighFunctionDBUtil.commitParamsToDatabase(highFunc, true,
+                        HighFunctionDBUtil.ReturnCommitOption.COMMIT, SourceType.USER_DEFINED);
                     HighFunctionDBUtil.commitLocalNamesToDatabase(highFunc, SourceType.USER_DEFINED);
 
                     Iterator<HighSymbol> symbols = lsm.getSymbols();

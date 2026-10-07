@@ -70,9 +70,9 @@ public class FindFunctionsAfterPaddingWrapper extends GhidraScript {
 				Address blockEnd = block.getEnd();
 				Address currentAddr = blockStart;
 
-				while (currentAddr <= blockEnd && !monitor.isCancelled()) {
+				while (currentAddr.compareTo(blockEnd) <= 0 && !monitor.isCancelled()) {
 					try {
-						byte currentByte = memory.getByte(currentAddr) & 0xFF;
+						byte currentByte = memory.getByte(currentAddr);
 
 						if (paddingByteSet.contains((byte) currentByte)) {
 							// Found first padding byte - check for sequence
@@ -81,9 +81,9 @@ public class FindFunctionsAfterPaddingWrapper extends GhidraScript {
 							Address sequenceEnd = currentAddr;
 
 							Address checkAddr = currentAddr.add(1);
-							while (checkAddr <= blockEnd) {
+							while (checkAddr.compareTo(blockEnd) <= 0) {
 								try {
-									byte checkByte = memory.getByte(checkAddr) & 0xFF;
+									byte checkByte = memory.getByte(checkAddr);
 									if (paddingByteSet.contains((byte) checkByte)) {
 										paddingLength++;
 										sequenceEnd = checkAddr;
@@ -104,7 +104,7 @@ public class FindFunctionsAfterPaddingWrapper extends GhidraScript {
 								if (REQUIRE_RET_BEFORE_PADDING && sequenceStart.getOffset() > 0) {
 									try {
 										Address prevAddr = sequenceStart.subtract(1);
-										byte prevByte = memory.getByte(prevAddr) & 0xFF;
+										byte prevByte = memory.getByte(prevAddr);
 										hasRETBefore = isRetInstruction(prevByte);
 									} catch (Exception e) {
 										hasRETBefore = false;
@@ -114,7 +114,7 @@ public class FindFunctionsAfterPaddingWrapper extends GhidraScript {
 								if (!REQUIRE_RET_BEFORE_PADDING || hasRETBefore) {
 									// Try to create function at next address after padding
 									Address nextAddr = sequenceEnd.add(1);
-									if (nextAddr <= blockEnd) {
+									if (nextAddr.compareTo(blockEnd) <= 0) {
 										try {
 											Function existing = currentProgram.getFunctionManager().getFunctionContaining(nextAddr);
 											if (existing == null) {

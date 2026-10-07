@@ -91,6 +91,10 @@ dependencies {
 // classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
 test {
     jvmArgs '-Dnet.bytebuddy.experimental=true'
+    // GhidraScriptsCompileGhidraTest compiles ghidra_scripts/, which is not a
+    // source set, so without this a script-only change left :test UP-TO-DATE
+    // and a broken script reported BUILD SUCCESSFUL.
+    inputs.dir('ghidra_scripts').withPropertyName('ghidraScripts')
     // Mirrors the surefire systemPropertyVariables in pom.xml. The offline
     // source-reading tests resolve the repo through
     // com.xebyte.offline.ProjectSource, which can find the root by itself but

@@ -99,7 +99,7 @@ public class Repair_AutoFixOrdinalLinkage extends GhidraScript {
         List<Map<String, Object>> pointers = new ArrayList<>();
 
         ExternalManager externalManager = currentProgram.getExternalManager();
-        Collection<String> externalNames = externalManager.getExternalLibraryNames();
+        String[] externalNames = externalManager.getExternalLibraryNames();
 
         println("Scanning external libraries for ordinal pointers...");
         println("");

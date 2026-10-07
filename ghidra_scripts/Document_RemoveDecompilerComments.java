@@ -40,7 +40,7 @@ public class Document_RemoveDecompilerComments extends GhidraScript {
         Address minAddr = func.getBody().getMinAddress();
         Address maxAddr = func.getBody().getMaxAddress();
 
-        for (Address addr = minAddr; addr <= maxAddr && !monitor.isCancelled(); addr = addr.add(1)) {
+        for (Address addr = minAddr; addr.compareTo(maxAddr) <= 0 && !monitor.isCancelled(); addr = addr.add(1)) {
             CodeUnit cu = listing.getCodeUnitAt(addr);
             if (cu != null) {
                 totalCount++;

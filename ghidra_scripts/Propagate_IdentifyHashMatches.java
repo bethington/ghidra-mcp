@@ -89,7 +89,7 @@ public class Propagate_IdentifyHashMatches extends GhidraScript {
                     address,
                     hash,
                     program,
-                    func.getBody().getNumAddresses(),
+                    (int) func.getBody().getNumAddresses(),
                     0
                 );
                 

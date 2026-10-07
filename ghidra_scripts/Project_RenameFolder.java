@@ -39,9 +39,9 @@ public class Project_RenameFolder extends GhidraScript {
         DomainFile[] files = folder.getFiles();
         for (DomainFile df : files) {
             // Close any open consumers
-            Object[] consumers = df.getConsumers();
+            java.util.List<?> consumers = df.getConsumers();
             if (consumers != null) {
-                println("  File " + df.getName() + " has " + consumers.length + " consumer(s)");
+                println("  File " + df.getName() + " has " + consumers.size() + " consumer(s)");
                 for (Object consumer : consumers) {
                     try {
                         DomainObject obj = df.getDomainObject(consumer, false, false, monitor);
