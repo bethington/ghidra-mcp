@@ -39,14 +39,21 @@ docs/
 ├── INSTALL_GUI.md
 ├── images/install/
 ├── PROJECT_STRUCTURE.md
+├── TESTING.md
+├── connection-triage-guide.md
 ├── NAMING_CONVENTIONS.md
 ├── HUNGARIAN_NOTATION.md
 ├── PLATE_COMMENT_BEST_PRACTICES.md
+├── STRUCT_RESIZE_WORKFLOW.md
+├── THIS_POINTER_TYPING.md
 ├── GHIDRA_VARIABLE_APIS_EXPLAINED.md
 ├── JAVA_HANDLER_REFACTORING.md
 ├── MAVEN_VERSION_MANAGEMENT.md
 ├── MULTI_PROGRAM_SUPPORT_ANALYSIS.md
 ├── ORGANIZATION_SUMMARY.md
+├── Context-Window-Analysis.md
+├── MARKDOWN_NAMING.md
+├── archive/
 ├── project-management/
 ├── prompts/
 └── releases/
@@ -83,6 +90,10 @@ The supported operator workflow is Python-first:
 - `python -m tools.setup deploy`
 - `python -m tools.setup start-ghidra`
 - `python -m tools.setup bump-version --new X.Y.Z`
+
+`tools.setup` uses Maven unless `TOOLS_SETUP_BACKEND=gradle` is set; for local
+builds, `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<ghidra>` is the default
+and needs no Maven install.
 
 Documentation in this directory should prefer that command surface and should
 not point readers at removed wrapper-script workflows.

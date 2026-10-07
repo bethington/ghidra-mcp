@@ -232,8 +232,7 @@ Default fallback                        -> szGame_ or szStr_
 | Tool | Purpose |
 | ------ | --------- |
 | `list_strings` | Retrieve all defined strings with addresses |
-| `create_label` | Apply labels efficiently in batches |
-| `create_label` | Apply single label |
+| `create_label` | Apply one label (`address`, `name`), or many in one call with `labels=[...]` |
 | `get_xrefs_to` | Analyze string usage context |
 | `get_functions` | Understand how string is used |
 
@@ -250,7 +249,7 @@ labels = [
     {"address": "0x6fb7f5f0", "name": "szCRT_R6029_NetRuntimeError"},
     {"address": "0x6fb7f694", "name": "szCRT_R6028_HeapInitError"}
 ]
-# Use create_label(labels)
+# Use create_label(labels=labels)
 ```
 
 ---

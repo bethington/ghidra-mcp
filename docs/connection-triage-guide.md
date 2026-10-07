@@ -81,11 +81,11 @@ regression check that the chosen route has not drifted.
 
 Interpret the results as follows:
 
-- `200` from `/mcp/health` (GUI) or `/health` (headless) means the HTTP server can
-  answer a health request.
-- `200` from GUI `/mcp/instance_info` means the server can report instance metadata
-  such as its process, project, and open-program state. Headless mode records this
-  GUI-only check as not applicable.
+- `200` from `/mcp/health` means the HTTP server can answer a health request. The
+  GUI plugin and the headless server both serve it; the headless server's old
+  `/health` route is gone.
+- `200` from `/mcp/instance_info` means the server can report instance metadata
+  such as its process, project, and open-program state. Both server kinds serve it.
 - A successful `/check_connection` response proves the basic plugin/headless connection
   path, but it is not a replacement for instance metadata when more than one instance
   may be running.

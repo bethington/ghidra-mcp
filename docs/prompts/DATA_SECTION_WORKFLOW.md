@@ -20,7 +20,7 @@ Targeted pass for .data/.rdata: enumerate, type, rename, and document globals an
 
 - Apply data types before renaming: apply_data_type (or create_struct when needed)
 - For pointers/tables: follow pointer chains; type both the pointer and the target; set correct stride for arrays
-- For function pointers/import tables: resolve ordinals using docs/KNOWN_ORDINALS.md; set function pointer types where possible
+- For function pointers/import tables: resolve ordinals against the exporting DLL (open it and read `list_program_items(kind="exports")`); set function pointer types where possible
 
 ### 3) Structs and Ownership
 

@@ -50,7 +50,7 @@ old-to-new call-site mapping.
 **Also done, in 7.0.0.** Lazy loading is now the **default** (#440, PR #452), so
 a client that cannot take the full set works out of the box rather than after
 reading the docs. The core groups loaded on connect are `listing`, `function`
-and `program` — 84 endpoints plus the 8 static bridge tools. `--no-lazy`
+and `program` — 67 endpoints plus the 8 static bridge tools. `--no-lazy`
 restores eager registration for clients that ignore `tools/list_changed`.
 
 Issue #440 is still open: the fix is on `dev` and has not shipped in a tagged

@@ -136,7 +136,7 @@ Analyze_Functions.py
 ### Function Naming (snake_case)
 
 ```python
-def get_function_xrefs():                   ✅
+def collect_function_xrefs():               ✅
 def batch_rename_functions():               ✅
 def extract_ioc_strings():                  ✅
 ```
@@ -235,39 +235,10 @@ archive/                      — Store completed reports here
 
 ## Directory Structure
 
-### Standard Layout (recommended)
+### Repository Layout
 
-```text
-ghidra-mcp/
-├── README.md                 — Project overview
-├── CONTRIBUTING.md           — Contribution guide
-├── CHANGELOG.md              — Version history
-├── docs/
-│   ├── TOOL_REFERENCE.md
-│   ├── ERROR_CODES.md
-│   ├── PERFORMANCE_BASELINES.md
-│   └── ARCHITECTURE.md
-├── examples/
-│   ├── README.md
-│   ├── analyze_functions.py
-│   ├── create_struct_workflow.py
-│   └── ...
-├── src/
-│   ├── main/java/
-│   │   └── com/xebyte/
-│   │       ├── GhidraMCPPlugin.java
-│   │       ├── ToolRegistry.java
-│   │       └── ...
-│   └── test/java/
-│       └── com/xebyte/
-│           └── GhidraMCPPluginTest.java
-├── tools/
-│   ├── setup/
-│   └── README.md   # index of the tools in this directory
-├── logs/
-│   └── (archived logs here)
-└── ...
-```
+The real layout, kept current, is in [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+Follow the naming rules on this page when adding to it.
 
 ---
 

@@ -46,4 +46,4 @@ this server, and left the repo with that project's tooling:
 
 ## Archive
 
-Earlier workflow versions (V1-V4), compact/subagent variants, and superseded reference docs are in [archive/](archive/). Use V5 for all new work.
+Earlier workflow versions (V1-V4) and their compact/subagent variants were removed in v5.0.0 and survive only in git history (`git log --diff-filter=D -- docs/prompts/`). Use V5 for all new work.

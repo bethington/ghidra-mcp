@@ -11,7 +11,7 @@ Before dispatching any subagents, verify Ghidra is running and the plugin is acc
 3. If connection refused: **stop immediately** and inform the user. Do not dispatch subagents - they will all fail with the same connection error. Suggest:
    - Start Ghidra and open a program in CodeBrowser
    - Run `ghidra-mcp-setup.ps1 -Deploy` to auto-activate the plugin
-   - Verify the MCP server is started (Tools > GhidraMCP > Start MCP Server)
+   - Verify the MCP server is started (Tools > GhidraMCP > Server Status; start it with Tools > GhidraMCP > Start Server if it is stopped)
 
 ## Dispatch Pattern
 
@@ -22,7 +22,7 @@ Task(
   description: "Document FunctionName",
   prompt: "Follow docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md to document the function
   at address 0xADDRESS (currently named 'FUN_XXXXXXXX').
-  Skip get_ui_cursor(type="selection") — the address is provided above.
+  Skip get_ui_cursor(type='selection') — the address is provided above.
   Apply all changes directly in Ghidra using MCP tools.
 
   CRITICAL: In Step 3, you MUST call get_functions(fields=parameters,locals) to check actual

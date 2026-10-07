@@ -82,7 +82,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Dynamic Analysis (v5.4.0)
 
 - **P-code Emulation** — Run any function in isolation via Ghidra's `EmulatorHelper`; brute-force API hash resolution in milliseconds
-- **Live Debugger Integration** — 17 Java endpoints over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise), plus 22 opt-in bridge proxies for an external debugger server: attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
+- **Live Debugger Integration** — 16 `/debugger/*` endpoints over Ghidra's TraceRmi framework (GUI plugin only; dbgeng on Windows PE, gdb/lldb otherwise): launch, interrupt/resume, step into/over/out, breakpoints, registers, memory reads, stack traces, ASLR-aware static↔dynamic address translation. The bridge can also proxy 22 `debugger_*` tools to an external debugger server; they are opt-in (see [below](#optional-connect-an-external-debugger-server))
 
 ### AI-Powered Reverse Engineering Workflows
 
@@ -94,7 +94,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Development & Automation
 
-- **Ghidra Script Management** — Create, run, update, and delete Ghidra scripts entirely via MCP
+- **Ghidra Script Execution** — List and run Ghidra scripts, or run inline script code, via MCP (running them is opt-in: `GHIDRA_MCP_ALLOW_SCRIPTS=1`)
 - **Multi-Program Support** — Switch between and compare multiple open programs
 - **Batch Operations** — Bulk renaming, commenting, typing, and label management (93% fewer API calls)
 - **Headless Server** — Full analysis without Ghidra GUI — Docker and CI/CD ready
@@ -106,7 +106,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Prerequisites
 
 - **Java 21 LTS** (OpenJDK recommended)
-- **Apache Maven 3.9+**
+- **Apache Maven 3.9+** for the `python -m tools.setup` commands below (Maven is their default backend). Not needed if you build with the committed Gradle wrapper instead — see step 6
 - **Ghidra 12.1.4** (or compatible version)
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
@@ -297,7 +297,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
    The extension is installed to `~/Library/ghidra/ghidra_12.1.4_PUBLIC/Extensions/GhidraMCP/`.
 
-   > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
+   > **Note:** the Homebrew path contains no version string, so `tools.setup` reads the Ghidra version from `Ghidra/application.properties` inside the installation instead.
 
 5. **Start Ghidra and enable the plugin:**
 
@@ -441,6 +441,17 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
 | `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
+| `--tools-page-size` | `0` | Serve `tools/list` in pages of this size (`0` = one page). Only for a client that cannot take one large response; a client that ignores `nextCursor` sees only the first page. |
+| `--json-response` | off | streamable-http: answer POSTs with plain JSON instead of an SSE stream. Server-initiated messages such as `tools/list_changed` are then not delivered. |
+| `--stateless-http` | off | streamable-http: no session id and no server-initiated notifications, for running several bridge workers behind a load balancer. Pair it with `--no-lazy`, since a group loaded later can never be announced. |
+
+To require a token from MCP clients of an HTTP transport, set
+`GHIDRA_MCP_INBOUND_TOKEN=<secret>`; clients must then send
+`Authorization: Bearer <secret>`. The bridge logs a warning when it binds a
+non-loopback `--mcp-host` without one. Separately, when `GHIDRA_MCP_AUTH_TOKEN`
+(the token the bridge sends to Ghidra) is set and the bridge binds a
+non-loopback host, clients must present that same token, so the bridge cannot
+be used to relay it.
 
 #### Lazy tool loading is the default (issue #440)
 
@@ -456,7 +467,7 @@ The specified schema produces a constraint that has too many states for serving
 
 That is not a degradation, it is an outright break, and no client-side setting
 could work around a server that only ever offered the full set. So the bridge
-now loads `listing,function,program` (84 endpoints plus the 8 static tools) on
+now loads `listing,function,program` (67 endpoints plus the 8 static tools) on
 connect and registers the rest on demand.
 
 **If your client ignores `tools/list_changed`** it will not notice tools that
@@ -529,30 +540,32 @@ allowlist has to be small *and* self-sufficient.
 | Tool | Group | What it buys you |
 | --- | --- | --- |
 | `get_metadata` | `program` | Which binary is loaded — name, architecture, image base, function count. Orientation, and it confirms the bridge reached Ghidra at all. |
-| `list_methods` | `listing` | Paginated function-name enumeration (`offset`, `limit`). **This is the discovery tool** — without it the agent cannot answer "what is in this binary". |
+| `find_functions` | `listing` | Paginated function enumeration (`offset`, `limit`); with no filter it lists the whole program, and `name_pattern`/`regex` turn it into a name search. **This is the discovery tool** — without it the agent cannot answer "what is in this binary". |
 | `get_entry_points` | `listing` | Where execution starts, so analysis has a root to work down from. |
-| `decompile_function` | `function` | The payload. Takes `address` **or** `functions=` (comma-separated names *or* addresses), so one call can pull several bodies. |
+| `get_functions` | `function` | The payload. Takes `function=` (name or address) **or** `functions=` (comma-separated names *or* addresses, up to 20), and `fields=` to pick what comes back: `decompiled_code`, `signature`, `callers`, `callees`, `xrefs`, `comments`, and more. |
 
-That set is genuinely closed: `get_entry_points` and `list_methods` supply the
-addresses and names that `decompile_function` consumes, and a decompiled body
-names its callees, which feed straight back into `decompile_function`.
+That set is genuinely closed: `get_entry_points` and `find_functions` supply the
+addresses and names that `get_functions` consumes, and its `callees` field names
+the next functions to feed straight back into it.
 
 The three tools suggested in [#441](https://github.com/bethington/ghidra-mcp/issues/441)
-— `get_metadata`, `get_entry_points`, `decompile_function` — all exist under
-exactly those names and are a workable floor. `list_methods` is the one addition
-worth making: without it the agent can only reach code that is reachable by name
-from something it already decompiled, so anything not referenced from an entry
-point is invisible.
+were `get_metadata`, `get_entry_points` and `decompile_function`. The first two
+still exist under those names; `decompile_function` was folded into
+`get_functions` in 7.0.0 (`fields=decompiled_code`), and
+[the migration guide](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)
+maps every other removed name. `find_functions` is the one addition worth
+making: without it the agent can only reach code that is reachable by name from
+something it already decompiled, so anything not referenced from an entry point
+is invisible.
 
 **Useful next additions, in order:**
 
 | Tool | Group | Why |
 | --- | --- | --- |
-| `get_function_callers` / `get_function_callees` | `xref` | Walk the call graph without decompiling every body to find edges. |
-| `get_xrefs_to` | `xref` | Who touches this address — the standard question about a global. |
+| `get_function_call_graph` | `xref` | A multi-level call graph (`depth`, `direction`) in one call. One level of callers and callees already comes from `get_functions`. |
+| `get_xrefs_to` | `xref` | Who touches this address — the standard question about a global. Takes `addresses=` for several at once. |
 | `list_strings` | `listing` | Strings are the cheapest orientation signal in an unknown binary. |
-| `search_functions` | `listing` | Name search, once the agent knows what it is hunting for. |
-| `list_imports` / `list_exports` | `listing` | The binary's external surface. |
+| `list_program_items` | `listing` | `kind=imports` / `kind=exports`: the binary's external surface. Other kinds list segments, classes, namespaces, data items and external locations. |
 
 Every tool above is a `GET`; none of them writes to the Ghidra database.
 
@@ -569,7 +582,7 @@ Every tool above is a `GET`; none of them writes to the Ghidra database.
   `--default-groups listing,function,program,xref`.
 - **A narrow allowlist plus `--lazy` needs the group tools.** If you allowlist
   only leaf tools and run lazily, the agent has no way to load anything else.
-  Either run eagerly (`--no-lazy`, the default) or add `search_tools`,
+  Either run eagerly (`--no-lazy`; lazy is the default) or add `search_tools`,
   `list_tool_groups`, `load_tool_group`, and `check_tools` to the allowlist.
 
 Verify any allowlist against the running server rather than against this table:
@@ -601,10 +614,10 @@ Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
 
 #### In Ghidra
 
-1. Start Ghidra and open a **CodeBrowser** window
-2. In **CodeBrowser**, enable the plugin via **File > Configure > Utility > Configure > GhidraMCPPlugin**
-3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
-4. The server starts with the plugin; check it via **Tools > GhidraMCP > Server Status** in the project window
+1. Start Ghidra and open your project
+2. In the **project window**, enable the plugin via **File > Configure > Utility > Configure > GhidraMCPPlugin** (this is what `deploy` does; enabling it in CodeBrowser also works, but then the server runs only while CodeBrowser is open)
+3. Optional: configure a custom port via **Edit > Tool Options > GhidraMCP HTTP Server** in the same window
+4. The server starts with the plugin; check it via **Tools > GhidraMCP > Server Status**
 5. The server runs on `http://127.0.0.1:8089/` by default
 
 Screenshots of every step: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
@@ -615,9 +628,13 @@ Screenshots of every step: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 # Quick health check
 curl http://127.0.0.1:8089/check_connection
 # Expected: {"status": "ok", "server_kind": "gui", "version": "7.0.0", "program": "<name>"}
+# ("program" appears only while a program is current)
 
-# Get version info
+# Fuller health: build details, uptime, open program count, HTTP pool, memory
 curl http://127.0.0.1:8089/mcp/health
+
+# Every tool the server advertises
+curl -s http://127.0.0.1:8089/mcp/schema | jq '.tools | length'
 ```
 
 ## Support This Project
@@ -636,7 +653,7 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 
 | Env var | Effect |
 | --- | --- |
-| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are exempt. |
+| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are exempt. |
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
 | `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
 
@@ -659,8 +676,15 @@ export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
 export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
 
-java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
+# Headless server (`mvn clean package -P headless -DskipTests`). The jar does not
+# bundle Ghidra, so Ghidra's Framework/Features/Processors jars go on the
+# classpath too -- docker/entrypoint.sh builds exactly that command.
+java -cp "target/GhidraMCP-<version>.jar:<ghidra jars>" \
+  com.xebyte.headless.GhidraMCPHeadlessServer --bind 0.0.0.0 --port 8089
 ```
+
+The headless server serves only its Unix domain socket unless `--port` or
+`--bind` is given; either one adds the TCP listener.
 
 ### Ghidra Server authentication
 
@@ -817,9 +841,11 @@ again even with a URL configured.
 
 **Solution:**
 
-1. Verify endpoint exists: `curl http://127.0.0.1:8089/mcp/health`
+1. Verify the endpoint exists: `curl -s http://127.0.0.1:8089/mcp/schema` lists every tool the server advertises
 2. Check for typos in endpoint name
 3. Ensure you're using correct HTTP method (GET vs POST)
+4. If a script or prompt calls a tool that worked before 7.0.0 (`decompile_function`, `list_functions`, `search_functions`, `get_function_callers`, `list_imports`, ...), it was consolidated: the [7.0.0 migration guide](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md) names the replacement for every removed tool
+5. Some routes exist on only one server: `/debugger/*` and `/tool/*` are GUI-only, and `/create_project`, `/close_project`, `/delete_project` and `/list_projects` are headless-only (see the API Reference)
 
 ### Python Ghidra scripts fail with "No script provider found"
 
@@ -847,7 +873,7 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 ### Build fails with "Ghidra dependencies not found"
 
-**Cause:** Ghidra JARs not installed in local Maven repository.
+**Cause:** Ghidra JARs not installed in local Maven repository (Maven backend only; Gradle reads them straight from the installation).
 
 **Solution:**
 
@@ -855,6 +881,10 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 # Windows (recommended)
 python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 ```
+
+Under Gradle, a wall of `package ghidra.program.model.address does not exist`
+errors instead means `-PGHIDRA_INSTALL_DIR` resolved to nothing — in Git Bash,
+write the path with forward slashes.
 
 ## 📊 Production Performance
 
@@ -1191,7 +1221,7 @@ python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup bump-version --new X.Y.Z
 ```
 
-The authoritative build system today is Maven. `tools.setup`, the VS Code tasks, and the documented deploy flow all build through `pom.xml` and write artifacts to `target/`. `build.gradle` remains in the repo as a manual fallback for direct Ghidra/Gradle users, but it is not the primary path.
+Both Java backends are maintained. Gradle (`./gradlew`, wrapper committed) is the default for local work and writes to `build/`; CI builds and gates with Maven, which writes to `target/`. `tools.setup` routes through Maven unless `TOOLS_SETUP_BACKEND=gradle`. Three things exist only under Maven: regenerating `tests/endpoints.json` (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`), the JaCoCo coverage gate, and the `headless`/`docker` build profiles.
 
 ### Command Reference
 
@@ -1202,12 +1232,12 @@ The authoritative build system today is Maven. `tools.setup`, the VS Code tasks,
 | `build` | Build the plugin JAR and extension ZIP via Maven (or Gradle when `TOOLS_SETUP_BACKEND=gradle`). |
 | `deploy` | Copy the built extension into the Ghidra profile and patch `FrontEndTool.xml` for auto-activation. |
 | `start-ghidra` | Launch the configured Ghidra installation. |
-| `clean` | Remove Maven/Gradle build outputs (`target/`, `build/`). |
+| `clean` | Remove the selected backend's build output (`target/`, or `build/` under Gradle). |
 | `clean-all` | Remove build outputs plus local cache artifacts (`.m2` Ghidra JARs, etc.). |
 | `install-ghidra-deps` | Install only the Ghidra JARs into `~/.m2`. Useful when the build environment changes. |
 | `install-python-deps` | Install the Python dependency groups via `uv sync`. |
-| `run-tests` | Run the Java offline test suite (no live Ghidra needed). |
-| `verify-version` | Check that version strings are consistent across `pom.xml`, `CHANGELOG.md`, and `README.md`. |
+| `run-tests` | Run the backend's whole Java `test` task (`mvn test`, or `gradlew test` under Gradle). The integration classes in it need a live Ghidra on port 8089. |
+| `verify-version` | Check `pom.xml`'s Ghidra version against the `--ghidra-path` installation (same major.minor series passes). |
 | `bump-version --new X.Y.Z` | Atomically update all version references. Pass `--tag` to create a git tag. |
 
 Common flags accepted by most commands:
@@ -1242,7 +1272,7 @@ python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 # Version bump and tag
 python -m tools.setup bump-version --new X.Y.Z --tag
 
-# Run offline Java tests
+# Run the Java test suite (integration classes need a live Ghidra)
 python -m tools.setup run-tests
 
 # Show full help
@@ -1259,31 +1289,32 @@ ghidra-mcp/
 │   └── com/xebyte/
 │       ├── GhidraMCPPlugin.java         # GUI plugin (205 endpoints)
 │       ├── headless/                    # Headless server (190 endpoints)
-│       └── core/                        # Shared service layer (14 services)
+│       └── core/                        # Shared service layer (`*Service.java`, `@McpTool`-annotated)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
-│   └── endpoints.json      # Endpoint specification (225 entries)
+│   └── endpoints.json      # Endpoint catalog (the authoritative tool list)
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts (V5 documentation workflows)
 │   ├── releases/           # Version release notes
 │   └── project-management/ # Contributor planning docs (Gradle migration, etc.)
 ├── tools/setup/             # Build and deployment CLI (python -m tools.setup)
+├── docker/                  # Headless server + bridge containers
 └── .github/workflows/      # CI/CD pipelines
 ```
 
 ### Library Dependencies
 
-Ghidra JARs must be installed into your local Maven repository (`~/.m2/repository`) before compilation.
+Under the Maven backend, Ghidra JARs must be installed into your local Maven repository (`~/.m2/repository`) before compilation.
 This is a one-time setup per machine, and again when your Ghidra version changes.
-`-Deploy` now installs these automatically by default.
+`ensure-prereqs` does it for you; Gradle needs no such step, because it reads the jars from the installation.
 
 The tool enforces version consistency between:
 
 - `pom.xml` (`ghidra.version`)
 - `--ghidra-path` version segment (e.g., `ghidra_12.1.4_PUBLIC`)
 
-If these do not match, deployment fails fast with a clear error.
+If they are not in the same major.minor series, deployment fails fast with a clear error (a different patch release of the same series is accepted).
 
 ### Troubleshooting: Version Mismatch
 
@@ -1303,7 +1334,7 @@ python -m tools.setup preflight --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.4_PUBLIC"
 ```
 
-**Required Libraries (14 JARs, ~37MB):**
+**Required Libraries (18 JARs, as listed in `tools/setup/ghidra.py`):**
 
 | Library | Source Path | Purpose |
 | --------- | ------------ | --------- |
@@ -1321,6 +1352,10 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 | **Graph.jar** | `Framework/Graph/lib/` | Graph/call graph analysis |
 | **DB.jar** | `Framework/DB/lib/` | Database operations |
 | **Emulation.jar** | `Framework/Emulation/lib/` | P-code emulation |
+| **Help.jar** | `Framework/Help/lib/` | Help system |
+| **Debugger-api.jar** | `Debug/Debugger-api/lib/` | Debugger service API |
+| **Framework-TraceModeling.jar** | `Debug/Framework-TraceModeling/lib/` | Debug trace model |
+| **Debugger-rmi-trace.jar** | `Debug/Debugger-rmi-trace/lib/` | Trace RMI debugger connection |
 
 > **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
 
@@ -1330,7 +1365,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 >
 > - `python -m tools.setup` is the supported setup/build/deploy/versioning interface
 > - use `ensure-prereqs`, `build`, `deploy`, `preflight`, `clean-all`, and `bump-version` directly
-> - these commands currently use Maven as the canonical Java build backend
+> - these commands use Maven unless `TOOLS_SETUP_BACKEND=gradle` is set
 
 ### Development Features
 
@@ -1371,32 +1406,42 @@ GhidraMCP includes a headless server mode for automated analysis without the Ghi
 ### Quick Start with Docker
 
 ```bash
-# Build and run
-docker-compose up -d ghidra-mcp
+# Build and run (the compose files live in docker/). The token is required:
+# the container binds 0.0.0.0, and the server refuses a non-loopback bind
+# without one.
+cd docker
+export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+docker compose up -d --build
 
-# Test connection
+# Test connection (/check_connection and /mcp/health need no token)
 curl http://localhost:8089/check_connection
 # {"status": "ok", "server_kind": "headless", "version": "7.0.0"}
 ```
 
+This starts the headless server on `:8089` and the MCP bridge on `:8081`
+(streamable-http at `/mcp`). See [docker/README.md](docker/README.md) for the
+full deployment guide.
+
 ### Headless API Workflow
 
 ```bash
+AUTH="Authorization: Bearer $GHIDRA_MCP_AUTH_TOKEN"
+
 # 1. Import a binary into the open project (auto-analysis runs by default)
-curl -X POST -H 'Content-Type: application/json' \
+curl -X POST -H "$AUTH" -H 'Content-Type: application/json' \
      -d '{"file_path": "/data/program.exe"}' http://localhost:8089/import_file
 
 # 2. Re-run auto-analysis later if needed
-curl -X POST http://localhost:8089/run_analysis
+curl -X POST -H "$AUTH" http://localhost:8089/run_analysis
 
 # 3. List discovered functions
-curl "http://localhost:8089/list_functions?limit=20"
+curl -H "$AUTH" "http://localhost:8089/find_functions?limit=20"
 
 # 4. Decompile a function
-curl "http://localhost:8089/decompile_function?address=0x401000"
+curl -H "$AUTH" "http://localhost:8089/get_functions?function=0x401000&fields=decompiled_code"
 
 # 5. Get metadata
-curl http://localhost:8089/get_metadata
+curl -H "$AUTH" http://localhost:8089/get_metadata
 ```
 
 ### Key Headless Endpoints
@@ -1406,13 +1451,12 @@ curl http://localhost:8089/get_metadata
 | `/import_file` | POST | Import a binary into the project and open it |
 | `/open_program` | POST | Open a program already in the project (any `program=` also opens on demand) |
 | `/run_analysis` | POST | Run Ghidra auto-analysis |
-| `/list_functions` | GET | List all discovered functions |
-| `/list_exports` | GET | List exported symbols |
-| `/list_imports` | GET | List imported symbols |
-| `/decompile_function` | GET | Decompile function to C code |
+| `/find_functions` | GET | List or filter discovered functions |
+| `/list_program_items` | GET | `kind=imports`, `exports`, `segments`, `classes`, `namespaces`, `data_items` or `external_locations` |
+| `/get_functions` | GET | Decompiled code, signature, callers, callees and more for one or many functions (`fields=` picks) |
 | `/create_function` | POST | Create function at address |
 | `/get_metadata` | GET | Get program metadata |
-| `/create_project` | POST | Create a Ghidra project |
+| `/create_project` | POST | Create a Ghidra project (headless only) |
 | `/list_analyzers` | GET | List available analyzers |
 | `/server/status` | GET | Check Ghidra Server connection |
 
@@ -1420,6 +1464,7 @@ curl http://localhost:8089/get_metadata
 
 Environment variables for Docker:
 
+- `GHIDRA_MCP_AUTH_TOKEN` - Bearer token, **required** by the compose files (see above)
 - `GHIDRA_MCP_PORT` - Server port (default: 8089)
 - `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
 - `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
