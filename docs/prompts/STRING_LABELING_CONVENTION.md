@@ -101,7 +101,7 @@ sz[Category]_[Description][Suffix]
 | Menu labels (Options, Previous) | `szMenu_` | `szMenu_Options` |
 | Option names (Gamma, Contrast) | `szOpt_` | `szOpt_LightQuality` |
 | UI element names | `szUI_` | `szUI_MiniPanel` |
-| Window/dialog titles | `szTitle_` | `szTitle_DiabloII` |
+| Window/dialog titles | `szTitle_` | `szTitle_MainWindow` |
 | Screen identifiers | `szScreen_` | `szScreen_Screen01` |
 
 ### Format and Debug Strings
@@ -133,8 +133,8 @@ sz[Category]_[Description][Suffix]
 
 | Content Pattern | Category | Example Label |
 | ----------------- | ---------- | --------------- |
-| Battle.net strings | `szBnet_` | `szBnet_ChatPrefix` |
-| Server IPs/addresses | `szServer_` | `szServer_BnetIP1` |
+| Online-service strings | `szNet_` | `szNet_ChatPrefix` |
+| Server IPs/addresses | `szServer_` | `szServer_PrimaryIP` |
 | Chat commands (/whisper) | `szChat_` | `szChat_Whisper` |
 | Command strings | `szCmd_` | `szCmd_NoPickup` |
 

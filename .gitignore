@@ -463,33 +463,6 @@ completeness-tracking.json
 functions-progress-worker*.json
 
 # =============================================================================
-# WORKFLOW LOCAL STATE FILES
-# =============================================================================
-
-# RE loop runtime state (project-specific, regenerated per session)
-workflows/loop_state.json
-workflows/learnings.md
-workflows/proposals.json
-workflows/community_names.json
-workflows/community/*.csv
-workflows/survey_*.json
-
-# Ghidra manager config (contains local paths)
-workflows/.ghidra_manager_config.json
-
-# Improvement loop state (session-specific)
-workflows/.improvement_state.json
-workflows/.self_improvement_state.json
-
-# Session and quality history
-workflows/.session_history.json
-workflows/.quality_history.json
-
-# Workflow logs and reports
-workflows/logs/
-workflows/reports/
-
-# =============================================================================
 # TEST OUTPUT DIRECTORIES
 # =============================================================================
 
@@ -512,69 +485,23 @@ nul
 CLAUDE.local.md
 
 # =============================================================================
-# PROJECT-SPECIFIC ANALYSIS REPOS (nested repos, tracked separately)
+# PER-PROJECT ANALYSIS DATA (never part of this repo)
 # =============================================================================
-# Project-specific analysis files live in their own repos inside this workspace.
-# Clone them as needed: git clone <repo-url> <folder-name>
+# Reverse-engineering work on a specific target (exports maps, examples,
+# generated documentation, todo lists, investigation notes) belongs in that
+# target's own repository, not here.
 
-# Diablo 2 analysis: https://github.com/bethington/d2-ghidra-analysis
-d2-analysis/
-
-# =============================================================================
-# PROJECT-SPECIFIC FILES (Not part of universal ghidra-mcp)
-# =============================================================================
-# These files are specific to individual reverse engineering projects
-# (e.g., Diablo 2) and should not be committed to the universal repo.
-
-# DLL export/ordinal mapping files (project-specific binaries)
 dll_exports/
-# Exception: the small fixture used by tests/unit/test_address_map.py is
-# source-of-truth for that test and must stay in git.
-!tests/fixtures/dll_exports/
-!tests/fixtures/dll_exports/**
-
-# Project-specific examples and reference data
 examples/
-
-# Function documentation output (generated per-binary)
 output/
-
-# Function tracking and todo lists (project-specific)
 FunctionsTodo.txt
-
-# Project-specific batch processing scripts
-apply_prefix_renames.py
-batch-unify-ordinals.bat
-
-# Project-specific session notes and enhancement docs
+FunctionsTodo-*.txt
 MEMORY.md
 ISSUES.md
-SHARED_SERVER_ENHANCEMENT.md
-
-# Project-specific analysis/investigation documents
 docs/Analysis_*.md
 docs/Detailed_Investigation_*.md
 docs/Investigation_*.md
-
-# Project-specific Ghidra scripts (D2/ordinal-specific)
-ghidra_scripts/AnalyzeD2*.py
-ghidra_scripts/AutoTypeD2*.py
-ghidra_scripts/CreateD2*.py
-ghidra_scripts/DetectD2*.py
-ghidra_scripts/DetectD2*.java
-ghidra_scripts/DetectAndApplyD2*.java
-ghidra_scripts/DebugOrdinalRename.py
-ghidra_scripts/ExportOrdinalLister.py
-ghidra_scripts/ResolveOrdinalImports*.java
-ghidra_scripts/UltimateOrdinalFixer.py
-ghidra_scripts/UnifyOrdinalNames*.java
-ghidra_scripts/AutoFixOrdinalLinkage.py
-ghidra_scripts/ExportDLLFunctionMappings*.java
 .worktrees/
-
-# D2/PD2S12 Project-specific todo tracking
-FunctionsTodo-*.txt
-pd2s12-*.txt
 
 # Temporary analysis state files
 completeness_tmp.json
@@ -584,86 +511,29 @@ schema_dump.json
 
 # One-off extraction/utility scripts
 extract_*.py
-apply_prefix_renames.py
 audit_*.py
 audit-*.json
-# ...but fun-doc/scripts/ holds FIRST-CLASS audit tooling, not one-offs: CLAUDE.md
-# gives audit_ret_widths / audit_stdcall_argc / audit_reimpl_offsets their own
-# test-matrix rows. The blanket audit_*.py rule above was silently keeping them
-# out of version control -- a machine failure would have taken them with it.
-!fun-doc/scripts/audit_*.py
-# Same trap, second location: tools/ is an importable package invoked as
-# `python -m tools.<name>` and referenced from CLAUDE.md's test matrix -- it is
-# first-class tooling, never a one-off drop zone. audit_endpoint_categories.py
-# (the reproducer for the endpoints.json category drift) was silently unstageable
-# until this line existed.
+# ...but tools/ is an importable package invoked as `python -m tools.<name>`
+# and referenced from CLAUDE.md's test matrix -- it is first-class tooling,
+# never a one-off drop zone. audit_endpoint_categories.py (the reproducer for
+# the endpoints.json category drift) was silently unstageable until this line
+# existed.
 !tools/audit_*.py
 
-fun-doc/state.json
-fun-doc/state.json.bak
-fun-doc/state.json.*_bak
-fun-doc/state.json.*.bak
-fun-doc/state.json.corrupt-*
-fun-doc/state.json.truncated-*
-fun-doc/state.json.before-*
-# Demonstrably-stale recovery snapshots get moved to fun-doc/archive/ over
-# time (see fun-doc/archive/README.md). Ignored wholesale — nothing in
-# there is read at runtime, but the directory + its README are committed.
-fun-doc/archive/*
-!fun-doc/archive/README.md
-fun-doc/inventory.json.before-*
-fun-doc/global_inventory.json
-fun-doc/global_inventory.json.before-*
-fun-doc/logs/
-fun-doc/priority_queue.json
-fun-doc/debug/
-fun-doc/inventory.json
-fun-doc/inventory.json.tmp
-fun-doc/provider_pauses.json
-fun-doc/provider_pauses.json.tmp
-
-# Globals-worker per-address timestamp cache — runtime state that churns on
-# every globals-doc run and carries per-binary/per-program data (2026-07-25).
-fun-doc/globals_clean_cache.json
-
-# Parallel-harness resume state (iteration/cursor/attempted) — analogous to
-# workflows/loop_state.json above but under fun-doc/parallel_harness/.
-fun-doc/parallel_harness/loop_state.json
-
-# fun-doc audit loop runtime state (registry + pending-trigger queue).
-# The subpackage code at fun-doc/audit/*.py IS tracked; only runtime
-# artifacts generated by the watcher are ignored.
-fun-doc/audit/registry.json
-fun-doc/audit/registry.json.tmp
-fun-doc/audit/queue.jsonl
-fun-doc/audit/queue.jsonl.*-archived
+# Directories that moved to other repositories in the 7.0 scope split. A
+# working copy that predates the split can still hold them, along with runtime
+# state and third-party binaries; keep them ignored so nothing left behind is
+# committed by accident.
+/workflows/
+/fun-doc/
+/d2-analysis/
+/tools/scyllahide/
 
 # Playwright MCP scratch directory (snapshots, screenshots, console logs)
 .playwright-mcp/
 
 # AI tool config directories (Gemini, etc.) — local only, not project config
 .gemini/
-
-# fun-doc historical analysis snapshots (large per-project state files)
-fun-doc/state_*.json
-fun-doc/benchmark/bh/source/
-
-# fun-doc pre-migration / pre-reset data snapshots. Generated safety copies
-# written before a destructive migration or a bulk status reset (doc_map_*,
-# port_status_reset_*, oracle_unreachable_reset_*). Timestamped, near-duplicate
-# and ~700KB each -- recoverable state, not source.
-fun-doc/backups/
-
-
-# Runtime artifacts the GAME and its mods write into fun-doc/, which is their
-# working directory when the dashboard launches them. Not project source.
-# BH.json in particular is built to store a Battle.net password
-# (bnet.save_last_pass, with autofill_last_password on) -- it must never be
-# committed to a public repo, empty or not.
-fun-doc/imgui.ini
-fun-doc/BH.json
-fun-doc/ProjectDiablo.json
-fun-doc/SGD2FreeResolution.json
 
 # BSim credentials (see ghidra_scripts/db.env.example)
 ghidra_scripts/db.env
@@ -672,9 +542,3 @@ ghidra_scripts/db.env
 # already goes to /dist/; this catches strays like packaging-*.whl that
 # otherwise sit in `git status` forever and invite being committed by accident.
 /*.whl
-
-# Third-party ScyllaHide binaries. The tooling that used them moved to the
-# d2-game-exe repo on 2026-08-11, but the binaries stay on disk here because
-# a SCYLLAHIDE_DIR may still point at this path. Never track them: they are
-# third-party redistributables, not ours.
-/tools/scyllahide/

@@ -1,15 +1,15 @@
 #Custom Registers
 #
-#This script identifies functions in Diablo 2 that use non-standard registers (in_* or unaff_*)
+#This script identifies functions that use non-standard registers (in_* or unaff_*)
 #as parameters and promotes them to explicit function arguments. It enables custom variable storage,
 #adds the register parameters to the function signature, and sets the calling convention to "unknown".
 #Useful for fixing functions with unusual register usage patterns that Ghidra doesn't detect automatically.
 #
 #@author Ben Ethington
-#@category Diablo 2
+#@category GhidraMCP
 #@description Promotes non-standard registers (in_*, unaff_*) to explicit function arguments with custom storage
 #@keybinding
-#@menupath Diablo II.Custom Registers
+#@menupath GhidraMCP.Custom Registers
 
 import json
 import os
@@ -44,9 +44,6 @@ def stepFindCustomRegisters(s):
         monitor.incrementProgress(1)
         monitor.setShowProgressValue(True)
         
-        # stop on this address - after that we have standard garbage code we dont care about
-        if "{}".format(func.getEntryPoint()) == "00681a48":
-            break
             
         monitor.setMessage("Analyzing 0x{}".format(func.getEntryPoint()))
         res = ifc.decompileFunction(func, 60, monitor)

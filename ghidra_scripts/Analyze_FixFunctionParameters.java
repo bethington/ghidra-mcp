@@ -1,14 +1,16 @@
 // Fix Function Parameters
 //
-// Analyzes function calling conventions and stack usage to detect and fix incorrect parameter counts, types, and conventions across all functions in the program.
+// Analyzes RET cleanup bytes, stack-argument accesses and ECX/EDX parameter-register usage to detect and fix
+// incorrect parameter counts and calling conventions across all functions in a 32-bit x86 program. Only the
+// standard conventions (__cdecl, __stdcall, __fastcall, __thiscall) are inferred.
 //
 // Usage: Run from Script Manager. Interactive mode with progress reporting.
 // Output: Fixes function prototypes in the current program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Fix function parameters based on calling conventions
-// @menupath Diablo 2.Analysis.Fix Function Parameters
+// @menupath GhidraMCP.Analysis.Fix Function Parameters
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
@@ -29,20 +31,26 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
     private int conventionFixed = 0;
     private int failedCount = 0;
     private long startTime;
-    private Map<String, ConventionInfo> conventionMap;
     
     @Override
     public void run() throws Exception {
         startTime = System.currentTimeMillis();
-        
-        // Initialize calling convention expectations
-        initializeConventionMap();
         
         println("========================================");
         println("FIX FUNCTION PARAMETERS AND CONVENTIONS");
         println("========================================");
         println("Program: " + currentProgram.getName());
         println("Date: " + new Date());
+
+        // The heuristics below read x86-32 registers (ECX/EDX) and 4-byte stack
+        // slots; on any other architecture they would rewrite prototypes from noise.
+        Language language = currentProgram.getLanguage();
+        if (!"x86".equals(language.getProcessor().toString())
+                || language.getLanguageDescription().getSize() != 32) {
+            printerr("This script only supports 32-bit x86 programs (found "
+                + language.getLanguageID() + "). Nothing was changed.");
+            return;
+        }
         println();
         
         // Ask if user wants to apply fixes
@@ -104,35 +112,6 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
         }
     }
     
-    private void initializeConventionMap() {
-        conventionMap = new HashMap<>();
-        
-        // __cdecl: caller cleanup, parameters on stack
-        conventionMap.put("__cdecl", new ConventionInfo("__cdecl", false, new String[]{}, true));
-        
-        // __stdcall: callee cleanup, parameters on stack
-        conventionMap.put("__stdcall", new ConventionInfo("__stdcall", false, new String[]{}, true));
-        
-        // __fastcall: first 2 in ECX/EDX, rest on stack
-        conventionMap.put("__fastcall", new ConventionInfo("__fastcall", false, new String[]{"ECX", "EDX"}, true));
-        
-        // __thiscall: 'this' in ECX, rest on stack
-        conventionMap.put("__thiscall", new ConventionInfo("__thiscall", false, new String[]{"ECX"}, true));
-        
-        // D2 custom conventions
-        // __d2call: First param in EBX, rest on stack
-        conventionMap.put("__d2call", new ConventionInfo("__d2call", false, new String[]{"EBX"}, true));
-        
-        // __d2regcall: Up to 3 params in registers (EAX, EDX, ECX)
-        conventionMap.put("__d2regcall", new ConventionInfo("__d2regcall", false, new String[]{"EAX", "EDX", "ECX"}, false));
-        
-        // __d2mixcall: Mix of registers and stack
-        conventionMap.put("__d2mixcall", new ConventionInfo("__d2mixcall", false, new String[]{"EAX", "EDX"}, true));
-        
-        // __d2edicall: First param in EDI
-        conventionMap.put("__d2edicall", new ConventionInfo("__d2edicall", false, new String[]{"EDI"}, true));
-    }
-    
     private void analyzeAndFixFunction(Function func) {
         try {
             String funcName = func.getName();
@@ -146,45 +125,9 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
             }
             
             boolean needsFix = false;
-            String targetConvention = currentConvention;
-            int targetParamCount = analysis.paramCount;
-            
-            // Determine correct calling convention based on evidence
-            if (analysis.retCleanupBytes > 0) {
-                // Has callee cleanup - check for stack loads FIRST
-                if (analysis.hasStackLoad) {
-                    // Stack-based parameters detected via MOV reg,[ESP+offset]
-                    targetConvention = "__stdcall";
-                } else if (analysis.usesEBX && !analysis.usesECX) {
-                    targetConvention = "__d2call";
-                } else if (analysis.usesEDI && !analysis.usesECX && !analysis.usesEBX) {
-                    targetConvention = "__d2edicall";
-                } else if (analysis.usesECX && !analysis.usesEBX && !analysis.usesEDI) {
-                    targetConvention = "__thiscall";
-                } else if ((analysis.usesEAX || analysis.usesEDX || analysis.usesECX) && 
-                          !analysis.usesEBX && !analysis.usesEDI && !analysis.hasStackLoad) {
-                    // Only apply __d2regcall if NO stack loads detected
-                    targetConvention = "__d2regcall";
-                } else {
-                    // Default to __stdcall for callee cleanup with no clear pattern
-                    targetConvention = "__stdcall";
-                }
-            } else {
-                // No callee cleanup - likely __cdecl or register-only convention
-                if (analysis.usesEBX) {
-                    targetConvention = "__d2call";
-                } else if (analysis.usesEDI) {
-                    targetConvention = "__d2edicall";
-                } else if (analysis.usesECX && analysis.paramCount == 1) {
-                    targetConvention = "__thiscall";
-                } else if ((analysis.usesEAX || analysis.usesEDX || analysis.usesECX || analysis.usesESI) &&
-                          !analysis.usesEBX && !analysis.usesEDI) {
-                    targetConvention = "__d2regcall";
-                } else if (analysis.paramCount > 0) {
-                    targetConvention = "__cdecl";
-                }
-            }
-            
+            String targetConvention = chooseConvention(analysis, currentConvention);
+            int targetParamCount = paramCountFor(analysis, targetConvention);
+
             // Check if change needed
             if (!currentConvention.equals(targetConvention)) {
                 needsFix = true;
@@ -225,13 +168,52 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
     
     private String getRegisterSummary(ParameterAnalysis analysis) {
         List<String> regs = new ArrayList<>();
-        if (analysis.usesEAX) regs.add("EAX");
-        if (analysis.usesEBX) regs.add("EBX");
         if (analysis.usesECX) regs.add("ECX");
         if (analysis.usesEDX) regs.add("EDX");
-        if (analysis.usesEDI) regs.add("EDI");
-        if (analysis.usesESI) regs.add("ESI");
-        return String.join(", ", regs);
+        return regs.isEmpty() ? "none" : String.join(", ", regs);
+    }
+
+    /**
+     * Pick a standard x86-32 calling convention from the observed evidence.
+     *
+     * Callee cleanup (RET n): __fastcall when both ECX and EDX carry arguments,
+     * __thiscall when only ECX does, otherwise __stdcall. Caller cleanup (plain
+     * RET): register-only __fastcall/__thiscall when no stack arguments are read,
+     * __cdecl when stack arguments are read, and the current convention when
+     * there is no evidence either way.
+     */
+    private String chooseConvention(ParameterAnalysis analysis, String currentConvention) {
+        boolean hasStackParams = analysis.stackParamCount > 0;
+        if (analysis.retCleanupBytes > 0) {
+            if (analysis.usesECX && analysis.usesEDX) {
+                return "__fastcall";
+            }
+            if (analysis.usesECX && !analysis.hasStackLoad) {
+                return "__thiscall";
+            }
+            return "__stdcall";
+        }
+        if (!hasStackParams) {
+            if (analysis.usesECX && analysis.usesEDX) {
+                return "__fastcall";
+            }
+            if (analysis.usesECX) {
+                return "__thiscall";
+            }
+            return currentConvention;
+        }
+        return "__cdecl";
+    }
+
+    /** Stack arguments plus the register arguments the chosen convention passes. */
+    private int paramCountFor(ParameterAnalysis analysis, String convention) {
+        int registerParams = 0;
+        if ("__fastcall".equals(convention)) {
+            registerParams = analysis.usesEDX ? 2 : (analysis.usesECX ? 1 : 0);
+        } else if ("__thiscall".equals(convention)) {
+            registerParams = 1;
+        }
+        return registerParams + analysis.stackParamCount;
     }
     
     private void analyzeFunction(Function func) {
@@ -239,10 +221,12 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
             ParameterAnalysis analysis = analyzeParameters(func);
             if (analysis != null) {
                 String funcName = func.getName();
+                String convention = chooseConvention(analysis, func.getCallingConventionName());
+                int detected = paramCountFor(analysis, convention);
                 int currentCount = func.getParameterCount();
-                if (currentCount != analysis.paramCount) {
-                    println("[MISMATCH] " + funcName + ": has " + currentCount + 
-                           " params, detected " + analysis.paramCount);
+                if (currentCount != detected) {
+                    println("[MISMATCH] " + funcName + ": has " + currentCount +
+                           " params, detected " + detected + " (" + convention + ")");
                 }
             }
         } catch (Exception e) {
@@ -257,7 +241,6 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
         Listing listing = currentProgram.getListing();
         InstructionIterator instIter = listing.getInstructions(entryPoint, true);
         
-        Set<String> registersUsed = new HashSet<>();
         Set<Integer> stackOffsetsUsed = new HashSet<>();
         boolean hasStandardPrologue = false;
         int stackFrameSize = 0;
@@ -316,31 +299,14 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
                         }
                     }
                     
-                    // Check for parameter register usage
+                    // Check for parameter-register reads (ECX for __thiscall /
+                    // __fastcall, EDX for __fastcall). A PUSH of the register is a
+                    // save, not a use, and a memory operand is a dereference.
                     if (op.contains("ECX") && !mnemonic.equals("PUSH") && !op.contains("[")) {
                         analysis.usesECX = true;
-                        registersUsed.add("ECX");
                     }
-                    if (op.contains("EBX") && !mnemonic.equals("PUSH") && !op.contains("[")) {
-                        analysis.usesEBX = true;
-                        registersUsed.add("EBX");
-                    }
-                    if (op.contains("EDI") && !mnemonic.equals("PUSH") && !op.contains("[")) {
-                        analysis.usesEDI = true;
-                        registersUsed.add("EDI");
-                    }
-                    if (i == 0 && op.contains("EAX") && mnemonic.equals("MOV")) {
-                        // EAX being loaded (destination) suggests parameter
-                        analysis.usesEAX = true;
-                        registersUsed.add("EAX");
-                    }
-                    if (i == 0 && op.contains("EDX") && mnemonic.equals("MOV")) {
+                    if (i > 0 && op.contains("EDX") && !mnemonic.equals("PUSH") && !op.contains("[")) {
                         analysis.usesEDX = true;
-                        registersUsed.add("EDX");
-                    }
-                    if (op.contains("ESI") && !mnemonic.equals("PUSH") && count < 8) {
-                        analysis.usesESI = true;
-                        registersUsed.add("ESI");
                     }
                 }
             }
@@ -386,8 +352,7 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
             count++;
         }
         
-        // Calculate parameter count
-        int registerParams = 0;
+        // Calculate stack parameter count
         int stackParams = 0;
         
         // Use RET cleanup bytes if available (most reliable)
@@ -405,16 +370,7 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
             }
         }
         
-        // Count register parameters
-        if (analysis.usesECX) registerParams++;
-        if (analysis.usesEBX) registerParams++;
-        if (analysis.usesEDI) registerParams++;
-        if (analysis.usesESI) registerParams++;
-        if (analysis.usesEAX && !analysis.usesECX) registerParams++;
-        if (analysis.usesEDX && !analysis.usesECX) registerParams++;
-        
-        // Total parameters
-        analysis.paramCount = registerParams + stackParams;
+        analysis.stackParamCount = stackParams;
         analysis.hasStandardPrologue = hasStandardPrologue;
         analysis.hasStackLoad = hasStackLoad;  // NEW: Store stack load detection
         
@@ -456,9 +412,9 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
                         func.addParameter(param, SourceType.ANALYSIS);
                     }
                 } else if (paramCount < currentCount) {
-                    // Remove excess parameters
-                    Parameter[] params = func.getParameters();
-                    for (int i = paramCount; i < currentCount; i++) {
+                    // Remove excess parameters from the end, so the indices
+                    // still to be removed do not shift underneath the loop
+                    for (int i = currentCount - 1; i >= paramCount; i--) {
                         func.removeParameter(i);
                     }
                 }
@@ -486,29 +442,12 @@ public class Analyze_FixFunctionParameters extends GhidraScript {
     
     // Inner classes
     private static class ParameterAnalysis {
-        int paramCount = 0;
+        int stackParamCount = 0;
         boolean usesECX = false;
-        boolean usesEBX = false;
-        boolean usesEDI = false;
-        boolean usesEAX = false;
         boolean usesEDX = false;
-        boolean usesESI = false;
         boolean hasStandardPrologue = false;
         boolean hasStackLoad = false;  // NEW: Track stack parameter loads
         int retCleanupBytes = 0;
     }
     
-    private static class ConventionInfo {
-        String name;
-        boolean callerCleanup;
-        String[] registerParams;
-        boolean usesStack;
-        
-        ConventionInfo(String name, boolean callerCleanup, String[] registerParams, boolean usesStack) {
-            this.name = name;
-            this.callerCleanup = callerCleanup;
-            this.registerParams = registerParams;
-            this.usesStack = usesStack;
-        }
-    }
 }

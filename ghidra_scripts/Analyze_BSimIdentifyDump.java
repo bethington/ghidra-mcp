@@ -5,7 +5,7 @@
 // including zero-match functions and every candidate above the floor -- to a JSONL
 // file. This script deliberately makes NO decisions: it is the measurement half of
 // the BSim identification lane. All thresholds, the tie/abstain rule and every write
-// live in `fun-doc/bsim_identify.py`, which consumes this dump.
+// live in the external scorer that consumes this dump.
 //
 // Dump low and decide later, on purpose. The floors are calibration outputs
 // (Phase 0, 2026-08-03) and WILL be re-tuned per reference corpus; re-running an
@@ -29,9 +29,9 @@
 //        file:/C:/path/to/refindex out.jsonl 10 0.3 0.0 500
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Dump low-threshold BSim matches for every function; decisions happen in Python
-// @menupath Diablo 2.Analysis.BSim Identify Dump
+// @menupath GhidraMCP.Analysis.BSim Identify Dump
 
 import java.io.PrintWriter;
 import java.net.URL;

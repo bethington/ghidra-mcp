@@ -1,14 +1,14 @@
 // Batch Folder
 //
-// Runs Ghidra auto-analysis on every program in a specified project folder. Skips known non-game binaries (binkw32, SmackW32, etc.).
+// Runs Ghidra auto-analysis on every program in a specified project folder. Optionally skips named binaries (e.g. third-party runtime DLLs).
 //
-// Usage: Args: [0]=folder path (e.g., /Mods/PD2-S12).
+// Usage: Args: [0]=folder path (e.g., /MyProduct/v1.0), [1]=optional comma-separated file names to skip.
 // Output: Auto-analysis applied to all programs in the folder.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Batch analyze all programs in a project folder
-// @menupath Diablo 2.Analysis.Batch Folder
+// @menupath GhidraMCP.Analysis.Batch Folder
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.*;
@@ -20,7 +20,7 @@ public class Analyze_BatchFolder extends GhidraScript {
     public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length == 0) {
-            println("Usage: args = folderPath");
+            println("Usage: args = folderPath [skipName1,skipName2,...]");
             return;
         }
         String folderPath = args[0].trim();
@@ -32,7 +32,9 @@ public class Analyze_BatchFolder extends GhidraScript {
             return;
         }
         
-        String[] skip = {"binkw32.dll", "SmackW32.dll", "ijl11.dll", "glide3x.dll", "libcrypto-1_1.dll"};
+        String[] skip = (args.length > 1 && !args[1].isBlank())
+            ? args[1].trim().split("\\s*,\\s*")
+            : new String[0];
         
         DomainFile[] files = folder.getFiles();
         int analyzed = 0;
@@ -44,7 +46,7 @@ public class Analyze_BatchFolder extends GhidraScript {
         for (DomainFile df : files) {
             String name = df.getName();
             
-            // Skip 3rd party
+            // Skip names the caller asked to leave alone
             boolean shouldSkip = false;
             for (String s : skip) {
                 if (name.equalsIgnoreCase(s)) {
@@ -53,7 +55,7 @@ public class Analyze_BatchFolder extends GhidraScript {
                 }
             }
             if (shouldSkip) {
-                println("SKIP: " + name + " (3rd party)");
+                println("SKIP: " + name + " (in skip list)");
                 skipped++;
                 continue;
             }

@@ -3,9 +3,9 @@
 // function header comment following the standard plate comment format.
 //
 // @author Ben Ethington
-// @category Diablo 2
+// @category GhidraMCP
 // @keybinding ctrl shift P
-// @menupath Diablo II.Document Function with Claude
+// @menupath GhidraMCP.Document Function with Claude
 // @toolbar
 
 import ghidra.app.script.GhidraScript;

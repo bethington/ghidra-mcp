@@ -6,9 +6,9 @@
 // Output: Combined JSON hash index for the entire folder.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Build hash index from all binaries in folder
-// @menupath Diablo 2.Propagation.Build Hash Index Folder
+// @menupath GhidraMCP.Propagation.Build Hash Index Folder
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

@@ -6,9 +6,9 @@
 // Output: Fixes variable types across all functions.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Bulk fix variable types based on Hungarian naming
-// @menupath Diablo 2.Repair.Bulk Type Fix
+// @menupath GhidraMCP.Repair.Bulk Type Fix
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

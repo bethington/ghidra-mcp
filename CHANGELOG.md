@@ -24,6 +24,29 @@ and `/tool/launch_codebrowser` retired), and **210** with `/set_memory_block`.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Changed — Diablo II–specific content removed (#562)
+
+This project is a generic Ghidra MCP server; game-specific tooling lives elsewhere.
+
+- **The 22 `debugger_*` proxy tools are off by default.** They used to register on
+  every Windows host, pointing at an external debugger server most users do not run,
+  and mixed silently with Ghidra's own TraceRmi debugger tools (#554). They now register
+  only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`;
+  `GHIDRA_DEBUGGER_TOOLS=0` still wins over a set URL.
+- **Removed the five `oracle_*` tools** (`bridge_mcp_ghidra/oracle.py`). They proxied an
+  in-process oracle inside one specific game build and registered by default on Windows.
+- **Plate validation no longer expects a `Source:` file reference.** The check suggested
+  a game-specific source path and counted as an issue on every plate in every binary.
+- **`ghidra_scripts`:** the `Diablo 2.*` script menus are now `GhidraMCP.*`; five
+  game-specific scripts were removed (`ArgumentsRenamer.py`, `Repair_ArgumentsRenamer`,
+  `Analyze_DetectAndApplyConventions`, `signfunction.py`, `Export_FunctionsToJSON`);
+  `Analyze_FixFunctionParameters` infers only standard x86 calling conventions; a
+  hard-coded stop address that truncated eight scripts on any other binary is gone; and
+  reports go to `$GHIDRA_MCP_REPORTS_DIR` (default `~/ghidra-mcp-reports`) instead of a
+  maintainer's local path.
+- Removed `workflows/` and three session-note docs; tool descriptions, docs and
+  `.env.template` use generic examples.
+
 ### Fixed — check-in dry run, firmware memory permissions, shared-project paths
 
 - **`checkin_program(dry_run=true)` reports instead of refusing.** A check-in is not a

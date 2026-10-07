@@ -149,7 +149,7 @@ TYPE: char[6] (6 bytes) - Null-terminated ASCII string
 VALUE: "VIDEO" (0x56 0x49 0x44 0x45 0x4F 0x00)
 
 PURPOSE:
-INI section name used to read video configuration settings from D2Server.ini file.
+INI section name used to read video configuration settings from Server.ini file.
 Passed to GetPrivateProfileIntA/GetPrivateProfileStringA for retrieving video-related
 configuration keys from the VIDEO section.
 
@@ -341,7 +341,7 @@ apply_function_documentation(
 ```python
 # Build index from documented functions across programs
 build_function_hash_index(
-    programs=["D2Client.dll 1.07", "D2Client.dll 1.08"],
+    programs=["Client.dll 1.07", "Client.dll 1.08"],
     filter="documented",
     index_file="function_hash_index.json"
 )
@@ -353,7 +353,7 @@ matches = lookup_function_by_hash(hash="abc123...")
 # Propagate documentation to all matching functions
 propagate_documentation(
     source_address="0x6FAB1234",
-    target_programs=["D2Client.dll 1.08", "D2Client.dll 1.09"],
+    target_programs=["Client.dll 1.08", "Client.dll 1.09"],
     dry_run=True  # Preview changes without applying
 )
 ```
@@ -533,6 +533,6 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 
 `analyze_function_completeness` is a **hygiene** score: it verifies documentation is *present and well-formed* (name quality, plate sections, typed params). It is computed entirely from the documentation, so it cannot detect a claim that is confidently wrong — a plate describing an algorithm the code does not implement still scores 100.
 
-The **truth** axis is falsifiability (`fun-doc/falsify.py`): mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. Tier-1 (mechanically certain) findings mark the function `DOC_REFUTED`, stamp an idempotent `[AUDIT falsify:*]` plate flag, force an audit pass seeded with the contradiction, and keep the function in the work queue regardless of its score.
+The **truth** axis is falsifiability: mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. These checks are not part of this server; an external documentation orchestrator can run them. When one does, a mechanically certain finding stamps an idempotent `[AUDIT falsify:*]` plate flag and keeps the function in its work queue regardless of its score.
 
 Operationally: treat a high completeness score as "the form is filled in", never as "the content is verified". When a plate carries an `[AUDIT falsify:*]` flag, resolving that contradiction — by correcting the documentation to match the disassembly, never the reverse — takes priority over any score-driven work.

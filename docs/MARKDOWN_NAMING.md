@@ -96,7 +96,7 @@
 
 ```text
 <binary>-analysis.md    → game-exe-analysis.md
-<dll>-analysis.md       → d2client-analysis.md
+<dll>-analysis.md       → client-dll-analysis.md
 ```
 
 ### Reports

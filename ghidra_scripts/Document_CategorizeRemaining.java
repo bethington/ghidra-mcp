@@ -6,9 +6,9 @@
 // Output: Console categorization of Ordinal_ functions.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Categorize remaining Ordinal_ functions by type
-// @menupath Diablo 2.Documentation.Categorize Remaining
+// @menupath GhidraMCP.Documentation.Categorize Remaining
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

@@ -6,9 +6,9 @@
 // Output: Applies a comprehensive plate comment to the current function.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Document current function using Claude AI
-// @menupath Diablo 2.Documentation.Function With Claude
+// @menupath GhidraMCP.Documentation.Function With Claude
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;

@@ -6,9 +6,9 @@
 // Output: Console listing of programs in dependency-first order.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Compute dependency-based binary documentation order
-// @menupath Diablo 2.Documentation.Compute Dependency Order
+// @menupath GhidraMCP.Documentation.Compute Dependency Order
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;
@@ -29,7 +29,9 @@ public class Document_ComputeDependencyOrder extends GhidraScript {
             return;
         }
 
-        String folderPath = "/LoD/1.07";
+        // Default: the current program's folder, else the project root.
+        // Script arg [0] overrides both.
+        String folderPath = "/";
         try {
             if (currentProgram != null) {
                 DomainFile curDf = currentProgram.getDomainFile();
@@ -38,6 +40,10 @@ public class Document_ComputeDependencyOrder extends GhidraScript {
                 }
             }
         } catch (Exception ignored) {
+        }
+        String[] scriptArgs = getScriptArgs();
+        if (scriptArgs != null && scriptArgs.length > 0 && !scriptArgs[0].isBlank()) {
+            folderPath = scriptArgs[0].trim();
         }
 
         DomainFolder folder = project.getProjectData().getFolder(folderPath);

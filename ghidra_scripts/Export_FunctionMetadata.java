@@ -3,12 +3,12 @@
 // Exports all functions to JSON with complete metadata including addresses, parameters, return types, disassembly snippets, and jumpback addresses for creating hooking frameworks.
 //
 // Usage: Run from Script Manager on any program.
-// Output: JSON files (game.json and game_minify.json) with function metadata.
+// Output: JSON files (functions.json and functions_minify.json) with function metadata.
 //
 // @author Ben Ethington
-// @category Diablo 2.Export
+// @category GhidraMCP.Export
 // @description Export function metadata with hooking information
-// @menupath Diablo 2.Export.Function Metadata
+// @menupath GhidraMCP.Export.Function Metadata
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
@@ -41,7 +41,6 @@ public class Export_FunctionMetadata extends GhidraScript {
                 monitor.checkCanceled();
                 Function func = funcIter.next();
 
-                if (func.getEntryPoint().toString().equals("00681a48")) break;
                 o++;
 
                 String asm = "";
@@ -98,7 +97,7 @@ public class Export_FunctionMetadata extends GhidraScript {
 
         sb.append("\n]\n");
 
-        String outputPath = System.getProperty("user.home") + "/game.json";
+        String outputPath = System.getProperty("user.home") + "/functions.json";
         Files.writeString(Path.of(outputPath), sb.toString());
 
         // Write minified version
@@ -111,7 +110,7 @@ public class Export_FunctionMetadata extends GhidraScript {
             .replaceAll("\\s+\\}", "}")
             .replaceAll("\\s+\\]", "]");
 
-        String minPath = System.getProperty("user.home") + "/game_minify.json";
+        String minPath = System.getProperty("user.home") + "/functions_minify.json";
         Files.writeString(Path.of(minPath), minified);
 
         println("Exported " + o + " functions");

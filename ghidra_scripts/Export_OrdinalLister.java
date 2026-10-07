@@ -6,9 +6,9 @@
 // Output: Console CSV listing: Ordinal, Address, Function Name.
 //
 // @author Ben Ethington
-// @category Diablo 2.Export
+// @category GhidraMCP.Export
 // @description List exported functions with ordinal numbers as CSV
-// @menupath Diablo 2.Export.Ordinal Lister
+// @menupath GhidraMCP.Export.Ordinal Lister
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

@@ -6,9 +6,9 @@
 // Output: Applies documentation with confidence-based auto/manual filtering.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Propagate from V2 index with confidence scoring
-// @menupath Diablo 2.Propagation.From Index V2
+// @menupath GhidraMCP.Propagation.From Index V2
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

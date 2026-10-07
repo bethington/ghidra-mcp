@@ -54,7 +54,7 @@ Best for sponsors who care about:
 
 Goal: make AI-assisted documentation reliable across large binaries.
 
-The first phase focuses on resumable function-level jobs, priority scoring, failure policies, controlled parallelism, and Markdown/JSON reports. Later phases expand the existing `fun-doc` dashboard into review, diff, accept/reject, retry, provider policy, and cross-version documentation bundles.
+The first phase focuses on resumable function-level jobs, priority scoring, failure policies, controlled parallelism, and Markdown/JSON reports. Later phases expand a review dashboard into review, diff, accept/reject, retry, provider policy, and cross-version documentation bundles.
 
 Best for sponsors who care about:
 

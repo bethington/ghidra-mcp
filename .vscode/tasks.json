@@ -9,7 +9,7 @@
 		},
 		{
 			"id": "autoOpen",
-			"description": "AutoOpen path (e.g. F:\\GhidraProjects\\diablo2|/Vanilla/1.00/D2Common.dll)",
+			"description": "AutoOpen path (e.g. F:\\GhidraProjects\\MyProject|/MyProduct/v1.0/engine.dll)",
 			"default": "",
 			"type": "promptString"
 		}

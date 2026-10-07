@@ -833,11 +833,11 @@ def clear_restored_benchmark_tools(repo_root: Path, *, dry_run: bool = False) ->
     root = tree.getroot()
     parent_by_child = {child: parent for parent in root.iter() for child in parent}
     removed = 0
+    # In a shared project Ghidra records the path as "<repository>:<path>";
+    # the folder marker below matches that form for any repository name.
     benchmark_state_markers = (
         f'VALUE="{DEFAULT_BENCHMARK_PROGRAM}"',
-        f'VALUE="diablo2:{DEFAULT_BENCHMARK_PROGRAM}"',
         f'VALUE="{DEFAULT_BENCHMARK_DEBUG_PROGRAM}"',
-        f'VALUE="diablo2:{DEFAULT_BENCHMARK_DEBUG_PROGRAM}"',
         f'VALUE="{LEGACY_BENCHMARK_PROGRAM}"',
         "/testing/benchmark/",
         "/New Traces/pydbg/BenchmarkDebug.exe",

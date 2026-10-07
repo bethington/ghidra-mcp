@@ -12,14 +12,14 @@ The desired end state is:
 
 - Gradle owns Java compile, test, packaging, validation, deploy, and launch tasks.
 - `tools.setup` remains as a stable Python CLI facade, but mostly shells out to Gradle for Java/plugin operations.
-- Python remains the source of truth for runtime systems such as `bridge_mcp_ghidra.py`, `debugger/`, and `fun-doc/`.
+- Python remains the source of truth for runtime systems such as the `bridge_mcp_ghidra` package.
 - Maven is removed as an active build dependency after cutover.
 
 ## Non-Goals
 
 - Do not migrate `bridge_mcp_ghidra.py` runtime logic into Gradle.
 - Do not migrate the standalone debugger server into Gradle.
-- Do not migrate `fun-doc` orchestration into Gradle.
+- Do not migrate Python orchestration into Gradle.
 - Do not keep Maven and Gradle as equal first-class build backends after cutover.
 
 ## Command Mapping

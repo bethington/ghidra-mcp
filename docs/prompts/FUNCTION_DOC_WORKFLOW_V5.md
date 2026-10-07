@@ -42,7 +42,7 @@ Call `rename_function` and `set_function_prototype` in **parallel**.
 
 **Naming**: PascalCase, verb-first (e.g., GetPlayerHealth, ProcessInputEvent, ValidateItemSlot). Invalid: `SKILLS_GetLevel`->GetSkillLevel, `processData`->ProcessData.
 
-**Prototype**: Use typed struct pointers (UnitAny* not int*) and Hungarian camelCase params. Verify calling convention from disassembly. Mark implicit register parameters with IMPLICIT keyword in plate comment.
+**Prototype**: Use typed struct pointers (Entity* not int*) and Hungarian camelCase params. Verify calling convention from disassembly. Mark implicit register parameters with IMPLICIT keyword in plate comment.
 
 **Note**: Prototype changes trigger re-decompilation and may create new SSA variables. Always re-fetch variables in Step 3.
 

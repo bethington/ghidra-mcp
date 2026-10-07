@@ -82,7 +82,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Dynamic Analysis (v5.4.0)
 
 - **P-code Emulation** — Run any function in isolation via Ghidra's `EmulatorHelper`; brute-force API hash resolution in milliseconds
-- **Live Debugger Integration** — 17 Java endpoints + 22 Python bridge tools over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise): attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
+- **Live Debugger Integration** — 17 Java endpoints over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise), plus 22 opt-in bridge proxies for an external debugger server: attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
 
 ### AI-Powered Reverse Engineering Workflows
 
@@ -576,30 +576,28 @@ Verify any allowlist against the running server rather than against this table:
 `curl http://127.0.0.1:8089/mcp/schema` lists every tool with the `category`
 the bridge groups it by.
 
-#### Optional: Connect a standalone debugger server
+#### Optional: Connect an external debugger server
 
-The debugger server itself moved to the `d2-game-exe` repository on 2026-08-11
-(its D2 calling-convention layer made it game-specific). Start it there, then
-point this bridge at it:
+The bridge can proxy 22 `debugger_*` tools to an external dbgeng/WinDbg
+debugger server speaking the bridge's debugger HTTP API. That server is **not
+part of this repository**; this repo ships only the proxies. They are **off by
+default** and register only when you opt in:
 
 ```bash
+# point the bridge at your debugger server (loopback only)
 export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+
+# or force registration against the default URL (http://127.0.0.1:8099)
+export GHIDRA_DEBUGGER_TOOLS=1
 ```
 
-The bridge's 22 `debugger_*` proxy tools register only when that variable is
-set, so leaving it unset costs nothing — the tools simply do not appear rather
-than appearing and failing.
+`GHIDRA_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
+registers the tools, anything else (`0`, `false`, ...) keeps them off even with
+a URL configured. With neither variable set the tools simply do not appear,
+rather than appearing and failing. The host platform plays no part.
 
-Debugger server flags:
-
-| Flag | Default | Description |
-| ------ | --------- | ------------- |
-| `--port` | `8099` | HTTP server port |
-| `--host` | `127.0.0.1` | Bind address (`0.0.0.0` to expose on LAN) |
-| `--exports-dir` | — | Path to a `dll_exports/` directory for ordinal-to-name resolution |
-| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
-
-Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so the bridge can find it.
+Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
+...) are separate: they live in the GUI plugin and need no extra server.
 
 #### In Ghidra
 
@@ -787,20 +785,20 @@ bridge-mcp-ghidra
 
 ### The `debugger_*` tools do not appear
 
-**Cause:** They are registered only when `GHIDRA_DEBUGGER_URL` is set, and only
-on Windows. The debugger server they proxy to lives in the `d2-game-exe`
-repository since 2026-08-11 — this repo ships the proxies, not the server.
+**Cause:** The 22 bridge-side debugger proxies are off by default. They register
+only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`, and they
+forward to an external debugger server that is not part of this repository.
 
-**Solution:** start the debugger server from that repo, then set the URL before
-launching the bridge:
+**Solution:** start your debugger server, then set the URL before launching the
+bridge:
 
 ```text
 export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
-A `ModuleNotFoundError` for `pybag` or `comtypes` while starting that server is
-a missing optional dependency on its side; install its Windows-only extras from
-that repo, and make sure you install into and run from the same interpreter.
+If the tools appear but every call reports that the server is not running,
+the URL is wrong or the server is down. `GHIDRA_DEBUGGER_TOOLS=0` turns them off
+again even with a URL configured.
 
 ### 500 Internal Server Errors
 
@@ -1072,7 +1070,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 ### Cross-Binary Documentation & Archive
 
 - `apply_function_documentation` - Apply function documentation
-- `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres)
+- `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL)
 - `archive_ingest_program` - Bulk-ingest every function in a program into the cross-version documentation archive
 - `batch_string_anchor_report` - Report of source file strings and their FUN_* functions
 - `bulk_fuzzy_match` - Bulk cross-binary function matching
@@ -1145,7 +1143,7 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 
 ### Bridge Static Tools
 
-Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge also proxies 22 `debugger_*` WinDbg tools when `GHIDRA_DEBUGGER_URL` points at the standalone debugger server.
+Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.
 
 - `check_tools` - Report which tools are currently registered and callable
 - `connect_instance` - Connect the bridge to a specific Ghidra instance
@@ -1272,9 +1270,6 @@ ghidra-mcp/
 │   ├── releases/           # Version release notes
 │   └── project-management/ # Contributor planning docs (Gradle migration, etc.)
 ├── tools/setup/             # Build and deployment CLI (python -m tools.setup)
-├── fun-doc/                 # Internal RE curation tool — not part of the MCP plugin
-│                            #   Priority-queue worker, LLM scoring, web dashboard.
-│                            #   See fun-doc/README.md for details.
 └── .github/workflows/      # CI/CD pipelines
 ```
 

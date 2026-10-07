@@ -6,9 +6,9 @@
 // Output: Clears flow overrides and restores correct control flow.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Clear incorrect CALL_RETURN flow overrides
-// @menupath Diablo 2.Repair.Clear Call Return Overrides
+// @menupath GhidraMCP.Repair.Clear Call Return Overrides
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;

@@ -290,7 +290,7 @@ jobs:
 
   python-tests-windows:
     # The bridge has real platform forks (no AF_UNIX in Windows CPython, the
-    # drive-letter socket sweep, debugger proxy gating). The ubuntu matrix job
+    # drive-letter socket sweep). The ubuntu matrix job
     # only ever executes the POSIX half — this leg executes the Windows half
     # so both sides of every `os.name == "nt"` branch run on each PR.
     name: Python Tests (pytest, Windows)

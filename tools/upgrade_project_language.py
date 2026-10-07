@@ -65,7 +65,7 @@ USAGE
 
     # do it
     python tools/upgrade_project_language.py --apply
-    python tools/upgrade_project_language.py --apply --folder /Vanilla/1.01
+    python tools/upgrade_project_language.py --apply --folder /MyProduct/v1.0
 
 Password comes from the environment (never argv, which is world-readable):
 ``GHIDRA_SERVER_PASSWORD`` then ``GHIDRA_PASS``. On Windows the user-scope
@@ -100,7 +100,7 @@ DEFAULT_MCP = "http://127.0.0.1:8089"
 # Ghidra emits exactly these, per file, on the paths we care about. Every line
 # carries a trailing " (ComponentName)" that must not become part of the path.
 # Paths are matched non-greedily up to a literal delimiter, never with \S+:
-# "Diablo II.exe" has a SPACE, and \S+ makes the whole line fail to match, so a
+# a name like "My Game.exe" has a SPACE, and \S+ makes the whole line fail to match, so a
 # skipped file silently disappears from the tally instead of being reported.
 _TAIL = r"(?:\s+\([A-Za-z]\w*\))?\s*$"
 RE_PROCESSING = re.compile(r"REPORT: Processing (?:read-only )?project file: (.+?)" + _TAIL)
@@ -216,7 +216,7 @@ def checkout_census(base: str) -> dict[str, dict]:
 
     Deliberately unscoped: the folder-scoped form of this endpoint has been
     observed returning an empty list for a folder that demonstrably contains a
-    checked-out file (``/Vanilla/1.01`` reported 0 while ``1.01/Game.exe`` was
+    checked-out file (``/MyProduct/v1.0`` reported 0 while ``v1.0/App.exe`` was
     checked out in the project-wide listing). Trust only the unscoped call.
     """
     data = mcp_get(base, "server/checkouts", timeout=180.0)
@@ -820,7 +820,7 @@ def main() -> int:
         # A --baseline report lets this catch strays the recorded list missed.
         # /server/checkouts reads LOCAL project data that lags the server, so a
         # checkout created moments earlier can be absent from the census and
-        # therefore never recorded -- measured 2026-08-10: two Game.exe
+        # therefore never recorded -- measured 2026-08-10: two
         # checkouts surfaced only after a Ghidra restart, having been reported
         # as fully released. Anything checked out that is NOT in the baseline's
         # preexisting set is ours by construction.

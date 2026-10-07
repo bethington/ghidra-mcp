@@ -6,9 +6,9 @@
 // Output: Resolves symbol conflicts in the current program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Fix symbol name conflicts across versions
-// @menupath Diablo 2.Propagation.Fix Symbol Conflicts
+// @menupath GhidraMCP.Propagation.Fix Symbol Conflicts
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

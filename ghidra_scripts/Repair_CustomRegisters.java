@@ -6,9 +6,9 @@
 // Output: Adds register parameters to function signatures.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Promote non-standard registers to function arguments
-// @menupath Diablo 2.Repair.Custom Registers
+// @menupath GhidraMCP.Repair.Custom Registers
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
@@ -40,7 +40,6 @@ public class Repair_CustomRegisters extends GhidraScript {
                 monitor.incrementProgress(1);
                 monitor.setShowProgressValue(true);
 
-                if (func.getEntryPoint().toString().equals("00681a48")) break;
 
                 monitor.setMessage("Analyzing 0x" + func.getEntryPoint());
                 DecompileResults res = ifc.decompileFunction(func, 60, monitor);

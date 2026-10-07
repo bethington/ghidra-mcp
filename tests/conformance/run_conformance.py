@@ -9,7 +9,7 @@
     # normal run: semantic assertions + snapshot diffing
     python -m tests.conformance.run_conformance
 
-    # read-only tier only (safe to run while fun-doc workers are active)
+    # read-only tier only (safe to run while other MCP clients are active)
     python -m tests.conformance.run_conformance --tier read
 
     # re-record ONE golden (e.g. after a deploy that changed /mcp/schema)

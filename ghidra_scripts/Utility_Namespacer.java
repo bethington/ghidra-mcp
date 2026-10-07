@@ -6,9 +6,9 @@
 // Output: Moves subsequent functions into the selected namespace.
 //
 // @author Ben Ethington
-// @category Diablo 2.Utility
+// @category GhidraMCP.Utility
 // @description Bulk assign functions to the current namespace
-// @menupath Diablo 2.Utility.Namespacer
+// @menupath GhidraMCP.Utility.Namespacer
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

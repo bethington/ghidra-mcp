@@ -6,9 +6,9 @@
 // Output: Creates functions across all project binaries.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Find functions after padding in all project programs
-// @menupath Diablo 2.Analysis.Find Functions After Padding All
+// @menupath GhidraMCP.Analysis.Find Functions After Padding All
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.DomainFile;

@@ -111,7 +111,7 @@ Use a debugger-agnostic evidence model:
 ```json
 {
   "target": {
-    "program": "/Mods/PD2-S12/D2Common.dll",
+    "program": "/MyProduct/v2.0/engine.dll",
     "function": "GetSkillManaCost_9d00",
     "static_address": "0x6fcee520",
     "runtime_address": "0x1234e520"
