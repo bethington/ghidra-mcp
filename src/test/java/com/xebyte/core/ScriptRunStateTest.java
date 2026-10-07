@@ -6,6 +6,7 @@ import ghidra.program.model.listing.Program;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -25,8 +26,17 @@ public class ScriptRunStateTest {
         when(provider.getProject()).thenReturn(project);
         ProgramScriptService scripts = new ProgramScriptService(provider, mock(ThreadingStrategy.class));
 
-        GhidraState state = scripts.scriptState(null, mock(Program.class), null);
+        GhidraState state = scripts.scriptState(null, mock(Program.class));
         assertSame(project, state.getProject());
+    }
+
+    /** No memory, no first address: no location, rather than Ghidra's null-address error. */
+    @Test
+    public void aProgramWithNoMemoryRunsWithNoLocation() {
+        ProgramScriptService scripts = new ProgramScriptService(mock(ProgramProvider.class),
+            mock(ThreadingStrategy.class));
+        Program empty = mock(Program.class);  // getMinAddress() answers null
+        assertNull(scripts.scriptState(null, empty).getCurrentLocation());
     }
 
     @Test

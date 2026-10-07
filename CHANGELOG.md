@@ -36,6 +36,12 @@ control and the CodeBrowser tools became shared services
   `run_script_inline` / `run_ghidra_script` now carries `error`: the exception and the
   script's own line (`NullPointerException: ... (SyncLabels2.java:15)`), and the bridge quotes
   the end of `console_output` for any failed call that gives no other reason.
+- **A script on a program with no memory started at a null location.** The runner built
+  `ProgramLocation(program, program.getMinAddress())`, which is null for such a program, and
+  Ghidra reports that as an error (a dialog in the GUI). It now runs with no location. Found by
+  auditing for the same shape as the missing project: a null handed to Ghidra where the server
+  holds, or can check for, the real value. The other constructions, domain-object opens and
+  tool-manager lookups came out clean.
 
 ### Changed — shared services on both servers (version control, lifecycle, GUI tools, batch docs)
 
