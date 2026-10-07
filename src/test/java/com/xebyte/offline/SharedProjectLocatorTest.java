@@ -124,14 +124,21 @@ public class SharedProjectLocatorTest extends TestCase {
         SecurityConfig security = SecurityConfig.getInstance();
         // When FILE_ROOT is unset, resolveWithinFileRoot returns the path as-is
         // (pre-v5.4.1). When it IS set, an escape must fail — probe both.
+        // An absolute path on THIS platform. A "/tmp/..." literal is absolute on
+        // Linux (where CI runs) but not on Windows, where it has no drive letter:
+        // the override was rejected by the absolute-path check before the
+        // containment check this test exists for ever ran, so the documented
+        // pre-push `./gradlew test` failed on every Windows machine.
+        Path tmp = Path.of(System.getProperty("java.io.tmpdir")).toAbsolutePath();
         if (!security.hasFileRoot()) {
-            Path dir = SharedProjectLocator.resolveProjectDir(
-                    p, "/tmp/ghidra-mcp-shared-test-root", security);
+            Path root = tmp.resolve("ghidra-mcp-shared-test-root");
+            Path dir = SharedProjectLocator.resolveProjectDir(p, root.toString(), security);
             assertEquals("127.0.0.1_13100_firmware-shared", dir.getFileName().toString());
-            assertTrue(dir.startsWith(Path.of("/tmp/ghidra-mcp-shared-test-root")));
+            assertTrue(dir.startsWith(root));
         } else {
             // Escape the configured root — must not silently accept.
-            String outside = "/tmp/definitely-outside-file-root-" + System.nanoTime();
+            String outside = tmp.getRoot()
+                    .resolve("definitely-outside-file-root-" + System.nanoTime()).toString();
             try {
                 SharedProjectLocator.resolveProjectDir(p, outside, security);
                 fail("path outside GHIDRA_MCP_FILE_ROOT must be rejected");
