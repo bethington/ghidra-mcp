@@ -356,9 +356,10 @@ class TestSafeDataTypeOperations:
         """Validate that common data types exist."""
         for type_name in ["int", "char", "void", "uint"]:
             response = http_client.get(
-                "/validate_data_type", params={"type_name": type_name}
+                "/find_data_types", params={"name": type_name}
             )
             assert response.status_code == 200
+            assert response.json()["total"] == 1, type_name
 
     def test_search_and_get_data_type(self, http_client):
         """Search for a data type and get its size."""

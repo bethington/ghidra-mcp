@@ -19,6 +19,20 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — checks fold into the calls they checked
+
+- **`/validate_function_prototype` is `set_function_prototype(dry_run=true)`.** The validator
+  checked only that the string contained `(` and that the convention was one of a hard-coded x86
+  list, so it passed prototypes the real call rejects and warned on every non-x86 convention. The dry
+  run parses and applies the prototype, then rolls back.
+- **`/validate_data_type` is `apply_data_type(dry_run=true)` with an address, and
+  `find_data_types(name=...)` without one.** Its existence check searched only the program's own
+  types by exact name, so it answered `exists: false` for `int` or `dword[4]` in a program that
+  had not used them yet, while `apply_data_type` accepted them. `find_data_types(name=)`
+  resolves exactly as `apply_data_type` does and returns that type or `total: 0`.
+- **`/search_strings` is `list_strings(pattern=...)`.** `list_strings` gains `pattern` (a
+  case-insensitive regex) and `min_length`; `filter` stays a substring. `search_strings`'
+  `encoding` parameter only echoed a label back and is gone. See the migration guide.
 ### Fixed: builds and runs on Ghidra 12.2
 
 Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on

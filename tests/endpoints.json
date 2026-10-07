@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 222,
+  "total_endpoints": 219,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1482,6 +1482,7 @@
       "category": "datatype",
       "params": [
         "pattern",
+        "name",
         "category",
         "kind",
         "categories",
@@ -1493,7 +1494,7 @@
         "gui",
         "headless"
       ],
-      "description": "Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path). With categories=true, list the category paths instead. With no filter it lists every type."
+      "description": "Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path). With categories=true, list the category paths instead. With no filter it lists every type. name= resolves one type exactly as apply_data_type would (replaces validate_data_type's existence check)."
     },
     {
       "path": "/find_dead_code",
@@ -2347,13 +2348,15 @@
         "offset",
         "limit",
         "filter",
+        "pattern",
+        "min_length",
         "program"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "List defined strings"
+      "description": "List defined strings of at least min_length mostly printable characters, optionally narrowed by a substring (filter) and/or a case-insensitive regex (pattern). Each entry has address, value and length; `total` counts every match before paging. Replaces search_strings."
     },
     {
       "path": "/mcp/health",
@@ -2859,24 +2862,6 @@
         "headless"
       ],
       "description": "Search for instructions by mnemonic and/or operand substring. Complement to /search_byte_patterns (byte-level); this matches after Ghidra has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without knowing the encoding. Case-insensitive substring match on both fields. Returns {address, function, mnemonic, operands, bytes} per match."
-    },
-    {
-      "path": "/search_strings",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "search_term",
-        "min_length",
-        "encoding",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Search defined strings by a regex/substring pattern"
     },
     {
       "path": "/server/admin/set_permissions",
@@ -3443,41 +3428,6 @@
         "gui"
       ],
       "description": "List all running Ghidra tool windows"
-    },
-    {
-      "path": "/validate_data_type",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "address",
-        "type_name",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Validate data type syntax"
-    },
-    {
-      "path": "/validate_function_prototype",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "prototype",
-        "calling_convention",
-        "program"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Validate function prototype"
     }
   ]
 }

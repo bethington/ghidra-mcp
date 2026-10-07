@@ -91,12 +91,18 @@ public class DataTypeService {
      */
     @McpTool(path = "/find_data_types", description = "Find data types by name or path pattern, category and "
             + "kind, one record per type (name, kind, category, size, path). With categories=true, list the "
-            + "category paths instead. With no filter it lists every type.",
+            + "category paths instead. With no filter it lists every type. name= resolves one type exactly as "
+            + "apply_data_type would (replaces validate_data_type's existence check).",
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response findDataTypes(
             @Param(value = "pattern", defaultValue = "",
                    description = "Case-insensitive substring of the type's name or full path; omit for no "
                                + "name filter.") String pattern,
+            @Param(value = "name", defaultValue = "",
+                   description = "Resolve exactly this type name the way apply_data_type does: a built-in "
+                               + "(int, DWORD), a pointer (char *), an array (dword[4]) or a struct/enum/typedef "
+                               + "name. Returns that one type, or none when apply_data_type would reject the "
+                               + "name. The other filters do not apply.") String name,
             @Param(value = "category", defaultValue = "",
                    description = "Case-insensitive substring of the category path (e.g. Windows, /MyTypes); omit "
                                + "for any category.") String category,
@@ -116,6 +122,11 @@ public class DataTypeService {
                                + "full unpaged count.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
         DataTypeManager dtm = program.getDataTypeManager();
+        if (name != null && !name.isBlank()) {
+            DataType resolved = ServiceUtils.resolveDataType(dtm, name.trim());
+            return ServiceUtils.paged("data_types",
+                resolved == null ? List.of() : List.of(dataTypeRecord(resolved)), offset, limit);
+        }
         String needle = pattern == null ? "" : pattern.toLowerCase();
 
         if (categories) {
@@ -143,16 +154,20 @@ public class DataTypeService {
             if (!wantedKind.isEmpty() && !typeKind.equals(wantedKind)) {
                 continue;
             }
-            Map<String, Object> record = new LinkedHashMap<>();
-            record.put("name", dt.getName());
-            record.put("kind", typeKind);
-            record.put("category", dt.getCategoryPath().getPath());
-            record.put("size", dt.getLength());
-            record.put("path", path);
-            found.add(record);
+            found.add(dataTypeRecord(dt));
         }
         found.sort(Comparator.comparing(r -> (String) r.get("path")));
         return ServiceUtils.paged("data_types", found, offset, limit);
+    }
+
+    private Map<String, Object> dataTypeRecord(DataType dt) {
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("name", dt.getName());
+        record.put("kind", getDataTypeName(dt));
+        record.put("category", dt.getCategoryPath().getPath());
+        record.put("size", dt.getLength());
+        record.put("path", dt.getPathName());
+        return record;
     }
 
     /**
@@ -1783,181 +1798,6 @@ public class DataTypeService {
             return Response.err(r.getMessage());
         } catch (Exception e) {
             return Response.err("Error renaming data type: " + ServiceUtils.failureMessage(e));
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Data Type Validation Methods
-    // -----------------------------------------------------------------------
-
-    /**
-     * Validate if a data type fits at a given address
-     */
-    @McpTool(path = "/validate_data_type", description = "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.", category = "datatype", access = ToolAccess.READ_ONLY)
-    public Response validateDataType(
-            @Param(value = "address", paramType = "address", defaultValue = "",
-                   description = "Optional address. Omit to check type existence only; provide to validate "
-                               + "applicability at that address (memory range/alignment/conflicts). Accepts "
-                               + "0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).") String addressStr,
-            @Param(value = "type_name", description = "Data type name (bare names resolve across all categories)") String typeName,
-            @Param(value = "program", defaultValue = "") Program program) {
-        if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
-
-        DataTypeManager dtm = program.getDataTypeManager();
-        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
-
-        // Existence-only mode (no address) — replaces validate_data_type_exists. Uses the
-        // bare-name resolver (findDataTypeByNameInAllCategories) so 'int'/'DWORD'/'char *'
-        // resolve instead of requiring a full path like '/int' (BUG-1 fix).
-        if (addressStr == null || addressStr.isEmpty()) {
-            if (dataType != null) {
-                return Response.ok(JsonHelper.mapOf("exists", true,
-                        "type_name", typeName,
-                        "category", dataType.getCategoryPath().getPath(),
-                        "size", dataType.getLength()));
-            }
-            return Response.ok(JsonHelper.mapOf("exists", false, "type_name", typeName));
-        }
-
-        try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-            if (dataType == null) {
-                return Response.err("Data type not found: " + typeName);
-            }
-
-            // Check if memory is available
-            Memory memory = program.getMemory();
-            int typeSize = dataType.getLength();
-            Address endAddr = addr.add(typeSize - 1);
-
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("type_name", typeName);
-            out.put("address", addressStr);
-            out.put("size", typeSize);
-
-            List<String> warnings = new ArrayList<>();
-
-            if (!memory.contains(addr) || !memory.contains(endAddr)) {
-                out.put("memory_available", false);
-                out.put("range", JsonHelper.mapOf("start", addr.toString(), "end", endAddr.toString()));
-                out.put("valid", false);
-                warnings.add("Memory range not available");
-                out.put("warnings", warnings);
-                return Response.ok(out);
-            }
-
-            out.put("memory_available", true);
-            out.put("range", JsonHelper.mapOf("start", addr.toString(), "end", endAddr.toString()));
-
-            // Check alignment
-            long alignment = dataType.getAlignment();
-            boolean aligned = alignment <= 1 || addr.getOffset() % alignment == 0;
-            out.put("aligned", aligned);
-            out.put("alignment", alignment);
-            if (!aligned) {
-                warnings.add("Alignment warning: address not aligned to " + alignment + "-byte boundary");
-            }
-
-            // Check if there's existing data
-            Data existingData = program.getListing().getDefinedDataAt(addr);
-            if (existingData != null) {
-                out.put("existing_data", existingData.getDataType().getName());
-                warnings.add("Existing data: " + existingData.getDataType().getName());
-            } else {
-                out.put("existing_data", null);
-            }
-
-            out.put("valid", true);
-            out.put("warnings", warnings);
-            return Response.ok(out);
-        } catch (Exception e) {
-            return Response.err("Error validating data type: " + ServiceUtils.failureMessage(e));
-        }
-    }
-
-    // Backward compatibility overload
-    public Response validateDataType(String addressStr, String typeName) {
-        return validateDataType(addressStr, typeName, null);
-    }
-
-    /**
-     * NEW v1.6.0: Validate function prototype before applying
-     */
-    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
-    public Response validateFunctionPrototype(
-            @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") Function func,
-            @Param(value = "prototype", description = "Function prototype") String prototype,
-            @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
-            @Param(value = "program", defaultValue = "") Program program) {
-        return validateFunctionPrototypeAt(program, func.getEntryPoint(), func.getName(), prototype, callingConvention);
-    }
-
-    private Response validateFunctionPrototypeAt(Program program, Address addr, String functionAddress,
-                                                 String prototype, String callingConvention) {
-        try {
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) {
-                return Response.ok(JsonHelper.mapOf(
-                    "valid", false,
-                    "error", "No function at address: " + functionAddress
-                ));
-            }
-
-            // Basic validation - check if prototype string is parseable
-            if (prototype == null || prototype.trim().isEmpty()) {
-                return Response.ok(JsonHelper.mapOf(
-                    "valid", false,
-                    "error", "Empty prototype"
-                ));
-            }
-
-            // Check for common issues
-            List<String> warnings = new ArrayList<>();
-
-            // Check for return type
-            if (!prototype.contains("(")) {
-                return Response.ok(JsonHelper.mapOf(
-                    "valid", false,
-                    "error", "Invalid prototype format - missing parentheses"
-                ));
-            }
-
-            // Validate calling convention if provided
-            if (callingConvention != null && !callingConvention.isEmpty()) {
-                String[] validConventions = {"__cdecl", "__stdcall", "__fastcall", "__thiscall", "default"};
-                boolean validConv = false;
-                for (String valid : validConventions) {
-                    if (callingConvention.equalsIgnoreCase(valid)) {
-                        validConv = true;
-                        break;
-                    }
-                }
-                if (!validConv) {
-                    warnings.add("Unknown calling convention: " + callingConvention);
-                }
-            }
-
-            if (!warnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf(
-                    "valid", true,
-                    "warnings", warnings
-                ));
-            }
-            return Response.ok(JsonHelper.mapOf(
-                "valid", true
-            ));
-        } catch (Exception e) {
-            return Response.ok(JsonHelper.mapOf(
-                "valid", false,
-                "error", e.getMessage()
-            ));
         }
     }
 

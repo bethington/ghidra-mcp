@@ -49,7 +49,7 @@ call site is rewritten.
 | --- | --- | --- |
 | `get_data_type_size(type_name)` | `get_type_size(type_name)` | superset; drop-in |
 | ~~`mcp_health`~~ | — | **KEPT — verified not a duplicate.** `/check_connection` is a trivial liveness probe; `/mcp/health` returns pool stats, uptime, memory, and active request count, and is consumed by `tests/performance/test_health_endpoint.py`, the fun-doc dashboard, and the recovery RFC's accessibility probe. Both are hardcoded auth-exempt paths in `SecurityConfig` / `UdsHttpServer`. Folding the diagnostics into the liveness probe would bloat the hot path for no surface win. |
-| `validate_data_type_exists(type_name)` | `validate_data_type(address?, type_name)` | make `address` optional; when absent → existence-only. **Fixes BUG-1** (bare-name resolver) |
+| `validate_data_type_exists(type_name)` | `find_data_types(name=type_name)` | existence check, resolved as `apply_data_type` would. **Fixes BUG-1** (bare-name resolver). (Went through `validate_data_type`, itself folded below.) |
 | `rename_function_by_address(function_address, new_name)` | `rename_function(old_name, new_name)` | `old_name` now accepts a **name OR address**; transform: `rename_function(old_name=<addr>, new_name)` |
 
 ## Tier-3 — semantic unifications
@@ -120,6 +120,17 @@ fails on a descriptor with no registered route, which is what caught the leftove
 
 `apply_documentation` also takes `entries=[...]` for many functions at once, plus the
 prototype, variable-type and variable-rename fields that used to need separate calls.
+
+## Checks become the real call's dry run or filter
+
+A tool that only checked whether another call would work is gone: the call itself answers,
+with `dry_run=true` where it writes, and the answer is the one the real call would give.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `validate_function_prototype(function, prototype, calling_convention)` | `set_function_prototype` | `set_function_prototype(function_address, prototype, calling_convention, dry_run=true)`. The validator only checked for `(` and a hard-coded x86 convention list; the dry run parses and applies the prototype, then rolls back. |
+| `validate_data_type(address?, type_name)` | `apply_data_type` | With an address: `apply_data_type(address, type_name, dry_run=true)` (memory, alignment and the eviction guard, as the real apply sees them). Without one: `find_data_types(name=type_name)`, the type `apply_data_type` would resolve (built-ins, pointers, arrays included), or `total: 0`. |
+| `search_strings(search_term, min_length, encoding)` | `list_strings` | `list_strings(pattern=search_term, min_length=...)`; `filter` stays a substring; `encoding` only echoed a label and is gone. Results are list entries (`address`, `value`, `length`) under `strings`, not `matches`. |
 
 ## Folds after the consolidation
 

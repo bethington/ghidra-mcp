@@ -348,7 +348,7 @@ XREF COUNT: 2 references
 
 **For validation:**
 
-- `validate_data_type(type_name)` - Check if type exists
+- `find_data_types(name=type_name)` - Resolve a type exactly as `apply_data_type` would (empty when it would reject the name)
 - `can_rename_at_address(address)` - Check what operation is appropriate
 
 ## Per-Program Storage: Options and Property Maps (v5.17.0+)

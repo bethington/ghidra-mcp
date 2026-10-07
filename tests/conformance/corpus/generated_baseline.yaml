@@ -1089,10 +1089,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: search_strings
-  tier: read
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''search_term'']'
 - tool: server_admin_set_permissions
   tier: write
   snapshot: false
@@ -1245,17 +1241,3 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: false
-- tool: validate_data_type
-  tier: read
-  args:
-    address: '0x10001000'
-    type_name: int
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: validate_function_prototype
-  tier: read
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''calling_convention'', ''prototype'']'

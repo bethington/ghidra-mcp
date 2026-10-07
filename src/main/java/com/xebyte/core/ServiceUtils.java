@@ -200,8 +200,8 @@ public final class ServiceUtils {
     /**
      * Check if a string meets quality criteria: 4+ chars, 80%+ printable ASCII.
      */
-    public static boolean isQualityString(String str) {
-        if (str == null || str.length() < 4) {
+    public static boolean isQualityString(String str, int minLength) {
+        if (str == null || str.isEmpty() || str.length() < minLength) {
             return false;
         }
 

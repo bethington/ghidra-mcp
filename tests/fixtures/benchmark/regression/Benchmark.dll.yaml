@@ -236,8 +236,8 @@ endpoint_smoke:
       type: "lines"
       contains: ["compute_gcd", "compute_str_len"]
 
-  - endpoint: "/search_strings"
-    params: { search_term: "benchmark" }
+  - endpoint: "/list_strings"
+    params: { pattern: "benchmark" }
     assert:
       type: "nonempty"
 
