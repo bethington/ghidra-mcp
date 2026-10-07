@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * A program name matched more than one program, and resolving it would mean guessing.
  *
- * <p>The multi-version corpus is the everyday case: {@code D2Common.dll} exists in every
+ * <p>The multi-version project is the everyday case: {@code example.dll} exists in every
  * version folder. Both servers used to pick one -- the GUI the first file its recursive
  * walk found, headless the first loaded name containing the string -- and every write
  * that followed went to whichever that was. A full project path always resolves.

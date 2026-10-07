@@ -484,8 +484,8 @@ public class AnnotationScanner {
      * is not a missing argument but a WRONG TARGET: resolution falls through to the
      * current program, so a bookmark, comment or rename addressed to one program
      * lands in whichever program happens to be active, and the response says
-     * success. That is how 16442 bookmarks describing D2Common were written into
-     * D2Game without a single error.
+     * success. That is how 16442 bookmarks describing one DLL were written into
+     * a different DLL without a single error.
      *
      * This generalises what {@code isDryRunRequested} already does by hand for
      * {@code dry_run}, and for the same reason it gives: the Python bridge

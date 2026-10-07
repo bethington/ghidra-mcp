@@ -784,7 +784,7 @@ public class XrefCallGraphService {
         // Format output based on requested format
         if ("json_edges".equals(format)) {
             // Address-based JSON edge list — designed for automation tools
-            // (fun-doc call-graph traversal) that need stable identifiers.
+            // (e.g. external call-graph traversal) that need stable identifiers.
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("edge_count", addressEdges != null ? addressEdges.size() : 0);
             result.put("caller_count", callGraph.size());

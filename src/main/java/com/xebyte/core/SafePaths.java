@@ -57,7 +57,7 @@ public final class SafePaths {
      * Reduce a (possibly project-path-shaped) identifier to a safe basename.
      *
      * <p>Used to derive default output filenames from a program name like
-     * {@code /Vanilla/1.13d/D2Common.dll} so the slashes never leak into a
+     * {@code /Project/1.0/example.dll} so the slashes never leak into a
      * filesystem path. Returns {@code "program"} when nothing usable remains.
      */
     public static String safeBasename(String ident) {

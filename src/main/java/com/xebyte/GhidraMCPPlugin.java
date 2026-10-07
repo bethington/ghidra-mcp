@@ -493,7 +493,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Get a program by name, or return the current program if name is null/empty.
      * Delegates to FrontEndProgramProvider which checks CodeBrowser, cache, and project.
      *
-     * @param programName The name or project path (e.g., "/LoD/1.00/D2Common.dll"), or null/empty for current
+     * @param programName The name or project path (e.g., "/Project/1.0/example.dll"), or null/empty for current
      * @return The requested program, or null if not found
      */
     public Program getProgram(String programName) {
@@ -514,7 +514,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             // Program was explicitly requested but not found - provide helpful error
             StringBuilder error = new StringBuilder();
             error.append("{\"error\": \"Program not found: ").append(escapeJson(programName)).append("\", ");
-            error.append("\"hint\": \"Use full project path (e.g., /LoD/1.00/D2Common.dll) to open on-demand\", ");
+            error.append("\"hint\": \"Use full project path (e.g., /Project/1.0/example.dll) to open on-demand\", ");
             error.append("\"available_programs\": [");
 
             Program[] programs = programProvider.getAllOpenPrograms();

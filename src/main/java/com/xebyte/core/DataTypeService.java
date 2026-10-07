@@ -102,7 +102,7 @@ public class DataTypeService {
                    description = "Case-insensitive substring of the type's name or full path; omit for no "
                                + "name filter.") String pattern,
             @Param(value = "category", defaultValue = "",
-                   description = "Case-insensitive substring of the category path (e.g. Windows, /D2); omit "
+                   description = "Case-insensitive substring of the category path (e.g. Windows, /MyTypes); omit "
                                + "for any category.") String category,
             @Param(value = "kind", defaultValue = "",
                    description = "Only this kind: struct, union, enum, typedef, pointer, array, function or "
@@ -393,7 +393,7 @@ public class DataTypeService {
     @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype", access = ToolAccess.WRITE)
     public Response createStruct(
             @Param(value = "name", source = ParamSource.BODY,
-                   description = "New structure type name, for example UnitAny or SkillTableEntry") String name,
+                   description = "New structure type name, for example ConfigEntry or SkillTableEntry") String name,
             @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]") String fieldsJson,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
@@ -806,7 +806,7 @@ public class DataTypeService {
                                + "existing struct/enum names all work; `void` is Ghidra's void type.") String baseType,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
                    description = "Name for the type. Required for a typedef. For an array or pointer, omit "
-                               + "to let Ghidra name it after the base type (dword[16], UnitAny *); the "
+                               + "to let Ghidra name it after the base type (dword[16], MyStruct *); the "
                                + "response reports the name actually used.") String name,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
                    description = "Array only: number of ELEMENTS, not bytes — total size is length x "
@@ -1103,7 +1103,7 @@ public class DataTypeService {
                     // with the surrounding unit -- "Error applying data type:
                     // Conflicting data exists at address X to Y" even though the
                     // caller explicitly asked to clear first. Confirmed live
-                    // 2026-07-26: a fun-doc FIX-mode worker retried the identical
+                    // 2026-07-26: an automated documentation worker retried the identical
                     // apply_data_type call 2-3 times before it happened to succeed,
                     // which only worked because an unrelated later clear coincidentally
                     // freed the range. clearCodeUnits is a documented no-op over a
@@ -2009,7 +2009,7 @@ public class DataTypeService {
                    description = "Simple name of the type to move, matched across every category (no "
                                + "/path prefix needed).") String typeName,
             @Param(value = "category_path", source = ParamSource.BODY,
-                   description = "Destination category as a /-separated path, e.g. /D2Structs/Units. It "
+                   description = "Destination category as a /-separated path, e.g. /MyTypes/Network. It "
                                + "is created, with any missing parents, if it does not exist.") String categoryPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2419,7 +2419,7 @@ public class DataTypeService {
     @McpTool(path = "/create_data_type_category", method = "POST", description = "Create a new data type category", category = "datatype", access = ToolAccess.WRITE)
     public Response createDataTypeCategory(
             @Param(value = "category_path", source = ParamSource.BODY,
-                   description = "New category as a /-separated path, e.g. /D2Structs/Units. Missing "
+                   description = "New category as a /-separated path, e.g. /MyTypes/Network. Missing "
                                + "parent categories are created too.") String categoryPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -3511,8 +3511,8 @@ public class DataTypeService {
         // `untyped`, length 0). The difference matters because a swallowed
         // global is INVISIBLE elsewhere: /list_globals resolves the CONTAINING
         // unit, so it reports the eater's type at the dead address and the
-        // dashboard shows the global as perfectly typed. Measured on
-        // PD2_EXT.dll 2026-08-03: the types bar counted 1 untyped, audit_global
+        // dashboard shows the global as perfectly typed. Measured on a
+        // mod DLL 2026-08-03: the types bar counted 1 untyped, audit_global
         // counted 3, and the 2 ghosts were exactly the globals a neighbouring
         // type application had destroyed. Surface the container so the
         // difference is reportable instead of inferable.
@@ -3607,7 +3607,7 @@ public class DataTypeService {
         // consuming process resolves against it — so `g_` + Hungarian form is
         // not an improvement, it is the destruction of the symbol's identity.
         //
-        // Measured on PD2_EXT.dll 2026-08-04. That DLL is a `version.dll` proxy:
+        // Measured on a mod DLL 2026-08-04 that is a `version.dll` proxy:
         // all 12 of its named exports are FORWARDER strings ("version.VerFindFileW")
         // and it has no real code exports at all. A globals pass renamed every
         // one of them — `GetFileVersionInfoA` became
@@ -3622,7 +3622,7 @@ public class DataTypeService {
         // correct `char[N]` and an explanation. Only the NAME is off-limits.
         //
         // NOT every export is protected, and the distinction is the whole
-        // subtlety. D2's own DLLs export by ORDINAL: Ghidra names those
+        // subtlety. Many DLLs export mostly by ORDINAL: Ghidra names those
         // `Ordinal_10001`, they carry no identity worth keeping, and renaming
         // them to something meaningful is the core of this project's workflow.
         // A blanket "exports are untouchable" rule would break that. What is
@@ -4109,7 +4109,7 @@ public class DataTypeService {
      * unknown, which is the one axis you cannot read around. A global is never
      * 80% complete without a type, so both the raw and effective scores are
      * clamped one point below the band floor — every downstream consumer (the
-     * {@code Complete} band map, fun-doc's {@code effective_score >= Target}
+     * {@code Complete} band map, an external worker's {@code effective_score >= Target}
      * draft gate, the dashboard rollups) then agrees without needing its own
      * copy of the rule.
      */
@@ -4400,7 +4400,7 @@ public class DataTypeService {
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New name. Must follow g_ + Hungarian + descriptor convention (e.g., g_dwActiveQuestState, g_pUnitList).") String newName,
             @Param(value = "type_name", source = ParamSource.BODY,
-                   description = "Ghidra data type to apply (e.g., uint, byte, UnitAny *, char *, MyStruct). Use create_struct/create_derived_type first if the type doesn't exist. Pass empty to leave type unchanged.") String typeName,
+                   description = "Ghidra data type to apply (e.g., uint, byte, MyStruct *, char *, MyStruct). Use create_struct/create_derived_type first if the type doesn't exist. Pass empty to leave type unchanged.") String typeName,
             @Param(value = "array_length", source = ParamSource.BODY, defaultValue = "0",
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
@@ -4587,7 +4587,7 @@ public class DataTypeService {
         // Eviction guard. clearCodeUnits below operates on whole code units and
         // its exception is swallowed, so without this a type application quietly
         // deletes any named global it overlaps — and reports success. Measured
-        // 2026-08-03: three globals destroyed in one PD2_EXT.dll pass, each one
+        // 2026-08-03: three globals destroyed in one documentation pass over a mod DLL, each one
         // reported `completed` seconds earlier. Refuse instead, and name the
         // casualties so the caller can pick a type that fits or fix the conflict
         // deliberately via allow_evict.

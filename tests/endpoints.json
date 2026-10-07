@@ -329,7 +329,7 @@
         "gui",
         "headless"
       ],
-      "description": "Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk."
+      "description": "Ingest a single function's documentation into the cross-version archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk."
     },
     {
       "path": "/archive_ingest_program",

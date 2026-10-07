@@ -506,7 +506,7 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
             // binaries and records body_end == body_start. `end` is then the
             // entry point itself, the loop below emits exactly ONE instruction
             // and stops, and nothing in the response says so. Measured
-            // 2026-08-11 against Game.exe: 8 of 24 launcher functions, 7 of
+            // 2026-08-11 against a 32-bit launcher EXE: 8 of 24 launcher functions, 7 of
             // them returning a single instruction -- IsFieldSeparator is 44
             // bytes and answered with `MOV EAX,[0x0040cf30]`, count 1.
             //
@@ -920,7 +920,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "New function name in PascalCase, verb first: GetPlayerHealth, not "
                                + "get_player_health and not PlayerHealth. An UPPERCASE module prefix is "
-                               + "allowed and validated separately (D2COMMON_GetUnitStat). The quality "
+                               + "allowed and validated separately (MODULE_GetValue). The quality "
                                + "gate rejects a vague verb carrying fewer than two specifier tokens "
                                + "(ProcessData), a single-token name (Get), a weak-noun-only name "
                                + "(GetInfo), and a name whose tokens are a strict subset of an existing "
@@ -1931,7 +1931,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             category = "function", access = ToolAccess.READ_ONLY)
     public Response listClassMembers(
             @Param(value = "class_name",
-                   description = "Class / struct name, e.g. 'UnitAny'.") String className,
+                   description = "Class / struct name, e.g. 'CWindow'.") String className,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of members to skip before this page starts; 0 begins at the "
                                + "first. Negative values are clamped to 0.") int offset,

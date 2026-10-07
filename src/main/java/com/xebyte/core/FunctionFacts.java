@@ -89,7 +89,7 @@ public final class FunctionFacts {
      * <p>Scoped to this endpoint rather than {@code createConfiguredDecompiler}: the shared
      * path feeds {@code analyze_function_completeness}, whose comment counter special-cases
      * Ghidra's {@code WARNING:} banners in its {@code /*} branch but not its {@code //} one,
-     * and fun-doc's {@code port_pipeline._strip_comments}, which strips only {@code /* … *}{@code /}.
+     * and an external port pipeline's {@code _strip_comments}, which strips only {@code /* … *}{@code /}.
      * Under {@code //} both would silently change behaviour, and both are scoring inputs.
      *
      * <p>Ghidra renders a comment on its own line above the statement, never trailing it, so

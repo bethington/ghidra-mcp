@@ -1574,7 +1574,7 @@ public class ProgramScriptService {
         // If folder path specified, navigate to it
         ghidra.framework.model.DomainFolder targetFolder = rootFolder;
         if (folderPath != null && !folderPath.trim().isEmpty() && !folderPath.equals("/")) {
-            // Navigate through path segments (handles nested folders like "LoD/1.07")
+            // Navigate through path segments (handles nested folders like "Project/1.0")
             String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
             String[] pathParts = cleanPath.split("/");
             for (String part : pathParts) {
@@ -1698,9 +1698,9 @@ public class ProgramScriptService {
              category = "project", access = ToolAccess.WRITE)
     public Response moveFile(
             @Param(value = "filePath", source = ParamSource.BODY,
-                   description = "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll") String filePath,
+                   description = "Project file path to move, e.g. /Project/1.0/example.dll") String filePath,
             @Param(value = "destFolder", source = ParamSource.BODY,
-                   description = "Destination project folder path, e.g. /Mods/PD2-S12") String destFolder) {
+                   description = "Destination project folder path, e.g. /Project/1.1") String destFolder) {
         ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
@@ -1764,8 +1764,8 @@ public class ProgramScriptService {
             // moveTo returns the RELOCATED DomainFile. The receiver keeps
             // reporting its old pathname, so reading getPathname() off it
             // reports a destination the file is not at -- measured live: a
-            // successful move to /Mods/PD2-S12 still answered
-            // "to": "/Vanilla/1.00/D2Server.dll". Anything chaining on that
+            // successful move to /Project/1.1 still answered
+            // "to": "/Project/1.0/example.dll". Anything chaining on that
             // path then operates on a file that no longer exists there.
             ghidra.framework.model.DomainFile movedFile = domainFile.moveTo(dest);
             String newPath = movedFile != null ? movedFile.getPathname()
@@ -1790,9 +1790,9 @@ public class ProgramScriptService {
              category = "project", access = ToolAccess.WRITE)
     public Response moveFolder(
             @Param(value = "sourcePath", source = ParamSource.BODY,
-                   description = "Project folder path to move, e.g. /Vanilla/1.00") String sourcePath,
+                   description = "Project folder path to move, e.g. /Project/1.0") String sourcePath,
             @Param(value = "destPath", source = ParamSource.BODY,
-                   description = "Destination parent folder path, e.g. /Mods") String destPath) {
+                   description = "Destination parent folder path, e.g. /Archive") String destPath) {
         ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");

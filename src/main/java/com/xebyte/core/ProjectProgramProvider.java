@@ -58,7 +58,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     public static final int MAX_CACHED_PROGRAMS = resolveMaxCachedPrograms();
 
     // Keyed by project path; a program with no DomainFile (an import not yet saved, a
-    // test double) by name. Path, not name: D2Common.dll exists in every version folder.
+    // test double) by name. Path, not name: the same DLL name can exist in every version folder.
     private final Map<String, Program> cache = new ConcurrentHashMap<>();
     private final Map<String, Long> lastAccessNanos = new ConcurrentHashMap<>();
     // Why a program is open read-only: the writable open's failure, kept so a caller can

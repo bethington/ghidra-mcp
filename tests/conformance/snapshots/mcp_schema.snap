@@ -747,7 +747,7 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk.",
+      "description": "Ingest a single function's documentation into the cross-version archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL). Idempotent; field-level merge resolution happens on the archive side. Use archive_ingest_program for bulk.",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -775,7 +775,7 @@
         },
         {
           "default": "",
-          "description": "Override the auto-extracted version (e.g. 'PD2-S12')",
+          "description": "Override the auto-extracted version (e.g. '1.0')",
           "name": "version_override",
           "required": false,
           "source": "query",
@@ -810,7 +810,7 @@
         },
         {
           "default": "",
-          "description": "Override the auto-extracted version (e.g. 'PD2-S12')",
+          "description": "Override the auto-extracted version (e.g. '1.0')",
           "name": "version_override",
           "required": false,
           "source": "query",
@@ -1573,7 +1573,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "New category as a /-separated path, e.g. /D2Structs/Units. Missing parent categories are created too.",
+          "description": "New category as a /-separated path, e.g. /MyTypes/Network. Missing parent categories are created too.",
           "name": "category_path",
           "required": true,
           "source": "body",
@@ -1614,7 +1614,7 @@
         },
         {
           "default": "",
-          "description": "Name for the type. Required for a typedef. For an array or pointer, omit to let Ghidra name it after the base type (dword[16], UnitAny *); the response reports the name actually used.",
+          "description": "Name for the type. Required for a typedef. For an array or pointer, omit to let Ghidra name it after the base type (dword[16], MyStruct *); the response reports the name actually used.",
           "name": "name",
           "required": false,
           "source": "body",
@@ -1998,7 +1998,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "New structure type name, for example UnitAny or SkillTableEntry",
+          "description": "New structure type name, for example ConfigEntry or SkillTableEntry",
           "name": "name",
           "required": true,
           "source": "body",
@@ -3084,7 +3084,7 @@
         },
         {
           "default": "",
-          "description": "Case-insensitive substring of the category path (e.g. Windows, /D2); omit for any category.",
+          "description": "Case-insensitive substring of the category path (e.g. Windows, /MyTypes); omit for any category.",
           "name": "category",
           "required": false,
           "source": "query",
@@ -4584,7 +4584,7 @@
       "method": "GET",
       "params": [
         {
-          "description": "Class / struct name, e.g. 'UnitAny'.",
+          "description": "Class / struct name, e.g. 'CWindow'.",
           "name": "class_name",
           "required": true,
           "source": "query",
@@ -5154,7 +5154,7 @@
           "type": "string"
         },
         {
-          "description": "Destination category as a /-separated path, e.g. /D2Structs/Units. It is created, with any missing parents, if it does not exist.",
+          "description": "Destination category as a /-separated path, e.g. /MyTypes/Network. It is created, with any missing parents, if it does not exist.",
           "name": "category_path",
           "required": true,
           "source": "body",
@@ -5180,14 +5180,14 @@
       "method": "POST",
       "params": [
         {
-          "description": "Project file path to move, e.g. /Vanilla/1.00/D2Server.dll",
+          "description": "Project file path to move, e.g. /Project/1.0/example.dll",
           "name": "filePath",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Destination project folder path, e.g. /Mods/PD2-S12",
+          "description": "Destination project folder path, e.g. /Project/1.1",
           "name": "destFolder",
           "required": true,
           "source": "body",
@@ -5205,14 +5205,14 @@
       "method": "POST",
       "params": [
         {
-          "description": "Project folder path to move, e.g. /Vanilla/1.00",
+          "description": "Project folder path to move, e.g. /Project/1.0",
           "name": "sourcePath",
           "required": true,
           "source": "body",
           "type": "string"
         },
         {
-          "description": "Destination parent folder path, e.g. /Mods",
+          "description": "Destination parent folder path, e.g. /Archive",
           "name": "destPath",
           "required": true,
           "source": "body",
@@ -5671,7 +5671,7 @@
           "type": "string"
         },
         {
-          "description": "New function name in PascalCase, verb first: GetPlayerHealth, not get_player_health and not PlayerHealth. An UPPERCASE module prefix is allowed and validated separately (D2COMMON_GetUnitStat). The quality gate rejects a vague verb carrying fewer than two specifier tokens (ProcessData), a single-token name (Get), a weak-noun-only name (GetInfo), and a name whose tokens are a strict subset of an existing function's within the same module prefix. strict_mode downgrades those rejections to warnings.",
+          "description": "New function name in PascalCase, verb first: GetPlayerHealth, not get_player_health and not PlayerHealth. An UPPERCASE module prefix is allowed and validated separately (MODULE_GetValue). The quality gate rejects a vague verb carrying fewer than two specifier tokens (ProcessData), a single-token name (Get), a weak-noun-only name (GetInfo), and a name whose tokens are a strict subset of an existing function's within the same module prefix. strict_mode downgrades those rejections to warnings.",
           "name": "new_name",
           "required": true,
           "source": "body",
@@ -6784,7 +6784,7 @@
           "type": "string"
         },
         {
-          "description": "Ghidra data type to apply (e.g., uint, byte, UnitAny *, char *, MyStruct). Use create_struct/create_derived_type first if the type doesn't exist. Pass empty to leave type unchanged.",
+          "description": "Ghidra data type to apply (e.g., uint, byte, MyStruct *, char *, MyStruct). Use create_struct/create_derived_type first if the type doesn't exist. Pass empty to leave type unchanged.",
           "name": "type_name",
           "required": true,
           "source": "body",

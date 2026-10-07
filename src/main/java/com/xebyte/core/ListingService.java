@@ -1009,8 +1009,8 @@ public class ListingService {
      * type at all. Every consumer reads this field as "the type of this
      * global", so a global swallowed by its neighbour rendered as perfectly
      * typed in all of them: the dashboard's types bar, the globals inventory,
-     * `plate_scaffold`, and the assess pass. Measured 2026-08-03 across the
-     * PD2-S12 corpus — 540 shadowed globals, 539 of them invisible everywhere
+     * `plate_scaffold`, and the assess pass. Measured 2026-08-03 across a
+     * multi-DLL production corpus — 540 shadowed globals, 539 of them invisible everywhere
      * for this one reason.
      *
      * It also contradicted this very method's own caller: `listGlobals` derives

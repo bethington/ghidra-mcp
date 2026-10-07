@@ -1590,11 +1590,11 @@ public class DocumentationHashService {
     }
 
     // -----------------------------------------------------------------------
-    // Function-doc archive ingestion (MCP → re-kb FastAPI)
+    // Function-doc archive ingestion (MCP → configured doc archive service)
     // -----------------------------------------------------------------------
     //
-    // Seeds the cross-version documentation archive at re_kb.functions
-    // with the user's existing fun-doc work. Walks every function in a
+    // Seeds the configured cross-version documentation archive with the
+    // documentation already in the program. Walks every function in a
     // program, builds a doc payload mirroring what merge_program_documentation
     // reads, and POSTs each to /v1/doc_archive/upsert. Idempotent — re-runs
     // route through the field-level merge resolution on the archive side.
@@ -1604,10 +1604,10 @@ public class DocumentationHashService {
     //     GHIDRA_MCP_ARCHIVE_URL to opt in to an explicitly chosen service.
     //
     // Identity scheme:
-    //   - binary_name: program name (e.g. "Bnclient.dll")
+    //   - binary_name: program name (e.g. "example.dll")
     //   - version:     extracted from project path; default heuristic walks
-    //                  /Mods/<VERSION>/... or /Vanilla/<VERSION>/... and uses
-    //                  the second segment. Override via version_override param.
+    //                  /<BUCKET>/<VERSION>/... (e.g. /Project/1.0/...) and
+    //                  uses the second segment. Override via version_override param.
     //   - address:     "0x" + hex (canonical Ghidra form)
 
     private static String getArchiveUrl() {
@@ -1618,9 +1618,9 @@ public class DocumentationHashService {
     /**
      * Best-effort version extraction from a Program's DomainFile path.
      * Examples:
-     *   /Mods/PD2-S12/Bnclient.dll       -> "PD2-S12"
-     *   /Vanilla/1.13d/D2Common.dll      -> "1.13d"
-     *   /LoD/1.00/D2Common.dll           -> "1.00"
+     *   /Project/1.0/example.dll         -> "1.0"
+     *   /Releases/2.3b/example.dll       -> "2.3b"
+     *   /Builds/nightly/example.exe      -> "nightly"
      * Falls back to "unknown" if the path doesn't match.
      */
     private static String extractVersion(Program program) {
@@ -1630,14 +1630,14 @@ public class DocumentationHashService {
         if (pathname == null) return "unknown";
         String[] parts = pathname.split("/");
         // Skip leading empty + the project-bucket segment, take the next:
-        //   "" / "Mods" / "PD2-S12" / "Bnclient.dll"  -> parts[2] = "PD2-S12"
+        //   "" / "Project" / "1.0" / "example.dll"  -> parts[2] = "1.0"
         if (parts.length >= 3 && !parts[2].isEmpty()) return parts[2];
         return "unknown";
     }
 
     @McpTool(path = "/archive_ingest_function", dryRun = false, method = "POST",
         description = "Ingest a single function's documentation into the cross-version "
-            + "archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge "
+            + "archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL). Idempotent; field-level merge "
             + "resolution happens on the archive side. Use archive_ingest_program for bulk.",
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestFunction(
@@ -1646,7 +1646,7 @@ public class DocumentationHashService {
             @Param(value = "program",
                 description = "Target program path/name", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
-                description = "Override the auto-extracted version (e.g. 'PD2-S12')",
+                description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build payload but skip the POST") boolean dryRun) {
@@ -1696,7 +1696,7 @@ public class DocumentationHashService {
             @Param(value = "program",
                 description = "Target program path/name", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
-                description = "Override the auto-extracted version (e.g. 'PD2-S12')",
+                description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
             @Param(value = "limit", source = ParamSource.QUERY, defaultValue = "0",
                 description = "Stop after N functions (0 = no limit)") int limit,

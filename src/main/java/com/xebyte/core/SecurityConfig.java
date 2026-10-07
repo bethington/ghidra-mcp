@@ -35,7 +35,7 @@ import java.nio.file.Paths;
  *       <p>{@code /open_project} takes a filesystem path too (a {@code .gpr} or project
  *       directory), so it is contained the same way on both servers; a {@code ghidra://}
  *       URL names a server repository and is not a path. {@code /delete_file} operates
- *       on Ghidra <em>project domain</em> paths (e.g. {@code /Vanilla/1.00/D2Common.dll}),
+ *       on Ghidra <em>project domain</em> paths (e.g. {@code /Project/1.0/example.dll}),
  *       not filesystem paths, so file-root canonicalization does not apply to it; its
  *       containment guard is project-folder scope
  *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
@@ -171,7 +171,7 @@ public final class SecurityConfig {
 
     /**
      * Return the configured project-folder scope prefix (e.g.
-     * {@code "/Mods/PD2-S12"}), or {@code null} when unset (default).
+     * {@code "/Project/1.0"}), or {@code null} when unset (default).
      * Trailing slash already normalized at construction.
      */
     public String getProjectFolderScope() {
@@ -184,11 +184,11 @@ public final class SecurityConfig {
      * (default — preserves general-user behavior).
      *
      * Uses the {@code path == prefix || path.startsWith(prefix + "/")} idiom
-     * to prevent prefix-collision attacks (e.g. {@code /Mods/PD2-S12-OTHER}
-     * does NOT match scope {@code /Mods/PD2-S12}).
+     * to prevent prefix-collision attacks (e.g. {@code /Project/1.0-OTHER}
+     * does NOT match scope {@code /Project/1.0}).
      *
      * @param domainFilePath the project-relative path of a Ghidra DomainFile
-     *                       (e.g. {@code "/Mods/PD2-S12/Bnclient.dll"});
+     *                       (e.g. {@code "/Project/1.0/example.dll"});
      *                       null returns true (unscoped equivalent)
      */
     public boolean isPathInProjectScope(String domainFilePath) {
@@ -204,7 +204,7 @@ public final class SecurityConfig {
      * <p>A null {@code scopePrefix} (no scope configured) or null
      * {@code domainFilePath} both return true — the unscoped default. The
      * {@code equals || startsWith(prefix + "/")} idiom prevents prefix-collision
-     * escapes (e.g. {@code /Mods/PD2-S12-OTHER} does NOT match {@code /Mods/PD2-S12}).
+     * escapes (e.g. {@code /Project/1.0-OTHER} does NOT match {@code /Project/1.0}).
      */
     public static boolean pathWithinScope(String domainFilePath, String scopePrefix) {
         if (scopePrefix == null) return true;
