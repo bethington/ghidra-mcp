@@ -241,8 +241,10 @@ def _summarize_instance(inst: dict) -> dict:
     when it was connected to something worth listing. Nothing downstream reads
     the roster: connect_instance matches on project name.
 
-    Entries are dicts ({name, path, open}) from /mcp/instance_info, or bare
-    strings from /list_open_programs — where being listed *is* being open.
+    Entries are dicts ({name, path, open}) from /mcp/instance_info, or entries
+    from the /list_open_programs fallback — dicts with no `open` key, or bare
+    strings — where being listed *is* being open. Only an explicit open=False
+    filters an entry out (#565).
     """
     programs = inst.get("programs")
     if not isinstance(programs, list):
@@ -252,7 +254,7 @@ def _summarize_instance(inst: dict) -> dict:
     open_names = [
         (p.get("path") or p.get("name")) if isinstance(p, dict) else p
         for p in programs
-        if not isinstance(p, dict) or p.get("open")
+        if not isinstance(p, dict) or p.get("open", True)
     ]
     summary["program_count"] = len(programs)
     summary["open_programs"] = open_names[:MAX_OPEN_PROGRAMS_LISTED]
