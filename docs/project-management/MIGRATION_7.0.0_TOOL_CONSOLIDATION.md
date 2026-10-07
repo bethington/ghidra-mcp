@@ -10,7 +10,7 @@ survivor.
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
 > `/batch_get_comments` — and three later passes removed more (see
 > [Readers, listings and the server model](#readers-listings-and-the-server-model)),
-> so the shipped catalog is **209**, not 251. The
+> so the shipped catalog is **210** (with `/set_memory_block`, added after rc.1), not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.

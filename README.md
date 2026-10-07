@@ -467,7 +467,7 @@ The specified schema produces a constraint that has too many states for serving
 
 That is not a degradation, it is an outright break, and no client-side setting
 could work around a server that only ever offered the full set. So the bridge
-now loads `listing,function,program` (67 endpoints plus the 8 static tools) on
+now loads `listing,function,program` (68 endpoints plus the 8 static tools) on
 connect and registers the rest on demand.
 
 **If your client ignores `tools/list_changed`** it will not notice tools that

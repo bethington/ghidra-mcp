@@ -78,7 +78,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (67 endpoints plus 8
+called. The bridge now loads `listing,function,program` (68 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 

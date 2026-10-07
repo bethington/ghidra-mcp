@@ -34,11 +34,11 @@ Both run in CI on every pull request (`Offline HTTP Tier (no Ghidra)` in
    execute for real.
 
 2. **Callers obey the endpoint contract.** The fake routes from
-   `tests/endpoints.json` (219 endpoints) and checks parameters against the
-   recorded `/mcp/schema` (205 tools, each parameter carrying its declared
-   `source`). The 14 catalogued endpoints the recording does not cover get
+   `tests/endpoints.json` (210 endpoints) and checks parameters against the
+   recorded `/mcp/schema` (206 tools, each parameter carrying its declared
+   `source`). The 4 catalogued endpoints the recording does not cover get
    routing and **no parameter check at all** — correct and permanent, because
-   all 14 are the headless-only project-management surface and the snapshot is
+   all 4 are the headless-only project-management surface and the snapshot is
    a recording of the *GUI* server. `test_fake_ghidra.py`'s
    `SCHEMA_RECORDING_PREDATES` is the ratchet on that: it is **empty**, and a
    GUI-served endpoint the recording does not cover fails there. Four were in
