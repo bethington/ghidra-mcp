@@ -125,8 +125,8 @@ mvn clean package -P docker -DskipTests
 | `GHIDRA_MCP_AUTH_TOKEN` | - (required) | Bearer token for every route except `/check_connection` and `/mcp/health` |
 | `GHIDRA_MCP_PORT` | `8089` | HTTP server port |
 | `GHIDRA_MCP_BIND_ADDRESS` | `0.0.0.0` | Bind address |
-| `GHIDRA_MCP_ALLOW_SCRIPTS` | unset | `1` enables `/run_script_inline` and `/run_ghidra_script` (arbitrary code) |
-| `GHIDRA_MCP_FILE_ROOT` | unset | Confine filesystem-path endpoints such as `/import_file` to this directory |
+| `GHIDRA_MCP_SCRIPTS_ALLOW` | unset | `1` enables `/run_script_inline` and `/run_ghidra_script` (arbitrary code) |
+| `GHIDRA_MCP_FILES_ROOT` | unset | Confine filesystem-path endpoints such as `/import_file` to this directory |
 | `JAVA_OPTS` | `-Xmx4g -XX:+UseG1GC` | JVM options |
 | `PROGRAM_FILE` | - | Path to binary file to load on startup |
 | `PROJECT_PATH` | - | Path to Ghidra project directory |

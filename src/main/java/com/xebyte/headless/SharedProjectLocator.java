@@ -149,7 +149,7 @@ public final class SharedProjectLocator {
      * <p>Default: {@code ~/ghidra-shared-projects/<host>_<port>_<repo>}.
      * Override root with {@code GHIDRA_MCP_SHARED_PROJECT_DIR} (key still appended).
      * Routed through {@link SecurityConfig#resolveWithinFileRoot} so a configured
-     * {@code GHIDRA_MCP_FILE_ROOT} cannot be escaped.
+     * {@code files.root} cannot be escaped.
      */
     public static Path resolveProjectDir(Parsed parsed) {
         return resolveProjectDir(parsed, System.getenv(SHARED_PROJECT_DIR_ENV),
@@ -188,7 +188,7 @@ public final class SharedProjectLocator {
         Path resolved = security.resolveWithinFileRoot(projectDir.toString());
         if (resolved == null) {
             throw new IllegalArgumentException(
-                    "shared project dir escapes GHIDRA_MCP_FILE_ROOT: " + projectDir
+                    "shared project dir escapes files.root: " + projectDir
                             + " (root=" + security.getFileRoot() + ")");
         }
         return resolved;

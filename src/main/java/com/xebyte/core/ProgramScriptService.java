@@ -41,6 +41,9 @@ public class ProgramScriptService {
         + "' holds GhidraMCP settings; change them with set_setting.";
     private static final String SETTINGS_ARCHIVE_REFUSAL = ProjectStores.ARCHIVE_PATH
         + " holds the project's GhidraMCP settings; change them with set_setting.";
+    /** States the guardrail; never how to lift it, which is the operator's call. */
+    private static final String SCRIPTS_OFF =
+        "Script execution is off: scripts.allow is a guardrail set by the server operator. ";
     private static final int MAX_SCRIPT_TIMEOUT_SECONDS = 1800;
 
     private final ProgramProvider programProvider;
@@ -1831,13 +1834,13 @@ if (map instanceof ObjectPropertyMap) {
             return Response.err("file_path is required");
         }
 
-        // GHIDRA_MCP_FILE_ROOT, when configured. The configured root stays in the server
+        // files.root, when configured. The configured root stays in the server
         // log, out of a response an untrusted caller reads.
         SecurityConfig security = SecurityConfig.getInstance();
         java.nio.file.Path resolved = security.resolveWithinFileRoot(filePath);
         if (resolved == null) {
             Msg.warn(this, "Rejected /import_file for '" + filePath
-                + "': outside configured GHIDRA_MCP_FILE_ROOT (" + security.getFileRoot() + ")");
+                + "': outside configured files.root (" + security.getFileRoot() + ")");
             return Response.err("Access denied: path is outside the configured file root");
         }
         File file = resolved.toFile();
@@ -2056,10 +2059,9 @@ if (map instanceof ObjectPropertyMap) {
         // only on the callers. runGhidraScriptWithCapture already checks this
         // before delegating here; enforcing it again means no current or future
         // caller (including any re-wired /run_script route) can reach arbitrary
-        // Ghidra script execution with GHIDRA_MCP_ALLOW_SCRIPTS unset.
+        // Ghidra script execution with scripts.allow unset.
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
-            return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
-                + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
+            return Response.err(SCRIPTS_OFF
                 + "runGhidraScript executes any script resolvable via the Ghidra script path.");
         }
         Workbench workbench = programProvider.workbench();
@@ -2353,7 +2355,7 @@ if (map instanceof ObjectPropertyMap) {
         return sb.toString();
     }
 
-    @McpTool(path = "/run_script_inline", dryRun = false, method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/run_script_inline", dryRun = false, method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Off unless the scripts.allow guardrail allows it (see get_settings).", category = "program", access = ToolAccess.WRITE)
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY,
                    description = "Complete Java source for a GhidraScript, as one string — not a bare "
@@ -2368,8 +2370,7 @@ if (map instanceof ObjectPropertyMap) {
                                + "arguments.") String args,
             @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
-            return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
-                + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
+            return Response.err(SCRIPTS_OFF
                 + "/run_script_inline executes arbitrary Java against the Ghidra process.");
         }
         if (code == null || code.trim().isEmpty()) {
@@ -3256,7 +3257,7 @@ if (map instanceof ObjectPropertyMap) {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    @McpTool(path = "/run_ghidra_script", dryRun = false, method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
+    @McpTool(path = "/run_ghidra_script", dryRun = false, method = "POST", description = "Execute script with output capture and timeout. Off unless the scripts.allow guardrail allows it (see get_settings).", category = "program", access = ToolAccess.WRITE)
     public Response runGhidraScriptWithCapture(
 @Param(value = "script_name", source = ParamSource.BODY,
                    description = "Script to run. Searched in ~/ghidra_scripts, <cwd>/ghidra_scripts and "
@@ -3280,8 +3281,7 @@ if (map instanceof ObjectPropertyMap) {
                                + "never silent.") boolean captureOutput,
             @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
-            return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
-                + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
+            return Response.err(SCRIPTS_OFF
                 + "/run_ghidra_script executes any script resolvable via the Ghidra script path.");
         }
         if (scriptName == null || scriptName.isEmpty()) {

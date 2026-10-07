@@ -33,7 +33,7 @@ public class ProjectLifecycleService {
     }
 
     /**
-     * Resolve a caller-supplied filesystem path against {@code GHIDRA_MCP_FILE_ROOT},
+     * Resolve a caller-supplied filesystem path against {@code files.root},
      * matching the containment /import_file applies. Returns the canonical {@link File}
      * when allowed, or {@code null} (after a server-side log that keeps the configured
      * root out of the client response) when a root is configured and the path escapes it.
@@ -43,7 +43,7 @@ public class ProjectLifecycleService {
         Path resolved = security.resolveWithinFileRoot(userPath);
         if (resolved == null) {
             Msg.warn(this, "Rejected " + endpoint + " for '" + userPath
-                + "': outside configured GHIDRA_MCP_FILE_ROOT (" + security.getFileRoot() + ")");
+                + "': outside configured files.root (" + security.getFileRoot() + ")");
             return null;
         }
         return resolved.toFile();

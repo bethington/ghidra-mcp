@@ -6438,7 +6438,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "description": "Execute script with output capture and timeout. Off unless the scripts.allow guardrail allows it (see get_settings).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -6488,7 +6488,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Off unless the scripts.allow guardrail allows it (see get_settings).",
       "destructive": false,
       "method": "POST",
       "params": [

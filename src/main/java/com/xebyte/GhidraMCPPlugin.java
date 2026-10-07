@@ -141,6 +141,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.programProvider = new FrontEndProgramProvider(tool, this);
         this.threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
         this.services = com.xebyte.core.CoreServices.build(programProvider, threadingStrategy);
+        com.xebyte.core.SecurityConfig.getInstance().useSettings(services.settings());
         this.listingService = services.listing();
         this.commentService = services.comment();
         this.symbolLabelService = services.symbolLabel();

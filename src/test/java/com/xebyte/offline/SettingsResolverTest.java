@@ -164,6 +164,20 @@ public class SettingsResolverTest {
     }
 
     @Test
+    public void aRetiredGuardrailVariableStopsTheServerRatherThanRunningUnconfined() {
+        assertNull(com.xebyte.core.SecurityConfig.retiredVariables(Map.of("GHIDRA_MCP_FILES_ROOT", "/x")));
+        String refusal = com.xebyte.core.SecurityConfig.retiredVariables(
+            Map.of("GHIDRA_MCP_FILE_ROOT", "/x", "GHIDRA_MCP_PROJECT_FOLDER", "/Mods"));
+        assertTrue(refusal, refusal.contains("GHIDRA_MCP_FILE_ROOT (now GHIDRA_MCP_FILES_ROOT)"));
+        assertTrue(refusal, refusal.contains("GHIDRA_MCP_PROJECT_FOLDER (now GHIDRA_MCP_PROJECT_FOLDER_SCOPE)"));
+        // every retired name points at the variable its registry key derives
+        Map<String, String> retiredByKey = Map.of("scripts.allow", "GHIDRA_MCP_ALLOW_SCRIPTS",
+            "files.root", "GHIDRA_MCP_FILE_ROOT", "project.folder_scope", "GHIDRA_MCP_PROJECT_FOLDER");
+        retiredByKey.forEach((key, old) -> assertTrue(old, com.xebyte.core.SecurityConfig
+            .retiredVariables(Map.of(old, "1")).contains("(now " + REG.get(key).envName() + ")")));
+    }
+
+    @Test
     public void envNamesDeriveFromTheKey() {
         assertEquals("GHIDRA_MCP_TOOLS_AUTOLOAD", REG.get("tools.autoload").envName());
         assertEquals("GHIDRA_MCP_PROJECT_FOLDER_SCOPE", REG.get("project.folder_scope").envName());

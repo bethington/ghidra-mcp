@@ -99,6 +99,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         threadingStrategy = new DirectThreadingStrategy();
 
         services = CoreServices.build(programProvider, threadingStrategy);
+        SecurityConfig.getInstance().useSettings(services.settings());
 
         // Create server manager for shared Ghidra server support
         serverManager = new GhidraServerManager();
@@ -223,7 +224,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // NullPointerException at JavaScriptProvider.getScriptInstance() because
         // GhidraScriptUtil.bundleHost is null.
         //
-        // Gated on GHIDRA_MCP_ALLOW_SCRIPTS (via SecurityConfig) to avoid the Felix
+        // Gated on scripts.allow (via SecurityConfig) to avoid the Felix
         // OSGi framework startup cost (~hundreds of ms) when script execution is
         // disabled (default since v5.4.1). Held for the lifetime of the server;
         // released by stop().

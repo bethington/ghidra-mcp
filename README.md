@@ -145,7 +145,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Development & Automation
 
-- **Ghidra Script Execution** — List and run Ghidra scripts, or run inline script code, via MCP (running them is opt-in: `GHIDRA_MCP_ALLOW_SCRIPTS=1`)
+- **Ghidra Script Execution** — List and run Ghidra scripts, or run inline script code, via MCP (running them is opt-in: `GHIDRA_MCP_SCRIPTS_ALLOW=1`)
 - **Multi-Program Support** — Switch between and compare multiple open programs
 - **Batch Operations** — Bulk renaming, commenting, typing, and label management (93% fewer API calls)
 - **Headless Server** — Full analysis without Ghidra GUI — Docker and CI/CD ready
@@ -744,13 +744,20 @@ If Ghidra MCP saves you engineering or reverse-engineering time, consider [spons
 
 GhidraMCP is designed for **localhost-only development**. The default configuration — HTTP server bound to `127.0.0.1`, no authentication — is safe on a trusted single-user workstation and matches pre-v5.4.1 behavior.
 
-**If you expose the server beyond loopback, configure these three environment variables first.** The server refuses to start on a non-loopback bind without a token.
+**If you expose the server beyond loopback, configure these environment variables first.** The server refuses to start on a non-loopback bind without a token.
 
 | Env var | Effect |
 | --- | --- |
 | `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are exempt. |
-| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
-| `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+| `GHIDRA_MCP_SCRIPTS_ALLOW` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
+| `GHIDRA_MCP_FILES_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+| `GHIDRA_MCP_PROJECT_FOLDER_SCOPE` | When set to a project folder (e.g. `/Mods/PD2-S12`), programs outside it are neither served nor changed, and project file operations stay inside it. |
+
+Each is the server-scope value of a setting (`auth.token`, `scripts.allow`, `files.root`,
+`project.folder_scope`); the variable for any setting is `GHIDRA_MCP_` plus its key upper-cased
+with dots as underscores. The last three are guardrails: a project's or this machine's settings
+(`set_setting`) can make them stricter, never looser, and take effect without a restart.
+`get_settings` shows the value in force and where it came from.
 
 Name-quality enforcement is separate from security. By default,
 `rename_function` and global write endpoints reject names that fail
@@ -768,8 +775,8 @@ enforcement is disabled.
 
 ```bash
 export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
-export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
+export GHIDRA_MCP_SCRIPTS_ALLOW=1     # only if your workflow needs it
+export GHIDRA_MCP_FILES_ROOT=/srv/ghidra/inputs
 
 # Headless server (`mvn clean package -P headless -DskipTests`). The jar does not
 # bundle Ghidra, so Ghidra's Framework/Features/Processors jars go on the
@@ -799,7 +806,7 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
 
 ### Migration from v5.4.0 → v5.4.1
 
-- **Script endpoints now default-off.** If you relied on `/run_script_inline` or `/run_ghidra_script`, export `GHIDRA_MCP_ALLOW_SCRIPTS=1`. This is a deliberate breaking change; the prior default was unsafe.
+- **Script endpoints now default-off.** If you relied on `/run_script_inline` or `/run_ghidra_script`, export `GHIDRA_MCP_SCRIPTS_ALLOW=1`. This is a deliberate breaking change; the prior default was unsafe.
 - **Localhost-only deployments need no changes.** Auth, bind refusal, and path-root checks are all opt-in.
 
 ## ❓ Troubleshooting

@@ -59,7 +59,7 @@ public final class TreeRoot {
     /**
      * Explicit caller-supplied root. Routed through
      * {@link SecurityConfig#resolveWithinFileRoot(String)}; when
-     * {@code GHIDRA_MCP_FILE_ROOT} is unset that returns the path unconstrained,
+     * {@code files.root} is unset that returns the path unconstrained,
      * so we also require the input to be absolute (relative roots silently
      * binding to cwd are never what an agent meant).
      *
@@ -82,7 +82,7 @@ public final class TreeRoot {
         Path resolved = SecurityConfig.getInstance().resolveWithinFileRoot(trimmed);
         if (resolved == null) {
             throw new IllegalArgumentException(
-                    "tree root escapes GHIDRA_MCP_FILE_ROOT: " + trimmed);
+                    "tree root escapes files.root: " + trimmed);
         }
         return new TreeRoot(resolved);
     }

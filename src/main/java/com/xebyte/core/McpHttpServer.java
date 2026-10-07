@@ -98,6 +98,10 @@ public final class McpHttpServer {
     }
 
     public synchronized void start(Config config) throws IOException {
+        String retired = SecurityConfig.retiredVariables(System.getenv());
+        if (retired != null) {
+            throw new IOException(retired);
+        }
         startMillis = System.currentTimeMillis();
         ProgramProvider provider = scanner != null ? scanner.getProgramProvider() : null;
         // Generated at start, not in endpoints(): callers add manual descriptors in between.

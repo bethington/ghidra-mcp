@@ -683,7 +683,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     // ------------------------------------------------------------ scope guard
 
     /**
-     * Apply the opt-in project-folder scope ({@code GHIDRA_MCP_PROJECT_FOLDER}): a
+     * Apply the opt-in project-folder scope ({@code project.folder_scope}): a
      * program outside it reads as not found. Off by default.
      */
     private Program inProjectScope(Program resolved, String requested) {

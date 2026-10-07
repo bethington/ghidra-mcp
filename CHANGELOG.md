@@ -73,6 +73,44 @@ Scorecard's push filter and its test constant still named `main` while the
 repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
 and the existing check against `origin/HEAD` passes on a fresh clone.
 
+### Added — settings: one registry, scoped values, `get_settings` / `set_setting`
+
+Configuration was a scatter of environment variables, Tool Options and a JSON file, with no way
+for an agent to see what was in force or for a project to carry its own defaults. Settings are
+now dotted keys declared once (type, default, the scopes they may be set at, who may write them,
+how scopes combine) and resolved through default < server < project < local < program < session
+< call.
+
+- **Where values live.** *server*: the server's environment, `GHIDRA_MCP_` plus the key
+  upper-cased with dots as underscores. *project*: options on a `/.ghidra-mcp` data-type archive
+  in the project, created on first write; on a shared project it is versioned, and each write
+  checks it out and back in, so every instance of the repository reads it (measured live with
+  two servers on one throwaway repository). *local*: a properties file in the project's `.rep`
+  directory, never shared. *program*: the program's `GhidraMCP` options. Not Ghidra's project
+  saveable data for *local*: a headless project never saves it (`DefaultProject.save()` returns
+  without a ToolManager).
+- **`get_settings`** lists every key with its value, the scope it came from and the scopes that
+  also hold one; secrets show only whether they are set. **`set_setting`** writes or unsets one
+  scope.
+- **Guardrails only tighten.** `scripts.allow`, `files.root` and `project.folder_scope` are set
+  by the operator; a project or local value can make them stricter and takes effect without a
+  restart, and a write or unset that would loosen one is refused. Refusals state the guardrail
+  and never how to lift it (the script refusals used to say "Set GHIDRA_MCP_ALLOW_SCRIPTS=1").
+  `set_program_option` / `remove_program_option` refuse the `GhidraMCP` group, and `delete_file`
+  / `move_file` refuse the archive, which `list_project_files` does not show.
+- **Tool groups come from settings.** On connect the bridge loads `tools.autoload`, plus
+  `tools.last_loaded` (the groups the last session loaded beyond it) when `tools.restore_loaded`
+  is on, and records `tools.last_loaded` on this machine after every `load_tool_group` /
+  `unload_tool_group`. `tools.require_program` is strict program routing. A session overrides
+  any of them with its own environment, or `--default-groups` for `tools.autoload`; unknown
+  group names are warned about with the valid list.
+- **Breaking:** `GHIDRA_MCP_ALLOW_SCRIPTS` is now `GHIDRA_MCP_SCRIPTS_ALLOW`,
+  `GHIDRA_MCP_FILE_ROOT` is `GHIDRA_MCP_FILES_ROOT`, `GHIDRA_MCP_PROJECT_FOLDER` is
+  `GHIDRA_MCP_PROJECT_FOLDER_SCOPE`, and the bridge's `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS` is
+  `GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM`. No aliases, and no silent fallback either: an unset
+  `files.root` or `project.folder_scope` means unconfined, so a server whose environment still
+  sets an old guardrail name refuses to start and names the new one.
+
 ### Added — function resources and `/get_change_token`
 
 A function review used to take about five tool calls, and every write forced a re-read.

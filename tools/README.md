@@ -17,7 +17,7 @@ tools/
 ├── upgrade_project_language.py    # upgrade a shared project's programs to a new SLEIGH version
 ├── build_reference_index.py       # build a BSim reference index from labelled binaries
 ├── context_analysis/              # measure MCP tool-schema context cost
-└── launch-ghidra-scoped.ps1       # launch Ghidra with GHIDRA_MCP_PROJECT_FOLDER set
+└── launch-ghidra-scoped.ps1       # launch Ghidra with GHIDRA_MCP_PROJECT_FOLDER_SCOPE set
 ```
 
 ## Legacy function-documentation scripts

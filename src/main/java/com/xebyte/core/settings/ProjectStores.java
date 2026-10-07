@@ -16,6 +16,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -87,6 +88,10 @@ public final class ProjectStores {
     public static ScopeStore local(Project project) {
         Path file = project.getProjectLocator().getProjectDir().toPath().resolve("ghidra-mcp-settings.properties");
         return new ScopeStore() {
+            /** The file's contents as of {@link #loadedAt}; guardrail checks read on every call. */
+            private Properties loaded;
+            private FileTime loadedAt;
+
             @Override
             public synchronized Optional<String> read(SettingKey key) {
                 return Optional.ofNullable(load().getProperty(key.key()));
@@ -109,12 +114,22 @@ public final class ProjectStores {
 
             private Properties load() {
                 Properties p = new Properties();
-                if (Files.isRegularFile(file)) {
+                if (!Files.isRegularFile(file)) {
+                    return p;
+                }
+                try {
+                    FileTime modified = Files.getLastModifiedTime(file);
+                    if (modified.equals(loadedAt)) {
+                        p.putAll(loaded);
+                        return p;
+                    }
                     try (InputStream in = Files.newInputStream(file)) {
                         p.load(in);
-                    } catch (IOException e) {
-                        throw new SettingRefusedException("Cannot read local settings: " + e.getMessage());
                     }
+                    loaded = (Properties) p.clone();
+                    loadedAt = modified;
+                } catch (IOException e) {
+                    throw new SettingRefusedException("Cannot read local settings: " + e.getMessage());
                 }
                 return p;
             }
@@ -126,6 +141,7 @@ public final class ProjectStores {
                         p.store(out, "GhidraMCP local settings; this machine only");
                     }
                     Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                    loadedAt = null;
                 } catch (IOException e) {
                     throw new SettingRefusedException("Cannot write local settings: " + e.getMessage());
                 }

@@ -187,6 +187,30 @@ public class SettingsStoresGhidraTest {
     }
 
     @Test
+    public void aLocalValueTightensWhatSecurityConfigEnforces() {
+        ProgramProvider provider = mock(ProgramProvider.class);
+        when(provider.getProject()).thenReturn(project);
+        SettingsService settings = new SettingsService(provider,
+            Map.of("GHIDRA_MCP_PROJECT_FOLDER_SCOPE", "/Mods", "GHIDRA_MCP_SCRIPTS_ALLOW", "1"));
+        SecurityConfig security = SecurityConfig.getInstance();
+        security.useSettings(settings);
+        try {
+            assertTrue(security.areScriptsAllowed());
+            assertTrue(security.isPathInProjectScope("/Mods/Other/x.dll"));
+
+            settings.setSetting("project.folder_scope", "/Mods/PD2/", "local", false, "");
+            settings.setSetting("scripts.allow", "false", "project", false, "");
+            assertEquals("/Mods/PD2", security.getProjectFolderScope());
+            assertFalse(security.isPathInProjectScope("/Mods/Other/x.dll"));
+            assertTrue(security.isPathInProjectScope("/Mods/PD2/x.dll"));
+            assertFalse(security.areScriptsAllowed());
+        } finally {
+            ProgramProvider none = mock(ProgramProvider.class);
+            security.useSettings(new SettingsService(none));
+        }
+    }
+
+    @Test
     public void projectListingsDoNotShowTheArchiveAndFileToolsRefuseIt() {
         ProjectStores.shared(project).write(AUTOLOAD, "+datatype");
         ProgramProvider provider = mock(ProgramProvider.class);

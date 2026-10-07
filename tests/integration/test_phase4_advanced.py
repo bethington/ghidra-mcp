@@ -47,7 +47,7 @@ class TestScriptExecution:
         handler at all -- and `script_path` is not a parameter of either
         endpoint.
 
-        Execution is gated on GHIDRA_MCP_ALLOW_SCRIPTS=1, so both the gate
+        Execution is gated on GHIDRA_MCP_SCRIPTS_ALLOW=1, so both the gate
         refusal and the not-found refusal are correct outcomes here. A success
         is not.
         """

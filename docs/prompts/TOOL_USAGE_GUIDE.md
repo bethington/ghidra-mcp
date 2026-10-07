@@ -846,31 +846,46 @@ find_functions(tag="crypto")            # any of several: tag="crypto,parser"
 
 Tags are case-sensitive; `find_functions(tag=...)` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
 
-## Security Environment Variables (v5.4.1+)
+## Settings (v7.3.0+)
 
-GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev box. Configure these before binding beyond loopback:
+`get_settings` lists every setting with its value, the scope it came from and the scopes that
+also hold one; `set_setting(key, value, scope)` changes one. Scopes, lowest first:
 
-| Env var | Effect |
-| --- | --- |
-| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are always exempt. |
-| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** (breaking change — these endpoints execute arbitrary Java against the Ghidra process). |
-| `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |
+- **default**: the registry's value.
+- **server**: set by the server operator when the server starts.
+- **project**: shared with everyone using the project, versioned with a shared one.
+- **local**: this machine only.
+- **program**: one program's own value.
+- **session**: the bridge session's own flags and environment.
+- **call**: a tool's own argument.
 
-The headless server refuses to start on a non-loopback bind address (`0.0.0.0`, explicit external IP) unless `GHIDRA_MCP_AUTH_TOKEN` is set.
+A *preference* is yours to set. A *guardrail* (`scripts.allow`, `files.root`,
+`project.folder_scope`) is set by the server operator: from the project or local scope you can
+only make it stricter, and a refusal says so rather than how to lift it. A *secret* is neither
+shown nor settable. List settings take `+x,-y` to adjust the scope below, or a plain list to
+replace it.
 
-**The MCP bridge reads the same `GHIDRA_MCP_AUTH_TOKEN`** and attaches `Authorization: Bearer <token>` to every outbound call (UDS and TCP). Export the same token in the bridge's environment — otherwise it will hit `401 Unauthorized` on every tool call to an auth-enabled server. When an HTTP/SSE bridge binds beyond loopback, clients must also send that bearer token to the bridge; unauthenticated requests receive `401 Unauthorized`. Unset = no header (matches the localhost default).
+<!-- settings-keys:start -->
+| Key | Kind | Type | Default | Scopes | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `tools.autoload` | preference | list | `listing,function,program` | server, project, local, session | Tool groups every new bridge session loads; +group/-group adjust the scope below. |
+| `tools.restore_loaded` | preference | bool | `true` | server, project, local, session | Whether a new bridge session also loads tools.last_loaded. |
+| `tools.last_loaded` | preference | list | none | local | Tool groups the last bridge session had loaded beyond tools.autoload; the bridge keeps it current. |
+| `tools.require_program` | preference | bool | `false` | server, project, local, session | Require an explicit program on every program-scoped tool call. |
+| `scripts.allow` | guardrail | bool | `false` | server, project, local | Whether run_ghidra_script and run_script_inline may run code. |
+| `files.root` | guardrail | string | none | server, project, local | Directory that file paths given to tools must lie within; empty for none. |
+| `project.folder_scope` | guardrail | string | none | server, project, local | Project folder that programs must lie within to be served; empty for none. |
+| `auth.token` | secret | string | hidden | server | Bearer token HTTP clients must present; empty disables authentication. |
+<!-- settings-keys:end -->
 
-### Worked example — exposing to a private LAN with auth
+The bridge reads the `tools.*` keys when it connects: it loads `tools.autoload`, plus
+`tools.last_loaded` (the groups the last session loaded beyond that) when
+`tools.restore_loaded` is on, and keeps `tools.last_loaded` current as you load and unload
+groups.
 
-```bash
-export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
-export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
-
-# The jar does not bundle Ghidra; put both on the classpath, as docker/entrypoint.sh does
-java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadlessServer \r
-    --bind 0.0.0.0 --port 8089
-```
+The bridge sends `GHIDRA_MCP_AUTH_TOKEN` as `Authorization: Bearer <token>` on every call when
+the server requires one; HTTP/SSE clients of a bridge bound beyond loopback must send the same
+token.
 
 ---
 

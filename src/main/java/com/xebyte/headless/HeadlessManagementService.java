@@ -32,7 +32,7 @@ public class HeadlessManagementService {
     // ========================================================================
 
     /**
-     * Resolve a caller-supplied filesystem path against {@code GHIDRA_MCP_FILE_ROOT},
+     * Resolve a caller-supplied filesystem path against {@code files.root},
      * matching the containment /import_file applies. Returns the
      * canonical {@link File} when allowed, or {@code null} (after a server-side
      * log that keeps the configured root out of the client response) when a root
@@ -45,7 +45,7 @@ public class HeadlessManagementService {
         Path resolved = security.resolveWithinFileRoot(userPath);
         if (resolved == null) {
             Msg.warn(this, "Rejected " + endpoint + " for '" + userPath
-                + "': outside configured GHIDRA_MCP_FILE_ROOT (" + security.getFileRoot() + ")");
+                + "': outside configured files.root (" + security.getFileRoot() + ")");
             return null;
         }
         return resolved.toFile();
@@ -146,7 +146,7 @@ public class HeadlessManagementService {
         if (projectPath == null || projectPath.isEmpty()) {
             return Response.err("Project path required");
         }
-        // A local path is a filesystem path, so it stays under GHIDRA_MCP_FILE_ROOT like the
+        // A local path is a filesystem path, so it stays under files.root like the
         // other filesystem endpoints; a ghidra:// URL names a server repository instead.
         if (!projectPath.startsWith("ghidra://")) {
             File local = resolveWithinRootOrLog(projectPath, "/open_project");
