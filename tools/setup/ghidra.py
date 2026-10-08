@@ -1557,6 +1557,17 @@ def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
     print("Negative/error-shape contract test passed.")
 
 
+def _normalize_hex_address(value) -> str | None:
+    """'0x10001000', '10001000' and 'ram:10001000' all compare equal."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    text = text.rsplit(":", 1)[-1]
+    if text.startswith("0x"):
+        text = text[2:]
+    return text.lstrip("0") or "0"
+
+
 def run_multi_program_targeting_test(repo_root: Path, mcp_url: str) -> None:
     address = _find_benchmark_function(repo_root, mcp_url)
     _status, programs = _mcp_request(repo_root, mcp_url, "/list_open_programs", timeout=30)
@@ -1580,8 +1591,14 @@ def run_multi_program_targeting_test(repo_root: Path, mcp_url: str) -> None:
         timeout=30,
     )
     _ensure_mcp_ok("/get_functions", by_path)
-    if not isinstance(by_path, dict) or by_path.get("function_address") != address:
-        raise RuntimeError("Program path targeting returned the wrong benchmark function")
+    # /get_functions reports the entry as `address` ("10001000"); the 6.x
+    # readers it replaced used `function_address`. Compare normalised hex.
+    got = by_path.get("address") or by_path.get("entry_point") if isinstance(by_path, dict) else None
+    if _normalize_hex_address(got) != _normalize_hex_address(address):
+        raise RuntimeError(
+            f"Program path targeting returned the wrong benchmark function: "
+            f"expected {address}, got {got!r}"
+        )
 
     _status, by_name = _mcp_request(
         repo_root,

@@ -1800,3 +1800,30 @@ def test_run_release_regression_catches_debugger_skip(
     out = capsys.readouterr().out
     assert "SKIPPED debugger live test: test reason here" in out
     assert "Release regression tier passed." in out
+
+
+def _targeting_fixture(monkeypatch, get_functions_payload):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra, "_find_benchmark_function", lambda repo, url: "10001000")
+    def fake(repo, url, path, **kwargs):
+        if path == "/list_open_programs":
+            return 200, {"programs": [{"path": ghidra.DEFAULT_BENCHMARK_PROGRAM}]}
+        if path == "/get_functions":
+            return 200, get_functions_payload
+        return 200, {"status": "ok"}
+    monkeypatch.setattr(ghidra, "_mcp_request", fake)
+    return ghidra
+
+
+def test_multi_program_targeting_reads_get_functions_address(monkeypatch):
+    """/get_functions reports `address`, not the 6.x `function_address`; the rc.2
+    release tier failed on that rename even though targeting worked."""
+    ghidra = _targeting_fixture(monkeypatch, {"name": "calc_crc16", "address": "10001000"})
+    ghidra.run_multi_program_targeting_test(Path("."), "http://127.0.0.1:8089")
+
+
+def test_multi_program_targeting_still_fails_on_the_wrong_function(monkeypatch):
+    ghidra = _targeting_fixture(monkeypatch, {"name": "other", "address": "0x10002000"})
+    with pytest.raises(RuntimeError, match="expected 10001000"):
+        ghidra.run_multi_program_targeting_test(Path("."), "http://127.0.0.1:8089")
