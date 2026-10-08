@@ -285,8 +285,8 @@ endpoint_smoke:
   # system / utility
   - endpoint: "/check_connection"
     assert:
-      type: "text"
-      contains: ["GhidraMCP plugin running"]
+      type: "json"
+      contains_keys: ["status", "server_kind", "version"]
 
   - endpoint: "/list_open_programs"
     assert:

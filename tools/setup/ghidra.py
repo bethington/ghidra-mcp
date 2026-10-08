@@ -2115,8 +2115,10 @@ def _bench_assert_endpoint_smoke(repo_root: Path, mcp_url: str, program_path: st
     a_type = assertion.get("type", "nonempty")
 
     # Auto-add program= for endpoints that take a target program (most do).
-    # Skip for genuinely program-less endpoints.
-    program_less = {"/check_connection", "/list_open_programs", "/list_calling_conventions",
+    # Skip for genuinely program-less endpoints. /list_calling_conventions is
+    # NOT one: conventions come from the program's compiler spec, and with two
+    # programs open the server refuses to guess.
+    program_less = {"/check_connection", "/list_open_programs",
                     "/list_scripts", "/check_tools"}
     if endpoint not in program_less and "program" not in params:
         params["program"] = program_path
