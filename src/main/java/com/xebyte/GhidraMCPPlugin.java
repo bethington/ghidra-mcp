@@ -489,51 +489,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return programProvider.getCurrentProgram();
     }
 
-    /**
-     * Get a program by name, or return the current program if name is null/empty.
-     * Delegates to FrontEndProgramProvider which checks CodeBrowser, cache, and project.
-     *
-     * @param programName The name or project path (e.g., "/Project/1.0/example.dll"), or null/empty for current
-     * @return The requested program, or null if not found
-     */
-    public Program getProgram(String programName) {
-        return programProvider.resolveProgram(programName);
-    }
-
-    /**
-     * Get a program by name with error message if not found.
-     * Returns a JSON error string if the program cannot be found.
-     *
-     * @param programName The name of the program to find
-     * @return A 2-element array: [0] = Program (or null), [1] = error message (or null if found)
-     */
-    public Object[] getProgramOrError(String programName) {
-        Program program = getProgram(programName);
-
-        if (program == null && programName != null && !programName.trim().isEmpty()) {
-            // Program was explicitly requested but not found - provide helpful error
-            StringBuilder error = new StringBuilder();
-            error.append("{\"error\": \"Program not found: ").append(escapeJson(programName)).append("\", ");
-            error.append("\"hint\": \"Use full project path (e.g., /Project/1.0/example.dll) to open on-demand\", ");
-            error.append("\"available_programs\": [");
-
-            Program[] programs = programProvider.getAllOpenPrograms();
-            for (int i = 0; i < programs.length; i++) {
-                if (i > 0) error.append(", ");
-                error.append("\"").append(escapeJson(programs[i].getName())).append("\"");
-            }
-            error.append("]}");
-
-            return new Object[] { null, error.toString() };
-        }
-
-        if (program == null) {
-            return new Object[] { null, "{\"error\": \"No program currently loaded. Use the 'program' parameter with a project path to open one.\"}" };
-        }
-
-        return new Object[] { program, null };
-    }
-
     // ----------------------------------------------------------------------------------
     // Program Management Methods
     // ----------------------------------------------------------------------------------
@@ -894,73 +849,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return dataTypeService.createEnum(name, valuesJson, size).toJson();
     }
 
-    /**
-     * Serialize a List of objects to proper JSON string
-     * Handles Map objects within the list
-     */
-    private String serializeListToJson(java.util.List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            Object item = list.get(i);
-            if (item instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) item)).append("\"");
-            } else if (item instanceof Number) {
-                sb.append(item);
-            } else if (item instanceof java.util.Map) {
-                sb.append(serializeMapToJson((java.util.Map<?, ?>) item));
-            } else if (item instanceof java.util.List) {
-                sb.append(serializeListToJson((java.util.List<?>) item));
-            } else {
-                sb.append("\"").append(escapeJsonString(item.toString())).append("\"");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
-    }
 
-    /**
-     * Serialize a Map to proper JSON object
-     */
-    private String serializeMapToJson(java.util.Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("\"").append(escapeJsonString(entry.getKey().toString())).append("\":");
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) value)).append("\"");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else if (value instanceof java.util.Map) {
-                sb.append(serializeMapToJson((java.util.Map<?, ?>) value));
-            } else if (value instanceof java.util.List) {
-                sb.append(serializeListToJson((java.util.List<?>) value));
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value == null) {
-                sb.append("null");
-            } else {
-                sb.append("\"").append(escapeJsonString(value.toString())).append("\"");
-            }
-        }
-        sb.append("}");
-        return sb.toString();
-    }
 
-    /**
-     * Escape special characters in JSON string values
-     */
-    private String escapeJsonString(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
 
     /**
      * Apply a specific data type at the given memory address
@@ -987,17 +877,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // HIGH-PERFORMANCE DATA ANALYSIS METHODS (v1.3.0)
     // ==========================================================================
 
-    /**
-     * Helper to escape strings for JSON
-     */
-    private String escapeJson(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
 
     /**
      * === FIELD-LEVEL ANALYSIS IMPLEMENTATIONS (v1.4.0) ===
@@ -1046,9 +925,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      *                        CodeBrowser when {@code headless == false};
      *                        ignored otherwise.
      */
-    private String openProject(String projectPath, boolean headless, String programToLaunch) {
+    private com.xebyte.core.Response openProject(String projectPath, boolean headless, String programToLaunch) {
         if (projectPath == null || projectPath.trim().isEmpty()) {
-            return "{\"error\": \"path parameter is required\"}";
+            return com.xebyte.core.Response.err("path parameter is required");
         }
 
         String trimmed = projectPath.trim();
@@ -1056,7 +935,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             java.nio.file.Path local = com.xebyte.core.SecurityConfig.getInstance()
                     .resolveWithinFileRoot(trimmed);
             if (local == null) {
-                return "{\"error\": \"Path is outside this server's file root\"}";
+                return com.xebyte.core.Response.err("Path is outside this server's file root");
             }
             trimmed = local.toString();
         }
@@ -1084,35 +963,40 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             name = fname;
         }
         if (location == null || location.isEmpty()) {
-            return "{\"error\": \"path must include a parent directory: " + escapeJson(projectPath) + "\"}";
+            return com.xebyte.core.Response.err("path must include a parent directory: " + projectPath);
         }
 
         ProjectLocator locator;
         try {
             locator = new ProjectLocator(location, name);
         } catch (IllegalArgumentException e) {
-            return "{\"error\": \"Invalid project path: " + escapeJson(e.getMessage()) + "\"}";
+            return com.xebyte.core.Response.err("Invalid project path: " + e.getMessage());
         }
         if (!locator.exists()) {
-            return "{\"error\": \"Project does not exist: " + escapeJson(projectPath) + "\"}";
+            return com.xebyte.core.Response.err("Project does not exist: " + projectPath);
         }
 
         Project currentProject = tool.getProject();
         if (currentProject != null && locator.equals(currentProject.getProjectLocator())) {
             // Already open — honor headless flag for CodeBrowser side-effect anyway.
-            String maybeLaunch = null;
+            Object maybeLaunch = null;
             if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-                maybeLaunch = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
+                maybeLaunch = programScriptService.openProgramFromProject(programToLaunch, false).asEmbeddable();
             }
-            return "{\"success\": true, \"project\": \"" + escapeJson(name) + "\", "
-                + "\"already_open\": true, \"headless\": " + headless
-                + (maybeLaunch != null ? ", \"program_launch_result\": " + maybeLaunch : "")
-                + "}";
+            java.util.Map<String, Object> already = new java.util.LinkedHashMap<>();
+            already.put("success", true);
+            already.put("project", name);
+            already.put("already_open", true);
+            already.put("headless", headless);
+            if (maybeLaunch != null) {
+                already.put("program_launch_result", maybeLaunch);
+            }
+            return com.xebyte.core.Response.ok(already);
         }
 
         ProjectManager pm = tool.getProjectManager();
         if (pm == null) {
-            return "{\"error\": \"ProjectManager not available on this tool\"}";
+            return com.xebyte.core.Response.err("ProjectManager not available on this tool");
         }
 
         // Must run on the EDT — FrontEndTool state updates expect Swing.
@@ -1137,27 +1021,27 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             });
         } catch (Exception e) {
-            return "{\"error\": \"EDT invocation failed: " + escapeJson(e.getMessage()) + "\"}";
+            return com.xebyte.core.Response.err("EDT invocation failed: " + e.getMessage());
         }
         if (errMsg[0] != null) {
-            return "{\"error\": \"Failed to open project: " + escapeJson(errMsg[0]) + "\"}";
+            return com.xebyte.core.Response.err("Failed to open project: " + errMsg[0]);
         }
         if (opened[0] == null) {
-            return "{\"error\": \"openProject returned null without an error\"}";
+            return com.xebyte.core.Response.err("openProject returned null without an error");
         }
 
-        String launchResult = null;
+        Object launchResult = null;
         if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-            launchResult = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
+            launchResult = programScriptService.openProgramFromProject(programToLaunch, false).asEmbeddable();
         }
-        StringBuilder json = new StringBuilder(256);
-        json.append("{\"success\": true, \"project\": \"").append(escapeJson(opened[0].getName()))
-            .append("\", \"headless\": ").append(headless);
+        java.util.Map<String, Object> openedOut = new java.util.LinkedHashMap<>();
+        openedOut.put("success", true);
+        openedOut.put("project", opened[0].getName());
+        openedOut.put("headless", headless);
         if (launchResult != null) {
-            json.append(", \"program_launch_result\": ").append(launchResult);
+            openedOut.put("program_launch_result", launchResult);
         }
-        json.append("}");
-        return json.toString();
+        return com.xebyte.core.Response.ok(openedOut);
     }
 
     @Override

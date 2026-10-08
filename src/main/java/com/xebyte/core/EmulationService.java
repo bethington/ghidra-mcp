@@ -373,10 +373,17 @@ public class EmulationService {
         List<String> candidates = new ArrayList<>();
         if (candidatesJson != null && !candidatesJson.isEmpty()) {
             try {
-                Object parsed = JsonHelper.parseJson("{\"c\":" + candidatesJson + "}").get("c");
-                if (parsed instanceof List<?> list) {
-                    for (Object item : list) {
-                        candidates.add(String.valueOf(item));
+                com.google.gson.JsonElement el =
+                        com.google.gson.JsonParser.parseString(candidatesJson);
+                if (el.isJsonArray()) {
+                    for (com.google.gson.JsonElement item : el.getAsJsonArray()) {
+                        if (item == null || item.isJsonNull()) {
+                            candidates.add("null");
+                        } else if (item.isJsonPrimitive()) {
+                            candidates.add(item.getAsString());
+                        } else {
+                            candidates.add(item.toString());
+                        }
                     }
                 }
             } catch (Exception e) {

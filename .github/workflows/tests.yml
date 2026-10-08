@@ -371,11 +371,10 @@ jobs:
           -p tests.offline.replay_plugin -v --no-cov --tb=short
 
   code-quality:
-    # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
-    # fallback), so this job surfaces lint/format drift without ever failing CI.
-    # It is intentionally NOT a gate — `build-status` does not depend on it. To make
-    # it gating, drop the `|| true` once the tree is verified flake8/black-clean.
-    name: Code Quality (advisory, non-blocking)
+    # flake8/black remain advisory (`|| true` / echo fallback) and do not gate.
+    # Ruff F (pyflakes) is gating: the tree is F-clean and `build-status` depends
+    # on this job so a new unused import / undefined name fails the build.
+    name: Code Quality (ruff F gating; flake8/black advisory)
     runs-on: ubuntu-latest
 
     steps:
@@ -385,6 +384,9 @@ jobs:
       uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
       with:
         enable-cache: true
+
+    - name: Ruff pyflakes (F)
+      run: uvx ruff check --select F python tests tools
 
     - name: Run flake8
       run: uvx flake8 python/bridge_mcp_ghidra/ --max-line-length=120 --ignore=E501,W503 || true
@@ -454,13 +456,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint ]
+    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint, code-quality ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ] && [ "${{ needs.code-quality.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

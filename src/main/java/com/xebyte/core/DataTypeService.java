@@ -562,7 +562,7 @@ public class DataTypeService {
                                + "name already exists — delete it first or choose another name.") String name,
             @Param(value = "values", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON object mapping member name to integer value, e.g. "
-                               + "{\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal "
+                               + "{UNIT_PLAYER: 0, UNIT_MONSTER: 1}. Values may be numbers, decimal "
                                + "strings, or 0x-prefixed hex strings; floats and non-numeric strings are "
                                + "rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any "
                                + "complaint comes back as a warning, not a failure.") String valuesJson,
@@ -879,7 +879,7 @@ public class DataTypeService {
                                + "names). Required — pass `void` for no return value.") String returnType,
             @Param(value = "parameters", source = ParamSource.BODY,
                    description = "JSON array of parameter objects, e.g. "
-                               + "[{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. "
+                               + "[{name:dwId, type:uint},{name:pUnit, type:void *}]. "
                                + "Only the TYPES are used: parameter names are discarded and the created "
                                + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
                                + "a type containing a comma or a colon does not survive it, and a parameter "
@@ -3154,8 +3154,8 @@ public class DataTypeService {
         return reason + ". Expected a JSON array of objects, each with "
                 + "name (string) and type (string), with optional offset (decimal byte). "
                 + "Example: "
-                + "[{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},"
-                + "{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. "
+                + "[{name:dwId, type:uint, offset:0},"
+                + "{name:pNext, type:void *, offset:4}]. "
                 + "type may be any resolvable Ghidra data type "
                 + "(uint, byte, ushort, char *, void *, MyStruct *, ...). "
                 + "Do NOT pass a C-style struct definition or CSV — only JSON.";
@@ -3170,31 +3170,51 @@ public class DataTypeService {
         }
 
         try {
-            // Trim and validate JSON array
             String json = fieldsJson.trim();
             if (!json.startsWith("[")) {
-                Msg.error(this, "Fields JSON must be an array starting with [, got: " + json.substring(0, Math.min(50, json.length())));
-                return fields;
-            }
-            if (!json.endsWith("]")) {
-                Msg.error(this, "Fields JSON must be an array ending with ]");
+                Msg.error(this, "Fields JSON must be an array starting with [, got: "
+                        + json.substring(0, Math.min(50, json.length())));
                 return fields;
             }
 
-            // Remove outer brackets
-            json = json.substring(1, json.length() - 1).trim();
+            com.google.gson.JsonElement root = com.google.gson.JsonParser.parseString(json);
+            if (!root.isJsonArray()) {
+                Msg.error(this, "Fields JSON must be an array");
+                return fields;
+            }
 
-            // Parse field objects using proper bracket/brace matching
-            List<String> fieldJsons = parseFieldJsonArray(json);
-            Msg.info(this, "Found " + fieldJsons.size() + " field objects to parse");
+            Msg.info(this, "Found " + root.getAsJsonArray().size() + " field objects to parse");
+            for (com.google.gson.JsonElement el : root.getAsJsonArray()) {
+                if (el == null || !el.isJsonObject()) {
+                    Msg.warn(this, "  Skipping non-object field entry");
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> keyValues = JsonHelper.parseJson(el.toString());
+                // Gson numbers arrive as Double; stringify for firstOf, parse offset via getInt.
+                Map<String, String> asStrings = new LinkedHashMap<>();
+                for (Map.Entry<String, Object> e : keyValues.entrySet()) {
+                    Object v = e.getValue();
+                    asStrings.put(e.getKey(), v == null ? null : String.valueOf(v));
+                }
 
-            for (String fieldJson : fieldJsons) {
-                FieldDefinition field = parseFieldJsonObject(fieldJson);
-                if (field != null && field.name != null && field.type != null) {
-                    fields.add(field);
-                    Msg.info(this, "  Parsed field: " + field.name + " (" + field.type + ")");
+                String name = firstOf(asStrings, "name", "field_name", "fieldName", "field");
+                String type = firstOf(asStrings, "type", "field_type", "fieldType", "data_type", "dataType");
+                Object offsetRaw = null;
+                for (String k : new String[] {"offset", "field_offset", "fieldOffset", "off"}) {
+                    if (keyValues.containsKey(k)) {
+                        offsetRaw = keyValues.get(k);
+                        break;
+                    }
+                }
+                int offset = offsetRaw == null ? -1 : JsonHelper.getInt(offsetRaw, -1);
+
+                if (name != null && type != null) {
+                    name = NamingConventions.applyStructFieldNamingPolicy(name, type);
+                    fields.add(new FieldDefinition(name, type, offset));
+                    Msg.info(this, "  Parsed field: " + name + " (" + type + ")");
                 } else {
-                    Msg.warn(this, "  Field missing required fields (name/type): " + fieldJson.substring(0, Math.min(50, fieldJson.length())));
+                    Msg.warn(this, "  Field missing required fields (name/type): " + el);
                 }
             }
 
@@ -3212,103 +3232,6 @@ public class DataTypeService {
         return fields;
     }
 
-    /**
-     * Parse a JSON array string by properly matching braces
-     * Returns list of individual JSON object content strings (without outer braces)
-     */
-    private List<String> parseFieldJsonArray(String json) {
-        List<String> items = new ArrayList<>();
-
-        int braceDepth = 0;
-        int start = -1;
-        boolean inString = false;
-        boolean escapeNext = false;
-
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
-
-            // Handle escape sequences
-            if (escapeNext) {
-                escapeNext = false;
-                continue;
-            }
-
-            if (c == '\\') {
-                escapeNext = true;
-                continue;
-            }
-
-            // Track if we're inside a string
-            if (c == '"' && !escapeNext) {
-                inString = !inString;
-                continue;
-            }
-
-            // Only count braces outside of strings
-            if (!inString) {
-                if (c == '{') {
-                    if (braceDepth == 0) {
-                        start = i + 1; // Start after the opening brace
-                    }
-                    braceDepth++;
-                } else if (c == '}') {
-                    braceDepth--;
-                    if (braceDepth == 0 && start >= 0) {
-                        // Extract object content (between braces)
-                        String item = json.substring(start, i).trim();
-                        if (!item.isEmpty()) {
-                            items.add(item);
-                        }
-                        start = -1;
-                    }
-                }
-            }
-        }
-
-        return items;
-    }
-
-    /**
-     * Parse a single JSON object string (content between braces) into a FieldDefinition
-     * Format: "name":"fieldname","type":"typename","offset":0
-     */
-    private FieldDefinition parseFieldJsonObject(String objectJson) {
-        if (objectJson == null || objectJson.isEmpty()) {
-            return null;
-        }
-
-        String name = null;
-        String type = null;
-        int offset = -1;
-
-        try {
-            // Parse key-value pairs while respecting quotes and escapes
-            Map<String, String> keyValues = parseJsonKeyValues(objectJson);
-
-            // Accept common alternative key names for flexibility
-            name = firstOf(keyValues, "name", "field_name", "fieldName", "field");
-            type = firstOf(keyValues, "type", "field_type", "fieldType", "data_type", "dataType");
-            String offsetStr = firstOf(keyValues, "offset", "field_offset", "fieldOffset", "off");
-            if (offsetStr != null) {
-                try {
-                    offset = Integer.parseInt(offsetStr);
-                } catch (NumberFormatException e) {
-                    // Keep offset as -1
-                }
-            }
-
-        } catch (Exception e) {
-            Msg.error(this, "Error parsing JSON object: " + e.getMessage());
-        }
-
-        // Apply configured struct-field naming policy.
-        if (name != null && type != null) {
-            name = NamingConventions.applyStructFieldNamingPolicy(name, type);
-        }
-
-        return new FieldDefinition(name, type, offset);
-    }
-
     /** Return the value for the first matching key, or null. */
     private static String firstOf(Map<String, String> map, String... keys) {
         for (String key : keys) {
@@ -3318,90 +3241,7 @@ public class DataTypeService {
         return null;
     }
 
-    /**
-     * Parse JSON key-value pairs from a string like: "name":"value","type":"typename"
-     * Properly handles quoted strings and escapes
-     */
-    private Map<String, String> parseJsonKeyValues(String json) {
-        Map<String, String> pairs = new LinkedHashMap<>();
-
-        // Find all "key":"value" or "key":value patterns
-        int i = 0;
-        while (i < json.length()) {
-            // Skip whitespace and commas
-            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ',')) {
-                i++;
-            }
-
-            if (i >= json.length()) break;
-
-            // Expect opening quote for key
-            if (json.charAt(i) != '"') {
-                i++;
-                continue;
-            }
-
-            // Parse key (quoted string)
-            i++; // Skip opening quote
-            int keyStart = i;
-            boolean escapeNext = false;
-            while (i < json.length()) {
-                char c = json.charAt(i);
-                if (escapeNext) {
-                    escapeNext = false;
-                } else if (c == '\\') {
-                    escapeNext = true;
-                } else if (c == '"') {
-                    break;
-                }
-                i++;
-            }
-            String key = json.substring(keyStart, i).replace("\\\"", "\"");
-            i++; // Skip closing quote
-
-            // Skip whitespace and colon
-            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ':')) {
-                i++;
-            }
-
-            if (i >= json.length()) break;
-
-            // Parse value (can be quoted string or number)
-            String value;
-            if (json.charAt(i) == '"') {
-                // Quoted string value
-                i++; // Skip opening quote
-                int valueStart = i;
-                escapeNext = false;
-                while (i < json.length()) {
-                    char c = json.charAt(i);
-                    if (escapeNext) {
-                        escapeNext = false;
-                    } else if (c == '\\') {
-                        escapeNext = true;
-                    } else if (c == '"') {
-                        break;
-                    }
-                    i++;
-                }
-                value = json.substring(valueStart, i).replace("\\\"", "\"");
-                i++; // Skip closing quote
-            } else {
-                // Unquoted value (number, boolean, etc)
-                int valueStart = i;
-                while (i < json.length() && json.charAt(i) != ',' && json.charAt(i) != '}') {
-                    i++;
-                }
-                value = json.substring(valueStart, i).trim();
-            }
-
-            pairs.put(key, value);
-        }
-
-        return pairs;
-    }
-
-    /**
+        /**
      * Parse values JSON into name-value pairs (for enum creation)
      */
     /**

@@ -18,7 +18,6 @@ Tests for the 12 Phase 4 endpoints:
 
 import pytest
 import uuid
-import json
 
 
 class TestScriptExecution:

@@ -1259,7 +1259,19 @@ public class DocumentationHashService {
         };
 
         try {
-            threadingStrategy.runOnUi(mergeTask);
+            if (dryRun) {
+                threadingStrategy.runOnUi(mergeTask);
+            } else {
+                threadingStrategy.executeWrite(target, "Merge from " + source.getName(), () -> {
+                    mergeTask.run();
+                    if (errorMsg.get() != null) {
+                        throw new Refusal(errorMsg.get());
+                    }
+                    return null;
+                });
+            }
+        } catch (Refusal r) {
+            // errorMsg already says why
         } catch (Throwable t) {
             return Response.err("Merge invocation failed: " + t.getMessage());
         }
