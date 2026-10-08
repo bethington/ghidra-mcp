@@ -48,6 +48,7 @@ This project is a generic Ghidra MCP server; game-specific tooling lives elsewhe
   maintainer's local path.
 - Removed `workflows/` and three session-note docs; tool descriptions, docs and
   `.env.template` use generic examples.
+
 ### Changed — `apply_documentation` replaces both documentation writers
 
 - **`apply_documentation` is the one tool for writing a function's documentation.**
