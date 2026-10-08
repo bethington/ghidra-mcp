@@ -501,6 +501,10 @@ Measured against the spec and against what real clients do with each field.
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
 
+- **Decompiler variable endpoints** in `FunctionService`: `/list_decompiler_variables`
+  and `/apply_local_variable` (POST) — read local variable names/types from the
+  decompiler output and apply renames/retypes to a function's variables.
+
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
 `FunctionManagerDB.doRemoveFunction` iterates a function's own tag set while

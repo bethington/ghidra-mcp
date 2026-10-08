@@ -1477,6 +1477,238 @@ Map<String, Object> out = new LinkedHashMap<>();
     // ========================================================================
 
     /**
+     * Parse "-0x88", "-136" or "Stack[-0x88]" (optionally ":size") into a frame offset.
+     */
+    private static Integer parseStackOffset(String text) {
+        if (text == null) return null;
+        String trimmed = text.strip().replace("Stack[", "").replace("]", "");
+        int colon = trimmed.indexOf(':');
+        if (colon > 0) trimmed = trimmed.substring(0, colon);
+        if (trimmed.isEmpty()) return null;
+        try {
+            if (trimmed.startsWith("-0x") || trimmed.startsWith("-0X")) {
+                return -Integer.parseInt(trimmed.substring(3), 16);
+            }
+            if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+                return Integer.parseInt(trimmed.substring(2), 16);
+            }
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * List the decompiler's symbols (SSA / register temporaries) of a function, with their
+     * type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident
+     * local to the temporary that has to be renamed.
+     */
+    @McpTool(path = "/list_decompiler_variables",
+            description = "List the decompiler's symbols (SSA / register temporaries) of a function with their "
+                    + "type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident "
+                    + "local to the temporary that has to be renamed (rename_variables + "
+                    + "set_decompiler_variable_type).",
+            category = "function")
+    public Response listDecompilerVariables(
+            @Param(value = "function_address", paramType = "address", defaultValue = "",
+                   description = "Function entry point address") String functionAddrStr,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            return Response.err("`function_address` is required");
+        }
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        final AtomicReference<List<Map<String, Object>>> result =
+                new AtomicReference<>(new ArrayList<>());
+        final AtomicReference<String> failure = new AtomicReference<>(null);
+        try {
+            threadingStrategy.executeRead(() -> {
+                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                if (func == null) {
+                    failure.set("No function at " + functionAddrStr);
+                    return null;
+                }
+                DecompileResults results = decompileFunction(func, program);
+                if (results == null || !results.decompileCompleted()) {
+                    failure.set("Decompilation failed for " + func.getName());
+                    return null;
+                }
+                HighFunction highFunction = results.getHighFunction();
+                if (highFunction == null) {
+                    failure.set("No high function for " + func.getName());
+                    return null;
+                }
+                List<Map<String, Object>> entries = new ArrayList<>();
+                Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                while (symbols.hasNext()) {
+                    HighSymbol symbol = symbols.next();
+                    String storageText = "";
+                    try {
+                        storageText = symbol.getStorage() == null ? ""
+                                : symbol.getStorage().toString();
+                    } catch (Exception ignored) {
+                        // storage is not always available for a symbol
+                    }
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("name", symbol.getName());
+                    entry.put("type", symbol.getDataType() == null ? ""
+                            : symbol.getDataType().getName());
+                    entry.put("storage", storageText);
+                    entries.add(entry);
+                }
+                result.set(entries);
+                return null;
+            });
+        } catch (Exception e) {
+            Msg.error(this, "list_decompiler_variables failed: " + e.getMessage(), e);
+            return Response.err("list_decompiler_variables failed: " + e);
+        }
+        if (failure.get() != null) return Response.err(failure.get());
+        return Response.ok(JsonHelper.mapOf(
+                "function", functionAddrStr,
+                "count", result.get().size(),
+                "variables", result.get(),
+                "program", program.getName()));
+    }
+
+    /**
+     * Create (or replace) a stack local variable at an explicit frame offset.
+     *
+     * DWARF often knows a local (DW_OP_fbreg offset) that Ghidra never turned into a
+     * variable - large struct/array locals are the common case - and
+     * /set_local_variable_type cannot help there because it needs an existing symbol.
+     * StackFrame.createVariable() can, so this endpoint exposes it.
+     */
+    @McpTool(path = "/apply_local_variable", method = "POST",
+            description = "Create a stack local variable at an explicit frame offset, or retype/rename the one "
+                    + "already covering that offset. Use it when DWARF knows a local (DW_OP_fbreg offset) that "
+                    + "Ghidra never materialised - typically large struct/array locals, which set_local_variable_type "
+                    + "cannot reach because no symbol exists. stack_offset accepts -0x88, -136 or Stack[-0x88]; "
+                    + "replace=true overwrites whatever occupies the slot; remove=true deletes the local with "
+                    + "the given name (the undo path). dry_run=true previews (the framework rolls the transaction "
+                    + "back).",
+            category = "function")
+    public Response applyLocalVariable(
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Function containing the variable (0x-prefixed, or space:offset)") String functionAddrStr,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Variable name to create/rename to (use the DWARF name)") String variableName,
+            @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
+                   description = "Data type name, e.g. uint32_t or EventParamTask_t (not needed with remove=true)") String newType,
+            @Param(value = "stack_offset", source = ParamSource.BODY, defaultValue = "",
+                   description = "Stack frame offset: -0x88, -136 or Stack[-0x88]") String stackOffsetText,
+            @Param(value = "replace", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Overwrite the variable that already covers this offset") boolean replace,
+            @Param(value = "remove", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Remove the local variable with this `name` instead of creating one "
+                           + "(the undo path for a bad create; type/offset are ignored)") boolean removeFlag,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            return Response.err("`function_address` is required");
+        }
+        if (variableName == null || variableName.isEmpty()) {
+            return Response.err("`name` is required");
+        }
+        final Integer offset = parseStackOffset(stackOffsetText);
+        DataType dataType = null;
+        if (!removeFlag) {
+            if (newType == null || newType.isEmpty()) {
+                return Response.err("`type` is required");
+            }
+            if (offset == null) {
+                return Response.err("`stack_offset` (-0x88, -136 or Stack[-0x88]) is required");
+            }
+            dataType = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
+            if (dataType == null) return Response.err("Could not resolve data type: " + newType);
+        }
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        final DataType finalType = dataType;
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
+        try {
+            threadingStrategy.executeWrite(program, "Apply local variable", () -> {
+                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                if (func == null) {
+                    resultMsg.append("No function at ").append(functionAddrStr);
+                    return null;
+                }
+                Variable created;
+                if (removeFlag) {
+                    Variable target = null;
+                    for (Variable existing : func.getLocalVariables()) {
+                        if (existing.getName().equals(variableName)) {
+                            target = existing;
+                            break;
+                        }
+                    }
+                    if (target == null) {
+                        resultMsg.append("no local variable named '").append(variableName).append("'");
+                        return null;
+                    }
+                    String storageText = target.getVariableStorage() == null ? "?"
+                            : target.getVariableStorage().toString();
+                    func.removeVariable(target);
+                    resultMsg.append("removed ").append(variableName).append(" (").append(storageText)
+                            .append(")");
+                    success.set(true);
+                    return null;
+                }
+                StackFrame frame = func.getStackFrame();
+                if (frame == null) {
+                    resultMsg.append("No stack frame for ").append(func.getName());
+                    return null;
+                }
+                Variable occupant = frame.getVariableContaining(offset);
+                if (occupant != null && !replace) {
+                    resultMsg.append("offset ").append(offset).append(" already holds '")
+                            .append(occupant.getName()).append("' (")
+                            .append(occupant.getDataType().getName())
+                            .append("); pass replace=true to overwrite it");
+                    return null;
+                }
+                if (occupant != null) {
+                    frame.clearVariable(occupant.getStackOffset());
+                }
+                created = frame.createVariable(variableName, offset, finalType,
+                                               SourceType.USER_DEFINED);
+                if (created == null) {
+                    resultMsg.append("could not create ").append(variableName);
+                    return null;
+                }
+                resultMsg.append("OK ").append(created.getName()).append(" : ")
+                        .append(created.getDataType().getName()).append(" at ")
+                        .append(created.getVariableStorage());
+                success.set(true);
+                return null;
+            });
+        } catch (Exception e) {
+            Msg.error(this, "apply_local_variable failed: " + e.getMessage(), e);
+            return Response.err("apply_local_variable failed: " + e);
+        }
+        if (!success.get()) {
+            return Response.err(resultMsg.length() > 0 ? resultMsg.toString() : "nothing was applied");
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "applied", true,
+                "function", functionAddrStr,
+                "name", variableName,
+                "type", finalType == null ? "" : finalType.getName(),
+                "stack_offset", offset,
+                "message", resultMsg.toString(),
+                "program", program.getName()));
+    }
+
+    /**
      * Build the decompiler-default-name guidance appended to a "variable not found"
      * error from set_variable_type. Pure function of the requested name and the
      * current high-symbol names, so it is unit-testable without a live decompile.
