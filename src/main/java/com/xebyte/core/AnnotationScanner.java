@@ -97,10 +97,9 @@ public class AnnotationScanner {
      *
      * @param programProvider  provider for resolving programs (enables dry-run support)
      * @param threadingStrategy strategy the dry-run wrapper uses to run the wrapped
-     *                          write on the same thread Ghidra's own threading model
-     *                          requires (the Swing EDT in GUI mode); pass the same
-     *                          instance the scanned services themselves were built
-     *                          with, e.g. {@link SwingThreadingStrategy}
+     *                          write under the same locking rules as a real write
+     *                          ({@code executeWrite}); pass the same instance the
+     *                          scanned services themselves were built with
      * @param services          service objects to scan
      */
     public AnnotationScanner(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,

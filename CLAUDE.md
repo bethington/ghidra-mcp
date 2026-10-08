@@ -110,11 +110,10 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 - Headless mode: `HeadlessProgramProvider` + `DirectThreadingStrategy`
 
 Both servers construct `DirectThreadingStrategy` (one global lock, no event-thread
-hop). `SwingThreadingStrategy` exists and is tested, but nothing in `src/main`
-constructs it, so `ThreadingStrategy.runOnUi` runs on the calling thread on the
-GUI as well as headless. Code that genuinely needs the Swing thread calls
-`SwingUtilities.invokeAndWait` itself, as `GuiToolService`, `Workbench` and
-`DebuggerService` do.
+hop). Tool bodies run on the request thread; reads and writes go through
+`executeRead`/`executeWrite`. Code that drives windows calls
+`SwingUtilities.invokeAndWait` or Ghidra's `Swing.runNow` itself (or via Ghidra
+services that already do), as `GuiToolService`, `Workbench` and `DebuggerService` do.
 
 ## Tool Inventory
 
@@ -488,7 +487,7 @@ pytest tests/unit/test_published_counts.py         # any published count vs the 
 - **Max ~5 shared server programs open at once** -- opening 20+ crashes Ghidra
 - **`switch_program` changes the server-wide current program** -- for multi-version work pass `program=<full project path>` on each call instead. Names resolve through `ProjectProgramProvider.match` (exact path, exact name, then a unique substring), so a bare name like `D2Common.dll` that several version folders share is an error listing the candidates, not the first hit
 - **Plate comment `\n` creates literal text**, not newlines -- use actual multi-line text
-- **GUI operations from HTTP threads** must reach the Swing thread with `SwingUtilities.invokeAndWait()`. `threadingStrategy.runOnUi` does not do that today: both servers are wired with `DirectThreadingStrategy`, whose `runOnUi` runs on the caller (see "Architecture")
+- **GUI operations from HTTP threads** must reach the Swing thread with `SwingUtilities.invokeAndWait()` (or Ghidra's `Swing.runNow`). Both servers run tool bodies on the request thread; reads/writes go through `executeRead`/`executeWrite`. Window-driving code hops itself — see "Architecture"
 
 ## Cross-version doc archive (optional re-kb service)
 
