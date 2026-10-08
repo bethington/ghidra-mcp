@@ -1,5 +1,5 @@
 {
-  "count": 205,
+  "count": 207,
   "tools": [
     {
       "category": "function",
@@ -3441,6 +3441,55 @@
       "read_only": true
     },
     {
+      "category": "datatype",
+      "description": "Functions whose decompilation references a data type (or one of its fields). Used by resource invalidation after struct/enum edits so only the affected function URIs are refreshed. Runs off the EDT with a hard timeout; a timeout returns the partial set with timed_out=true rather than failing.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "aliases": [
+            "name",
+            "data_type",
+            "datatype"
+          ],
+          "description": "Data type name (resolved across all categories).",
+          "name": "type_name",
+          "required": true,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "aliases": [
+            "field_name"
+          ],
+          "default": "",
+          "description": "Optional field name. When set, only references to that field are returned (FieldMatcher).",
+          "name": "field",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "10",
+          "description": "Hard timeout for the finder (1–60). Default 10.",
+          "name": "timeout_seconds",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit for the active program).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/find_type_users",
+      "read_only": true
+    },
+    {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
       "description": "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -5302,6 +5351,48 @@
       ],
       "path": "/open_project",
       "read_only": false
+    },
+    {
+      "category": "analysis",
+      "description": "Group a program's functions into compartments so you can decide which regions to ignore before reading any of them — on a driver DLL the two library compartments were 42% of the binary and identifiable from their referenced strings alone. Uses a cascade of structural strategies (class names in log strings, peripheral register pages, linker literal locality, address banding); each reports whether it applied and why, and every partition carries the evidence that formed it. Slugs are machine-generated and assert nothing about content. Read-only: reports the partitioning, does not write the Program Tree. Runs off the EDT; costs one pass over every instruction.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "20",
+          "description": "Functions per file for the address-band fallback.",
+          "name": "band_size",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "1",
+          "description": "Omit partitions smaller than this from the response.",
+          "name": "min_size",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated subset of strategy names to run (qualified-name, mmio-page, literal-locality, address-band). Omit to run the full cascade.",
+          "name": "strategies",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit for the active program).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/partition_program",
+      "read_only": true
     },
     {
       "category": "system",
