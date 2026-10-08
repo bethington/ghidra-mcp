@@ -5,8 +5,6 @@ and what-if scenarios for context optimization.
 """
 
 import json
-import sys
-from collections import defaultdict
 from pathlib import Path
 
 try:
@@ -198,10 +196,10 @@ def main():
     print("📊 CONTEXT ALLOCATION (typical 200K window with all 251 tools):")
     print()
     print(f"   Endpoints.json:     {base_tokens:>7,} tokens  (  6.5%)")
-    print(f"   User query:         ≈ 2,000 tokens  (  1.0%)")
-    print(f"   Chat history:       ≈ 5,000 tokens  (  2.5%)")
-    print(f"   Agent reasoning:    ≈10,000 tokens  (  5.0%)")
-    print(f"   Available for resp: ≈170,000 tokens  ( 85.0%)")
+    print("   User query:         ≈ 2,000 tokens  (  1.0%)")
+    print("   Chat history:       ≈ 5,000 tokens  (  2.5%)")
+    print("   Agent reasoning:    ≈10,000 tokens  (  5.0%)")
+    print("   Available for resp: ≈170,000 tokens  ( 85.0%)")
     print()
     
     print("🎯 WHAT EdwardBlair'S CONCERN ACTUALLY MEANS:")

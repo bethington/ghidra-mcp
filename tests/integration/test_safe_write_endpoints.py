@@ -151,7 +151,6 @@ class TestSafeRenameOperations:
     def test_rename_function_same_name(self, http_client, first_named_function):
         """Rename a function to its current name (no-op)."""
         name = first_named_function["name"]
-        address = first_named_function["address"]
 
         # The selector is `old_name`, which also accepts the aliases
         # function_address / function / oldName. `address` is not one of them,
