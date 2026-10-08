@@ -3,15 +3,12 @@ Tests for address space prefix support in the bridge.
 Tests are pure-Python and do not require a running Ghidra instance.
 """
 import sys
-import pytest
 
 # Import bridge functions under test
 sys.path.insert(0, ".")
 from bridge_mcp_ghidra import (
     sanitize_address,
     validate_hex_address,
-    SEGMENT_ADDRESS_PATTERN,
-    SEGMENT_ADDR_WITH_0X_PATTERN,
     _build_tool_function,
 )
 

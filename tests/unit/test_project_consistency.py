@@ -6,7 +6,6 @@ invariants across the project. All tests run without a server.
 """
 
 import json
-import os
 import re
 import unittest
 import xml.etree.ElementTree as ET
@@ -184,6 +183,7 @@ class TestBridgeConfiguration(unittest.TestCase):
             import bridge_mcp_ghidra
         except ImportError as e:
             self.fail(f"Bridge import failed: {e}")
+        self.assertIsNotNone(bridge_mcp_ghidra)
 
     def test_bridge_has_uds_support(self):
         """Bridge should support Unix domain sockets."""

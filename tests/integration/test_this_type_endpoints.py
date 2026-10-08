@@ -103,10 +103,10 @@ def test_non_member_function_not_reparented(http_client):
     addr = _first_function_address(http_client)
 
     # Snapshot the function's current namespace/signature so we can prove no move.
-    before = http_client.get("/get_functions", params={"function": addr})
+    before = http_client.get("/get_functions", params={"function": addr, "fields": "signature"})
     if before.status_code != 200:
         pytest.skip("Cannot read function details")
-    before_text = before.text
+    before_signature = before.json().get("signature")
 
     # Create a unique throwaway struct to serve as a resolvable this_type base.
     created = http_client.post(
@@ -127,10 +127,15 @@ def test_non_member_function_not_reparented(http_client):
         # assert the invariant when it was rejected for lacking 'this'.
         if "no implicit 'this'" in r.text or "has no implicit" in r.text:
             after = http_client.get(
-                "/get_functions", params={"function": addr}
+                "/get_functions", params={"function": addr, "fields": "signature"}
             )
             assert after.status_code == 200
             # The function must not have been re-parented into the probe class.
+            # Re-parenting makes it __thiscall with a `this` of the class type, which shows here.
+            assert after.json().get("signature") == before_signature, (
+                "Non-member function details changed despite refusal — H2 safety "
+                "property violated (namespace must stay unchanged)."
+            )
             assert struct_name not in after.text, (
                 "Non-member function was re-parented into the class despite having "
                 "no implicit 'this' — H2 safety property violated."
