@@ -55,11 +55,10 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import pe32  # type: ignore
-    import x86  # type: ignore
-    from x86 import EAX, EBP, ECX, EDX, ESP, DL, Assembler  # type: ignore
+    from x86 import EAX, ECX, EDX, ESP, DL, Assembler  # type: ignore
 else:  # pragma: no cover - import style depends on how the module is loaded
-    from . import pe32, x86
-    from .x86 import EAX, EBP, ECX, EDX, ESP, DL, Assembler
+    from . import pe32
+    from .x86 import EAX, ECX, EDX, ESP, DL, Assembler
 
 FIXTURE_DIR = Path(__file__).resolve().parent
 GENERATOR_VERSION = "1.0.0"

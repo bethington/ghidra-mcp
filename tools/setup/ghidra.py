@@ -22,7 +22,6 @@ from .maven import find_maven_command
 from .requirements import uv_executable
 from .versioning import (
     infer_ghidra_install_meta,
-    infer_ghidra_version_from_path,
     read_pom_versions,
 )
 

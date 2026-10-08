@@ -88,8 +88,6 @@ def test_gradlew_deploy_task_order():
 @pytest.mark.slow
 def test_gradlew_verify_version_without_ghidra_dir():
     """verifyVersion should succeed without GHIDRA_INSTALL_DIR (prints skip message)."""
-    import os
-
     env = {k: v for k, v in __import__("os").environ.items() if k != "GHIDRA_INSTALL_DIR"}
     result = subprocess.run(
         [str(GRADLEW), "verifyVersion"],
