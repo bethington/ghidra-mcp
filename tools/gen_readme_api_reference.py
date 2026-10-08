@@ -101,11 +101,16 @@ def _server_marker(endpoint: dict) -> str:
     return SERVER_MARKERS.get(tuple(endpoint.get("servers", ())), "")
 
 
+def user_visible_endpoints(endpoints: list[dict]) -> list[dict]:
+    """Agent-facing inventory: internal HTTP routes stay in the catalog but are not tools."""
+    return [e for e in endpoints if not e.get("internal")]
+
+
 def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
     """Render the generated portion of the README API Reference section."""
     catalog = json.loads(endpoints_json.read_text(encoding="utf-8"))
-    endpoints = catalog["endpoints"]
-    total = catalog["total_endpoints"]
+    endpoints = user_visible_endpoints(catalog["endpoints"])
+    total = len(endpoints)
 
     by_category: dict[str, list[dict]] = {}
     for endpoint in endpoints:

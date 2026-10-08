@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import com.xebyte.core.tree.FunctionBlock;
 import ghidra.GhidraApplicationLayout;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.decompiler.DecompInterface;
@@ -23,13 +24,13 @@ import static org.junit.Assert.*;
 import static org.junit.Assume.assumeTrue;
 
 /**
- * A register reached as base + offset is listed in {@code refs} by its own address.
+ * A register reached as base + offset greps by its own address.
  *
  * <p>The firmware shape: the base sits in a literal-pool word, the code loads it and writes
  * at an offset. No reference names {@code 0x40003c0c}; the C prints the base plus 0xc. Only
  * the decompiled p-code has the sum, once the pool word is read-only and the decompiler folds
- * it. Measured on the monsgeek firmware before this: nothing a function read returned named
- * {@code 0x40003c0c}.
+ * it. Measured on the monsgeek firmware before this: {@code grep 0x40003c0c} over the whole
+ * tree found nothing.
  */
 public class AddressRefsGhidraTest {
 
@@ -75,8 +76,30 @@ public class AddressRefsGhidraTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private List<String> refs() {
+    private FunctionBlock.Built block() {
+        Function func = program.getFunctionManager().getFunctionAt(builder.addr("0x1000"));
+        DecompInterface decomp = ServiceUtils.createConfiguredDecompiler(program,
+            FunctionFacts::configureDecompiler);
+        try {
+            return FunctionBlock.build(func, decomp, 30, TaskMonitor.DUMMY, "c00",
+                "address-band", 0.5, false, program.getName());
+        } finally {
+            decomp.dispose();
+        }
+    }
+
+    @Test
+    public void theRegisterAndThePoolValueAreRefsWithTheWordTheValueCameFrom() {
+        String refs = String.valueOf(FunctionBlock.parse(block().text()).get("refs"));
+        assertTrue("the register itself, from the folded store: " + refs,
+            (" " + refs + " ").contains(" 0x40003c0c "));
+        assertTrue("the base, with the pool word it was loaded from: " + refs,
+            refs.contains("0x40003c00<0x00003000"));
+        assertTrue("the pool word itself: " + refs, (" " + refs + " ").contains(" 0x00003000 "));
+    }
+
+    @Test
+    public void getFunctionsAsksForRefsAloneAndStillGetsTheStore() {
         Function func = program.getFunctionManager().getFunctionAt(builder.addr("0x1000"));
         Map<String, Object> facts = FunctionFacts.build(program, func,
             new FunctionFacts.Options(java.util.Set.of("refs"), false, 0, 3, false), f -> {
@@ -88,23 +111,15 @@ public class AddressRefsGhidraTest {
                     d.dispose();
                 }
             });
-        return (List<String>) facts.get("refs");
-    }
-
-    @Test
-    public void theRegisterAndThePoolValueAreRefsWithTheWordTheValueCameFrom() {
-        List<String> refs = refs();
-        assertTrue("the register itself, from the folded store: " + refs, refs.contains("0x40003c0c"));
-        assertTrue("the base, with the pool word it was loaded from: " + refs,
-            refs.contains("0x40003c00<0x00003000"));
-        assertTrue("the pool word itself: " + refs, refs.contains("0x00003000"));
+        assertTrue(String.valueOf(facts.get("refs")),
+            ((List<?>) facts.get("refs")).contains("0x40003c0c"));
     }
 
     @Test
     public void aWritablePoolWordDoesNotFoldSoTheRegisterIsNotARef() throws Exception {
         builder.withTransaction(() -> program.getMemory().getBlock(".rodata").setWrite(true));
-        List<String> refs = refs();
+        String refs = String.valueOf(FunctionBlock.parse(block().text()).get("refs"));
         assertFalse("a writable word can change at run time; the decompiler must not fold it: " + refs,
-            refs.contains("0x40003c0c"));
+            (" " + refs + " ").contains(" 0x40003c0c "));
     }
 }

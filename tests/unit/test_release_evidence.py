@@ -345,7 +345,7 @@ def test_committed_evidence_if_present_is_well_formed():
     """
     path = REPO_ROOT / EVIDENCE_PATH
     if not path.is_file():
-        pytest.skip("no evidence recorded in this checkout")
+        pytest.skip("no evidence recorded in this tree")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["schema"] == release_evidence.SCHEMA_VERSION
     assert data["tier"] == GATING_TIER

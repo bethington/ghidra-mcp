@@ -1560,7 +1560,7 @@ public class ProgramScriptService {
     /**
      * List all files in the current Ghidra project.
      */
-    @McpTool(path = "/list_project_files", description = "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the checkout holds uncommitted work.", category = "program", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/list_project_files", description = "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the tree holds uncommitted work.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listProjectFiles(
             @Param(value = "folder", description = "Project folder path") String folderPath) {
         ghidra.framework.model.Project project = programProvider.getProject();
@@ -1598,7 +1598,7 @@ public class ProgramScriptService {
         ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
         List<Map<String, Object>> fileList = new ArrayList<>();
         for (ghidra.framework.model.DomainFile file : files) {
-            // With version-control state, so a checkout that still holds uncommitted work
+            // With version-control state, so a tree that still holds uncommitted work
             // (modified_since_checkout) can be told from an idle one without reading icons
             // in the Ghidra GUI. This is what the GUI's /server/repository/files reported.
             fileList.add(ProjectVersionControl.fileState(file));
@@ -3055,7 +3055,8 @@ public class ProgramScriptService {
                 + "matters most: firmware loaders often mark the flash block writable, and the decompiler "
                 + "then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of "
                 + "folding it into the constant it holds; marking flash read-only lets peripheral and "
-                + "RAM addresses show as constants or their labels.",
+                + "RAM addresses show as constants or their labels. Every function may decompile "
+                + "differently afterwards, so decompilation trees are marked stale (resweep).",
             category = "program", access = ToolAccess.WRITE)
     public Response setMemoryBlock(
             @Param(value = "block", source = ParamSource.BODY, defaultValue = "",

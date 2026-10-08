@@ -428,7 +428,7 @@ def test_apply_passes_commit_because_that_is_what_makes_checkout_exclusive(monke
     """-commit is load-bearing, not cosmetic.
 
     HeadlessAnalyzer does `domFile.checkout(options.commit, ...)`, so without
-    -commit the checkout is NON-exclusive and the language upgrade cannot happen.
+    -commit the tree is NON-exclusive and the language upgrade cannot happen.
     A refactor that drops it would leave a tool that runs cleanly and upgrades
     nothing.
     """

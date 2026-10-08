@@ -138,7 +138,7 @@ file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 The fixture lives at `tests/fixtures/benchmark/` and is **generated, not
 compiled** — `make_fixture.py` emits both PE32 images directly, with no
-toolchain of any kind. Both binaries are committed, so a checkout is enough.
+toolchain of any kind. Both binaries are committed, so a tree is enough.
 See `tests/fixtures/benchmark/README.md` for what is in them and why they are
 built this way.
 

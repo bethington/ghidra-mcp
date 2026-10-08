@@ -10,9 +10,9 @@ survivor.
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
 > `/batch_get_comments` — and three later passes removed more (see
 > [Readers, listings and the server model](#readers-listings-and-the-server-model)),
-> so the shipped catalog is **211** (with `/set_memory_block` added after rc.1,
-> `/apply_documentation` replacing both documentation writers, and
-> `/partition_program` and `/find_type_users` added), not 251. The
+> so the shipped catalog is **218** (with `/set_memory_block` added after rc.1,
+> `/apply_documentation` replacing both documentation writers, and the decompilation
+> tree, `/partition_program` and `/find_type_users` added), not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.
@@ -144,6 +144,8 @@ keeps its own single-item call unchanged and gains the removed tool's job.
 | `debugger_step_into()` | `debugger_step` | `debugger_step(kind="into")` |
 | `debugger_step_over()` | `debugger_step` | `debugger_step(kind="over")` |
 | `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
+| `decompile_tree_start(tree)` | `decompile_tree_run` | `decompile_tree_run(tree, action="start")` |
+| `decompile_tree_stop(tree)` | `decompile_tree_run` | `decompile_tree_run(tree, action="stop")` |
 | `get_function_tags(function)` | `get_functions` | `get_functions(function, fields="tags")`; `tags` is a list of names, and is part of the default bundle |
 | `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)`, or several names for any-of; every result also carries its `tags` |
 | `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`, or `apply_documentation(tags=..., tag_comments=...)`; attaching creates the definition |

@@ -38,7 +38,7 @@ import java.util.Set;
 
 /**
  * Everything known about one function, as one map: the single source for
- * {@code /get_functions}, the decompilation checkout's function blocks and the
+ * {@code /get_functions}, the decompilation tree's function blocks and the
  * {@code ghidra://function} resource. Each surface renders this map; none computes a field
  * of its own, so they cannot disagree about what a function is.
  *

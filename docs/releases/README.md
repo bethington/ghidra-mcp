@@ -19,10 +19,8 @@ surface from **272 to 251 tools**: five rename tools collapse into
 the same cycle (`/list_shadowed_globals`, `/batch_get_comments`), and rc.1
 shipped 253.
 
-After rc.1 a second pass removed 53 more tools and added 11, so
-**7.0.0 ships 211 tools** — 207 served by the GUI plugin, 192 by the headless server, 188 by both:
-- **`partition_program` and `find_type_users`** group functions into compartments by
-  evidence before any decompile, and list functions whose decompilation uses a type or field.
+After rc.1 a second pass removed 53 more tools and added 18, so
+**7.0.0 ships 218 tools** — 214 served by the GUI plugin, 199 by the headless server, 195 by both:
 
 - **`get_functions`** reads one function, or up to 20, with `fields=` choosing
   what comes back. It replaces `decompile_function` and eight other per-function
@@ -44,6 +42,10 @@ After rc.1 a second pass removed 53 more tools and added 11, so
 - **`apply_documentation`** replaces `apply_function_documentation` and
   `batch_apply_documentation`, and takes what `get_function_documentation`
   exports (one function, or `entries=[...]` for many).
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C to
+  disk as a file tree an agent searches with its own Grep, Read and Glob, and keeps
+  it current as the program changes. `partition_program` and `find_type_users` come
+  with it.
 - Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
   `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
   `create_derived_type`, `debugger/step(kind=)`.
@@ -77,7 +79,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 (`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
 `--tools-page-size`.
 
-**Lazy tool loading is the default.** Advertising all 211 endpoints in one
+**Lazy tool loading is the default.** Advertising all 218 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
 called. The bridge now loads `listing,function,program` (68 endpoints plus 8

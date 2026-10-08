@@ -50,7 +50,7 @@ verification step -- a whole-project ``--apply`` refuses if another ran within
 
 ``--verify`` is the verification step: it writes no versions. It takes an
 exclusive checkout per probed program and closes the program before undoing it;
-a checkout still "in use" after that survives until Ghidra restarts (measured
+a tree still "in use" after that survives until Ghidra restarts (measured
 2026-08-10, before ``close_program`` could release the server's own reference:
 140 of 152). Keep ``--verify-sample`` small, and clear any leftovers with a
 Ghidra restart followed by ``--release-checkouts``.
@@ -539,7 +539,7 @@ def run_folder(
         "-p",
     ]
     if apply_changes:
-        # -commit is not optional: it is what makes the checkout EXCLUSIVE, and
+        # -commit is not optional: it is what makes the tree EXCLUSIVE, and
         # only an exclusive checkout permits the language upgrade.
         cmd += ["-commit", comment]
     else:
@@ -855,7 +855,7 @@ def main() -> int:
                 print(f"        {path}")
         if stuck or lingering:
             print("      Restart Ghidra, then run this again -- and re-run once more")
-            print("      afterwards, because the checkout census lags the server.")
+            print("      afterwards, because the tree census lags the server.")
         return 1 if (stuck or lingering) else 0
 
     # ---- verify (no writes) ------------------------------------------------ #

@@ -1,5 +1,5 @@
 {
-  "count": 207,
+  "count": 213,
   "tools": [
     {
       "category": "function",
@@ -2397,6 +2397,276 @@
       "method": "GET",
       "params": [],
       "path": "/debugger/traces",
+      "read_only": true
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Change a tree's configuration: exclusions (tag: / partition: / range:), enabled strategies, band size, max file bytes, throttle. Exclusions are how you keep library code out of the tree — on a driver DLL, excluding two CRT compartments took it from 3,230 functions to 2,036. Classifies the change and acts on it: narrowing deletes now-out-of-scope bodies immediately (leaving them would be a lie a Grep would still hit); widening marks STALE with pending_functions; repartitioning sets requires_full_resweep. Never starts a sweep.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Checkout id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Ignored for now — root is identity; changing it needs a new checkout.",
+          "name": "root",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated partition strategies. Omit to leave unchanged.",
+          "name": "strategies",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Address-band width. Omit to leave unchanged.",
+          "name": "band_size",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Read-budget bytes per .c file. Omit to leave unchanged. Changing this repartitions file paths.",
+          "name": "max_file_bytes",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "CSV of exclusion specs. Omit to leave unchanged.",
+          "name": "exclusions",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "CSV of include-only specs. Omit to leave unchanged.",
+          "name": "include_only",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Interactive yield 0..90. Omit to leave unchanged.",
+          "name": "throttle_percent",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Disassemble at entries without instructions before sweep. Omit to leave unchanged.",
+          "name": "disassemble_missing",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_configure",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the derived root, reconciling swept_at_modification_number against the live program. Unrelated to Ghidra version-control checkouts (/server/version_control/*).",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "default": "",
+          "description": "Target program name (omit for the active program).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Absolute checkout root. Omit for the default under java.io.tmpdir/ghidra-mcp-tree/.",
+          "name": "root",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated partition strategies. Empty = full cascade.",
+          "name": "strategies",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "20",
+          "description": "Address-band width when bands apply.",
+          "name": "band_size",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "32768",
+          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths.",
+          "name": "max_file_bytes",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "CSV of tag:/partition:/range: exclusion specs.",
+          "name": "exclusions",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "CSV of tag:/partition:/range: include-only specs.",
+          "name": "include_only",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "10",
+          "description": "Interactive yield 0..90 after each decompiled function.",
+          "name": "throttle_percent",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "true",
+          "description": "Before partitioning, disassemble at function entries with no instruction yet (typical for PE .pdata imports).",
+          "name": "disassemble_missing",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_create",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Deregister a tree; with delete_files=true also remove the files it wrote, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched.",
+      "destructive": true,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Checkout id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "When true, delete the files the tree wrote.",
+          "name": "delete_files",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_delete",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Pin a function to a tree compartment forever. Use this when you have learned the real module boundary — e.g. after reading evidence that a function belongs with driver code despite the cascade placing it in an address band — and you want that placement to stick across resweeps, tree delete/recreate, and every other tool. Stored as a program property map (TreeModule) at the function entry, not in tree config. Empty module string unpins. Does not rewrite the tree by itself — the next sweep (or reconcile) honours the pin ahead of the whole partitioner cascade.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
+          "description": "Function name or entry address to pin.",
+          "name": "function",
+          "param_type": "function_ref",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Compartment slug to pin to. Empty string removes the pin.",
+          "name": "module",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Target program name (omit for the active program).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_pin_module",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Start or stop the sweep that fills a tree. action=start enqueues it (then poll decompile_tree_status): returns in milliseconds with phase queued and the resource URI. Sweeps run one at a time JVM-wide and yield to auto-analysis and to interactive requests. Measured: ~4 s for a 700-function firmware, ~28 s for a 3,200-function driver DLL, ~11 min for a 25,000-function static binary. action=stop cancels a queued or running sweep and is idempotent: stopping an idle or complete tree is success, not an error. The partial tree is left in place and STATUS.md records state: cancelled, so whatever was already written stays safe to Grep.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Checkout id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "start (enqueue the sweep) or stop (cancel it).",
+          "name": "action",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_run",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Status, config and root path of a decompilation tree — poll this after decompile_tree_run(action=start), then Grep the reported root. READ_ONLY, so it is safe to call while planning. Reports phase, progress, and freshness against the live program. Never errors when the program is closed or the root is missing — reports program:\"closed\" / root_present:false instead, because that is exactly when you are asking. With no selector, lists every tree plus adoptable trees found on disk.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Checkout id, program name, or domain path. Omit to list all + scan for adoptable on-disk trees.",
+          "name": "tree",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_status",
       "read_only": true
     },
     {
@@ -4930,7 +5200,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the checkout holds uncommitted work.",
+      "description": "List files in the current project, with each one's version-control state: whether it is versioned, checked out, and (when checked out) whether the tree holds uncommitted work.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -6375,7 +6645,7 @@
         },
         {
           "default": "",
-          "description": "Terminate only this checkout, as /server/checkouts reports it. Empty terminates every checkout of the file.",
+          "description": "Terminate only this tree, as /server/checkouts reports it. Empty terminates every tree of the file.",
           "name": "checkout_id",
           "required": false,
           "source": "body",
@@ -6422,7 +6692,7 @@
     },
     {
       "category": "server",
-      "description": "What is checked out under a file or folder of the open project, locally or on the server (with the holders' users and checkout ids). modified_since_checkout says whether a checkout holds uncommitted work, which is what decides if it is safe to release.",
+      "description": "What is checked out under a file or folder of the open project, locally or on the server (with the holders' users and checkout ids). modified_since_checkout says whether a tree holds uncommitted work, which is what decides if it is safe to release.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -6600,7 +6870,7 @@
     },
     {
       "category": "server",
-      "description": "Undo a checkout in the open shared project, discarding local changes that were not checked in. Close the program first: an open file cannot be released.",
+      "description": "Undo a tree in the open shared project, discarding local changes that were not checked in. Close the program first: an open file cannot be released.",
       "destructive": true,
       "method": "POST",
       "params": [
@@ -6976,7 +7246,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels.",
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels. Every function may decompile differently afterwards, so decompilation trees are marked stale (resweep).",
       "destructive": false,
       "method": "POST",
       "params": [

@@ -80,7 +80,7 @@ public class ToolAccessClassificationTest extends TestCase {
         assertTrue("schema should carry destructive flags", json.contains("\"destructive\": true"));
 
         AnnotationScanner.ToolDescriptor unspecified = new AnnotationScanner.ToolDescriptor(
-            "/unclassified", "GET", "d", "cat", "", ToolAccess.UNSPECIFIED, List.of());
+            "/unclassified", "GET", "d", "cat", "", ToolAccess.UNSPECIFIED, false, List.of());
         String bare = unspecified.toJson();
         assertFalse("an unclassified tool must emit no hints", bare.contains("read_only"));
         assertFalse("an unclassified tool must emit no hints", bare.contains("destructive"));

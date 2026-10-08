@@ -51,6 +51,13 @@ NOT_TOOL_CALLS = {
     "checkin", "checkout", "undoCheckout", "getEntryPoint", "getName",
 }
 
+# Docs a service WRITES rather than ships. A tree's STATUS.md is generated
+# into its tree at sweep time and is referenced relative to the tree root, so
+# it is correctly absent from the repo. Listed explicitly rather than matched by
+# pattern, for the same reason NOT_TOOL_CALLS is: a genuinely missing doc must not
+# be able to hide behind a loose rule.
+GENERATED_DOCS = {"STATUS.md"}
+
 TOOL_CALL_RE = re.compile(r"\b([a-z][a-z0-9_]{3,})\(\)")
 # Only .md paths; source-file references (.cpp/.java) are examples, not repo files.
 DOC_RE = re.compile(r"\b((?:docs/)?[A-Za-z0-9_./-]*[A-Z][A-Z0-9_]{3,}[A-Za-z0-9_./-]*\.md)\b")
@@ -104,7 +111,7 @@ def test_guidance_strings_reference_only_real_tools(known_tools):
 
 def test_guidance_strings_reference_only_real_docs():
     """A doc filename mentioned in guidance must exist somewhere in the repo."""
-    on_disk = {p.name for p in REPO_ROOT.rglob("*.md")}
+    on_disk = {p.name for p in REPO_ROOT.rglob("*.md")} | GENERATED_DOCS
     offenders: list[str] = []
     for f in _java_files():
         rel = f.relative_to(REPO_ROOT).as_posix()

@@ -61,9 +61,26 @@ GUI_ONLY = sum(1 for e in _ENDPOINTS if e["servers"] == ["gui"])
 HEADLESS_ONLY = sum(1 for e in _ENDPOINTS if e["servers"] == ["headless"])
 SHARED = sum(1 for e in _ENDPOINTS if "gui" in e["servers"] and "headless" in e["servers"])
 
+#: The catalog minus the endpoints marked ``internal`` -- routes that stay
+#: registered over HTTP but are never advertised as MCP tools. This is what the
+#: generated API-reference block lists, so it is a published figure in its own
+#: right and must be derived, not written down.
+USER_VISIBLE = sum(1 for e in _ENDPOINTS if not e.get("internal"))
+
+#: Of those agent-visible tools, the ones both servers answer. The generated
+#: README block says "N of these are served by both", where "these" is
+#: USER_VISIBLE -- so it cannot be SHARED, which counts internal routes too.
+USER_VISIBLE_SHARED = sum(
+    1 for e in _ENDPOINTS
+    if not e.get("internal") and "gui" in e["servers"] and "headless" in e["servers"]
+)
+
 #: What each published figure is allowed to be. Anything else in a
 #: present-tense surface is drift until it is listed in ``NON_CATALOG_COUNTS``.
-CATALOG_COUNTS = {TOTAL, GUI, HEADLESS, SHARED, GUI_ONLY, HEADLESS_ONLY}
+CATALOG_COUNTS = {
+    TOTAL, GUI, HEADLESS, SHARED, GUI_ONLY, HEADLESS_ONLY,
+    USER_VISIBLE, USER_VISIBLE_SHARED,
+}
 
 
 # --------------------------------------------------------------------------
@@ -74,12 +91,14 @@ CATALOG_COUNTS = {TOTAL, GUI, HEADLESS, SHARED, GUI_ONLY, HEADLESS_ONLY}
 # --------------------------------------------------------------------------
 PINNED: list[tuple[str, str, int, str]] = [
     # ---- README.md ------------------------------------------------------
-    ("README.md", r"\*\*(\d+) MCP tools\*\*", TOTAL, "whole catalog"),
+    # "MCP tools" counts TOOLS, which is the catalog minus internal routes --
+    # not every catalog entry. The two differ by the endpoints marked internal.
+    ("README.md", r"\*\*(\d+) MCP tools\*\*", USER_VISIBLE, "agent-visible tools"),
     (
         "README.md",
         r"- \*\*MCP Tools\*\*: (\d+) tools fully implemented",
-        TOTAL,
-        "whole catalog",
+        USER_VISIBLE,
+        "agent-visible tools",
     ),
     ("README.md", r"the GUI plugin serves (\d+) of them", GUI, "GUI plugin"),
     ("README.md", r"and the headless server (\d+)\)", HEADLESS, "headless server"),
@@ -120,19 +139,19 @@ PINNED: list[tuple[str, str, int, str]] = [
     (
         "README.md",
         r"(?m)^(\d+) MCP tools backed by HTTP endpoints",
-        TOTAL,
-        "whole catalog",
+        USER_VISIBLE,
+        "agent-visible tools (catalog minus internal routes)",
     ),
     (
         "README.md",
         r"(?m)^(\d+) of these are served by both the GUI plugin",
-        SHARED,
-        "both servers",
+        USER_VISIBLE_SHARED,
+        "both servers, among agent-visible tools",
     ),
     ("README.md", r"\*\*\(GUI only\)\*\* \((\d+)\)", GUI_ONLY, "GUI-only"),
     ("README.md", r"\*\*\(headless only\)\*\* \((\d+)\)", HEADLESS_ONLY, "headless-only"),
     # ---- CLAUDE.md ------------------------------------------------------
-    ("CLAUDE.md", r"(\d+) MCP tools for binary analysis", TOTAL, "whole catalog"),
+    ("CLAUDE.md", r"(\d+) MCP tools for binary analysis", USER_VISIBLE, "agent-visible tools"),
     (
         "CLAUDE.md",
         r"`tests/endpoints\.json` \((\d+) endpoints, categories",
@@ -151,8 +170,8 @@ PINNED: list[tuple[str, str, int, str]] = [
     (
         "AGENTS.md",
         r"\*\*Key feature\*\*: (\d+) MCP tools for binary analysis",
-        TOTAL,
-        "whole catalog",
+        USER_VISIBLE,
+        "agent-visible tools",
     ),
     # ---- CONTRIBUTING.md ------------------------------------------------
     (
@@ -266,13 +285,8 @@ NON_CATALOG_COUNTS: list[tuple[str, int, str]] = [
     ("ROADMAP.md", _default_group_count(), "endpoints in the three default tool groups loaded under --lazy"),
     ("CLAUDE.md", 5, "REST endpoints on the optional external re-kb archive service"),
     ("CLAUDE.md", 22, "debugger proxy tools in the bridge, not catalog endpoints"),
-    ("CLAUDE.md", 27, "historical category-drift example in the match-change table"),
     ("ROADMAP.md", 272, "the pre-consolidation surface; a statement about the past"),
-    (
-        "CLAUDE.md",
-        27,
-        "tools whose category taxonomy understated them; a measured past figure",
-    ),
+    ("CLAUDE.md", 27, "tools a since-fixed category drift understated; a statement about the past"),
 ]
 
 _COUNT_NEAR_NOUN = re.compile(

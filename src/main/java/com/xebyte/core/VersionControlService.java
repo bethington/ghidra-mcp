@@ -74,7 +74,7 @@ public class VersionControlService {
     }
 
     @McpTool(path = "/server/version_control/undo_checkout", dryRun = false, method = "POST",
-            description = "Undo a checkout in the open shared project, discarding local changes that were "
+            description = "Undo a tree in the open shared project, discarding local changes that were "
                 + "not checked in. Close the program first: an open file cannot be released.",
             category = "server", access = ToolAccess.DESTRUCTIVE)
     public Response undoCheckout(
@@ -128,8 +128,8 @@ public class VersionControlService {
             @Param(value = "path", source = ParamSource.BODY,
                    description = "Path of the file whose checkout is being terminated") String path,
             @Param(value = "checkout_id", source = ParamSource.BODY, defaultValue = "",
-                   description = "Terminate only this checkout, as /server/checkouts reports it. Empty "
-                               + "terminates every checkout of the file.") String checkoutId) {
+                   description = "Terminate only this tree, as /server/checkouts reports it. Empty "
+                               + "terminates every tree of the file.") String checkoutId) {
         Long id = null;
         if (checkoutId != null && !checkoutId.isBlank()) {
             try {

@@ -6,8 +6,9 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**211 tools** — 207 served by the GUI plugin, 192 by the headless server, 188
-by both. The advertised surface went from 272 → 251 in the first consolidation
+**218 tools** — 214 served by the GUI plugin, 199 by the headless server, 195
+by both. 217 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
+only the bridge calls. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
 7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
 nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
@@ -19,7 +20,7 @@ became shared services (`/server/version_control/checkin` and
 `/apply_function_documentation` and `/batch_apply_documentation` (53 tools
 removed and 9 added since rc.1, every one named in
 [`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
-and **211** with `/partition_program` and `/find_type_users`.
+and **218** with the decompilation tree, `/partition_program` and `/find_type_users`.
 
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
@@ -32,9 +33,45 @@ the 235-tool schema recording); the figures above are the current ones.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Added — decompilation tree, `/partition_program`, `/find_type_users`
 
-### Added — `/partition_program`, `/find_type_users`
-
+- **Decompilation tree.** A program's decompiled C as a file tree an agent searches
+  with its own Grep, Read and Glob, so "which functions touch this MMIO page" is one search
+  instead of one tool call per function. `decompile_tree_create` registers a tree
+  without sweeping it; `decompile_tree_run(action=start|stop)` runs the sweep, which
+  returns in milliseconds; `decompile_tree_status` (read-only, so usable in plan mode)
+  and `STATUS.md` on disk report progress; `decompile_tree_configure`,
+  `decompile_tree_pin_module` and `decompile_tree_delete` manage it.
+  `/decompile_tree_refresh` is an internal route: it stays callable over HTTP but is
+  left out of `/mcp/schema` (`@McpTool(internal = true)`), and the published "MCP tools"
+  count excludes it.
+  - **Each function block carries what `get_functions` returns for it**, one greppable
+    `// key: value` header line per fact (signature, classification, body range, tags,
+    plate and its issues, calls and callers, parameters, locals, labels, comments, xrefs,
+    jump targets) and `// refs:`, every data address the function uses, including
+    literal-pool values and registers reached as base + offset, so `grep 0x40003c0c`
+    finds a register however the C prints it. A real-Ghidra test holds a swept block equal
+    to a fresh `get_functions` result field for field. Each block's `// uri:` line names
+    the function's `ghidra://function/...` resource, which the bridge serves from the next
+    change on.
+  - **It stays current.** An observer turns program events into dirty functions (a rename
+    dirties every function that references the symbol, and the old name is searched for in
+    bodies to catch calls through a register or literal pool); a queue splices rebuilt
+    blocks, and undo, redo or a storm of changes triggers a full reconcile. A sweep, a
+    reconcile and a repair converge: a test holds every route to a fresh sweep, file for
+    file. Measured: a callee used 72 times updated everywhere in 1.4 s.
+  - **Its status is honest.** `clean`, `spliced` (kept current since the sweep), `stale`
+    (with the reason) and `in_sync`; `close_program(save=false)` marks it stale and the next
+    open reconciles the discarded edits out. A memory-map change (such as
+    `/set_memory_block`) marks it stale, because only a resweep fixes that.
+  - **It survives a restart.** Stamps compare the program's saved time and a per-open
+    session epoch, not the modification counter that restarts at every open; trees are
+    re-adopted and reconciled when their program first opens, matched by `program_url`
+    so two projects holding `/fw.bin` never share one.
+  - **Exclusions** keep library code out: `tag:` (function tags, FID), `partition:` (a
+    whole compartment) and `range:` (works on stripped binaries). Narrowing deletes the
+    excluded files immediately so Grep cannot lie. Measured full sweeps: a 677-function
+    ARM firmware in 4 s, a 3,230-function driver in 18–28 s, `ls` (25,231) in 669 s.
 - **`/partition_program`** groups functions into compartments before anything is
   decompiled, by qualified names in strings, MMIO page sets, literal locality and address
   bands, and reports each partition's rule and evidence. On a Windows driver the two
@@ -183,7 +220,7 @@ versioned file that is not checked out opens as an in-memory copy that saves now
 `open_program` now reports `read_only: true` with the reason, each edit carries the
 reason in `warnings`, `save_program` names the cause and the remedy, and
 `close_program(save=true)` refuses and asks for `save=false`. A second checkout answers
-`already_checked_out` instead of Ghidra's "private file exists", and a checkout reopens
+`already_checked_out` instead of Ghidra's "private file exists", and a tree reopens
 an unedited copy on itself (`reopened`) or reports `reopen_required` for an edited one.
 
 **`dry_run` stays refused on the moved tools.** Version control, project lifecycle,

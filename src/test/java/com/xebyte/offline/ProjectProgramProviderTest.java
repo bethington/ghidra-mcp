@@ -186,8 +186,11 @@ public class ProjectProgramProviderTest {
     public void closeWithSaveSavesUnsavedEdits() throws Exception {
         Fixture f = new Fixture();
         Program p = f.file("/fw/a");
-        f.getProgram("/fw/a");
+        // Stub before opening: once any test in this JVM has built the services, every open
+        // queues the tree registry's adopt hook, which reads this mock from another thread.
+        // A stub racing that read lands on the wrong method (Mockito WrongTypeOfReturnValue).
         when(p.isChanged()).thenReturn(true);
+        f.getProgram("/fw/a");
 
         assertTrue(f.closeProgram(p, true));
         verify(p.getDomainFile()).save(any(TaskMonitor.class));
@@ -199,8 +202,8 @@ public class ProjectProgramProviderTest {
     public void closeWithoutSaveDiscards() throws Exception {
         Fixture f = new Fixture();
         Program p = f.file("/fw/a");
-        f.getProgram("/fw/a");
         when(p.isChanged()).thenReturn(true);
+        f.getProgram("/fw/a");
 
         assertTrue(f.releaseCachedProgram("/fw/a", false));
         verify(p.getDomainFile(), never()).save(any(TaskMonitor.class));
