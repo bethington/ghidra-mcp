@@ -19,6 +19,19 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — tree defaults are settings
+
+`decompile_tree_create`'s defaults come from `tree.*` keys (`strategies`, `band_size`,
+`max_file_bytes`, `exclusions`, `include_only`, `throttle_percent`, `decompile_timeout_seconds`,
+`analysis_wait_seconds`, `disassemble_missing`), resolved for the program at server, project,
+local or program scope; a parameter given on the call wins. Create takes
+`decompile_timeout_seconds` and `analysis_wait_seconds` now too. The resolved values are written
+to `tree.json`, so changing a default later leaves existing trees as they are.
+
+`tree.disassemble_missing` stays off by default: it is the one tree setting that writes the
+program (it creates instructions at function entries the importer left undefined). A project
+whose imports need it (PE `.pdata` entries, firmware) now sets it once instead of on every create.
+
 ### Changed — the bridge's environment variables are settings keys
 
 The bridge's own variables are `bridge.*` registry keys at session scope, documented in the

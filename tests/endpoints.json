@@ -1070,6 +1070,8 @@
         "exclusions",
         "include_only",
         "throttle_percent",
+        "decompile_timeout_seconds",
+        "analysis_wait_seconds",
         "disassemble_missing"
       ],
       "servers": [

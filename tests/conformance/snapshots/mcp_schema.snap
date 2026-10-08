@@ -2512,23 +2512,23 @@
         },
         {
           "default": "",
-          "description": "Comma-separated partition strategies. Empty = full cascade.",
+          "description": "Comma-separated partition strategies. Empty = full cascade. Omit for the tree.strategies setting.",
           "name": "strategies",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "default": "20",
-          "description": "Address-band width when bands apply.",
+          "default": "",
+          "description": "Address-band width when bands apply. Omit for the tree.band_size setting.",
           "name": "band_size",
           "required": false,
           "source": "body",
           "type": "integer"
         },
         {
-          "default": "32768",
-          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths.",
+          "default": "",
+          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths. Omit for the tree.max_file_bytes setting.",
           "name": "max_file_bytes",
           "required": false,
           "source": "body",
@@ -2536,7 +2536,7 @@
         },
         {
           "default": "",
-          "description": "CSV of tag:/partition:/range: exclusion specs.",
+          "description": "CSV of tag:/partition:/range: exclusion specs. Omit for the tree.exclusions setting.",
           "name": "exclusions",
           "required": false,
           "source": "body",
@@ -2544,27 +2544,43 @@
         },
         {
           "default": "",
-          "description": "CSV of tag:/partition:/range: include-only specs.",
+          "description": "CSV of tag:/partition:/range: include-only specs. Omit for the tree.include_only setting.",
           "name": "include_only",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "default": "10",
-          "description": "Interactive yield 0..90 after each decompiled function.",
+          "default": "",
+          "description": "Interactive yield 0..90 after each decompiled function. Omit for the tree.throttle_percent setting.",
           "name": "throttle_percent",
           "required": false,
           "source": "body",
           "type": "integer"
         },
         {
-          "default": "false",
-          "description": "Off by default. When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies — a program write, not filesystem-only.",
+          "default": "",
+          "description": "When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies: a program write, not filesystem-only. Omit for the tree.disassemble_missing setting.",
           "name": "disassemble_missing",
           "required": false,
           "source": "body",
           "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Per-function decompile budget during the sweep. Omit for the tree.decompile_timeout_seconds setting.",
+          "name": "decompile_timeout_seconds",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Cap on waiting for auto-analysis before partitioning. Omit for the tree.analysis_wait_seconds setting.",
+          "name": "analysis_wait_seconds",
+          "required": false,
+          "source": "body",
+          "type": "integer"
         }
       ],
       "path": "/decompile_tree_create",

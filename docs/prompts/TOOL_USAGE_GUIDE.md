@@ -627,8 +627,8 @@ one search instead of one MCP round trip per function.
 ```
 
 Create and start are separate on purpose: config changes must not silently launch
-a multi-minute sweep. `disassemble_missing` defaults to off; set it true on create
-or configure only when you want the next sweep to disassemble entries that still
+a multi-minute sweep. `disassemble_missing` defaults to off (the `tree.disassemble_missing`
+setting); set it true on create or configure, or in that setting, only when you want the next sweep to disassemble entries that still
 have no instruction (and possibly reflow PE stub bodies) — that is a program write,
 not filesystem-only. `decompile_tree_status` is READ_ONLY so it stays usable in plan
 mode; the five write paths (`create` / `configure` / `start` / `stop` / `delete`)
@@ -886,6 +886,15 @@ replace it.
 | `bridge.rebind_protection` | operator | bool | `true` | session | DNS-rebinding protection for wildcard HTTP binds; set false only on a wildcard bind to opt out. |
 | `bridge.debugger_url` | operator | string | none | session | Loopback URL of an external WinDbg debugger server; setting it registers the 22 debugger_* proxy tools, which are off by default. |
 | `bridge.debugger_tools` | operator | string | none | session | Force the debugger_* proxy tools on (true, at `http://127.0.0.1:8099` when no URL is set) or off (false, even with a URL); empty follows bridge.debugger_url. |
+| `tree.strategies` | preference | list | none | server, project, local, program | Partition strategies for decompile_tree_create; empty means the full cascade. |
+| `tree.band_size` | preference | int | `20` | server, project, local, program | Address-band width when bands apply in a decompilation tree. |
+| `tree.max_file_bytes` | preference | int | `32768` | server, project, local, program | Read-budget bytes per .c file inside a tree compartment (floored at 4096). |
+| `tree.exclusions` | preference | list | none | server, project, local, program | Exclusion specs (tag:/partition:/range:) for decompile_tree_create. |
+| `tree.include_only` | preference | list | none | server, project, local, program | Include-only specs (tag:/partition:/range:) for decompile_tree_create. |
+| `tree.throttle_percent` | preference | int | `10` | server, project, local, program | Interactive yield 0..90 after each function during a tree sweep. |
+| `tree.decompile_timeout_seconds` | preference | int | `30` | server, project, local, program | Per-function decompile budget during a tree sweep. |
+| `tree.analysis_wait_seconds` | preference | int | `600` | server, project, local, program | Cap on waiting for auto-analysis before a tree sweep partitions. |
+| `tree.disassemble_missing` | preference | bool | `false` | server, project, local, program | Before a tree sweep, disassemble at function entries with no instruction; writes the program, so off unless a scope or the create call turns it on. |
 | `server.bind_address` | operator | string | none | server | When non-empty, also serve HTTP on TCP at this address (headless/Docker). |
 | `programs.max_cached` | operator | int | `8` | server | Maximum programs kept open in the provider cache; values below 2 become 2. |
 | `archive.url` | operator | string | none | server | Documentation archive REST base URL; empty disables archive ingest. |

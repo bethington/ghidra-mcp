@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static com.xebyte.core.settings.Scope.LOCAL;
+import static com.xebyte.core.settings.Scope.PROGRAM;
 import static com.xebyte.core.settings.Scope.PROJECT;
 import static com.xebyte.core.settings.Scope.SERVER;
 import static com.xebyte.core.settings.Scope.SESSION;
@@ -83,6 +84,34 @@ public final class SettingsRegistry {
             EnumSet.of(SESSION), Kind.OPERATOR, Merge.OVERRIDE, null,
             "Force the debugger_* proxy tools on (true, at `http://127.0.0.1:8099` when no URL is "
                 + "set) or off (false, even with a URL); empty follows bridge.debugger_url."),
+        new SettingKey("tree.strategies", Type.LIST, "",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Partition strategies for decompile_tree_create; empty means the full cascade."),
+        new SettingKey("tree.band_size", Type.INT, "20",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Address-band width when bands apply in a decompilation tree."),
+        new SettingKey("tree.max_file_bytes", Type.INT, "32768",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Read-budget bytes per .c file inside a tree compartment (floored at 4096)."),
+        new SettingKey("tree.exclusions", Type.LIST, "",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.LIST_DELTA, null,
+            "Exclusion specs (tag:/partition:/range:) for decompile_tree_create."),
+        new SettingKey("tree.include_only", Type.LIST, "",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.LIST_DELTA, null,
+            "Include-only specs (tag:/partition:/range:) for decompile_tree_create."),
+        new SettingKey("tree.throttle_percent", Type.INT, "10",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Interactive yield 0..90 after each function during a tree sweep."),
+        new SettingKey("tree.decompile_timeout_seconds", Type.INT, "30",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Per-function decompile budget during a tree sweep."),
+        new SettingKey("tree.analysis_wait_seconds", Type.INT, "600",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Cap on waiting for auto-analysis before a tree sweep partitions."),
+        new SettingKey("tree.disassemble_missing", Type.BOOL, "false",
+            EnumSet.of(SERVER, PROJECT, LOCAL, PROGRAM), Kind.PREFERENCE, Merge.OVERRIDE, null,
+            "Before a tree sweep, disassemble at function entries with no instruction; "
+                + "writes the program, so off unless a scope or the create call turns it on."),
         new SettingKey("server.bind_address", Type.STRING, "",
             EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
             "When non-empty, also serve HTTP on TCP at this address (headless/Docker)."),

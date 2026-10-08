@@ -44,6 +44,7 @@ public record CoreServices(
         DocumentationHashService documentationHash =
             new DocumentationHashService(provider, ts, new BinaryComparisonService());
         documentationHash.setFunctionService(function);
+        SettingsService settings = new SettingsService(provider);
         return new CoreServices(
             new ListingService(provider, ts),
             new CommentService(provider, ts),
@@ -60,8 +61,8 @@ public record CoreServices(
             new TypeReferenceService(provider),
             new ChangeTokenService(provider),
             new PartitionService(provider),
-            new DecompTreeService(provider, ts),
-            new SettingsService(provider));
+            new DecompTreeService(provider, ts, settings),
+            settings);
     }
 
     /** Every shared service, in declaration order. */
