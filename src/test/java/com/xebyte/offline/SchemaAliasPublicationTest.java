@@ -71,8 +71,13 @@ public class SchemaAliasPublicationTest extends TestCase {
         assertEquals("function_ref", p.paramType());
 
         String json = p.toJson();
+        // Compact Gson (no spaces after ':' / ','). Parse rather than pin spacing.
+        com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
         assertTrue("ParamDescriptor.toJson must emit an aliases array; got: " + json,
-            json.contains("\"aliases\": [\"address\", \"name\", \"function_address\", \"function_name\"]"));
+            obj.has("aliases") && obj.get("aliases").isJsonArray());
+        java.util.List<String> published = new java.util.ArrayList<>();
+        obj.getAsJsonArray("aliases").forEach(e -> published.add(e.getAsString()));
+        assertEquals(List.of("address", "name", "function_address", "function_name"), published);
     }
 
     /**
