@@ -19,7 +19,7 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
-### Changed — checks fold into the calls they checked
+### Changed — checks and `force_decompile` fold into the calls they stood in for
 
 - **`/validate_function_prototype` is `set_function_prototype(dry_run=true)`.** The validator
   checked only that the string contained `(` and that the convention was one of a hard-coded x86
@@ -33,6 +33,10 @@ Changes on `dev` after 7.0.0.
 - **`/search_strings` is `list_strings(pattern=...)`.** `list_strings` gains `pattern` (a
   case-insensitive regex) and `min_length`; `filter` stays a substring. `search_strings`'
   `encoding` parameter only echoed a label back and is gone. See the migration guide.
+- **`/force_decompile` is `get_functions(fields=decompiled_code)`.** It flushed the cache of a
+  decompiler it had created a moment before, so it never refreshed anything: every
+  `get_functions` call already decompiles with a fresh decompiler. Nothing is lost.
+
 ### Fixed: builds and runs on Ghidra 12.2
 
 Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on

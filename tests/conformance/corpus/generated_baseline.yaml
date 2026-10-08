@@ -586,15 +586,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: force_decompile
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_address_spaces
   tier: read
   args:

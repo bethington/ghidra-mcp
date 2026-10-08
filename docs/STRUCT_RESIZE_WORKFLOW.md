@@ -69,7 +69,7 @@ POST /set_function_prototype
 POST /set_function_this_type
 {"function_address":"0x401000","this_type":"Widget *"}
 
-GET /force_decompile?function_address=0x401000
+GET /get_functions?function=0x401000&fields=decompiled_code
 ```
 
 After this the function appears as `Widget::Widget_OnClick` and the decompiler shows `this->member`, not `void *`.

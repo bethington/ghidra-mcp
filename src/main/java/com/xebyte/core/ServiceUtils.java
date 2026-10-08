@@ -833,11 +833,10 @@ public final class ServiceUtils {
      *
      * <p>Shared rather than copied, for the same reason the eviction guard is
      * shared across its three writers: a rule that only one entry point enforces
-     * is a rule the next tool in the chain steps around. Four endpoints return
+     * is a rule the next tool in the chain steps around. Three endpoints return
      * decompiler-produced C to a caller — /get_functions (decompiled_code and
-     * call_context, single and bulk mode), /force_decompile,
-     * /analyze_function_complete, /analyze_for_documentation — and all four
-     * consult this check. Endpoints
+     * call_context, single and bulk mode), /analyze_function_complete and
+     * /analyze_for_documentation — and all three consult this check. Endpoints
      * that merely decompile internally to derive a score or a field-usage map
      * (/analyze_function_completeness, /analyze_struct_field_usage) do not: they
      * hand back no pseudocode, so there is nothing for a caller to misread as

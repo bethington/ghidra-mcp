@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 219,
+  "total_endpoints": 218,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1624,25 +1624,6 @@
         "headless"
       ],
       "description": "Find undocumented functions referencing string"
-    },
-    {
-      "path": "/force_decompile",
-      "method": "GET",
-      "category": "function",
-      "params": [
-        "function",
-        "address",
-        "name",
-        "function_address",
-        "function_name",
-        "program",
-        "variant"
-      ],
-      "servers": [
-        "gui",
-        "headless"
-      ],
-      "description": "Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)"
     },
     {
       "path": "/get_address_spaces",

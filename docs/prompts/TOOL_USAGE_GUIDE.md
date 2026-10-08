@@ -136,9 +136,8 @@ as a tool error. Each one carries `loaded_variant`, the full
 
 The decompiler always decodes with the language the program was imported under
 and cannot be asked for another — that is why a mismatch is refused instead of
-answered. `force_decompile` does not help either: flushing the cache re-runs the
-same language and re-derives the same wrong C. Fixing it is a program-level
-operation:
+answered. Decompiling again does not help either: it re-runs the same language
+and re-derives the same wrong C. Fixing it is a program-level operation:
 
 - re-import with an explicit language: `import_file(file_path=..., language="PowerPC:BE:64:VLE-32addr")`, or
 - change it in Ghidra: **Language > Set Language** (re-disassembles; do this
@@ -146,11 +145,11 @@ operation:
 
 ### Composite analyses
 
-`force_decompile`, `analyze_function_complete` and `analyze_for_documentation`
-also return pseudocode, stamped the same way, and accept the same optional
-`variant=`. `force_decompile` refuses a contradicted one like `get_functions`
-does. The two composites instead return everything else with `decompiled_code`
-replaced by `decompiled_code_withheld`, rather than failing the whole call.
+`analyze_function_complete` and `analyze_for_documentation` also return
+pseudocode, stamped the same way, and accept the same optional `variant=`.
+Where `get_functions` refuses a contradicted one, the two composites return
+everything else with `decompiled_code` replaced by `decompiled_code_withheld`,
+rather than failing the whole call.
 
 ## Complete Workflow Pattern
 

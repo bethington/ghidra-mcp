@@ -134,11 +134,12 @@ with `dry_run=true` where it writes, and the answer is the one the real call wou
 
 ## Folds after the consolidation
 
-Fifteen more tools folded into a sibling, still within one permission tier. Each survivor
+Sixteen more tools folded into a sibling, still within one permission tier. Each survivor
 keeps its own single-item call unchanged and gains the removed tool's job.
 
 | REMOVE | SURVIVOR | Transform |
 | --- | --- | --- |
+| `force_decompile(function)` | `get_functions` | `get_functions(function=..., fields=decompiled_code)`: the C is under `decompiled_code`. Every call decompiles fresh; there was never a cache to force. |
 | `modify_struct_field_type(struct_name, field_name, new_type)` | `modify_struct_field` | `modify_struct_field(struct_name, field_name, new_type=...)` |
 | `embed_struct_field(parent_struct, field_name, embedded_struct)` | `modify_struct_field` | `modify_struct_field(struct_name=parent_struct, field_name, new_type=embedded_struct)` |
 | `create_typedef(name, base_type)` | `create_derived_type` | `create_derived_type(kind="typedef", name, base_type)` |

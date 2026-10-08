@@ -60,7 +60,8 @@ public class FunctionBundleFieldsEndpointTest extends TestCase {
                 "/get_function_by_address",
                 "/get_function_variables",
                 "/get_function_xrefs",
-                "/decompile_function" }) {
+                "/decompile_function",
+                "/force_decompile" }) {
             assertFalse("must not register " + gone,
                     functionSvc.contains("path = \"" + gone + "\"")
                             || xref.contains("path = \"" + gone + "\"")

@@ -11,8 +11,8 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **219 tools** — 215 served by the GUI plugin, 200 by the headless
-server, 196 by both:
+The catalog stands at **218 tools** — 214 served by the GUI plugin, 199 by the headless
+server, 195 by both:
 
 - **Decompiler symbols and stack locals** from @sagasm (#550):
   `get_functions(fields=decompiler_symbols)` reads SSA/register storage, and
@@ -32,9 +32,10 @@ server, 196 by both:
   field of it.
 - **Settings:** `get_settings` and `set_setting` read and write one registry of
   scoped settings (server, project, local, program, session).
-- **Checks fold into the calls they checked.** `validate_function_prototype` is
+- **Checks and `force_decompile` fold into the calls they stood in for.** `validate_function_prototype` is
   `set_function_prototype(dry_run=true)`, `validate_data_type` is `apply_data_type(dry_run=true)`
-  or `find_data_types(name=...)`, and `search_strings` is `list_strings(pattern=...)`.
+  or `find_data_types(name=...)`, `search_strings` is `list_strings(pattern=...)`, and
+  `force_decompile` is `get_functions(fields=decompiled_code)`.
 
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 

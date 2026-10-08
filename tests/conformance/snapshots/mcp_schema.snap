@@ -1,5 +1,5 @@
 {
-  "count": 214,
+  "count": 213,
   "tools": [
     {
       "category": "function",
@@ -3810,47 +3810,6 @@
         }
       ],
       "path": "/find_undocumented_by_string",
-      "read_only": true
-    },
-    {
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
-          "name": "variant",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/force_decompile",
       "read_only": true
     },
     {

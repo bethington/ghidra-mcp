@@ -281,25 +281,6 @@ public class DecompileVariantLabellingGhidraTest {
     }
 
     // ------------------------------------------------------------------
-    // force_decompile
-    // ------------------------------------------------------------------
-
-    @Test
-    public void forceDecompileIsStampedAndChecked() throws Exception {
-        Services s = x86();
-        Map<String, Object> out = data(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(), ""));
-        assertNotNull(out.toString(), out.get("decompiled"));
-        assertStamped(s.program(), out);
-
-        out = data(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(),
-            ServiceUtils.loadedVariant(s.program())));
-        assertNotNull(out.toString(), out.get("decompiled"));
-
-        assertRefused(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(), otherVariant(s.program())),
-            "variant_mismatch");
-    }
-
-    // ------------------------------------------------------------------
     // Composites
     // ------------------------------------------------------------------
 
@@ -388,6 +369,5 @@ public class DecompileVariantLabellingGhidraTest {
         String vle = ServiceUtils.languageVariantNames(s.program()).stream()
             .filter(v -> v.contains("VLE")).findFirst().orElseThrow();
         assertRefused(getFunctions(s, PPC_FUNC, "", "decompiled_code", vle), "variant_mismatch");
-        assertRefused(s.functions().forceDecompile(fn(s, PPC_FUNC), s.program(), vle), "variant_mismatch");
     }
 }
