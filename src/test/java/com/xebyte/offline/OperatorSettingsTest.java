@@ -61,14 +61,14 @@ public class OperatorSettingsTest {
         SettingRefusedException project = assertThrows(SettingRefusedException.class,
             () -> SettingsResolver.checkWrite(k, Scope.PROJECT, "1.2.3.4",
                 SettingsResolver.resolve(k, Map.of())));
-        assertTrue(project.getMessage().contains("server operator"));
+        assertTrue(project.getMessage().contains("set by the operator, not through tools."));
         assertFalse(project.getMessage().contains("GHIDRA_MCP"));
         assertFalse(project.getMessage().contains("override"));
 
         SettingRefusedException local = assertThrows(SettingRefusedException.class,
             () -> SettingsResolver.checkWrite(k, Scope.LOCAL, "1.2.3.4",
                 SettingsResolver.resolve(k, Map.of())));
-        assertTrue(local.getMessage().contains("server operator"));
+        assertTrue(local.getMessage().contains("set by the operator, not through tools."));
     }
 
     @Test

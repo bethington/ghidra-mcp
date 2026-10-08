@@ -1,5 +1,6 @@
 package com.xebyte.core.settings;
 
+import com.xebyte.core.ConventionConfig;
 import com.xebyte.core.settings.SettingKey.Kind;
 import com.xebyte.core.settings.SettingKey.Merge;
 
@@ -65,6 +66,7 @@ public final class SettingsResolver {
     public static void checkWrite(SettingKey key, Scope scope, String raw, Resolution current) {
         checkScope(key, scope);
         Object next = combine(key, current.value(), raw);
+        refuseInvalidNamingGuardrail(key, next);
         if (loosens(key, scope, current.value(), next)) {
             throw new SettingRefusedException(key.key() + " is a guardrail set by the server operator. "
                 + "From here it can only be made stricter, and '" + raw + "' would loosen it.");
@@ -75,7 +77,7 @@ public final class SettingsResolver {
     public static void checkScope(SettingKey key, Scope scope) {
         if (key.kind() == Kind.OPERATOR) {
             throw new SettingRefusedException(
-                key.key() + " is set by the server operator in the server's environment.");
+                key.key() + " is set by the operator, not through tools.");
         }
         if (key.kind() == Kind.SECRET) {
             throw new SettingRefusedException(
@@ -98,6 +100,23 @@ public final class SettingsResolver {
     private static boolean loosens(SettingKey key, Scope scope, Object current, Object next) {
         return key.kind() == Kind.GUARDRAIL && scope.ordinal() > Scope.SERVER.ordinal()
             && !key.tightens().test(current, next);
+    }
+
+    private static void refuseInvalidNamingGuardrail(SettingKey key, Object next) {
+        if ("naming.mode".equals(key.key())) {
+            if (ConventionConfig.Mode.parseStrict(String.valueOf(next)) == null) {
+                throw new SettingRefusedException(key.key()
+                    + " must be off, warn, or enforce; '" + next + "' is not.");
+            }
+            return;
+        }
+        if ("naming.override".equals(key.key())) {
+            String raw = String.valueOf(next).trim();
+            if (!raw.isEmpty() && !"allow".equalsIgnoreCase(raw) && !"deny".equalsIgnoreCase(raw)) {
+                throw new SettingRefusedException(key.key()
+                    + " must be allow or deny; '" + raw + "' is not.");
+            }
+        }
     }
 
     private static Object combine(SettingKey key, Object current, String raw) {

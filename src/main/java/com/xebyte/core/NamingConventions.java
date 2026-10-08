@@ -184,8 +184,7 @@ public final class NamingConventions {
 
     /** Tier of the given verb (1/2/3); 0 = unknown verb (treated as Tier 2).
      *
-     * <p>Per-project overrides via {@code .ghidra-mcp/conventions.json}
-     * (`function_naming.verb_tier_overrides`) take precedence over the
+     * <p>{@code naming.function.verb_tiers} overrides take precedence over the
      * built-in tier tables. */
     public static int getVerbTier(String verb) {
         if (verb == null) return 0;

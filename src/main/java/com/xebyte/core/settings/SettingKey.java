@@ -117,4 +117,31 @@ public record SettingKey(String key, Type type, String defaultRaw, Set<Scope> sc
         // Path.startsWith compares whole elements, so /Mods does not contain /Mods2.
         return cur.isEmpty() || Path.of(cand).normalize().startsWith(Path.of(cur).normalize());
     };
+
+    /** {@code naming.mode}: off &lt; warn &lt; enforce. */
+    public static final BiPredicate<Object, Object> NAMING_MODE_TIGHTENS =
+        (current, candidate) -> namingModeRank((String) candidate) >= namingModeRank((String) current);
+
+    /** {@code naming.override}: allow &lt; deny. */
+    public static final BiPredicate<Object, Object> NAMING_OVERRIDE_TIGHTENS =
+        (current, candidate) -> namingOverrideRank((String) candidate) >= namingOverrideRank((String) current);
+
+    public static int namingModeRank(String raw) {
+        if (raw == null) {
+            return 0;
+        }
+        return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+            case "enforce", "strict", "true" -> 2;
+            case "warn", "warning" -> 1;
+            case "off", "false", "disable", "disabled" -> 0;
+            default -> -1;
+        };
+    }
+
+    static int namingOverrideRank(String raw) {
+        if (raw == null) {
+            return 0;
+        }
+        return "deny".equalsIgnoreCase(raw.trim()) ? 1 : 0;
+    }
 }

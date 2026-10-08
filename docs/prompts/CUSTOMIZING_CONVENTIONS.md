@@ -3,205 +3,112 @@
 Ghidra MCP ships with an opinionated convention layer: PascalCase function
 names with verb-tier specificity, Hungarian prefixes on globals,
 Algorithm/Parameters/Returns plate comments, the `g_` prefix on globals.
-That works well for the kind of reverse-engineering work the tool was
-built for, but every project has its own house style. v5.11.2 makes the
-whole layer customizable on three axes — drop one knob, turn off a whole
-section, or replace the entire ruleset.
+v7.3+ exposes the whole layer as `naming.*` settings (see
+`get_settings` and the key table in `TOOL_USAGE_GUIDE.md`).
 
-## Three places convention enforcement gets configured
+## Three layers
 
-| Layer | Lives at | Scope | Use when |
-| --- | --- | --- | --- |
-| **Ghidra Tool Option** (existing) | `Edit ▸ Tool Options ▸ GhidraMCP ▸ Strict Naming Enforcement` | Per Ghidra tool instance | You want a global on/off switch via the GUI. |
-| **Project config file** (new) | `<ghidra-project>/.ghidra-mcp/conventions.json` | Per Ghidra project | Your project uses a different convention than the tool's defaults — e.g. snake_case fields, different Hungarian prefixes, no `g_` prefix. |
-| **Per-call override** (new) | `strict_mode` query/body param on rename + global + apply-type endpoints | Per HTTP request | A specific automation needs to bypass enforcement for one call — e.g. propagating names from a trusted source. |
+| Layer | How | Scope |
+| --- | --- | --- |
+| **Operator settings** | Server env (`GHIDRA_MCP_NAMING_…`), project/local/program stores, Ghidra Tool Option for mode | Shared rules for everyone on that scope |
+| **GUI strict checkbox** | `Edit ▸ Tool Options ▸ GhidraMCP ▸ Strict Naming Enforcement` | Writes `naming.mode` at **local** scope (`enforce` when checked, `warn` when not) |
+| **Per-call override** | `strict_mode` on rename / global / apply-type endpoints | One HTTP request |
 
-The layers compose: the file is loaded at plugin start, the Tool Option
-overrides just the *mode* (strict vs. off), and a per-call `strict_mode`
-parameter overrides the global setting for the duration of that one
-request.
+`naming.mode` is a **guardrail**: agents may only tighten it (`off` → `warn` →
+`enforce`). Every other `naming.*` key is **operator-only** — agents can read
+them via `get_settings` but not `set_setting`.
 
-## File location
+`naming.override` controls whether a per-call `strict_mode` may be **lower**
+than the resolved `naming.mode` (`allow`, default, or `deny`).
+
+## Setting values
+
+### Server environment
+
+Each key maps to an environment variable: `GHIDRA_MCP_` + the key in
+uppercase with dots as underscores. Examples:
+
+```bash
+export GHIDRA_MCP_NAMING_MODE=enforce
+export GHIDRA_MCP_NAMING_FUNCTION_VERBS_ADD="+Sniff,-Process"
+export GHIDRA_MCP_NAMING_PLATE_REQUIRED_SECTIONS="Algorithm,Parameters,Returns"
+```
+
+List keys accept comma-separated values. Use `+item` / `-item` at project,
+local, or program scope to adjust list-delta keys without replacing the whole
+list (same rules as `set_setting`).
+
+### Project, local, and program scope
+
+Use `set_setting` for **preference** keys only. Operator `naming.*` keys must
+be set by the operator:
+
+- **Project** — versioned with the shared Ghidra project (`.ghidra-mcp/settings`
+  on the project; see `TOOL_USAGE_GUIDE.md`).
+- **Local** — this machine only (including the Ghidra Tool Option checkbox for
+  `naming.mode`).
+- **Program** — one binary; pass `program=` on `set_setting` when the key allows
+  program scope.
+
+Headless/Docker operators typically use server env; GUI users use Tool Options
+plus project/local stores.
+
+## Key reference (`naming.*`)
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `naming.mode` | `enforce` | `off`, `warn`, or `enforce` |
+| `naming.override` | `allow` | `allow` or `deny` per-call strictness below mode |
+| `naming.function.min_length` | `8` | Minimum function name length (main part) |
+| `naming.function.verbs_add` | (empty) | Extra allowed verbs (`+Sniff`) |
+| `naming.function.verbs_remove` | (empty) | Built-in verbs to drop |
+| `naming.function.verb_tiers` | (empty) | `Verb:tier` overrides (tier 1–3) |
+| `naming.function.weak_nouns_add` | (empty) | Extra weak nouns |
+| `naming.function.weak_nouns_remove` | (empty) | Built-in weak nouns to allow |
+| `naming.hungarian.auto_fix` | `true` | Auto-fix struct field Hungarian prefixes |
+| `naming.hungarian.prefixes` | (empty) | `type:prefix` extra mappings |
+| `naming.global.validate` | `true` | Global name quality checks |
+| `naming.global.require_g_prefix` | `true` | Require `g_` on globals |
+| `naming.global.min_descriptor_length` | `2` | Min length after `g_` |
+| `naming.plate.validate` | `true` | Plate structure validation |
+| `naming.plate.required_sections` | `Algorithm,Parameters,Returns` | Required headings |
+| `naming.plate.min_first_line_words` | `4` | Summary line word count |
+
+## Examples
+
+**Add a domain verb** (project scope, operator sets via project settings store or
+server env):
 
 ```text
-<your-ghidra-project>/                 ← whatever Project.getProjectDir() returns
-└── .ghidra-mcp/
-    └── conventions.json
+naming.function.verbs_add=+Sniff
 ```
 
-The file is read once at plugin start (and again any time the Tool Option
-is toggled). Missing file = built-in defaults; malformed JSON = built-in
-defaults plus a warning in Ghidra's log.
+**Relax enforcement for a team** (operator only):
 
-## Schema
-
-Every field is optional — provide only the sections you want to customize.
-
-```json
-{
-  "strict_mode": "enforce",
-
-  "function_naming": {
-    "min_length": 8,
-    "verbs_add":       ["Sniff", "Inject", "Patch"],
-    "verbs_remove":    [],
-    "verb_tier_overrides": { "Process": 1, "Render": 3 },
-    "weak_nouns_add":  ["Widget", "Stuff"],
-    "weak_nouns_remove": ["Data"]
-  },
-
-  "hungarian": {
-    "auto_fix_struct_fields": true,
-    "extra_prefixes": {
-      "u8":  ["byte", "uchar"],
-      "u16": ["ushort", "word"]
-    }
-  },
-
-  "global_naming": {
-    "validate": true,
-    "require_g_prefix": true,
-    "min_descriptor_length": 2
-  },
-
-  "plate_comments": {
-    "validate": true,
-    "required_sections": ["Algorithm", "Parameters", "Returns"],
-    "min_first_line_words": 4
-  }
-}
+```text
+naming.mode=warn
 ```
 
-### Field reference
+**Block agents from loosening strictness per call**:
 
-#### `strict_mode` *(string, default `"enforce"`)*
-
-- `"enforce"` — reject low-quality names with a structured rejection (no
-  partial writes).
-- `"warn"` — accept the write but return a warning in the response.
-- `"off"` — skip validation entirely.
-
-The Ghidra Tool Option overrides this. The per-call `strict_mode`
-parameter overrides both.
-
-#### `function_naming`
-
-| Field | Effect |
-| --- | --- |
-| `min_length` (int) | Minimum length of the function-name body (after stripping any `MODULE_` prefix). Default 8. |
-| `verbs_add` (list) | Extra verbs to accept in addition to the built-in 70+ verb whitelist. |
-| `verbs_remove` (list) | Verbs to *remove* from the built-in whitelist. |
-| `verb_tier_overrides` (map) | Reassign a verb's tier (1 = highly specific, 2 = medium, 3 = vague). Tier-3 verbs require ≥2 specifier tokens; demoting `Process` to Tier 1 lets `ProcessPacket` pass. |
-| `weak_nouns_add` (list) | Extra tokens to treat as "weak" (contribute no specificity). `GetWidget` would then count as a weak-noun-only rejection. |
-| `weak_nouns_remove` (list) | Remove tokens from the built-in weak-noun denylist. E.g. if your domain genuinely uses `Data` as a meaningful term. |
-
-#### `hungarian`
-
-| Field | Effect |
-| --- | --- |
-| `auto_fix_struct_fields` (bool) | When true, `add_struct_field("count", uint32)` auto-rewrites to `dwCount`. When false, the field name is preserved as supplied (snake_case projects want this off). |
-| `extra_prefixes` (map) | Add prefix→type mappings. The map's keys are the prefix you want to teach the validator; values are lists of Ghidra type names that accept the prefix. |
-
-#### `global_naming`
-
-| Field | Effect |
-| --- | --- |
-| `validate` (bool) | Master toggle. When false, no global-name validation runs at all. |
-| `require_g_prefix` (bool) | When false, `ItemList` is acceptable; only the Hungarian / descriptor checks run. |
-| `min_descriptor_length` (int) | Minimum chars after the Hungarian prefix. Default 2 (so `g_pX` rejects, `g_pXY` passes). |
-
-#### `plate_comments`
-
-| Field | Effect |
-| --- | --- |
-| `validate` (bool) | Master toggle. When false, plate-comment validation is skipped at every write endpoint that previously enforced it. |
-| `required_sections` (list) | Sections the validator looks for. A line is considered to start a section when it matches `^<Section>$` or `^<Section>:`. Default `["Algorithm", "Parameters", "Returns"]`. |
-| `min_first_line_words` (int) | Plate-comment first line must contain at least this many whitespace-separated words. Default 4. |
-
-## Worked example: a non-Hungarian C++ project
-
-Goal: keep convention enforcement on, but switch to a project style that
-uses `snake_case` member names, no `g_` prefix on globals, and a
-`Purpose / Notes` plate-comment format.
-
-```json
-{
-  "function_naming": {
-    "verbs_add": ["Initialize", "Finalize", "Reset"]
-  },
-  "hungarian": {
-    "auto_fix_struct_fields": false
-  },
-  "global_naming": {
-    "require_g_prefix": false
-  },
-  "plate_comments": {
-    "required_sections": ["Purpose", "Notes"]
-  }
-}
+```text
+naming.override=deny
 ```
 
-Drop that file at `<project>/.ghidra-mcp/conventions.json`, restart
-Ghidra (or hit the Tool Option toggle to force a refresh), and:
+**Custom plate sections**:
 
-- `add_struct_field("entry_count", uint32)` keeps the name as
-  `entry_count` instead of rewriting to `dwEntry_count`.
-- `rename_symbol(addr, "PlayerInventory")` succeeds — the `g_` prefix
-  is no longer required.
-- `set_global(addr, name=..., plate_comment="...")` validates against
-  the `Purpose`/`Notes` sections instead of the default trio.
-
-## Per-call `strict_mode` override
-
-Four endpoints accept an optional `strict_mode` body parameter:
-
-- `/rename_function`
-- `/apply_data_type`
-- `/set_global`
-- `/rename_symbol`
-
-Values:
-
-- `"enforce"` — apply strict rejection for this one call, regardless of
-  global setting.
-- `"warn"` — accept the write and surface warnings.
-- `"off"` — skip naming validation entirely for this one call.
-
-Omit the parameter to inherit the project/global setting. Existing
-callers that don't pass `strict_mode` see no behavior change.
-
-```http
-POST /set_global
-Content-Type: application/json
-
-{
-  "address": "0x6fd5af00",
-  "name": "ItemPriceTable",
-  "type_name": "ItemRecord[100]",
-  "plate_comment": "Per-class item price modifiers loaded from items.txt",
-  "strict_mode": "off"
-}
+```text
+naming.plate.required_sections=Purpose,InputOutput
 ```
 
-## Backwards compatibility
+## Per-call `strict_mode`
 
-- A project with no `conventions.json` gets exactly the pre-v5.11.2
-  hardcoded behavior.
-- The existing `Strict Naming Enforcement` Tool Option still works and
-  still wins over the file's `strict_mode` field — flipping the GUI
-  checkbox to off is a quick way to silence enforcement without editing
-  any files.
-- Endpoint param signatures are additive — every new parameter is
-  optional with a safe default, so existing automation keeps working
-  unchanged.
+Rename and related write endpoints accept `strict_mode=off|warn|enforce` for
+that request only. When `naming.override` is `deny`, a value below the
+resolved `naming.mode` is refused. Raising strictness is always allowed.
 
-## Troubleshooting
+## Defaults
 
-- *Convention file not picked up* — confirm it sits at `<ghidra-project
-  directory>/.ghidra-mcp/conventions.json`, not under the binary's
-  folder. Toggle the Tool Option off/on to force a reload.
-- *Warnings about `verb_tier_overrides`* — tier values must be 1, 2, or
-  3. Out-of-range entries are dropped with a warning in Ghidra's log.
-- *Plate-comment validation refuses to turn off* — check that you wrote
-  `"plate_comments": { "validate": false }` (note the underscore + plural
-  on `plate_comments`).
+Unset keys use the built-in defaults above — the same behavior as pre-v7.3
+hardcoded rules. See `ConventionConfig.defaults()` in the Java sources for the
+authoritative field-by-field baseline.

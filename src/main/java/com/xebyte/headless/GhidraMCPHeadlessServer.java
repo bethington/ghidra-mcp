@@ -110,6 +110,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         services = CoreServices.build(programProvider, threadingStrategy);
         SecurityConfig.getInstance().useSettings(services.settings());
+        com.xebyte.core.NamingPolicy.getInstance().useSettings(services.settings());
 
         // Before any ghidra:// project open — same registration the GUI gets from ModuleInitializer.
         ServerCredentials.registerFromSettings();

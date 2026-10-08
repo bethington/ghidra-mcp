@@ -895,6 +895,22 @@ replace it.
 | `tree.decompile_timeout_seconds` | preference | int | `30` | server, project, local, program | Per-function decompile budget during a tree sweep. |
 | `tree.analysis_wait_seconds` | preference | int | `600` | server, project, local, program | Cap on waiting for auto-analysis before a tree sweep partitions. |
 | `tree.disassemble_missing` | preference | bool | `false` | server, project, local, program | Before a tree sweep, disassemble at function entries with no instruction; writes the program, so off unless a scope or the create call turns it on. |
+| `naming.mode` | guardrail | string | `enforce` | server, project, local, program | Naming enforcement: off, warn, or enforce (reject low-quality names). |
+| `naming.override` | guardrail | string | `allow` | server, project, local, program | Whether per-call strict_mode may be lower than naming.mode (allow or deny). |
+| `naming.function.min_length` | operator | int | `8` | server, project, local, program | Minimum length for function names under the verb-tier rules. |
+| `naming.function.verbs_add` | operator | list | none | server, project, local, program | Extra PascalCase verbs accepted in function names (+name to add, -name to remove). |
+| `naming.function.verbs_remove` | operator | list | none | server, project, local, program | Built-in verbs to drop from the whitelist (+name to add, -name to remove). |
+| `naming.function.verb_tiers` | operator | list | none | server, project, local, program | Verb tier overrides as Verb:tier entries (tier 1..3; +Verb:2 to add, -Verb to remove). |
+| `naming.function.weak_nouns_add` | operator | list | none | server, project, local, program | Tokens treated as weak nouns in function names (+token/-token). |
+| `naming.function.weak_nouns_remove` | operator | list | none | server, project, local, program | Built-in weak nouns to stop treating as weak (+token/-token). |
+| `naming.hungarian.auto_fix` | operator | bool | `true` | server, project, local, program | Rewrite struct field names to Hungarian prefixes on create/modify. |
+| `naming.hungarian.prefixes` | operator | list | none | server, project, local, program | Extra type-to-prefix mappings as type:prefix entries (+type:prefix/-type to adjust). |
+| `naming.global.validate` | operator | bool | `true` | server, project, local, program | Run global symbol name quality checks on rename/set_global. |
+| `naming.global.require_g_prefix` | operator | bool | `true` | server, project, local, program | Require g_ on documented globals. |
+| `naming.global.min_descriptor_length` | operator | int | `2` | server, project, local, program | Minimum length of the descriptor after g_ on globals. |
+| `naming.plate.validate` | operator | bool | `true` | server, project, local, program | Validate plate comment structure on batch_set_comments and related tools. |
+| `naming.plate.required_sections` | operator | list | `Algorithm,Parameters,Returns` | server, project, local, program | Section headings required in function plate comments. |
+| `naming.plate.min_first_line_words` | operator | int | `4` | server, project, local, program | Minimum word count on the plate comment summary line. |
 | `server.bind_address` | operator | string | none | server | When non-empty, also serve HTTP on TCP at this address (headless/Docker). |
 | `programs.max_cached` | operator | int | `8` | server | Maximum programs kept open in the provider cache; values below 2 become 2. |
 | `archive.url` | operator | string | none | server | Documentation archive REST base URL; empty disables archive ingest. |

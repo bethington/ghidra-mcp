@@ -35,6 +35,7 @@ public class SettingsService {
     private Project storesProject;
     private ScopeStore projectStore;
     private ScopeStore localStore;
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
 
     public SettingsService(ProgramProvider provider) {
         this(provider, ServerSettings.store());
@@ -70,9 +71,37 @@ public class SettingsService {
         return out;
     }
 
+    /** Bumped on every successful write or unset (invalidates NamingPolicy memoization). */
+    public long settingsGeneration() {
+        return generation.get();
+    }
+
     /** The effective value of one key, for server code that consumes settings. */
     public Object value(String key, Program program) {
         return SettingsResolver.resolve(registry.get(key), stores(program)).value();
+    }
+
+    /**
+     * Write a setting as the operator (GUI or server env), skipping agent scope
+     * checks while still validating the value type.
+     */
+    public void writeAsOperator(String key, Scope scope, String raw, Program program) {
+        SettingKey k = registry.get(key);
+        if (k.kind() == SettingKey.Kind.SECRET) {
+            throw new SettingRefusedException(
+                k.key() + " is a secret held by the server operator; tools can neither read nor set it.");
+        }
+        if (!k.allows(scope) || scope == Scope.DEFAULT) {
+            throw new SettingRefusedException(k.key() + " cannot be written at scope '" + scope.wireName() + "'.");
+        }
+        if (scope == Scope.PROGRAM && program == null) {
+            throw new SettingRefusedException("scope=program requires an open program.");
+        }
+        k.parse(raw);
+        Map<Scope, ScopeStore> storeMap = stores(program);
+        ScopeStore target = requireStore(storeMap.get(scope), scope);
+        target.write(k, raw);
+        generation.incrementAndGet();
     }
 
     @McpTool(path = "/get_settings",
@@ -147,9 +176,11 @@ public class SettingsService {
                 SettingsResolver.checkScope(k, scope);
                 checkUnsetKeepsGuardrail(k, scope, stores, current);
                 requireStore(target, scope).remove(k);
+                generation.incrementAndGet();
             } else {
                 SettingsResolver.checkWrite(k, scope, value, current);
                 requireStore(target, scope).write(k, value);
+                generation.incrementAndGet();
             }
             Map<String, Object> out = row(SettingsResolver.resolve(k, stores));
             out.put("scope_written", scope.wireName());

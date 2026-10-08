@@ -19,6 +19,27 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — naming rules are settings; `conventions.json` is gone
+
+The naming conventions `NamingConventions` enforces come from `naming.*` keys instead of
+`<project>/.ghidra-mcp/conventions.json`. That file sat in a per-machine cache directory, so on a
+shared project each machine enforced its own rules; the keys resolve through the project store
+like every other setting, so everyone on a repository gets the same ones, and a program can
+override them. Every field of the old file has a key (`naming.function.min_length`,
+`naming.function.verbs_add` / `verbs_remove` / `verb_tiers` / `weak_nouns_add` /
+`weak_nouns_remove`, `naming.hungarian.auto_fix` / `prefixes`, `naming.global.*`,
+`naming.plate.*`); `docs/prompts/CUSTOMIZING_CONVENTIONS.md` lists them.
+
+- **Agents cannot loosen the rules.** `naming.mode` (`off` < `warn` < `enforce`) is a guardrail:
+  an agent may only make it stricter. Every other `naming.*` key is the operator's: an agent can
+  read it but not set it, so it cannot add its own verb to get a name through.
+- **`naming.override` sets a floor for per-call `strict_mode`.** `deny` refuses a call that asks
+  for a mode below the resolved `naming.mode`; `allow`, the default, keeps today's behaviour.
+  Raising strictness per call is always allowed.
+- **The GUI checkbox writes the setting.** "Strict naming enforcement" now shows the resolved
+  `naming.mode` and, when changed, writes it at local scope, so the GUI and headless servers read
+  one value and `get_settings` shows it.
+
 ### Changed — tree defaults are settings
 
 `decompile_tree_create`'s defaults come from `tree.*` keys (`strategies`, `band_size`,
