@@ -5,6 +5,7 @@ Tests endpoint registration, response formats, and basic functionality.
 
 import pytest
 import json
+import requests
 from pathlib import Path
 
 
@@ -49,14 +50,30 @@ class TestServerConnection:
 # =============================================================================
 
 
+@pytest.fixture(scope="module")
+def server_kind(http_session, server_url):
+    """Read the server identity once for the registration catalog."""
+    try:
+        response = http_session.get(f"{server_url}/mcp/health", timeout=10)
+    except requests.RequestException as e:
+        pytest.skip(f"Connection error: {e}")
+
+    assert response.status_code == 200
+    kind = response.json()["server_kind"]
+    assert kind in {"gui", "headless"}, f"Unknown server kind: {kind}"
+    return kind
+
+
 class TestEndpointRegistration:
     """Verify all endpoints are registered and respond (not 404)."""
 
     @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=[e["path"] for e in ENDPOINTS])
-    def test_endpoint_not_404(self, http_client, endpoint):
+    def test_endpoint_not_404(self, http_client, endpoint, server_kind):
         """Each endpoint should respond (not 404)."""
         path = endpoint["path"]
         method = endpoint.get("method", "GET")
+        if server_kind not in endpoint["servers"]:
+            pytest.skip(f"{path} is not supported by the {server_kind} server")
 
         try:
             if method == "GET":
@@ -67,7 +84,7 @@ class TestEndpointRegistration:
             # Endpoint should not return 404
             assert response.status_code != 404, f"{path} returned 404 - not registered"
 
-        except Exception as e:
+        except requests.RequestException as e:
             # Connection errors are acceptable for this test
             # (server might not be running or endpoint might timeout)
             pytest.skip(f"Connection error: {e}")
