@@ -32,10 +32,10 @@ import java.util.Set;
  * that tool directly when a score is wanted.
  *
  * <p>Threading: the whole bundle is built on the calling HTTP worker thread with no
- * {@code threadingStrategy} wrapper, following {@link CommentService}. In GUI mode
- * {@code SwingThreadingStrategy} hops onto the EDT, and decompiling several callers there
- * would stall the UI for hundreds of milliseconds; Ghidra's program database is safe for
- * concurrent reads, so the hop buys nothing here.
+ * {@code threadingStrategy} wrapper, following {@link CommentService}. Both servers run
+ * tool bodies on the request thread already; wrapping this in {@code executeRead} would
+ * only hold the server-wide lock across several decompiles. Ghidra's program database is
+ * safe for concurrent reads.
  *
  * @since 7.1.0
  */

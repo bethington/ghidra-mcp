@@ -442,9 +442,9 @@ Pass actual multi-line text.
 ### GUI work from an HTTP thread must hop to Swing
 
 Anything touching Ghidra's UI from a request handler needs
-`SwingUtilities.invokeAndWait()`. Do not rely on `threadingStrategy.runOnUi`
-for this: both servers are wired with `DirectThreadingStrategy`, whose
-`runOnUi` runs on the calling thread.
+`SwingUtilities.invokeAndWait()` (or Ghidra's `Swing.runNow`). Both servers run
+tool bodies on the request thread; reads/writes go through
+`executeRead`/`executeWrite`. Window-driving code hops itself.
 
 ### Ghidra transactions must be committed
 
