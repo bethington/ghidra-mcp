@@ -169,14 +169,14 @@ public class AnnotationScanner {
 
     /** Generate a JSON schema string describing all discovered tools. */
     public String generateSchema() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"tools\": [");
-        for (int i = 0; i < descriptors.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(descriptors.get(i).toJson());
+        List<Map<String, Object>> tools = new ArrayList<>();
+        for (ToolDescriptor d : descriptors) {
+            tools.add(d.toMap());
         }
-        sb.append("], \"count\": ").append(descriptors.size()).append("}");
-        return sb.toString();
+        return JsonHelper.toJson(JsonHelper.mapOf(
+            "tools", tools,
+            "count", descriptors.size()
+        ));
     }
 
     // ==================================================================
@@ -460,12 +460,16 @@ public class AnnotationScanner {
      * Wrap a response to indicate it was a dry-run (no changes were committed).
      */
     private static Response wrapDryRunResponse(Response response) {
-        String json = response.toJson();
-        if (json.startsWith("{")) {
-            // Inject dry_run flag into the JSON object
-            return Response.text("{\"dry_run\":true," + json.substring(1));
+        Object data = response.asEmbeddable();
+        if (data instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("dry_run", true);
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return Response.ok(out);
         }
-        return Response.text("{\"dry_run\":true,\"result\":" + json + "}");
+        return Response.ok(JsonHelper.mapOf("dry_run", true, "result", data));
     }
 
     // ==================================================================
@@ -667,8 +671,7 @@ public class AnnotationScanner {
     private static String convertFieldsJson(Object obj) {
         if (obj == null) return null;
         if (obj instanceof String s) return s;
-        if (obj instanceof List<?> list) return ServiceUtils.serializeListToJson(list);
-        if (obj instanceof Map<?, ?>) return ServiceUtils.serializeMapToJson((Map<?, ?>) obj);
+        if (obj instanceof List<?> || obj instanceof Map<?, ?>) return JsonHelper.toJson(obj);
         return obj.toString();
     }
 
@@ -746,34 +749,38 @@ public class AnnotationScanner {
             String category, String categoryDescription, ToolAccess access,
             List<ParamDescriptor> params) {
 
-        /** Serialize to JSON. */
-        public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"path\": ").append(jsonStr(path));
-            sb.append(", \"method\": ").append(jsonStr(method));
+        /** Map form used by {@link #toJson()} and by {@link AnnotationScanner#generateSchema()}. */
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("path", path);
+            out.put("method", method);
             if (description != null && !description.isEmpty()) {
-                sb.append(", \"description\": ").append(jsonStr(description));
+                out.put("description", description);
             }
             if (category != null && !category.isEmpty()) {
-                sb.append(", \"category\": ").append(jsonStr(category));
+                out.put("category", category);
             }
             if (categoryDescription != null && !categoryDescription.isEmpty()) {
-                sb.append(", \"category_description\": ").append(jsonStr(categoryDescription));
+                out.put("category_description", categoryDescription);
             }
             // Emitted only when classified, so an unclassified tool carries no
             // hints and the client keeps its own defaults. The bridge turns
             // these into MCP's readOnlyHint / destructiveHint annotations.
             if (access != null && access != ToolAccess.UNSPECIFIED) {
-                sb.append(", \"read_only\": ").append(access.isReadOnly());
-                sb.append(", \"destructive\": ").append(access.isDestructive());
+                out.put("read_only", access.isReadOnly());
+                out.put("destructive", access.isDestructive());
             }
-            sb.append(", \"params\": [");
-            for (int i = 0; i < params.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(params.get(i).toJson());
+            List<Map<String, Object>> paramMaps = new ArrayList<>();
+            for (ParamDescriptor p : params) {
+                paramMaps.add(p.toMap());
             }
-            sb.append("]}");
-            return sb.toString();
+            out.put("params", paramMaps);
+            return out;
+        }
+
+        /** Serialize to JSON via Gson. */
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
         }
     }
 
@@ -803,45 +810,39 @@ public class AnnotationScanner {
                  allowEmpty, List.of());
         }
 
-        /** Serialize to JSON. */
-        public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"name\": ").append(jsonStr(name));
-            sb.append(", \"type\": ").append(jsonStr(type));
-            sb.append(", \"source\": ").append(jsonStr(source));
-            sb.append(", \"required\": ").append(!optional);
+        /** Map form used by {@link #toJson()} and by {@link ToolDescriptor#toMap()}. */
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("name", name);
+            out.put("type", type);
+            out.put("source", source);
+            out.put("required", !optional);
             if (defaultValue != null) {
-                sb.append(", \"default\": ").append(jsonStr(defaultValue));
+                out.put("default", defaultValue);
             }
             if (description != null && !description.isEmpty()) {
-                sb.append(", \"description\": ").append(jsonStr(description));
+                out.put("description", description);
             }
             if (paramType != null && !paramType.isEmpty()) {
-                sb.append(", \"param_type\": ").append(jsonStr(paramType));
+                out.put("param_type", paramType);
             }
             // Only emitted when the parameter actually declares alternatives, so the
-            // 200-odd tools that declare none keep byte-identical schema output.
+            // 200-odd tools that declare none keep schema output without an aliases key.
             if (aliases != null && !aliases.isEmpty()) {
-                sb.append(", \"aliases\": [");
-                for (int i = 0; i < aliases.size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(jsonStr(aliases.get(i)));
-                }
-                sb.append("]");
+                out.put("aliases", aliases);
             }
             // Only emitted when true: the bridge drops "" arguments unless a
             // parameter declares that empty carries meaning.
             if (allowEmpty) {
-                sb.append(", \"allow_empty\": true");
+                out.put("allow_empty", true);
             }
-            sb.append("}");
-            return sb.toString();
+            return out;
         }
-    }
 
-    private static String jsonStr(String s) {
-        if (s == null) return "null";
-        return "\"" + ServiceUtils.escapeJson(s) + "\"";
+        /** Serialize to JSON via Gson. */
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
+        }
     }
 
     // ==================================================================

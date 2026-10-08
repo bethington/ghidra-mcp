@@ -101,7 +101,8 @@ public final class McpHttpServer {
         startMillis = System.currentTimeMillis();
         ProgramProvider provider = scanner != null ? scanner.getProgramProvider() : null;
         // Generated at start, not in endpoints(): callers add manual descriptors in between.
-        String schemaJson = scanner != null ? scanner.generateSchema() : "{\"tools\": []}";
+        String schemaJson = scanner != null ? scanner.generateSchema()
+            : JsonHelper.toJson(JsonHelper.mapOf("tools", java.util.List.of()));
         int endpointCount = scanner != null ? scanner.getDescriptors().size() : 0;
         routes.put("/mcp/schema", exchange -> sendJson(exchange, schemaJson));
         routes.put("/mcp/instance_info", exchange ->

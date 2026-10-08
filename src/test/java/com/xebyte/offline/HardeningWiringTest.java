@@ -183,8 +183,8 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("a ghidra:// URL is a repository, not a filesystem path",
                 headless.contains("ghidra://"));
         String gui = read("GhidraMCPPlugin.java");
-        int at = gui.indexOf("private String openProject(String projectPath, boolean headless");
-        assertTrue("GUI openProject not found", at >= 0);
+        int at = gui.indexOf("openProject(String projectPath, boolean headless");
+        assertTrue("GUI openProject not found", at >= 0 && gui.lastIndexOf("private ", at) >= 0);
         assertTrue("GUI /open_project must resolve the path within the file root",
                 gui.substring(at, at + 2500).contains("resolveWithinFileRoot("));
     }

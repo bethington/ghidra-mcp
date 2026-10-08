@@ -76,7 +76,7 @@ public class OpenProjectGuiEndpointTest extends TestCase {
         String src = readUtf8("src/main/java/com/xebyte/GhidraMCPPlugin.java");
         // Find the private helper.
         Pattern decl = Pattern.compile(
-                "private\\s+String\\s+openProject\\s*\\(\\s*String[^)]*\\)\\s*\\{",
+                "private\\s+\\S+\\s+openProject\\s*\\(\\s*String[^)]*\\)\\s*\\{",
                 Pattern.MULTILINE);
         Matcher m = decl.matcher(src);
         assertTrue(

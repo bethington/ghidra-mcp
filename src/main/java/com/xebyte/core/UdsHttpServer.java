@@ -231,7 +231,7 @@ public class UdsHttpServer {
     }
 
     private void sendError(OutputStream out, int code, String message) throws IOException {
-        String body = "{\"error\": \"" + message.replace("\"", "\\\"") + "\"}";
+        String body = JsonHelper.errorJson(message);
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
         String response = "HTTP/1.1 " + code + " Error\r\n" +
                 "Content-Type: application/json\r\n" +
