@@ -471,10 +471,11 @@ only when `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOO
 `GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
 loopback, so reach a server on another machine through a forwarded port.
 
-> Naming note: where the two families share a name (e.g. `debugger_status`), only one
-> is registered. With the proxies off, the TraceRmi tool holds the name. With them on,
-> the dbgeng proxy replaces it and the TraceRmi version is not reachable — so do not
-> mix the two families against one target.
+> Naming note: where the two families share a name (e.g. `debugger_status`), both stay
+> reachable. With the proxies off, the TraceRmi tool holds the clean name. With them on,
+> the dbgeng proxy holds it and the TraceRmi tool is registered as `debugger_status_2`.
+> The two families drive separate debuggers, so pick one per target: a process the
+> TraceRmi debugger launched cannot also be attached by the dbgeng server.
 
 Use either family for: ground-truth validation after static analysis. After emulation
 resolves a hash, set a breakpoint on the resolved API and confirm the process calls it.

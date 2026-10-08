@@ -2179,6 +2179,43 @@ class TestDebuggerToolRegistration(unittest.TestCase):
         self.assertEqual(schema[0]["name"], "debugger_status")
         self.assertFalse(schema[0]["name_collided"])
 
+    def test_active_proxy_suffixes_trace_rmi_tool_so_both_stay_reachable(self):
+        """With the WinDbg proxies on, a TraceRmi tool sharing a proxy's name
+        registers as <name>_2, so both stay reachable (#554). Real /mcp/schema
+        entries carry no `name`, so the raw name is the path ("debugger/status"),
+        which is never an exact match for a static tool."""
+        import bridge_mcp_ghidra as bridge
+
+        active = set(bridge.MANAGEMENT_TOOL_NAMES) | set(bridge.DEBUGGER_TOOL_NAMES)
+        with (
+            patch.object(bridge.schema, "STATIC_TOOL_NAMES", active),
+            patch.object(bridge.registry, "STATIC_TOOL_NAMES", active),
+        ):
+            schema = bridge._parse_schema(
+                {"tools": [{"path": "/debugger/status", "method": "GET", "params": []}]}
+            )
+            self.assertEqual(schema[0]["name"], "debugger_status_2")
+            self.assertTrue(schema[0]["name_collided"])
+            try:
+                self.assertTrue(bridge.registry._register_tool_def(schema[0]))
+                self.assertIn("debugger_status_2", bridge.mcp._tool_manager._tools)
+            finally:
+                bridge.mcp._tool_manager._tools.pop("debugger_status_2", None)
+                if "debugger_status_2" in bridge.state._dynamic_tool_names:
+                    bridge.state._dynamic_tool_names.remove("debugger_status_2")
+
+    def test_exact_management_name_is_still_left_to_the_bridge_tool(self):
+        """A server endpoint named exactly like a bridge management tool keeps
+        the clean name and is skipped at registration — the bridge's own
+        wrapper (e.g. import_file) is the one clients should see."""
+        import bridge_mcp_ghidra as bridge
+
+        schema = bridge._parse_schema(
+            {"tools": [{"path": "/import_file", "method": "POST", "params": []}]}
+        )
+        self.assertEqual(schema[0]["name"], "import_file")
+        self.assertFalse(bridge.registry._register_tool_def(schema[0]))
+
     def test_nothing_set_registers_no_debugger_tools(self):
         """The default, on every platform including Windows: zero proxy tools."""
         report = _bridge_in_subprocess({})

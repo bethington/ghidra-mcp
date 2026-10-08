@@ -1155,7 +1155,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Debugger (Ghidra TraceRmi)
 
-When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a proxy tool with the same name (e.g. `debugger_status`) replaces the TraceRmi tool below. Leave the proxies off to use these.
+When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a TraceRmi tool below that shares a proxy's name gets a `_2` suffix (e.g. `debugger_status_2`), so both stay reachable.
 
 - `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
 - `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**

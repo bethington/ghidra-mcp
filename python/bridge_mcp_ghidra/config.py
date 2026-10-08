@@ -123,8 +123,9 @@ MANAGEMENT_TOOL_NAMES = {
 # _ALL_STATIC_TOOL_NAMES (validated at import, counted by the catalog tests);
 # collision handling uses the ACTIVE set (STATIC_TOOL_NAMES): while the proxies
 # are off, Ghidra's own TraceRmi /debugger/status registers as debugger_status;
-# when they are on, the proxy holds that name and registry._register_tool_def
-# skips the TraceRmi tool (no _2 suffix is assigned for exact matches).
+# when they are on, the proxy holds that name and the TraceRmi tool registers as
+# debugger_status_2 (its raw name "debugger/status" is not an exact match, so
+# schema._normalize_tool_def_names allocates a suffix instead of skipping it).
 DEBUGGER_TOOL_NAMES = {
     "debugger_attach",
     "debugger_detach",
