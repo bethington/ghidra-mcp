@@ -203,6 +203,18 @@ class TestToolGroupManagement(unittest.TestCase):
             bridge.register_tools_from_schema([])
 
 
+class StubSession:
+    """Stand-in for ServerSession.
+
+    A plain SimpleNamespace will not do: the bridge holds sessions by weakref so
+    a dropped one cannot pin a ServerSession forever, and SimpleNamespace is not
+    weak-referenceable.
+    """
+
+    def __init__(self):
+        self.send_tool_list_changed = mock.AsyncMock()
+
+
 class TestConnectInstance(unittest.TestCase):
     """Test connect_instance eager-loading behavior."""
 
@@ -226,7 +238,7 @@ class TestConnectInstance(unittest.TestCase):
             ]
         }
 
-        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        session = StubSession()
         ctx = SimpleNamespace(
             _request_context=object(),
             request_context=SimpleNamespace(session=session),
@@ -281,8 +293,8 @@ class TestToolsChangedFanout(unittest.TestCase):
     def test_worker_notification_fans_out_to_all_sessions(self):
         import bridge_mcp_ghidra as bridge
 
-        session1 = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
-        session2 = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        session1 = StubSession()
+        session2 = StubSession()
 
         async def scenario():
             ctx1 = SimpleNamespace(
@@ -298,15 +310,40 @@ class TestToolsChangedFanout(unittest.TestCase):
             bridge.state.notify_tools_changed_from_worker()
             await asyncio.sleep(0)
 
-        old_targets = list(bridge.state._tools_changed_targets)
+        old_interest = dict(bridge.state._resource_interest)
         try:
-            bridge.state._tools_changed_targets.clear()
+            bridge.state._resource_interest.clear()
             asyncio.run(scenario())
         finally:
-            bridge.state._tools_changed_targets[:] = old_targets
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_interest)
 
         session1.send_tool_list_changed.assert_awaited_once()
         session2.send_tool_list_changed.assert_awaited_once()
+
+    def test_resource_only_sessions_do_not_get_tools_changed(self):
+        """A session that read a resource but ran no tool must not be told the
+        tool list moved — the two notifications share a registry, not a trigger."""
+        import bridge_mcp_ghidra as bridge
+
+        resource_only = StubSession()
+
+        async def scenario():
+            bridge.state.remember_resource_interest(
+                resource_only, uri="ghidra://programs", read=True
+            )
+            bridge.state.notify_tools_changed_from_worker()
+            await asyncio.sleep(0)
+
+        old_interest = dict(bridge.state._resource_interest)
+        try:
+            bridge.state._resource_interest.clear()
+            asyncio.run(scenario())
+        finally:
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_interest)
+
+        resource_only.send_tool_list_changed.assert_not_awaited()
 
 
 class TestToolsListCapturesSession(unittest.TestCase):
@@ -338,23 +375,28 @@ class TestToolsListCapturesSession(unittest.TestCase):
     def test_tools_list_registers_notification_target(self):
         import bridge_mcp_ghidra as bridge
 
-        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
-        old_targets = list(bridge.state._tools_changed_targets)
+        session = StubSession()
+        old_targets = dict(bridge.state._resource_interest)
         try:
-            bridge.state._tools_changed_targets.clear()
+            bridge.state._resource_interest.clear()
             tools = self._run_list_tools(session)
             self.assertTrue(tools, "tools/list must still return the tool list")
-            self.assertEqual(len(bridge.state._tools_changed_targets), 1)
-            self.assertIs(bridge.state._tools_changed_targets[0][1], session)
+            # Read the registry directly: iter_resource_interest() prunes entries
+            # whose loop has closed, and asyncio.run() above closed this one.
+            self.assertEqual(len(bridge.state._resource_interest), 1)
+            entry = next(iter(bridge.state._resource_interest.values()))
+            self.assertTrue(entry.wants_tools_changed)
+            self.assertIs(entry.session_ref(), session)
         finally:
-            bridge.state._tools_changed_targets[:] = old_targets
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_targets)
 
     def test_late_registration_notifies_a_client_that_only_listed_tools(self):
         """The end-to-end shape of the bug: list tools, then register late."""
         import bridge_mcp_ghidra as bridge
         from mcp.server.lowlevel import server as lowlevel
 
-        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        session = StubSession()
 
         async def scenario():
             token = lowlevel.request_ctx.set(SimpleNamespace(session=session))
@@ -368,12 +410,13 @@ class TestToolsListCapturesSession(unittest.TestCase):
             )
             await asyncio.sleep(0)
 
-        old_targets = list(bridge.state._tools_changed_targets)
+        old_targets = dict(bridge.state._resource_interest)
         try:
-            bridge.state._tools_changed_targets.clear()
+            bridge.state._resource_interest.clear()
             asyncio.run(scenario())
         finally:
-            bridge.state._tools_changed_targets[:] = old_targets
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_targets)
 
         session.send_tool_list_changed.assert_awaited_once()
 
@@ -381,14 +424,15 @@ class TestToolsListCapturesSession(unittest.TestCase):
         """A direct call (no active request) must not raise."""
         import bridge_mcp_ghidra as bridge
 
-        old_targets = list(bridge.state._tools_changed_targets)
+        old_targets = dict(bridge.state._resource_interest)
         try:
-            bridge.state._tools_changed_targets.clear()
+            bridge.state._resource_interest.clear()
             tools = asyncio.run(bridge.mcp.list_tools())
             self.assertTrue(tools)
-            self.assertEqual(bridge.state._tools_changed_targets, [])
+            self.assertEqual(bridge.state._resource_interest, {})
         finally:
-            bridge.state._tools_changed_targets[:] = old_targets
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_targets)
 
     def test_lowlevel_handler_uses_the_capturing_wrapper(self):
         """Patching only FastMCP.list_tools would miss the real request path."""
@@ -396,7 +440,7 @@ class TestToolsListCapturesSession(unittest.TestCase):
         import mcp.types as types
         from mcp.server.lowlevel import server as lowlevel
 
-        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        session = StubSession()
         handler = bridge.mcp._mcp_server.request_handlers[types.ListToolsRequest]
 
         async def scenario():
@@ -406,14 +450,19 @@ class TestToolsListCapturesSession(unittest.TestCase):
             finally:
                 lowlevel.request_ctx.reset(token)
 
-        old_targets = list(bridge.state._tools_changed_targets)
+        old_targets = dict(bridge.state._resource_interest)
         try:
-            bridge.state._tools_changed_targets.clear()
+            bridge.state._resource_interest.clear()
             result = asyncio.run(scenario())
             self.assertTrue(result.root.tools)
-            self.assertEqual(len(bridge.state._tools_changed_targets), 1)
+            # Read the registry directly: iter_resource_interest() prunes entries
+            # whose loop has closed, and asyncio.run() above closed this one.
+            self.assertEqual(len(bridge.state._resource_interest), 1)
+            entry = next(iter(bridge.state._resource_interest.values()))
+            self.assertTrue(entry.wants_tools_changed)
         finally:
-            bridge.state._tools_changed_targets[:] = old_targets
+            bridge.state._resource_interest.clear()
+            bridge.state._resource_interest.update(old_targets)
 
 
 class TestEndpointTimeouts(unittest.TestCase):

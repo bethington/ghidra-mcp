@@ -52,7 +52,7 @@ import java.util.concurrent.TimeUnit;
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 214 endpoints for reverse engineering automation. " +
+                  "Provides 215 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +

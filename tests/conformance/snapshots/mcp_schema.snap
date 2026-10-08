@@ -1,5 +1,5 @@
 {
-  "count": 213,
+  "count": 214,
   "tools": [
     {
       "category": "function",
@@ -407,7 +407,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. For a cacheable read of decompile+callers+comments+xrefs prefer ghidra://function/{program}/{address} (or /get_functions).",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3873,6 +3873,24 @@
       "read_only": true
     },
     {
+      "category": "program",
+      "description": "Return program.getModificationNumber() — a cheap monotonic token that moves on real DB changes (rename, comment, struct edit, undo/redo, GUI writes, scripts) and never on a read. Used by the bridge to invalidate cached function resources after out-of-band edits.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Target program name (omit for the active program).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/get_change_token",
+      "read_only": true
+    },
+    {
       "category": "comment",
       "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
       "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.",
@@ -4145,7 +4163,7 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Export all documentation for a function. Prefer ghidra://function/{program}/{address} (or /get_functions) when you want decompile + docs + callers in one cacheable read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "destructive": false,
       "method": "GET",
       "params": [

@@ -34,6 +34,7 @@ public record CoreServices(
         EmulationService emulation,
         FunctionBundleService functionBundle,
         TypeReferenceService typeReference,
+        ChangeTokenService changeToken,
         PartitionService partition,
         DecompTreeService tree) {
 
@@ -56,6 +57,7 @@ public record CoreServices(
             new EmulationService(provider, ts),
             new FunctionBundleService(provider, ts, function),
             new TypeReferenceService(provider),
+            new ChangeTokenService(provider),
             new PartitionService(provider),
             new DecompTreeService(provider));
     }
@@ -64,7 +66,7 @@ public record CoreServices(
     public List<Object> all() {
         return List.of(listing, comment, symbolLabel, function, xrefCallGraph, dataType,
             documentationHash, analysis, malwareSecurity, programScript, emulation,
-            functionBundle, typeReference, partition, tree);
+            functionBundle, typeReference, changeToken, partition, tree);
     }
 
     /** The shared services plus a server's own, ready to hand to {@link AnnotationScanner}. */

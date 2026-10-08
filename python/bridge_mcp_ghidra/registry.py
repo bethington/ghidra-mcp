@@ -343,7 +343,15 @@ def _register_tool_def(tool_def: dict) -> bool:
                 heartbeat.cancel()
         # Failures arrive as an ordinary 200 body; raising is what makes the
         # tool result carry isError instead of looking like a success.
-        return dispatch.raise_on_failure(result)
+        ok = dispatch.raise_on_failure(result)
+        # Write-triggered resource invalidation: a call, not logic, so this
+        # module stays under the per-file line cap. Read-only tools no-op inside.
+        # Awaited before the response is sent — a notification that arrives after
+        # it has no request stream left to ride on (see after_successful_write).
+        from . import invalidation
+
+        await invalidation.after_successful_write(tool_def, kwargs, ctx, ok)
+        return ok
 
     handler.__signature__ = _signature_with_context(sync_handler.__signature__)
     handler.__annotations__ = dict(sync_handler.__annotations__, ctx=Context | None)

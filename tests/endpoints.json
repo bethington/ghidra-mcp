@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 218,
+  "total_endpoints": 219,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1664,6 +1664,19 @@
         "headless"
       ],
       "description": "Get assembly context"
+    },
+    {
+      "path": "/get_change_token",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Return the program's change token: '<saved time>:<open epoch>:<modification number>'. It moves on every DB change (rename, comment, struct edit, undo/redo, GUI writes, scripts), on a save, and on a reopen or server restart, and never on a read. Compare the whole token; the modification number alone starts over on every open. Used by the bridge to invalidate cached function resources after out-of-band edits."
     },
     {
       "path": "/get_comment",
