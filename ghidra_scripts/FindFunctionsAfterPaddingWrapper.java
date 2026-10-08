@@ -1,7 +1,7 @@
 // FindFunctionsAfterPaddingWrapper.java
 // Wrapper script to run FindFunctionsAfterPadding with timeout protection
 //@author Ben Ethington
-//@category Diablo 2
+//@category GhidraMCP
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

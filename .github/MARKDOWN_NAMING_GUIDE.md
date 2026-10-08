@@ -103,7 +103,7 @@ Examples:
 Examples:
 
 - `game-exe-analysis.md` ✅
-- `d2client-analysis.md` ✅
+- `client-dll-analysis.md` ✅
 - `storm-library-analysis.md` ✅
 
 ### docs/reports/ Directory
@@ -182,7 +182,7 @@ mv GAME_EXE_IMPROVEMENTS.md game-exe-improvements.md
 | Type | Pattern | Example |
 | ------ | --------- | --------- |
 | Binary | `<name>-analysis.md` | `game-exe-analysis.md` |
-| Component | `<name>-<component>.md` | `d2client-ui-analysis.md` |
+| Component | `<name>-<component>.md` | `client-ui-analysis.md` |
 | Overview | `<topic>-overview.md` | `architecture-overview.md` |
 
 ### Report Files

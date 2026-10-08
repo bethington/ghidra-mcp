@@ -56,27 +56,28 @@ def require_server(server_available):
 class TestServerHealth:
     """Test server connectivity and health endpoints."""
 
-    def test_check_connection(self, http_client):
+    def test_server_health(self, http_client):
         """Server should respond to health check."""
-        response = http_client.get("/check_connection")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
         assert "ok" in response.text.lower() or "connected" in response.text.lower()
 
     def test_get_version(self, http_client):
         """Server should return version info."""
-        response = http_client.get("/get_version")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        text = response.text
-        # Should contain version info
-        assert "version" in text.lower() or "ghidra" in text.lower()
+        data = response.json()
+        assert data.get("status") == "ok"
+        if "version" in data:
+            assert data["version"]
 
 
 class TestProgramInfo:
     """Test read-only program information endpoints."""
 
-    def test_get_current_program_info(self, http_client):
-        """Get current program info."""
-        response = http_client.get("/get_current_program_info")
+    def test_get_ui_cursor(self, http_client):
+        """Get UI cursor / active program info."""
+        response = http_client.get("/get_ui_cursor", params={"type": "program"})
         assert response.status_code == 200
         # May return error if no program open, that's OK
         assert len(response.text) > 0
@@ -91,10 +92,13 @@ class TestProgramInfo:
         response = http_client.get("/list_open_programs")
         assert response.status_code == 200
 
-    def test_list_segments(self, http_client):
-        """List memory segments."""
-        response = http_client.get("/list_segments")
+    def test_list_program_items_segments(self, http_client):
+        """List memory segments via list_program_items."""
+        response = http_client.get("/list_program_items", params={"kind": "segments"})
         assert response.status_code == 200
+        data = response.json()
+        assert data.get("kind") == "segments"
+        assert "items" in data
 
     def test_get_entry_points(self, http_client):
         """Get program entry points."""
@@ -184,27 +188,28 @@ class TestFunctionListing:
 
     def test_list_functions_default(self, http_client):
         """List functions with default parameters."""
-        response = http_client.get("/list_functions")
+        response = http_client.get("/find_functions")
         assert response.status_code == 200
         # Should return some text (may be empty list or error if no program)
         assert len(response.text) > 0
 
-    def test_list_functions_enhanced_with_limit(self, http_client):
-        """Pagination lives on /list_functions_enhanced, not /list_functions.
+    def test_list_functions_with_limit(self, http_client):
+        """List functions with limit parameter."""
+        response = http_client.get("/find_functions", params={"limit": 10})
+        assert response.status_code == 200
 
-        /list_functions declares only `program` -- ListingService documents it
-        as "List all functions (no pagination)". This test used to send
-        `limit` there, which the plugin silently drops, so it asserted nothing.
-        """
-        response = http_client.get("/list_functions_enhanced", params={"limit": 5})
+    def test_list_functions_with_offset(self, http_client):
+        """List functions with pagination."""
+        response = http_client.get("/find_functions", params={"offset": 0, "limit": 5})
         assert response.status_code == 200
         functions = response.json()["functions"]
         assert len(functions) <= 5
 
-    def test_list_functions_enhanced_with_offset(self, http_client):
-        """`offset` is declared on /list_functions_enhanced and must be honored."""
+    def test_find_functions_filters_by_name_pattern(self, http_client):
+        """`name_pattern` narrows the listing; find_functions replaced the four
+        separate listing tools this used to be spread across."""
         response = http_client.get(
-            "/list_functions_enhanced", params={"offset": 0, "limit": 5}
+            "/find_functions", params={"pattern": "FUN_", "limit": 10}
         )
         assert response.status_code == 200
         payload = response.json()
@@ -214,24 +219,24 @@ class TestFunctionListing:
     def test_search_functions_by_name(self, http_client):
         """Search functions by name pattern.
 
-        /search_functions_by_name is not an endpoint; /search_functions is,
-        and its declared selector is `name_pattern`.
+        /search_functions folded into /find_functions; the selector is still
+        `name_pattern`.
         """
-        response = http_client.get("/search_functions", params={"name_pattern": "a"})
+        response = http_client.get("/find_functions", params={"name_pattern": "a"})
         assert response.status_code == 200
         assert "functions" in response.json()
 
     def test_search_functions_enhanced(self, http_client):
         """Enhanced function search.
 
-        The declared selector is `name_pattern`; sent as `pattern` the filter
-        was dropped entirely and this returned an unfiltered listing.
+        /search_functions_enhanced folded into /find_functions, which returns
+        one shape -- `functions` -- for every filter combination.
         """
         response = http_client.get(
-            "/search_functions_enhanced", params={"name_pattern": "FUN_", "limit": 10}
+            "/find_functions", params={"name_pattern": "FUN_", "limit": 10}
         )
         assert response.status_code == 200
-        results = response.json()["results"]
+        results = response.json()["functions"]
         assert len(results) <= 10
         assert all("FUN_" in r["name"] for r in results)
 
@@ -239,19 +244,24 @@ class TestFunctionListing:
 class TestDataTypes:
     """Test data type listing endpoints (read-only)."""
 
-    def test_list_data_types(self, http_client):
-        """List data types."""
-        response = http_client.get("/list_data_types")
+    def test_find_data_types(self, http_client):
+        """Find data types with no filter."""
+        response = http_client.get("/find_data_types")
         assert response.status_code == 200
 
-    def test_list_data_types_with_limit(self, http_client):
-        """List data types with limit."""
-        response = http_client.get("/list_data_types", params={"limit": 20})
+    def test_find_data_types_with_limit(self, http_client):
+        """Find data types with limit."""
+        response = http_client.get("/find_data_types", params={"limit": 20})
         assert response.status_code == 200
 
-    def test_search_data_types(self, http_client):
-        """Search for data types."""
-        response = http_client.get("/search_data_types", params={"pattern": "int"})
+    def test_find_data_types_by_pattern(self, http_client):
+        """Search for data types by name."""
+        response = http_client.get("/find_data_types", params={"pattern": "int"})
+        assert response.status_code == 200
+
+    def test_find_data_types_categories(self, http_client):
+        """List the category paths."""
+        response = http_client.get("/find_data_types", params={"categories": "true"})
         assert response.status_code == 200
 
     def test_get_valid_data_types(self, http_client):
@@ -286,10 +296,13 @@ class TestStringsAndData:
         response = http_client.get("/list_strings", params={"limit": 20})
         assert response.status_code == 200
 
-    def test_list_data_items(self, http_client):
+    def test_list_program_items_data_items(self, http_client):
         """List data items."""
-        response = http_client.get("/list_data_items")
+        response = http_client.get("/list_program_items", params={"kind": "data_items"})
         assert response.status_code == 200
+        data = response.json()
+        assert data.get("kind") == "data_items"
+        assert "items" in data
 
     def test_list_data_items_by_xrefs(self, http_client):
         """List data items sorted by xref count."""
@@ -302,33 +315,35 @@ class TestStringsAndData:
 class TestImportsExports:
     """Test import/export listing endpoints (read-only)."""
 
-    def test_list_imports(self, http_client):
+    def test_list_program_items_imports(self, http_client):
         """List imported symbols."""
-        response = http_client.get("/list_imports")
+        response = http_client.get("/list_program_items", params={"kind": "imports"})
         assert response.status_code == 200
 
-    def test_list_exports(self, http_client):
+    def test_list_program_items_exports(self, http_client):
         """List exported symbols."""
-        response = http_client.get("/list_exports")
+        response = http_client.get("/list_program_items", params={"kind": "exports"})
         assert response.status_code == 200
 
-    def test_list_external_locations(self, http_client):
+    def test_list_program_items_external_locations(self, http_client):
         """List external locations."""
-        response = http_client.get("/list_external_locations")
+        response = http_client.get(
+            "/list_program_items", params={"kind": "external_locations"}
+        )
         assert response.status_code == 200
 
 
 class TestNamespaces:
     """Test namespace and class listing endpoints (read-only)."""
 
-    def test_list_namespaces(self, http_client):
+    def test_list_program_items_namespaces(self, http_client):
         """List namespaces."""
-        response = http_client.get("/list_namespaces")
+        response = http_client.get("/list_program_items", params={"kind": "namespaces"})
         assert response.status_code == 200
 
-    def test_list_classes(self, http_client):
+    def test_list_program_items_classes(self, http_client):
         """List classes."""
-        response = http_client.get("/list_classes")
+        response = http_client.get("/list_program_items", params={"kind": "classes"})
         assert response.status_code == 200
 
     def test_list_globals(self, http_client):
@@ -414,12 +429,8 @@ class TestFunctionAnalysis:
 
     @pytest.fixture
     def first_function_address(self, http_client):
-        """Get address of first function in program.
-
-        /list_functions takes no `limit` -- it lists all functions -- so the
-        first match in the full listing is what the regex below finds.
-        """
-        response = http_client.get("/list_functions")
+        """Get address of first function in program."""
+        response = http_client.get("/find_functions", params={"limit": 1})
         if response.status_code != 200:
             pytest.skip("Cannot list functions")
         text = response.text
@@ -435,17 +446,22 @@ class TestFunctionAnalysis:
             pytest.skip("No functions found in program")
         return f"0x{match.group(1)}"
 
-    def test_get_function_by_address(self, http_client, first_function_address):
-        """Get function details by address."""
+    def test_get_functions_signature(self, http_client, first_function_address):
+        """Get function identity via get_functions fields= (replaces get_function_by_address)."""
         response = http_client.get(
-            "/get_function_by_address", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "address": first_function_address,
+                "fields": "signature,entry_point,body_start,body_end",
+            },
         )
         assert response.status_code == 200
 
-    def test_decompile_function(self, http_client, first_function_address):
-        """Decompile a function (read-only)."""
+    def test_get_functions_decompiled_code(self, http_client, first_function_address):
+        """Decompile via get_functions fields= (replaces decompile_function)."""
         response = http_client.get(
-            "/decompile_function", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "decompiled_code"},
         )
         assert response.status_code == 200
 
@@ -465,47 +481,55 @@ class TestFunctionAnalysis:
     # the test accepted [200, 404]. /disassemble_function is the real route,
     # covered by test_disassemble_function directly above.
 
-    def test_get_function_variables(self, http_client, first_function_address):
-        """Get function variables."""
+    def test_get_functions_variables(self, http_client, first_function_address):
+        """Get function variables via get_functions fields=."""
         response = http_client.get(
-            "/get_function_variables", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "parameters,locals"},
         )
         assert response.status_code in [200, 404]
 
-    def test_get_function_labels(self, http_client, first_function_address):
-        """Get function labels.
-
-        The declared selector is `name` (which accepts a function name OR an
-        address). `address` is a back-compat alias the resolver still honors,
-        but /mcp/schema advertises only the canonical spelling, so that is
-        what a test should exercise.
-        """
+    def test_get_functions_labels(self, http_client, first_function_address):
+        """Get function labels via get_functions fields=."""
         response = http_client.get(
-            "/get_function_labels", params={"name": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "labels",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_callers(self, http_client, first_function_address):
-        """Get function callers (xrefs to)."""
+    def test_get_functions_callers(self, http_client, first_function_address):
+        """Get function callers via get_functions fields=."""
         response = http_client.get(
-            "/get_function_callers", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_callees(self, http_client, first_function_address):
-        """Get function callees (xrefs from)."""
+    def test_get_functions_callees(self, http_client, first_function_address):
+        """Get function callees via get_functions fields=."""
         response = http_client.get(
-            "/get_function_callees", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_xrefs(self, http_client, first_function_address):
-        """Get function cross-references."""
+    def test_get_functions_xrefs(self, http_client, first_function_address):
+        """Get function cross-references via get_functions fields=."""
         response = http_client.get(
-            "/get_function_xrefs", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "xrefs"},
         )
         assert response.status_code in [200, 404]
 
@@ -513,7 +537,7 @@ class TestFunctionAnalysis:
         """Get function call graph."""
         response = http_client.get(
             "/get_function_call_graph",
-            params={"address": first_function_address, "depth": 2},
+            params={"function": first_function_address, "depth": 2},
         )
         # May not exist in all versions
         assert response.status_code in [200, 404]
@@ -610,11 +634,8 @@ class TestXRefEndpoints:
 
     @pytest.fixture
     def sample_address(self, http_client):
-        """Get a sample address from the program.
-
-        /list_functions declares only `program`; `limit` was silently dropped.
-        """
-        response = http_client.get("/list_functions")
+        """Get a sample address from the program."""
+        response = http_client.get("/find_functions", params={"limit": 1})
         if response.status_code != 200:
             pytest.skip("Cannot get sample address")
         import re
@@ -648,7 +669,9 @@ class TestMemoryInspection:
     @pytest.fixture
     def sample_address(self, http_client):
         """Get a sample address from segments."""
-        response = http_client.get("/list_segments")
+        response = http_client.get(
+            "/list_program_items", params={"kind": "segments"}
+        )
         if response.status_code != 200:
             pytest.skip("Cannot get segments")
         import re
@@ -797,10 +820,10 @@ class TestSearchInstructions:
 class TestBulkHashing:
     """Test bulk hash endpoints (read-only)."""
 
-    def test_get_bulk_function_hashes(self, http_client):
+    def test_get_function_hash_bulk(self, http_client):
         """Get bulk function hashes."""
         response = http_client.get(
-            "/get_bulk_function_hashes", params={"offset": 0, "limit": 10}
+            "/get_function_hash", params={"offset": 0, "limit": 10}
         )
         assert response.status_code == 200
 
@@ -808,11 +831,10 @@ class TestBulkHashing:
 class TestCurrentSelection:
     """Test current selection/state endpoints (read-only)."""
 
-    def test_get_current_selection(self, http_client):
+    def test_get_ui_cursor_selection(self, http_client):
         """Get current cursor/selection in Ghidra."""
-        response = http_client.get("/get_current_selection")
-        # May be 404 if selection endpoint not available
-        assert response.status_code in [200, 404]
+        response = http_client.get("/get_ui_cursor", params={"type": "selection"})
+        assert response.status_code == 200
 
 
 class TestBytePatternSearch:
@@ -831,22 +853,16 @@ class TestResponseFormats:
     """Verify response format consistency."""
 
     def test_version_is_json_parseable(self, http_client):
-        """Version response should be JSON."""
-        response = http_client.get("/get_version")
+        """Health response should be JSON."""
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        try:
-            data = json.loads(response.text)
-            assert isinstance(data, dict)
-        except json.JSONDecodeError:
-            # Plain text is also acceptable
-            assert len(response.text) > 0
+        data = json.loads(response.text)
+        assert isinstance(data, dict)
+        assert data.get("status") == "ok"
 
     def test_list_functions_parseable(self, http_client):
-        """Function list should be parseable.
-
-        Sent without `limit`: the endpoint does not declare one.
-        """
-        response = http_client.get("/list_functions")
+        """Function list should be parseable."""
+        response = http_client.get("/find_functions", params={"limit": 5})
         assert response.status_code == 200
         # Should be non-empty
         assert len(response.text) > 0

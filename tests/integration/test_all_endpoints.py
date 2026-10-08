@@ -32,13 +32,14 @@ class TestServerConnection:
 
     def test_health_check(self, http_client):
         """Server should respond to health check."""
-        response = http_client.get("/check_connection")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        assert "Connection OK" in response.text or "GhidraMCP" in response.text
+        assert response.json()["status"] == "ok"
+        assert response.json()["server_kind"] in {"gui", "headless"}
 
     def test_version_endpoint(self, http_client):
         """Server should return version info."""
-        response = http_client.get("/get_version")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
         # Should contain version string
         assert "1." in response.text or "version" in response.text.lower()
@@ -49,14 +50,30 @@ class TestServerConnection:
 # =============================================================================
 
 
+@pytest.fixture(scope="module")
+def server_kind(http_session, server_url):
+    """Read the server identity once for the registration catalog."""
+    try:
+        response = http_session.get(f"{server_url}/mcp/health", timeout=10)
+    except requests.RequestException as e:
+        pytest.skip(f"Connection error: {e}")
+
+    assert response.status_code == 200
+    kind = response.json()["server_kind"]
+    assert kind in {"gui", "headless"}, f"Unknown server kind: {kind}"
+    return kind
+
+
 class TestEndpointRegistration:
     """Verify all endpoints are registered and respond (not 404)."""
 
     @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=[e["path"] for e in ENDPOINTS])
-    def test_endpoint_not_404(self, http_client, endpoint):
+    def test_endpoint_not_404(self, http_client, endpoint, server_kind):
         """Each endpoint should respond (not 404)."""
         path = endpoint["path"]
         method = endpoint.get("method", "GET")
+        if server_kind not in endpoint["servers"]:
+            pytest.skip(f"{path} is not supported by the {server_kind} server")
 
         try:
             if method == "GET":
@@ -87,13 +104,13 @@ class TestListingEndpoints:
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/list_functions")
+        response = http_client.get("/find_functions")
         assert response.status_code == 200
         # Response may be empty if no program loaded, but should not error
 
     @pytest.mark.requires_server
     def test_list_functions_enhanced_pagination(self, http_client, server_available):
-        """Pagination lives on /list_functions_enhanced, not /list_functions.
+        """Pagination lives on /find_functions, which replaced both.
 
         ListingService documents /list_functions as "List all functions (no
         pagination)" and declares only `program`, so the `offset`/`limit` this
@@ -102,19 +119,19 @@ class TestListingEndpoints:
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get(
-            "/list_functions_enhanced", params={"offset": 0, "limit": 10}
-        )
+        response = http_client.get("/find_functions", params={"offset": 0, "limit": 10})
         assert response.status_code == 200
         assert len(response.json()["functions"]) <= 10
 
     @pytest.mark.requires_program
-    def test_list_segments(self, http_client, program_loaded):
-        """list_segments should return memory segments."""
+    def test_list_program_items_segments(self, http_client, program_loaded):
+        """list_program_items kind=segments should return memory segments."""
         if not program_loaded:
             pytest.skip("No program loaded")
 
-        response = http_client.get("/list_segments")
+        response = http_client.get(
+            "/list_program_items", params={"kind": "segments"}
+        )
         assert response.status_code == 200
         # Should contain segment info if program loaded
         if response.text.strip():
@@ -125,12 +142,12 @@ class TestListingEndpoints:
                     assert ":" in line or "error" in line.lower()
 
     @pytest.mark.requires_program
-    def test_list_data_types(self, http_client, program_loaded):
-        """list_data_types should return data type list."""
+    def test_find_data_types(self, http_client, program_loaded):
+        """find_data_types should return data type records."""
         if not program_loaded:
             pytest.skip("No program loaded")
 
-        response = http_client.get("/list_data_types", params={"limit": 10})
+        response = http_client.get("/find_data_types", params={"limit": 10})
         assert response.status_code == 200
 
     @pytest.mark.requires_program
@@ -152,10 +169,11 @@ class TestGetterEndpoints:
     """Test getter endpoints."""
 
     @pytest.mark.requires_program
-    def test_get_function_by_address(self, http_client, sample_address):
-        """get_function_by_address should return function info."""
+    def test_get_functions_signature(self, http_client, sample_address):
+        """get_functions fields= should return function identity."""
         response = http_client.get(
-            "/get_function_by_address", params={"address": sample_address}
+            "/get_functions",
+            params={"address": sample_address, "fields": "signature,entry_point"},
         )
         assert response.status_code == 200
 
@@ -186,10 +204,10 @@ class TestDecompilationEndpoints:
     @pytest.mark.requires_program
     @pytest.mark.slow
     def test_decompile_by_address(self, http_client, sample_address):
-        """decompile_function should return C code."""
+        """get_functions fields=decompiled_code should return C code."""
         response = http_client.get(
-            "/decompile_function",
-            params={"address": sample_address},
+            "/get_functions",
+            params={"address": sample_address, "fields": "decompiled_code"},
             timeout=120,  # Decompilation can be slow
         )
         assert response.status_code == 200
@@ -262,7 +280,7 @@ class TestSearchEndpoints:
             pytest.skip("No program loaded")
 
         response = http_client.get(
-            "/search_functions", params={"name_pattern": "a", "limit": 10}
+            "/find_functions", params={"query": "main", "limit": 10}
         )
         assert response.status_code == 200
         payload = response.json()
@@ -282,7 +300,7 @@ class TestSearchEndpoints:
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/search_functions", params={"name_pattern": ""})
+        response = http_client.get("/find_functions", params={"query": ""})
         assert response.status_code == 200
         assert "required" in response.json()["error"].lower()
 
@@ -301,7 +319,7 @@ class TestResponseFormats:
         if not program_loaded:
             pytest.skip("No program loaded")
 
-        response = http_client.get("/list_functions")
+        response = http_client.get("/find_functions")
         if response.text.strip():
             lines = response.text.strip().split("\n")
             for line in lines[:5]:  # Check first few
@@ -351,10 +369,10 @@ class TestProgramManagement:
             assert "programs" in data or "count" in data or "error" in data
 
     @pytest.mark.requires_server
-    def test_get_current_program_info(self, http_client, server_available):
-        """get_current_program_info should return info or error."""
+    def test_get_ui_cursor_program(self, http_client, server_available):
+        """get_ui_cursor should return program facet or error."""
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/get_current_program_info")
+        response = http_client.get("/get_ui_cursor", params={"type": "program"})
         assert response.status_code == 200

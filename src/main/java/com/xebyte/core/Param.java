@@ -52,10 +52,24 @@ public @interface Param {
     /** Human-readable description of this parameter. */
     String description() default "";
 
+    /** {@link #paramType()} for a parameter that is only ever a memory address. */
+    String ADDRESS = "address";
+
+    /**
+     * {@link #paramType()} for a parameter that names a function by name OR by address.
+     * Resolved by {@code ServiceUtils.getFunctionOrError}. It implies the standard alias
+     * spellings ({@code address}, {@code name}, {@code function_address},
+     * {@code function_name}, {@code function}, minus the parameter's own name), so no
+     * endpoint lists them. Aliases declared explicitly are tried first.
+     */
+    String FUNCTION_REF = "function_ref";
+
     /**
      * Semantic type hint for this parameter, propagated to /mcp/schema.
-     * Use "address" for parameters that carry memory addresses.
-     * The bridge uses this to apply address sanitization before dispatch.
+     * {@link #ADDRESS} marks parameters that carry memory addresses, which the bridge
+     * normalises before dispatch. {@link #FUNCTION_REF} marks name-or-address function
+     * references, which the bridge passes through untouched: a name is not an address,
+     * and rewriting it (the bridge once prefixed "0x") makes the function unfindable.
      */
     String paramType() default "";
 

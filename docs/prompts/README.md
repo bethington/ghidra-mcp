@@ -37,10 +37,10 @@ The V5 workflow is the current standard. It addresses every failure mode encount
 | [DATA_SECTION_WORKFLOW.md](DATA_SECTION_WORKFLOW.md) | Workflow for .data/.rdata section analysis |
 | [GLOBAL_DATA_ANALYSIS_WORKFLOW.md](GLOBAL_DATA_ANALYSIS_WORKFLOW.md) | Global data naming and analysis |
 
-## Moved to `d2-game-exe` (2026-08-11)
+## Removed (2026-08-11)
 
 Four workflows described documenting one specific corpus rather than operating
-this server, and went with the D2 tooling:
+this server, and left the repo with that project's tooling:
 `DATA_TYPE_INVESTIGATION_WORKFLOW`, `BINARY_DOCUMENTATION_ORDER`,
 `CROSS_VERSION_FUNCTION_MATCHING`, `CROSS_VERSION_MATCHING_COMPREHENSIVE`.
 

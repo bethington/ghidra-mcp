@@ -134,8 +134,13 @@ class TestVersionConsistency(unittest.TestCase):
                     f"VersionInfo VERSION={match.group(1)} != pom.xml {pom_version}")
 
     def test_user_visible_tool_counts_match_endpoint_catalog(self):
-        """Marketing/extension metadata should not drift from endpoints.json."""
-        expected = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["total_endpoints"]
+        """Marketing/extension metadata should not drift from agent-visible endpoints.
+
+        Internal HTTP routes stay in endpoints.json (bridge still calls them) but
+        are omitted from /mcp/schema and from the advertised MCP tool count.
+        """
+        catalog = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
+        expected = sum(1 for e in catalog["endpoints"] if not e.get("internal"))
         checks = {
             "README.md": PROJECT_ROOT / "README.md",
             "CLAUDE.md": PROJECT_ROOT / "CLAUDE.md",
@@ -294,66 +299,63 @@ class TestJavaArchitecture(unittest.TestCase):
         """Manual createContext registrations need explicit GUI/headless parity."""
         gui_file = JAVA_SRC / "GhidraMCPPlugin.java"
         headless_file = JAVA_SRC / "headless" / "GhidraMCPHeadlessServer.java"
-        gui = set(re.findall(r'server\.createContext\("([^"]+)"', gui_file.read_text()))
-        headless = set(re.findall(r'safeContext\("([^"]+)"', headless_file.read_text()))
+        # Both servers register hand-coded routes on McpHttpServer as http.route("/x", ...).
+        route = re.compile(r'http\.route\("([^"]+)"')
+        gui = set(route.findall(gui_file.read_text()))
+        headless = set(route.findall(headless_file.read_text()))
         annotated = set()
         for java_file in list(CORE_SRC.glob("*Service.java")) + list((JAVA_SRC / "headless").glob("*Service.java")):
             annotated.update(
                 re.findall(r'@McpTool\(\s*(?:path\s*=\s*)?"([^"]+)"', java_file.read_text())
             )
 
-        gui_only_expected = {
-            "/batch_apply_documentation",
-            # /get_current_selection — added 2026-05-23 (@I-Knight-I, #153).
-            # Selection is the CodeBrowser listing's highlight state — a UI
-            # concept with no equivalent in headless mode, so it lives only
-            # on the GUI plugin alongside the other current_* sibling tools
-            # (which DO have headless equivalents because address + function
-            # generalize to "currentProgram-relative" outside a UI context).
-            "/get_current_selection",
-            "/mcp/health",
-            "/mcp/instance_info",
-            "/project/info",
-            "/server/authenticate",
-            "/tool/goto_address",
-            "/tool/launch_codebrowser",
-            "/tool/running_tools",
-        }
-        headless_only_expected = {
-            "/configure_analyzer",
-            "/delete_project",
-            "/health",
-            "/list_projects",
+        # /check_connection, /mcp/health and /mcp/instance_info are McpHttpServer's own,
+        # served by both servers and registered via http.route by neither.
+        gui_only_expected: set[str] = set()
+            # /health was the last one: headless-only liveness, retired for the
+            # shared /mcp/health.
+            # /configure_analyzer, /list_projects and /delete_project were hand-routed
+            # here until they became @McpTools (AnalysisService, on both servers; and
+            # HeadlessManagementService). Hand-routed, they skipped the file-root
+            # allow-list and /configure_analyzer answered success for any name.
             # /move_file and /move_folder used to be listed here. They were
             # hand-routed headless-only while tests/endpoints.json advertised
             # them globally, so a FrontEnd-mode /mcp/schema never served them
             # and every bridge call 404'd. They are now @McpTool methods on
             # ProgramScriptService, i.e. `annotated`, and must NOT come back
             # to this set -- see ProjectMoveEndpointsOfflineTest.
-        }
+        headless_only_expected: set[str] = set()
 
         self.assertEqual(gui - headless - annotated, gui_only_expected)
         self.assertEqual(headless - gui - annotated, headless_only_expected)
 
-    def test_manual_admin_endpoint_params_are_cataloged(self):
-        """Hand-registered admin routes should document mode-specific params."""
+    def test_version_control_routes_are_snake_case_only(self):
+        """The unified version-control routes take snake_case parameters, and only those.
+
+        They were hand-coded twice with camelCase spellings (keepCheckedOut, checkoutId,
+        accessLevel) and per-server extras (repo). That is one service now.
+        """
         catalog = {
             entry["path"]: set(entry.get("params", []))
             for entry in json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))["endpoints"]
         }
 
         expected_params = {
-            "/server/admin/terminate_all_checkouts": {"repo", "path"},
-            "/server/admin/terminate_checkout": {
-                "repo", "path", "checkoutId", "checkout_id"
-            },
+            "/server/admin/terminate_all_checkouts": {"path"},
+            "/server/admin/terminate_checkout": {"path", "checkout_id"},
+            "/server/admin/set_permissions": {"repo", "user", "access_level"},
+            "/server/version_control/checkout": {"path", "exclusive"},
+            "/server/version_control/undo_checkout": {"path", "keep"},
+            "/server/version_control/add": {"path", "comment", "keep_checked_out"},
+            "/checkin_program": {"path", "comment", "keep_checked_out", "dry_run"},
         }
         for path, params in expected_params.items():
             self.assertIn(path, catalog)
-            self.assertTrue(
-                params.issubset(catalog[path]),
-                f"{path} missing params: {sorted(params - catalog[path])}",
-            )
+            self.assertEqual(params, catalog[path], f"{path} parameters")
+        legacy = {"checkoutId", "keepCheckedOut", "accessLevel"}
+        for path, params in catalog.items():
+            if path.startswith("/server/") or path == "/checkin_program":
+                self.assertFalse(legacy & params, f"{path} still has camelCase params {legacy & params}")
 
 
 class TestProjectStructure(unittest.TestCase):

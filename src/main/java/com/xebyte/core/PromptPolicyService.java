@@ -67,9 +67,9 @@ public class PromptPolicyService {
         }
     }
 
-    @McpTool(path = "/prompt_policy", method = "POST",
+    @McpTool(path = "/prompt_policy", dryRun = false, method = "POST",
             description = "Temporarily enable, disable, or query scoped automation prompt handling",
-            category = "system")
+            category = "system", access = ToolAccess.WRITE)
     public Response configure(
             @Param(value = "action", source = ParamSource.BODY, defaultValue = "status",
                     description = "One of: enable, disable, status") String action,

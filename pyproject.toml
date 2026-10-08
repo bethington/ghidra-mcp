@@ -29,7 +29,7 @@ dependencies = [
 ]
 # NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
 # has no `requests` runtime dependency. `requests` is only needed by the repo's
-# unshipped subsystems (fun-doc, the test suite) and is declared in those
+# unshipped tooling (the test suite) and is declared in those
 # dependency groups instead — see [dependency-groups] below.
 
 [project.scripts]
@@ -84,10 +84,10 @@ test = [
     "clang>=18.1.8,<22",
     "libclang>=18.1.1,<19",
 ]
-# Standalone debugger server + Ghidra TraceRmi backend (Windows-only bits).
+# dbgeng bindings for Ghidra's TraceRmi debugger backend (Windows-only bits).
 debugger = [
     "pybag==2.2.16 ; sys_platform == 'win32'",
-    "comtypes==1.4.16 ; sys_platform == 'win32'",
+    "comtypes==1.4.17 ; sys_platform == 'win32'",
     "protobuf>=7.35.1",
 ]
 dev = [
@@ -155,20 +155,15 @@ target-version = ["py310"]
 package = true
 
 [tool.coverage.run]
-# Excluded from ALL coverage ratios (unit + fun-doc offline ratchets):
+# Excluded from ALL coverage ratios:
 #   1. Vendored third-party code -- not ours to test.
 #   2. Standalone operational scripts the offline tier cannot execute at all:
-#      one-shot CLIs that drive a live Ghidra instance (or an LLM) end-to-end.
-#      Keeping their 0% in the denominator makes the ratchet measure "how many
+#      one-shot CLIs that drive a live Ghidra instance end-to-end. Keeping
+#      their 0% in the denominator makes the ratchet measure "how many
 #      live-only scripts exist" instead of "how tested is the runtime code."
-# Importable engines/libraries (type_unifier, d2moo_types, port_pipeline, ...)
-# deliberately stay IN the denominator even when poorly covered -- that is the
-# test debt the ratchet exists to squeeze. Do not add runtime modules here.
+# Importable runtime modules deliberately stay IN the denominator even when
+# poorly covered -- that is the test debt the ratchet exists to squeeze. Do not
+# add runtime modules here.
 omit = [
     "*/vendored/*",
-    # One-shot log/diagnostic CLIs. They read a live fun-doc's logs or drive a
-    # live Ghidra and cannot execute in the offline tier at all, so their 0%
-    # measured "how many operational scripts exist", not how tested the runtime
-    # is. (adversarial_reproof.py, type_unifier.py and plate_scaffold.py are
-    # deliberately NOT here — those are importable engines, i.e. real debt.)
 ]

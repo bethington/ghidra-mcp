@@ -261,9 +261,8 @@ later**.
       the Java `EndpointRegistrationTest`) and the four live-Ghidra performance
       files. The migrated integration tests have been rewritten against the
       survivors but not yet executed against a running server.
-- [ ] **fun-doc benchmark** (`--mock --tier fast --compare`) — the prompt and
-      allowlist edits touch documentation quality, so a before/after run belongs
-      with this change.
+- [ ] ~~**fun-doc benchmark**~~ — out of scope here since `fun-doc` left this
+      repository (2026-08-11); a before/after quality run belongs to that project.
 - [ ] **P0 — port the §2b harness into `tests/integration/`** as durable
       round-trip tests (comment family, bookmark/struct/tag/label lifecycles,
       type-size, validators, rename-by-name-vs-address). This is what would have

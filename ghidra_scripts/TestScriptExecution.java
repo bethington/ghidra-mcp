@@ -1,8 +1,8 @@
 //Test script execution
 //@author GhidraMCP
-//@category D2
+//@category GhidraMCP
 //@keybinding
-//@menupath D2.Test Script Execution
+//@menupath GhidraMCP.Test Script Execution
 //@toolbar
 
 import ghidra.app.script.GhidraScript;

@@ -13,7 +13,7 @@ saying so.
 - **Discussions**: [GitHub Discussions](https://github.com/bethington/ghidra-mcp/discussions)
 - **Direction and priorities**: [ROADMAP.md](ROADMAP.md)
 - **Documentation index**: [docs/README.md](docs/README.md)
-- **Tool inventory** (253 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
+- **Tool inventory** (210 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
 - **Testing tiers in depth**: [docs/TESTING.md](docs/TESTING.md)
 - **Security reports**: [SECURITY.md](SECURITY.md) — do not file these as public issues
 
@@ -74,7 +74,7 @@ gates on.
 | [uv](https://docs.astral.sh/uv/) | current | Dependency resolution from `uv.lock` |
 | Gradle | bundled wrapper (`./gradlew`) | Default Java backend — nothing to install |
 | Maven | 3.9+ | Peer Java backend; what CI builds and gates with |
-| Ghidra | 12.1.3 | Compiling against Ghidra's jars; all live tiers |
+| Ghidra | 12.1.4 | Compiling against Ghidra's jars; all live tiers |
 
 Python-only changes need Java and Ghidra for nothing at all.
 
@@ -95,7 +95,7 @@ MCP client spawn commands:
   ...                        (advisory; how your MCP client would spawn the bridge)
 Java: available on PATH
 Project version: 7.0.0
-Ghidra version from pom.xml: 12.1.3
+Ghidra version from pom.xml: 12.1.4
 No Ghidra path configured; skipped Ghidra-specific preflight checks.
 ```
 
@@ -142,9 +142,9 @@ TOOLS_SETUP_BACKEND=gradle python -m tools.setup preflight --ghidra-path <dir>
 ```text
 > Task :verifyVersion
 Project version         : 7.0.0
-Ghidra version (pom.xml): 12.1.3
+Ghidra version (pom.xml): 12.1.4
 Ghidra install dir      : ...
-Ghidra version (install): 12.1.3
+Ghidra version (install): 12.1.4
 Version check passed.
 
 > Task :preflight
@@ -212,13 +212,13 @@ Verified both ways:
 
 ```text
 # Git Bash — works
-./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
 
 # Git Bash — fails with 100 "package does not exist" errors
-./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
+./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.4_PUBLIC
 
 # PowerShell — the backslash form is fine
-.\gradlew.bat test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.3_PUBLIC
+.\gradlew.bat test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.4_PUBLIC
 ```
 
 ## Test
@@ -231,7 +231,7 @@ uv run pytest tests/unit/ --no-cov
 
 Verified: 568 tests, 560 passed, 8 skipped, 0 failures, about 17 seconds. The
 skips are platform forks (`AF_UNIX` is absent on Windows CPython, and the
-debugger/oracle proxy gating differs), not failures.
+debugger proxy registration differs), not failures.
 
 Add `--frozen` (`uv run --frozen pytest ...`) if you want `uv.lock` left alone —
 see the gotcha below, it currently gets rewritten by any plain `uv run`.
@@ -324,7 +324,7 @@ benchmark binary in the active project — that is why they are opt-in.
 
 | Job | Gates the build? | What it does |
 | --- | --- | --- |
-| Java Build (Maven) | **Yes** | Downloads Ghidra 12.1.3, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate |
+| Java Build (Maven) | **Yes** | Downloads Ghidra 12.1.4, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate |
 | Python Tests (pytest) | **Yes** | `tests/unit/` on Python 3.10, 3.11, 3.12, 3.13 with the coverage floor |
 | Python Tests (pytest, Windows) | **Yes** | `tests/unit/` on Windows, no coverage floor — it exists so both sides of every `os.name == "nt"` branch execute |
 | Pester | **Yes** | `tests/pester/Run-Tests.ps1 -CI` |

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Ghidra MCP already enables AI-assisted function documentation through its tool surface and the internal `fun-doc` workflow. The next step is to turn the lessons from that workflow into a community-reviewed, fundable roadmap for documenting large binaries reliably.
+Ghidra MCP already enables AI-assisted function documentation through its tool surface, and the external `fun-doc` workflow (a separate project, not part of this repository) has exercised it at scale. The next step is to turn the lessons from that workflow into a community-reviewed, fundable roadmap for documenting large binaries reliably.
 
 This RFC proposes **Function Documentation at Scale**: a batch documentation pipeline that can prioritize functions, run controlled parallel workers, survive Ghidra/model failures, score quality, produce reports, and support a dashboard review flow with queue, progress, diffs, accept/reject, and retry controls.
 
@@ -27,7 +27,7 @@ Documenting a large binary is not just "call the model on every function." Real 
 - prioritization across many binaries or modules
 - review and audit of changes made by AI workers
 
-The internal `fun-doc` tool has proven the value of priority queues, scoring, workers, logs, and a dashboard. Community users need a clear spec for what a supported, scalable version of this should become.
+The external `fun-doc` tool has proven the value of priority queues, scoring, workers, logs, and a dashboard. Community users need a clear spec for what a supported, scalable version of this should become.
 
 ## Goals
 
@@ -48,7 +48,7 @@ The internal `fun-doc` tool has proven the value of priority queues, scoring, wo
 - Do not require fully autonomous writes for every user.
 - Do not make model self-critique the only quality gate.
 - Do not ignore Ghidra's concurrency constraints.
-- Do not make the internal `fun-doc` implementation a required long-term architecture without review.
+- Do not make the external `fun-doc` implementation a required long-term architecture without review.
 - Do not make BSim propagation or Ghidra auto-recovery prerequisites for the first milestone, though both can improve later phases.
 
 ## Job Model
@@ -180,7 +180,7 @@ The first milestone may keep conservative defaults while building the mechanics 
 
 ## Dashboard UX
 
-The first UI target should be the existing `fun-doc` dashboard surface, evolved through review rather than replaced immediately.
+The first UI target should draw on the external `fun-doc` dashboard's experience rather than start from a blank page.
 
 Target dashboard capabilities:
 
@@ -352,7 +352,7 @@ Acceptance criteria:
 
 ### Phase 2: Dashboard Review UX
 
-- Evolve the existing `fun-doc` dashboard.
+- Learn from the external `fun-doc` dashboard.
 - Add queue/progress/review views.
 - Add generated diffs.
 - Add accept/reject/retry controls.
@@ -425,7 +425,7 @@ Funding helps prioritize maintainer time while keeping the design public, review
 5. What quality thresholds should decide auto-apply versus review?
 6. Which provider/model policies matter most: cost caps, fallback, rate limits, or quality routing?
 7. What reports would teams actually share or archive?
-8. Should this remain a separate `fun-doc` tool, move closer to the MCP bridge, or become a supported companion package?
+8. Should this remain a separate external tool (as `fun-doc` is today), move closer to the MCP bridge, or become a supported companion package?
 9. How much parallelism is safe for common Ghidra setups?
 10. Which parts of the workflow are worth sponsoring first?
 
@@ -436,7 +436,7 @@ Use this text when opening a GitHub Discussion or issue:
 ```markdown
 We are considering a sponsored milestone called **Function Documentation at Scale**.
 
-The proposed design would turn the lessons from the internal `fun-doc` workflow into a supported roadmap for reliable batch documentation: prioritized function jobs, bottom-up call graph ordering, controlled parallel workers, failure recovery, provider policy, quality gates, Markdown/JSON reports, and dashboard review with diffs and accept/reject/retry controls.
+The proposed design would turn the lessons from the external `fun-doc` workflow into a supported roadmap for reliable batch documentation: prioritized function jobs, bottom-up call graph ordering, controlled parallel workers, failure recovery, provider policy, quality gates, Markdown/JSON reports, and dashboard review with diffs and accept/reject/retry controls.
 
 Please review the RFC and comment especially on:
 

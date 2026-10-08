@@ -32,7 +32,7 @@ preparation. For the tool inventory see
 
 ### 1. Tool-surface size
 
-**The problem.** The server advertises 253 tools. Several MCP clients cannot
+**The problem.** The server advertises 210 tools. Several MCP clients cannot
 accept a `tools/list` that large. Gemini rejects it outright with HTTP 400
 `INVALID_ARGUMENT` — "too many states for serving" — before a single tool is
 called (#440). Even where it works, the schema consumes context that the model
@@ -43,7 +43,7 @@ should be spending on the binary.
 tools it has not loaded; `check_tools`; a `--lazy` / `--no-lazy` startup flag and
 `--default-groups`; and the 7.0.0 consolidation pass, which folded 272 tools
 down to 251 by merging redundant ones into "one-or-many" survivors, without
-removing any capability. The catalog stands at 253 today. See `CHANGELOG.md` and
+removing any capability. The catalog stands at 210 today. See `CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.
 
@@ -259,7 +259,7 @@ ignored — it has been decided.
 - **Prose responses from any endpoint.** Everything returns JSON as of 7.0.0.
   Tooling that parsed stdout as English needs to read the envelope.
 - **Supporting multiple Ghidra versions at once.** The project targets one
-  Ghidra release at a time (currently **12.1.3**, tracked in `pom.xml` and
+  Ghidra release at a time (currently **12.1.4**, tracked in `pom.xml` and
   pinned in the three CI workflows). A new Ghidra release is a retarget, not a
   compatibility matrix.
 - **A GUI, web dashboard, or IDE plugin shipped from this repository.** The

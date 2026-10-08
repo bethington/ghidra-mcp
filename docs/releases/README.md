@@ -16,8 +16,8 @@ from **272 to 251 tools**: five rename tools collapse into `rename_symbol`, four
 variable-type setters into `set_variable_type`, six `batch_*` tools into their
 one-or-many survivors, and the comment family into `set_comment` / `get_comment`
 with an explicit kind. Two endpoints were added later in the same cycle
-(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 253 tools**
-— 239 served by the GUI plugin, 226 by the headless server, 212 by both. No
+(`/list_shadowed_globals`, `/batch_get_comments`), so **7.0.0 ships 210 tools**
+— 206 served by the GUI plugin, 191 by the headless server, 187 by both. No
 capability is removed — every operation the deleted tools performed is
 reachable through the survivor — and there are no backward-compatibility
 aliases. `tests/unit/test_migration_guide_successors.py` proves that: all 23
@@ -34,7 +34,7 @@ A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
 
-**Lazy tool loading is the default.** Advertising all 253 endpoints in one
+**Lazy tool loading is the default.** Advertising all 210 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
 called. The bridge now loads `listing,function,program` (84 endpoints plus 8
@@ -474,7 +474,7 @@ Known follow-ups (not blockers): globals worker run-write path is JSON-only; `ru
 Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, plus an extension of the v5.7.1 toggle.
 
 - **Bridge `duplicate parameter name: 'dry_run'` fix** (synthol, [#193](https://github.com/bethington/ghidra-mcp/pull/193), closes [#187](https://github.com/bethington/ghidra-mcp/issues/187)) — the bridge no longer collides its synthetic `dry_run` param with schema-declared ones. Affected every v5.7.0/v5.7.1 user whose plugin exposed `archive_ingest_function` or `archive_ingest_program`; the bridge failed to register tools on startup.
-- **Linux/Nix `tools.setup` compat** ([#194](https://github.com/bethington/ghidra-mcp/pull/194), closes [#190](https://github.com/bethington/ghidra-mcp/issues/190) + [#191](https://github.com/bethington/ghidra-mcp/issues/191)) — new `pip_command()` helper probes `python -m pip` first then falls back to a bare `pip` on PATH, fixing setup on Nix-managed Python environments where pip is exposed as a binary but not importable. `find_ghidra_executable` is platform-aware so `ghidraRun.bat` is no longer preferred on Linux. Reported by @Molkars + @letsjustfixit.
+- **Linux/Nix `tools.setup` compat** ([#194](https://github.com/bethington/ghidra-mcp/pull/194), closes [#190](https://github.com/bethington/ghidra-mcp/issues/190) + [#191](https://github.com/bethington/ghidra-mcp/issues/189)) — new `pip_command()` helper probes `python -m pip` first then falls back to a bare `pip` on PATH, fixing setup on Nix-managed Python environments where pip is exposed as a binary but not importable. `find_ghidra_executable` is platform-aware so `ghidraRun.bat` is no longer preferred on Linux. Reported by @Molkars + @letsjustfixit.
 - **Strict Naming Enforcement extended to globals** (Hummer12007, [#188](https://github.com/bethington/ghidra-mcp/pull/188)) — the existing Ghidra Tool Option remains strict by default, but disabling it now downgrades the hard name-quality rejects in `rename_data`, `rename_global_variable`, `set_global`, and the `apply_data_type` prefix/type guard to warnings, matching `rename_function_by_address`. Legacy saved values from the **Strict Function Name Enforcement** Tool Option migrate automatically.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
@@ -483,8 +483,8 @@ Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, pl
 
 Patch release bundling five community-contributed PRs and three post-release bug fixes.
 
-- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 231 → 241.
-- **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/177).
+- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 205 → 241.
+- **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/181).
 - **Function-name enforcement toggle** (Hummer12007, [#171](https://github.com/bethington/ghidra-mcp/pull/171)) — Ghidra Tool Option to switch verb-tier rejection between hard-reject (default) and warning-only. Power-user escape hatch.
 - **Headless startup crash fix** ([#180](https://github.com/bethington/ghidra-mcp/issues/180), originally diagnosed by @MMOStars) — duplicate route registration of `/create_folder` and `/delete_file` was tripping `HttpServerImpl.createContext` with `IllegalArgumentException`. Removed the manual registrations; the `@McpTool` annotations carry them. Affected every Docker/headless deployment.
 - **8051 (and similar) address-space fix** ([#184](https://github.com/bethington/ghidra-mcp/issues/184), reported by @Artem-B) — bridge no longer lowercases space names, which broke `CODE:123` etc. on architectures with uppercase-declared spaces.

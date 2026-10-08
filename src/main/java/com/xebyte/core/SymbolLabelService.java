@@ -38,9 +38,9 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol")
+    /** Kept for tests; agents use {@code /get_functions?fields=labels}. */
     public Response getFunctionLabels(
-            @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of labels to skip before this page starts; 0 begins at the "
@@ -62,10 +62,9 @@ public class SymbolLabelService {
 
         SymbolTable symbolTable = program.getSymbolTable();
 
-        Function function = ServiceUtils.resolveFunction(program, functionName);
-        if (function == null) {
-            return Response.err("Function not found: " + functionName);
-        }
+        ServiceUtils.FunctionOrError functionLookup = ServiceUtils.getFunctionOrError(program, functionName);
+        if (functionLookup.hasError()) return functionLookup.error();
+        Function function = functionLookup.function();
 
         AddressSetView functionBody = function.getBody();
         SymbolIterator symbols = symbolTable.getSymbolIterator();
@@ -124,7 +123,7 @@ public class SymbolLabelService {
 
     @McpTool(path = "/rename_symbol", method = "POST",
              description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
-             category = "symbol")
+             category = "symbol", access = ToolAccess.WRITE)
     public Response renameSymbol(
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
                    aliases = {"address", "function_address"},
@@ -147,8 +146,21 @@ public class SymbolLabelService {
                                + "migrated from rename_global_variable(old_name, new_name).") String oldName,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        target = resolveRenameTarget(target, oldName);
+                               + "when multiple programs are open)") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Per-call override for the naming-quality gate: 'enforce' rejects a "
+                               + "convention miss, 'warn' applies the name and returns the miss as a "
+                               + "warning, 'off' skips the check. Omit to use the project/global setting.")
+                    String strictModeArg) {
+        try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
+            return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, programName);
+        } catch (Exception e) {
+            return Response.err("rename_symbol failed: " + e.getMessage());
+        }
+    }
+
+    private Response renameSymbolKind(String target, String newName, String kind, String oldName,
+            String programName) {
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
             case "data":     return renameDataAtAddress(target, newName, programName);
@@ -213,7 +225,7 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Rename Label");
+            WriteTx tx = WriteTx.begin(program, "Rename Label");
             try {
                 targetSymbol.setName(newName, SourceType.USER_DEFINED);
                 List<String> labelWarnings = NamingConventions.validateLabelName(newName);
@@ -228,7 +240,7 @@ public class SymbolLabelService {
             } catch (Exception e) {
                 return Response.err("Error renaming label: " + e.getMessage());
             } finally {
-                program.endTransaction(transactionId, true);
+                tx.end(true);
             }
 
         } catch (Exception e) {
@@ -244,7 +256,7 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null, programName);
     }
 
-    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol")
+    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.WRITE)
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -293,7 +305,7 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Create Label");
+            WriteTx tx = WriteTx.begin(program, "Create Label");
             try {
                 Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                 if (newSymbol != null) {
@@ -312,7 +324,7 @@ public class SymbolLabelService {
             } catch (Exception e) {
                 return Response.err("Error creating label: " + e.getMessage());
             } finally {
-                program.endTransaction(transactionId, true);
+                tx.end(true);
             }
 
         } catch (Exception e) {
@@ -344,8 +356,8 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Create Labels");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Batch Create Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
 
@@ -408,7 +420,7 @@ public class SymbolLabelService {
                     errors.add("Transaction error: " + e.getMessage());
                     Msg.error(this, "Error in batch create labels transaction", e);
                 } finally {
-                    program.endTransaction(tx, successCount.get() > 0);
+                    tx.end(successCount.get() > 0);
                 }
             });
         } catch (Exception e) {
@@ -511,7 +523,7 @@ public class SymbolLabelService {
         return deleteLabel(addressStr, labelName, null, programName);
     }
 
-    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol", access = ToolAccess.DESTRUCTIVE)
     public Response deleteLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -551,8 +563,8 @@ public class SymbolLabelService {
             final List<String> deletedNames = new ArrayList<>();
             final List<String> errors = new ArrayList<>();
 
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Delete Label");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Delete Label");
                 try {
                     for (Symbol symbol : symbols) {
                         if (symbol.getSymbolType() != SymbolType.LABEL) {
@@ -576,7 +588,7 @@ public class SymbolLabelService {
                 } catch (Exception e) {
                     errors.add("Error during deletion: " + e.getMessage());
                 } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
+                    tx.end(deletedCount.get() > 0);
                 }
             });
 
@@ -619,8 +631,8 @@ public class SymbolLabelService {
         final List<String> errors = new ArrayList<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Delete Labels");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Batch Delete Labels");
                 try {
                     SymbolTable symbolTable = program.getSymbolTable();
 
@@ -674,7 +686,7 @@ public class SymbolLabelService {
                 } catch (Exception e) {
                     errors.add("Transaction error: " + e.getMessage());
                 } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
+                    tx.end(deletedCount.get() > 0);
                 }
             });
         } catch (Exception e) {
@@ -744,7 +756,8 @@ public class SymbolLabelService {
                     + "address=\"" + addressStr + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -766,8 +779,8 @@ public class SymbolLabelService {
         final AtomicReference<String> successMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Rename data");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Rename data");
                 try {
                     Listing listing = program.getListing();
                     Data data = listing.getDefinedDataAt(addr);
@@ -798,7 +811,7 @@ public class SymbolLabelService {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Rename data error", e);
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    tx.end(success.get());
                 }
             });
         } catch (Exception e) {
@@ -849,22 +862,10 @@ public class SymbolLabelService {
         // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
         // naming rules. Look up the symbol's existing data type for the
         // Hungarian-vs-type check.
-        SymbolTable symTableForCheck = program.getSymbolTable();
-        Namespace globalNsForCheck = program.getGlobalNamespace();
-        List<Symbol> initialSymbols = symTableForCheck.getSymbols(oldName, globalNsForCheck);
-        if (initialSymbols.isEmpty()) {
-            SymbolIterator allSymbols = symTableForCheck.getSymbols(oldName);
-            while (allSymbols.hasNext()) {
-                Symbol s = allSymbols.next();
-                if (s.getSymbolType() != SymbolType.FUNCTION) {
-                    initialSymbols.add(s);
-                    break;
-                }
-            }
-        }
+        Symbol existingSymbol = ServiceUtils.findGlobalSymbol(program, oldName);
         String existingTypeName = null;
-        if (!initialSymbols.isEmpty()) {
-            Address sa = initialSymbols.get(0).getAddress();
+        if (existingSymbol != null) {
+            Address sa = existingSymbol.getAddress();
             Data d = program.getListing().getDefinedDataAt(sa);
             if (d != null && d.getDataType() != null) existingTypeName = d.getDataType().getName();
         }
@@ -872,15 +873,16 @@ public class SymbolLabelService {
                 NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
         List<String> enforcementWarnings = new ArrayList<>();
         if (!quality.ok) {
-            String addrHint = !initialSymbols.isEmpty()
-                    ? "0x" + initialSymbols.get(0).getAddress().toString()
+            String addrHint = existingSymbol != null
+                    ? "0x" + existingSymbol.getAddress().toString()
                     : "<global address>";
             String enrichedSuggestion = quality.suggestion
                     + " For globals, prefer set_global("
                     + "address=\"" + addrHint + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -896,30 +898,13 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        int txId = program.startTransaction("Rename Global Variable");
+        WriteTx tx = WriteTx.begin(program, "Rename Global Variable");
         boolean success = false;
         try {
-            SymbolTable symbolTable = program.getSymbolTable();
-
-            Namespace globalNamespace = program.getGlobalNamespace();
-            List<Symbol> symbols = symbolTable.getSymbols(oldName, globalNamespace);
-
-            if (symbols.isEmpty()) {
-                SymbolIterator allSymbols = symbolTable.getSymbols(oldName);
-                while (allSymbols.hasNext()) {
-                    Symbol symbol = allSymbols.next();
-                    if (symbol.getSymbolType() != SymbolType.FUNCTION) {
-                        symbols.add(symbol);
-                        break;
-                    }
-                }
-            }
-
-            if (symbols.isEmpty()) {
+            Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
+            if (symbol == null) {
                 return Response.err("Global variable '" + oldName + "' not found");
             }
-
-            Symbol symbol = symbols.get(0);
             Address symbolAddr = symbol.getAddress();
             // Idempotent: oldName == newName is a no-op success rather than
             // a DuplicateNameException. Workers re-running rename_symbol
@@ -947,7 +932,7 @@ public class SymbolLabelService {
             Msg.error(this, "Error renaming global variable: " + e.getMessage());
             return Response.err(e.getMessage());
         } finally {
-            program.endTransaction(txId, success);
+            tx.end(success);
         }
         } catch (Exception e) {
             // try-with-resources close() can throw Exception (checked).
@@ -1018,8 +1003,8 @@ public class SymbolLabelService {
                         AtomicReference<String> errorMsg = new AtomicReference<>();
 
                         try {
-                            SwingUtilities.invokeAndWait(() -> {
-                                int tx = program.startTransaction("Rename external location");
+                            threadingStrategy.runOnUi(() -> {
+                                WriteTx tx = WriteTx.begin(program, "Rename external location");
                                 try {
                                     Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
                                     finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
@@ -1029,7 +1014,7 @@ public class SymbolLabelService {
                                     errorMsg.set(e.getMessage());
                                     Msg.error(this, "Error renaming external location: " + e.getMessage());
                                 } finally {
-                                    program.endTransaction(tx, success.get());
+                                    tx.end(success.get());
                                 }
                             });
                         } catch (Exception e) {
@@ -1065,7 +1050,7 @@ public class SymbolLabelService {
         return canRenameAtAddress(addressStr, null);
     }
 
-    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response canRenameAtAddress(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1088,7 +1073,7 @@ public class SymbolLabelService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {

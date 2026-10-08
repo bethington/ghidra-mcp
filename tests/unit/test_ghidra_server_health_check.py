@@ -293,9 +293,14 @@ def _doctor_responses(responses):
     return fake_probe, calls
 
 
-def _healthy_doctor_responses():
+def _connection(kind="gui", program="sample"):
+    return (200, json.dumps({"status": "ok", "server_kind": kind, "version": "7.0.0",
+                             "program": program}), {})
+
+
+def _healthy_doctor_responses(kind="gui"):
     return [
-        (200, "Connected: GhidraMCP plugin running", {}),
+        _connection(kind),
         (
             200,
             json.dumps(
@@ -305,6 +310,7 @@ def _healthy_doctor_responses():
                     "project_path": "D:/example/project",
                     "programs": [{"name": "sample", "path": "/sample", "open": True}],
                     "tcp_port": 8089,
+                    "server_kind": kind,
                 }
             ),
             {},
@@ -345,13 +351,11 @@ def test_doctor_reports_all_read_only_layers_and_optional_mcp_route():
     assert "project_path" not in json.dumps(report)
 
 
-def test_doctor_routes_headless_health_and_skips_gui_only_instance_probe():
-    responses = [
-        (200, "Connection OK - GhidraMCP Headless Server v6", {}),
-        (200, json.dumps({"status": "healthy", "program_loaded": True}), {}),
-        (200, json.dumps({"tools": [{"name": "headless_tool"}], "count": 1}), {}),
-    ]
-    fake_probe, calls = _doctor_responses(responses)
+def test_doctor_asks_a_headless_server_the_same_questions_as_the_gui():
+    """Until 7.0 headless had no /mcp/instance_info or /mcp/health, and the doctor
+    skipped the one and routed the other to /health, telling the kinds apart by
+    sniffing the /check_connection banner's English."""
+    fake_probe, calls = _doctor_responses(_healthy_doctor_responses("headless"))
 
     report = health.run_doctor(
         retries=1,
@@ -362,16 +366,27 @@ def test_doctor_routes_headless_health_and_skips_gui_only_instance_probe():
     assert report["ok"] is True
     assert report["server_kind"] == "headless"
     assert report["http_healthy"] is True
-    instance = next(check for check in report["checks"] if check["name"] == "instance_info")
-    assert instance["ok"] is True
-    assert instance["reason"] == "not_applicable:headless"
-    assert [call[0].rsplit("/", 1)[-1] for call in calls] == [
-        "check_connection",
-        "health",
-        "schema",
+    assert [urlsplit(call[0]).path for call in calls] == [
+        "/check_connection",
+        "/mcp/instance_info",
+        "/mcp/health",
+        "/mcp/schema",
     ]
-    assert all("/mcp/instance_info" not in call[0] for call in calls)
-    assert all("/mcp/health" not in call[0] for call in calls)
+
+
+def test_a_plain_text_banner_is_not_a_healthy_connection():
+    """The pre-7.0 banner. A server still answering it is an old build."""
+    fake_probe, _calls = _doctor_responses(
+        [(200, "Connection OK - GhidraMCP Headless Server v7.0.0-headless", {})]
+        + _healthy_doctor_responses()[1:]
+    )
+
+    report = health.run_doctor(retries=1, probe=fake_probe, sleep_fn=lambda _delay: None)
+
+    connection = next(check for check in report["checks"] if check["name"] == "plugin_connection")
+    assert connection["ok"] is False
+    assert connection["reason"] == "invalid_json"
+    assert report["ok"] is False
 
 
 def _catalog_servers() -> dict[str, set[str]]:
@@ -385,48 +400,16 @@ def _requested_paths(calls) -> set[str]:
 
 
 def test_doctor_health_routes_match_endpoint_catalog():
-    """Banner detection chooses the server. The health route that follows must
-    stay aligned with tests/endpoints.json, so a catalog move fails this test
-    even when the connection banner text is unchanged."""
+    """Every route the doctor asks must be served by both kinds per
+    tests/endpoints.json, so a catalog move fails this test."""
 
     servers = _catalog_servers()
-    assert servers["/mcp/health"] == {"gui"}
-    assert servers["/health"] == {"headless"}
-    assert {"gui", "headless"} <= servers["/check_connection"]
-    assert {"gui", "headless"} <= servers["/mcp/schema"]
-
-    gui_probe, gui_calls = _doctor_responses(_healthy_doctor_responses())
-    health.run_doctor(
-        retries=1,
-        probe=gui_probe,
-        sleep_fn=lambda _delay: None,
-        server_kind="gui",
-    )
-    gui_paths = _requested_paths(gui_calls)
-    assert "/mcp/health" in gui_paths
-    assert "/health" not in gui_paths
-    assert "/check_connection" in gui_paths
-    assert "/mcp/schema" in gui_paths
-
-    headless_probe, headless_calls = _doctor_responses(
-        [
-            (200, "Connection OK - GhidraMCP Headless Server v6", {}),
-            (200, json.dumps({"status": "healthy"}), {}),
-            (200, json.dumps({"tools": [{"name": "headless_tool"}], "count": 1}), {}),
-        ]
-    )
-    health.run_doctor(
-        retries=1,
-        probe=headless_probe,
-        sleep_fn=lambda _delay: None,
-        server_kind="headless",
-    )
-    headless_paths = _requested_paths(headless_calls)
-    assert "/health" in headless_paths
-    assert "/mcp/health" not in headless_paths
-    assert "/mcp/instance_info" not in headless_paths
-    assert "/check_connection" in headless_paths
-    assert "/mcp/schema" in headless_paths
+    for kind in ("gui", "headless"):
+        probe, calls = _doctor_responses(_healthy_doctor_responses(kind))
+        health.run_doctor(retries=1, probe=probe, sleep_fn=lambda _delay: None, server_kind=kind)
+        for path in _requested_paths(calls) - {"/mcp/instance_info"}:
+            assert kind in servers[path], (kind, path)
+    assert "/health" not in servers
 
 
 def test_doctor_applies_optional_bearer_to_all_requests_without_reporting_it():
@@ -452,7 +435,7 @@ def test_doctor_applies_optional_bearer_to_all_requests_without_reporting_it():
 def test_doctor_retries_a_transient_status_without_printing_response_body():
     responses = [
         (503, "secret-token-must-not-escape", {}),
-        (200, "Connected: ready", {}),
+        _connection(),
         _healthy_doctor_responses()[1],
         _healthy_doctor_responses()[2],
         _healthy_doctor_responses()[3],

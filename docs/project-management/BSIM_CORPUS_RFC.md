@@ -178,14 +178,14 @@ Search results should be transparent enough for humans and agents:
 ```json
 {
   "query": {
-    "program": "/Mods/PD2-S12/D2Common.dll",
+    "program": "/MyProduct/v2.0/engine.dll",
     "function": "GetSkillManaCost_9d00",
     "address": "0x6fcee520"
   },
   "corpus": "local",
   "results": [
     {
-      "program": "/Versions/1.11/D2Common.dll",
+      "program": "/MyProduct/v1.1/engine.dll",
       "function": "FUN_6fcd1234",
       "address": "0x6fcd1234",
       "bsim_score": 0.92,

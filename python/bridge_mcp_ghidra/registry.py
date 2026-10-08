@@ -8,17 +8,30 @@ from typing import Annotated
 
 from pydantic import Field
 
+from mcp.types import ToolAnnotations
+
 from . import dispatch
 from . import state
 from . import transport
-from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES, logger
+from .config import (
+    DESTRUCTIVE_TOOL,
+    READ_ONLY_TOOL,
+    STATIC_TOOL_NAMES,
+    WRITE_TOOL,
+    _ALL_STATIC_TOOL_NAMES,
+    logger,
+)
 from .schema import _TYPE_MAP, _normalize_tool_def_names, _parse_schema
 from .server import Context, mcp
 from .validation import sanitize_address, validate_tool_name
 
+# How often an in-flight call reports that it is still working. Short enough to
+# beat a client's idle timer, long enough not to spam a 600s batch write.
+_PROGRESS_INTERVAL_SECONDS = 5.0
+
 # Fail fast at import time if any static tool name is not CAPI-safe. Validates
 # every structurally-possible name (including debugger tools), not just the
-# ones active on this platform.
+# ones active in this process.
 for _static_tool_name in _ALL_STATIC_TOOL_NAMES:
     validate_tool_name(_static_tool_name)
 
@@ -237,6 +250,71 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     return handler
 
 
+def _signature_with_context(signature: inspect.Signature) -> inspect.Signature:
+    """Append the FastMCP `ctx` parameter, which it keeps out of inputSchema."""
+    ctx_param = inspect.Parameter(
+        "ctx",
+        inspect.Parameter.KEYWORD_ONLY,
+        default=None,
+        annotation=Context | None,
+    )
+    return signature.replace(parameters=[*signature.parameters.values(), ctx_param])
+
+
+def _start_progress_heartbeat(ctx: Context | None, tool_name: str):
+    """Tick progress notifications while a call is in flight, or return None.
+
+    Endpoint timeouts here reach 600s (`dispatch.get_timeout` scales batch
+    renames and comment writes by item count), and nothing was sent during the
+    wait: a client had no way to tell a long decompile from a hung session, and
+    some give up on their own idle timer.
+
+    Started only when the client actually asked for progress — the notification
+    is silently dropped without a progressToken, so spawning a task per call for
+    a client that never asked would be pure overhead.
+    """
+    if ctx is None:
+        return None
+    try:
+        meta = ctx.request_context.meta
+    except (AttributeError, ValueError):
+        # No active request context (direct call, or a test harness).
+        return None
+    if meta is None or meta.progressToken is None:
+        return None
+    token = meta.progressToken
+    session = ctx.request_context.session
+    request_id = ctx.request_context.request_id
+
+    async def _tick() -> None:
+        elapsed = 0.0
+        try:
+            while True:
+                await asyncio.sleep(_PROGRESS_INTERVAL_SECONDS)
+                elapsed += _PROGRESS_INTERVAL_SECONDS
+                # Sent through the session rather than ctx.report_progress()
+                # because that helper omits related_request_id, and without it
+                # the streamable-HTTP transport routes the notification to the
+                # standalone GET stream — where it is dropped outright for a
+                # client that only POSTs. Tying it to the request puts it on
+                # that call's own stream, which every client is already reading.
+                #
+                # No `total`: the server reports nothing a fraction could be
+                # computed from, and inventing one would misreport completion.
+                await session.send_progress_notification(
+                    progress_token=token,
+                    progress=elapsed,
+                    message=f"{tool_name} still running ({int(elapsed)}s)",
+                    related_request_id=request_id,
+                )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:  # a dead session must not fail the tool call
+            logger.debug("Progress heartbeat for %s stopped: %s", tool_name, e)
+
+    return asyncio.ensure_future(_tick())
+
+
 def _register_tool_def(tool_def: dict) -> bool:
     """Register a single tool from a schema definition. Returns True if registered."""
     name = tool_def["name"]
@@ -250,20 +328,69 @@ def _register_tool_def(tool_def: dict) -> bool:
 
     sync_handler = _build_tool_function(endpoint, http_method, input_schema)
 
-    async def handler(**kwargs):
-        # FastMCP calls synchronous tools directly on its event loop. Keep the
-        # blocking Ghidra HTTP lifecycle in a worker thread so one slow request
-        # cannot close or starve the entire MCP session.
-        return await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+    async def handler(ctx: Context | None = None, **kwargs):
+        # A heartbeat runs alongside the call, never around it: the await below
+        # is left exactly as it was so cancellation still reaches
+        # run_blocking_ghidra_call and aborts the in-flight Ghidra socket.
+        heartbeat = _start_progress_heartbeat(ctx, name)
+        try:
+            # FastMCP calls synchronous tools directly on its event loop. Keep
+            # the blocking Ghidra HTTP lifecycle in a worker thread so one slow
+            # request cannot close or starve the entire MCP session.
+            result = await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+        finally:
+            if heartbeat is not None:
+                heartbeat.cancel()
+        # Failures arrive as an ordinary 200 body; raising is what makes the
+        # tool result carry isError instead of looking like a success.
+        return dispatch.raise_on_failure(result)
 
-    handler.__signature__ = sync_handler.__signature__
-    handler.__annotations__ = sync_handler.__annotations__
+    handler.__signature__ = _signature_with_context(sync_handler.__signature__)
+    handler.__annotations__ = dict(sync_handler.__annotations__, ctx=Context | None)
     handler.__name__ = name
     handler.__doc__ = description
 
-    mcp.tool(name=name, description=description)(handler)
+    mcp.tool(
+        name=name,
+        description=description,
+        annotations=_tool_annotations(tool_def),
+        # Every tool here returns the server's response body as text. Left to
+        # infer from the `-> str` annotation, FastMCP declares
+        # outputSchema {"result": {"type": "string"}} and wraps the body in
+        # structuredContent {"result": "<the json>"} — a structured shape whose
+        # single field is an opaque string. That advertises a contract the tool
+        # does not have; a client reading `result` still has to parse the JSON
+        # itself. Declaring truthful per-tool output schemas needs response
+        # shapes described on the Java side, which no endpoint does yet, so the
+        # honest option is to declare none.
+        structured_output=False,
+    )(handler)
     state._dynamic_tool_names.append(name)
     return True
+
+
+def _tool_annotations(tool_def: dict) -> ToolAnnotations | None:
+    """Map the server's `access` classification onto MCP tool annotations.
+
+    Clients act on these, and not only cosmetically: Claude Code reads a tool's
+    read-only-ness solely from ``readOnlyHint`` (absent ⇒ false) and, in plan
+    mode, forces a permission prompt for every MCP tool that is not read-only —
+    one no allow-rule can suppress, since the plan gate is evaluated ahead of
+    allow-rules and returns early. The same flag decides whether calls may run
+    concurrently. So an unannotated read is a tool that cannot be used
+    unattended and cannot be parallelised.
+
+    A tool the server has not classified gets no annotations at all: guessing
+    read-only from the HTTP method would be wrong for the mutating GETs
+    (``/switch_program``, ``/save_program``, ``/open_program``,
+    ``/save_all_programs``) and letting one of those run unprompted while an
+    agent is still planning is the failure this is meant to avoid.
+    """
+    if "read_only" not in tool_def:
+        return None
+    if tool_def["read_only"]:
+        return READ_ONLY_TOOL
+    return DESTRUCTIVE_TOOL if tool_def.get("destructive") else WRITE_TOOL
 
 
 def _report_tool_registration_failures(failures: list[str]) -> None:

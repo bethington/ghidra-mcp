@@ -7,7 +7,7 @@ Tests for the 12 Phase 4 endpoints:
 - search_byte_patterns
 - analyze_data_region
 - get_function_hash
-- get_bulk_function_hashes
+- get_function_hash (bulk mode)
 - detect_array_bounds
 - get_assembly_context
 - analyze_struct_field_usage
@@ -163,18 +163,18 @@ class TestFunctionHashing:
         assert response.status_code in [200, 400, 404, 500]
 
     @pytest.mark.requires_program
-    def test_get_bulk_function_hashes(self, http_client):
+    def test_get_function_hash_bulk(self, http_client):
         """Test getting bulk function hashes."""
-        response = http_client.get("/get_bulk_function_hashes", params={
+        response = http_client.get("/get_function_hash", params={
             "offset": 0,
             "limit": 10
         })
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_get_bulk_function_hashes_filtered(self, http_client):
+    def test_get_function_hash_bulk_filtered(self, http_client):
         """Test bulk hashes with filter."""
-        response = http_client.get("/get_bulk_function_hashes", params={
+        response = http_client.get("/get_function_hash", params={
             "offset": 0,
             "limit": 5,
             "filter": "documented"
@@ -182,9 +182,9 @@ class TestFunctionHashing:
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_get_bulk_function_hashes_undocumented(self, http_client):
+    def test_get_function_hash_bulk_undocumented(self, http_client):
         """Test bulk hashes for undocumented functions."""
-        response = http_client.get("/get_bulk_function_hashes", params={
+        response = http_client.get("/get_function_hash", params={
             "offset": 0,
             "limit": 5,
             "filter": "undocumented"
@@ -448,7 +448,7 @@ class TestPhase4Integration:
     def test_bulk_function_analysis(self, http_client):
         """Test bulk function analysis workflow."""
         # Get bulk hashes
-        response = http_client.get("/get_bulk_function_hashes", params={
+        response = http_client.get("/get_function_hash", params={
             "limit": 5
         })
         assert response.status_code == 200
@@ -470,4 +470,4 @@ class TestPhase4Integration:
             # The bulk-hash body was not JSON. A bare `except` here also
             # swallowed the AssertionErrors above, so the block could not
             # fail even once the call was correct.
-            pytest.fail("/get_bulk_function_hashes did not return JSON")
+            pytest.fail("/get_function_hash did not return JSON")

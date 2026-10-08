@@ -79,9 +79,9 @@ public class EmulationService {
             description = "Emulate a single function with controlled register/memory inputs. " +
                     "Returns final register state after execution. Ideal for understanding " +
                     "hash functions, crypto routines, or any pure-computation code path.",
-            category = "emulation")
+            category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateFunction(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                     description = "Entry point address of the function to emulate") String addressStr,
             @Param(value = "registers", source = ParamSource.BODY, fieldsJson = true,
                     description = "Initial register values as JSON: {\"EAX\": \"0x1234\", \"ECX\": \"0x7FFE0000\"}") String registersJson,
@@ -110,7 +110,7 @@ public class EmulationService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        Address entryAddr = ServiceUtils.parseAddress(program, addressStr);
+        Address entryAddr = ServiceUtils.resolveFunctionAddress(program, addressStr);
         if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
         Function func = program.getFunctionManager().getFunctionAt(entryAddr);
@@ -330,7 +330,7 @@ public class EmulationService {
             description = "Brute-force API hash resolution. Emulates a hash function with " +
                     "each candidate API name and returns the one that produces the target hash. " +
                     "Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms.",
-            category = "emulation")
+            category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateHashBatch(
             @Param(value = "hash_function_address", paramType = "address", source = ParamSource.BODY,
                     description = "Address of the hash computation function") String hashFuncAddr,

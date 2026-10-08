@@ -145,7 +145,9 @@ endpoint_smoke:
       type: "json"
       contains_keys: ["function_count", "program"]
 
-  - endpoint: "/list_segments"
+  - endpoint: "/list_program_items"
+    params:
+      kind: segments
     assert:
       type: "lines"
       min_lines: 4
@@ -175,14 +177,14 @@ endpoint_smoke:
     assert:
       type: "nonempty"
 
-  - endpoint: "/list_data_types"
+  - endpoint: "/find_data_types"
     assert:
-      type: "lines"
-      min_lines: 10
+      json_keys: ["data_types", "count", "offset", "total"]
 
-  - endpoint: "/list_data_type_categories"
+  - endpoint: "/find_data_types"
+    params: { categories: "true" }
     assert:
-      type: "nonempty"
+      json_keys: ["categories", "count", "offset", "total"]
 
   - endpoint: "/list_calling_conventions"
     assert:
@@ -208,7 +210,9 @@ endpoint_smoke:
     assert:
       type: "nonempty"
 
-  - endpoint: "/get_current_program_info"
+  - endpoint: "/get_ui_cursor"
+    params:
+      type: program
     assert:
       type: "json"
       contains_keys: ["name"]
@@ -234,10 +238,10 @@ endpoint_smoke:
   # The parameter is `pattern`, not `query`. Passing the wrong name used to
   # produce a plain-text "Search pattern is required", which satisfied
   # `nonempty` -- so the case passed while testing nothing. Keep the name right.
-  - endpoint: "/search_data_types"
+  - endpoint: "/find_data_types"
     params: { pattern: "int" }
     assert:
-      type: "nonempty"
+      json_keys: ["data_types", "count", "offset", "total"]
 
   # xref
   - endpoint: "/get_xrefs_to"

@@ -176,7 +176,7 @@ snake_case Python scripts.
 
 ```text
 ✅ GOOD
-fun_doc.py
+upgrade_project_language.py
 ordinal_auto_fixer.py
 inventory_scorer.py
 ```
@@ -263,7 +263,7 @@ ghidra-mcp/
 │           └── GhidraMCPPluginTest.java
 ├── tools/
 │   ├── setup/
-│   └── README.md   # points at fun-doc/ for documentation CLI
+│   └── README.md   # index of the tools in this directory
 ├── logs/
 │   └── (archived logs here)
 └── ...

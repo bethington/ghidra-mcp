@@ -8,9 +8,9 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.*;
-import ghidra.util.Msg;
 
 import java.util.*;
+import java.util.Comparator;
 import java.util.regex.Pattern;
 
 /**
@@ -30,8 +30,25 @@ public class ListingService {
     // Listing endpoints
     // ========================================================================
 
-    @McpTool(path = "/list_methods", description = "List all function names with pagination", category = "listing")
-    public Response getAllFunctionNames(
+    /** Kinds accepted by {@link #listProgramItems}; unknown values are rejected. */
+    private static final Set<String> PROGRAM_ITEM_KINDS = Set.of(
+            "classes", "methods", "namespaces", "imports", "exports",
+            "segments", "data_items", "external_locations");
+
+    @McpTool(path = "/list_program_items",
+        description = "List one kind of program inventory with pagination. "
+            + "Replaces list_classes, list_methods, list_namespaces, list_imports, "
+            + "list_exports, list_segments, list_data_items and list_external_locations — "
+            + "one envelope ({kind, items, count, total, limit, offset}), item shape varies "
+            + "by kind: classes|methods|namespaces → string names; imports|exports → "
+            + "{address, name}; segments → {name, start, end, size, readable, writable, "
+            + "executable, initialized}; data_items → {address, block, label, size, type}; "
+            + "external_locations → {name, library, address, original_imported_name?}. "
+            + "Unknown kind is an error listing the valid values.",
+        category = "listing", access = ToolAccess.READ_ONLY)
+    public Response listProgramItems(
+            @Param(value = "kind", description = "classes | methods | namespaces | imports | "
+                        + "exports | segments | data_items | external_locations") String kind,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -45,28 +62,38 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if (kind == null || kind.isBlank()) {
+            return Response.err("kind parameter is required");
+        }
+        String normalized = kind.trim().toLowerCase();
+        if (!PROGRAM_ITEM_KINDS.contains(normalized)) {
+            return Response.err("Unknown kind: " + kind + ". Valid kinds: "
+                    + String.join(", ", PROGRAM_ITEM_KINDS));
+        }
+
+        List<?> all = switch (normalized) {
+            case "classes" -> collectClassNames(program);
+            case "methods" -> collectMethodNames(program);
+            case "namespaces" -> collectNamespaceNames(program);
+            case "imports" -> collectImports(program);
+            case "exports" -> collectExports(program);
+            case "segments" -> collectSegments(program);
+            case "data_items" -> collectDataItems(program);
+            case "external_locations" -> collectExternalLocations(program);
+            default -> List.of();
+        };
+        return ServiceUtils.pagedProgramItems(normalized, all, offset, limit);
+    }
+
+    private List<String> collectMethodNames(Program program) {
         List<String> names = new ArrayList<>();
         for (Function f : program.getFunctionManager().getFunctions(true)) {
             names.add(f.getName());
         }
-        return ServiceUtils.paged("methods", names, offset, limit);
+        return names;
     }
 
-    @McpTool(path = "/list_classes", description = "List class and namespace names with pagination", category = "listing")
-    public Response getAllClassNames(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<String> collectClassNames(Program program) {
         Set<String> classNames = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
             Namespace ns = symbol.getParentNamespace();
@@ -76,24 +103,10 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(classNames);
         Collections.sort(sorted);
-        return ServiceUtils.paged("classes", sorted, offset, limit);
+        return sorted;
     }
 
-    @McpTool(path = "/list_segments", description = "List memory blocks/segments", category = "listing")
-    public Response listSegments(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<Map<String, Object>> collectSegments(Program program) {
         List<Map<String, Object>> segments = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
             Map<String, Object> entry = new LinkedHashMap<>();
@@ -107,24 +120,10 @@ public class ListingService {
             entry.put("initialized", block.isInitialized());
             segments.add(entry);
         }
-        return ServiceUtils.paged("segments", segments, offset, limit);
+        return segments;
     }
 
-    @McpTool(path = "/list_imports", description = "List external/imported symbols", category = "listing")
-    public Response listImports(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<Map<String, Object>> collectImports(Program program) {
         ExternalManager extMgr = program.getExternalManager();
         List<Map<String, Object>> all = new ArrayList<>();
         for (Symbol symbol : program.getSymbolTable().getExternalSymbols()) {
@@ -140,24 +139,10 @@ public class ListingService {
             }
             all.add(entry);
         }
-        return ServiceUtils.paged("imports", all, offset, limit);
+        return all;
     }
 
-    @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing")
-    public Response listExports(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<Map<String, Object>> collectExports(Program program) {
         SymbolTable table = program.getSymbolTable();
         SymbolIterator it = table.getAllSymbols(true);
 
@@ -171,24 +156,10 @@ public class ListingService {
                 exports.add(entry);
             }
         }
-        return ServiceUtils.paged("exports", exports, offset, limit);
+        return exports;
     }
 
-    @McpTool(path = "/list_namespaces", description = "List namespace hierarchy", category = "listing")
-    public Response listNamespaces(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<String> collectNamespaceNames(Program program) {
         Set<String> namespaces = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
             Namespace ns = symbol.getParentNamespace();
@@ -198,24 +169,10 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(namespaces);
         Collections.sort(sorted);
-        return ServiceUtils.paged("namespaces", sorted, offset, limit);
+        return sorted;
     }
 
-    @McpTool(path = "/list_data_items", description = "List defined data items", category = "listing")
-    public Response listDefinedData(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private List<Map<String, Object>> collectDataItems(Program program) {
         List<Map<String, Object>> items = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
             DataIterator it = program.getListing().getDefinedData(block.getStart(), true);
@@ -235,10 +192,40 @@ public class ListingService {
                 }
             }
         }
-        return ServiceUtils.paged("data_items", items, offset, limit);
+        return items;
     }
 
-    @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.", category = "listing")
+    /** Package-visible for offline tests that exercise null external addresses. */
+    List<Map<String, Object>> collectExternalLocations(Program program) {
+        ExternalManager extMgr = program.getExternalManager();
+        List<Map<String, Object>> results = new ArrayList<>();
+        String[] extLibNames = extMgr.getExternalLibraryNames();
+        for (String libName : extLibNames) {
+            ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
+            while (iter.hasNext()) {
+                ExternalLocation extLoc = iter.next();
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("name", extLoc.getLabel());
+                entry.put("library", libName);
+                Address address = extLoc.getAddress();
+                if (address != null) {
+                    entry.putAll(ServiceUtils.addressToJson(address, program));
+                    entry.putIfAbsent("address_full", address.toString());
+                    entry.putIfAbsent("address_space", address.getAddressSpace().getName());
+                } else {
+                    entry.put("address", null);
+                }
+                String original = extLoc.getOriginalImportedName();
+                if (original != null && !original.isEmpty() && !original.equals(extLoc.getLabel())) {
+                    entry.put("original_imported_name", original);
+                }
+                results.add(entry);
+            }
+        }
+        return results;
+    }
+
+    @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by xref count (descending). By default returns only defined data items. `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to also include unnamed/untyped addresses — `filter=all,type_filter=all` returns the full data surface (named + DAT_*-style autogen + raw undefined-with-xrefs). `min_xrefs` (default 1) suppresses zero-xref noise on undefined items.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDataItemsByXrefs(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -344,99 +331,154 @@ public class ListingService {
                 "defined", "all", 1, false, programName);
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
-    public Response searchFunctionsByName(
-            @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
+    @McpTool(path = "/find_functions",
+        description = "Find functions: every filter is optional, so with none it lists the whole "
+            + "program a page at a time. Filter by name (substring or regex=true), xref count, "
+            + "calling convention, whether the name is user-given, thunk or external, or by tag "
+            + "(tag=a,b keeps functions carrying ANY of them); each result lists its tags; sort by "
+            + "address, name or xref_count. Replaces list_functions, list_functions_enhanced, "
+            + "search_functions and search_functions_enhanced, which returned four different "
+            + "shapes for the same question.",
+        category = "listing", access = ToolAccess.READ_ONLY)
+    public Response findFunctions(
+            @Param(value = "name_pattern", defaultValue = "",
+                   aliases = {"pattern", "query", "name"},
+                   description = "Substring to match, or a regex when regex=true. Omit to match "
+                               + "every function.") String namePattern,
+            @Param(value = "regex", defaultValue = "false",
+                   description = "Treat name_pattern as a regular expression.") boolean regex,
+            @Param(value = "min_xrefs", defaultValue = "",
+                   description = "Only functions with at least this many references to them.") Integer minXrefs,
+            @Param(value = "max_xrefs", defaultValue = "",
+                   description = "Only functions with at most this many references to them.") Integer maxXrefs,
+            @Param(value = "calling_convention", defaultValue = "",
+                   description = "Only functions with this calling convention (e.g. __stdcall).") String callingConvention,
+            @Param(value = "has_custom_name", defaultValue = "",
+                   description = "true = only functions somebody has named; false = only "
+                               + "auto-generated names (FUN_*, thunk_*).") Boolean hasCustomName,
+            @Param(value = "is_thunk", defaultValue = "",
+                   description = "true = only thunks, false = exclude them, omit for both.") Boolean isThunkFilter,
+            @Param(value = "is_external", defaultValue = "",
+                   description = "true = only external functions, false = exclude them.") Boolean isExternalFilter,
+            @Param(value = "tag", defaultValue = "",
+                   description = "Only functions carrying any of these tags: one name or a "
+                               + "comma-separated list. A name that is not a defined tag is an "
+                               + "error (list_function_tags shows the definitions).") String tagFilter,
+            @Param(value = "sort_by", defaultValue = "address",
+                   description = "address | name | xref_count.") String sortBy,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
                                + "`total` the response reports.") int offset,
             @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+                   description = "Page size. 0 means no limit, which on a large binary is a "
+                               + "megabytes-long response — the old list_functions had no "
+                               + "pagination at all and returned 1.7MB on a stripped `ls`.") int limit,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always "
+                               + "specify when multiple programs are open)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (searchTerm == null || searchTerm.isEmpty()) return Response.err("Search term is required");
+        Pattern pattern = null;
+        if (regex && namePattern != null && !namePattern.isEmpty()) {
+            try {
+                pattern = Pattern.compile(namePattern);
+            } catch (Exception e) {
+                return Response.err("Invalid regex pattern: " + e.getMessage());
+            }
+        }
 
-        List<String> matches = new ArrayList<>();
+        Set<String> wantedTags = new java.util.LinkedHashSet<>();
+        if (tagFilter != null) {
+            for (String part : tagFilter.split(",")) {
+                if (!part.trim().isEmpty()) wantedTags.add(part.trim());
+            }
+        }
+        var tagManager = program.getFunctionManager().getFunctionTagManager();
+        for (String wanted : wantedTags) {
+            if (tagManager.getFunctionTag(wanted) == null) {
+                return Response.err("Tag not found: " + wanted);
+            }
+        }
+
+        // Classification walks a function's instructions, so it is the one expensive test here.
+        // Only pay it during the scan when a caller actually filters on it; otherwise it is
+        // deferred to the returned page, turning 25,779 instruction walks into `limit` of them.
+        boolean classifyWhileScanning = isThunkFilter != null;
+
+        List<Map<String, Object>> matches = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
             String name = func.getName();
-            if (name.toLowerCase().contains(searchTerm.toLowerCase())) {
-                matches.add(String.format("%s @ %s", name, func.getEntryPoint()));
+            if (namePattern != null && !namePattern.isEmpty()) {
+                boolean hit = regex ? pattern.matcher(name).find() : name.contains(namePattern);
+                if (!hit) continue;
             }
-        }
-
-        Collections.sort(matches);
-
-        return ServiceUtils.paged("functions", matches, offset, limit);
-    }
-
-    @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
-    public Response listFunctions(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        List<Map<String, Object>> functions = new ArrayList<>();
-        for (Function func : program.getFunctionManager().getFunctions(true)) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("name", func.getName());
-            entry.put("address", func.getEntryPoint().toString(false));
-            functions.add(entry);
-        }
-        return ServiceUtils.listed("functions", functions);
-    }
-
-    @McpTool(path = "/list_functions_enhanced", description = "List functions with thunk/external flags as JSON", category = "listing")
-    public Response listFunctionsEnhanced(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "10000",
-                   description = "Maximum functions returned, counted after `offset` is applied "
-                               + "(default 10000, which covers most programs in one call). This endpoint "
-                               + "stops at the limit rather than treating 0 as unlimited, so 0 returns an "
-                               + "EMPTY list.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        List<Map<String, Object>> functions = new ArrayList<>();
-        int count = 0;
-        int skipped = 0;
-
-        for (Function func : program.getFunctionManager().getFunctions(true)) {
-            if (skipped < offset) {
-                skipped++;
+            if (hasCustomName != null && hasCustomName == ServiceUtils.isAutoGeneratedName(name)) {
                 continue;
             }
-            if (count >= limit) break;
+            if (callingConvention != null && !callingConvention.isEmpty()
+                    && !callingConvention.equalsIgnoreCase(func.getCallingConventionName())) {
+                continue;
+            }
+            if (!wantedTags.isEmpty()
+                    && func.getTags().stream().noneMatch(t -> wantedTags.contains(t.getName()))) {
+                continue;
+            }
+            int xrefCount = func.getSymbol().getReferenceCount();
+            if (minXrefs != null && xrefCount < minXrefs) continue;
+            if (maxXrefs != null && xrefCount > maxXrefs) continue;
 
-            Map<String, Object> funcItem = new LinkedHashMap<>();
-            funcItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
-            funcItem.put("name", func.getName());
-            funcItem.put("isThunk", "thunk".equals(AnalysisService.classifyFunction(func, program)));
-            funcItem.put("isExternal", func.isExternal());
-            functions.add(funcItem);
-            count++;
+            boolean external = func.isExternal();
+            if (isExternalFilter != null && external != isExternalFilter) continue;
+            if (classifyWhileScanning) {
+                boolean thunk = "thunk".equals(AnalysisService.classifyFunction(func, program));
+                if (thunk != isThunkFilter) continue;
+            }
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("name", name);
+            row.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            row.put("xref_count", xrefCount);
+            row.put("is_external", external);
+            if (classifyWhileScanning) {
+                row.put("is_thunk", isThunkFilter);
+            }
+            matches.add(row);
         }
 
-        return Response.ok(JsonHelper.mapOf(
-                "functions", functions,
-                "count", count,
-                "offset", offset,
-                "limit", limit
-        ));
+        if ("name".equals(sortBy)) {
+            matches.sort(Comparator.comparing(m -> (String) m.get("name")));
+        } else if ("xref_count".equals(sortBy)) {
+            matches.sort((a, b) -> Integer.compare((Integer) b.get("xref_count"), (Integer) a.get("xref_count")));
+        } else {
+            matches.sort(Comparator.comparing(m -> (String) m.get("address")));
+        }
+
+        Response paged = ServiceUtils.paged("functions", matches, offset, limit);
+        // Per-result work that only the returned page pays for: tags, and thunk
+        // classification when nothing filtered on it.
+        if (paged instanceof Response.Ok ok
+                && ok.data() instanceof Map<?, ?> map
+                && map.get("functions") instanceof List<?> rows) {
+            for (Object o : rows) {
+                if (!(o instanceof Map)) continue;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> row = (Map<String, Object>) o;
+                Function func = ServiceUtils.resolveFunction(program, String.valueOf(row.get("address")));
+                row.put("tags", func == null ? List.of()
+                    : func.getTags().stream().map(t -> t.getName()).sorted().toList());
+                if (!classifyWhileScanning) {
+                    row.put("is_thunk", func != null
+                        && "thunk".equals(AnalysisService.classifyFunction(func, program)));
+                }
+            }
+        }
+        return paged;
     }
 
-    @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing")
+    @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listCallingConventions(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -457,7 +499,7 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing")
+    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDefinedStrings(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -501,7 +543,7 @@ public class ListingService {
         return ServiceUtils.paged("strings", strings, offset, limit);
     }
 
-    @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing")
+    @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getFunctionCount(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -515,7 +557,7 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing")
+    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response searchStrings(
             @Param(value = "search_term", description = "Regex search pattern") String query,
             @Param(value = "min_length", defaultValue = "4",
@@ -574,7 +616,7 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/list_globals", description = "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.", category = "listing")
+    @McpTool(path = "/list_globals", description = "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listGlobals(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -710,7 +752,7 @@ public class ListingService {
 
     @McpTool(path = "/list_shadowed_globals",
             description = "List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them. These are invisible to /list_globals — it resolves the CONTAINING unit, so it reports the covering neighbour's type at the shadowed address and the global looks perfectly typed. Each record carries the container that swallowed it. Use this to find documentation that a neighbouring type application destroyed, or a symbol sitting inside an array where it does not belong.",
-            category = "listing")
+            category = "listing", access = ToolAccess.READ_ONLY)
     public Response listShadowedGlobals(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -809,7 +851,7 @@ public class ListingService {
         return block != null && isDataBlock(block);
     }
 
-    @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing")
+    @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -967,8 +1009,8 @@ public class ListingService {
      * type at all. Every consumer reads this field as "the type of this
      * global", so a global swallowed by its neighbour rendered as perfectly
      * typed in all of them: the dashboard's types bar, the globals inventory,
-     * `plate_scaffold`, and the assess pass. Measured 2026-08-03 across the
-     * PD2-S12 corpus — 540 shadowed globals, 539 of them invisible everywhere
+     * `plate_scaffold`, and the assess pass. Measured 2026-08-03 across a
+     * multi-DLL production corpus — 540 shadowed globals, 539 of them invisible everywhere
      * for this one reason.
      *
      * It also contradicted this very method's own caller: `listGlobals` derives
@@ -1024,60 +1066,7 @@ public class ListingService {
     // External Location Listing
     // ========================================================================
 
-    @McpTool(path = "/list_external_locations", description = "List external symbol locations", category = "listing")
-    public Response listExternalLocations(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of external locations to skip before this page starts; 0 begins "
-                               + "at the first entry. An offset past the end returns an empty list.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum external locations returned (default 100). This endpoint slices "
-                               + "the result directly and returns a bare array with no total, so 0 here "
-                               + "returns an EMPTY list rather than everything.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        ExternalManager extMgr = program.getExternalManager();
-
-        try {
-            List<Map<String, Object>> results = new ArrayList<>();
-            String[] extLibNames = extMgr.getExternalLibraryNames();
-            for (String libName : extLibNames) {
-                ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
-                while (iter.hasNext()) {
-                    ExternalLocation extLoc = iter.next();
-                    Map<String, Object> entry = new LinkedHashMap<>();
-                    entry.put("name", extLoc.getLabel());
-                    entry.put("library", libName);
-                    Address address = extLoc.getAddress();
-                    if (address != null) {
-                        entry.putAll(ServiceUtils.addressToJson(address, program));
-                        entry.putIfAbsent("address_full", address.toString());
-                        entry.putIfAbsent("address_space", address.getAddressSpace().getName());
-                    } else {
-                        entry.put("address", null);
-                    }
-                    String original = extLoc.getOriginalImportedName();
-                    if (original != null && !original.isEmpty() && !original.equals(extLoc.getLabel())) {
-                        entry.put("original_imported_name", original);
-                    }
-                    results.add(entry);
-                }
-            }
-            int end = Math.min(offset + limit, results.size());
-            return Response.ok(offset < results.size() ? results.subList(offset, end) : List.of());
-        } catch (Exception e) {
-            Msg.error(this, "Error listing external locations: " + e.getMessage());
-            return Response.err(e.getMessage());
-        }
-    }
-
-    public Response listExternalLocations(int offset, int limit) {
-        return listExternalLocations(offset, limit, null);
-    }
-
-    @McpTool(path = "/get_external_location", description = "Get external location details by address or DLL name", category = "listing")
+    @McpTool(path = "/get_external_location", description = "Get external location details by address or DLL name", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getExternalLocationDetails(
             @Param(value = "address", paramType = "address",
                    description = "Address of the external location, as 0x<hex> (default space) or "
@@ -1161,7 +1150,7 @@ public class ListingService {
     // Utility endpoints (not program-scoped)
     // ======================================================================
 
-    @McpTool(path = "/convert_number", description = "Convert number between hex/decimal/binary formats", category = "listing")
+    @McpTool(path = "/convert_number", description = "Convert number between hex/decimal/binary formats", category = "listing", access = ToolAccess.READ_ONLY)
     public Response convertNumber(
             @Param(value = "text", description = "Number to convert") String text,
             @Param(value = "size", defaultValue = "4", description = "Size in bytes") int size) {

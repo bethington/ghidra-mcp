@@ -590,9 +590,8 @@ def test_an_UNKNOWN_probe_is_not_reported_as_passed(env, monkeypatch, capsys):
 
 
 def test_leaked_checkouts_are_recorded_and_warned_about_LOUDLY(env, monkeypatch, capsys):
-    """open_program registers a DomainObject consumer nothing releases, so the
-    checkout survives until Ghidra restarts. Leaving the project quietly worse
-    than we found it is the failure mode."""
+    """A checkout the probe could not release survives until Ghidra restarts.
+    Leaving the project quietly worse than we found it is the failure mode."""
     def leaking(base, path, leaked=None):
         leaked.append(path)
         return "current", "{}"
@@ -943,11 +942,12 @@ def _probe_env(monkeypatch, *, checkouts=(), checkout_ok=True, opened=None):
     posted: list[str] = []
 
     def fake_get(base, endpoint, timeout=60.0, **params):
-        if endpoint == "server/checkouts":
-            return {"checkouts": [{"path": p} for p in checkouts]}
-        return opened
+        assert endpoint == "server/checkouts", endpoint
+        return {"checkouts": [{"path": p} for p in checkouts]}
 
     def fake_post(base, endpoint, **params):
+        if endpoint == "open_program":
+            return opened
         posted.append(endpoint)
         if endpoint.endswith("checkout"):
             return {"status": "checked_out"} if checkout_ok else {"status": "denied"}
@@ -968,9 +968,29 @@ def test_a_program_that_opens_read_write_is_current(monkeypatch):
     assert "server/version_control/undo_checkout" in posted, "the probe must clean up after itself"
 
 
+def test_a_program_that_only_opens_read_only_for_its_language_is_STALE(monkeypatch):
+    """The server falls back to a read-only open, so a stale program answers
+    success: true. The reason, not the success flag, is the oracle."""
+    _probe_env(monkeypatch, opened={
+        "success": True, "read_only": True,
+        "read_only_reason": "Minor language change 4.6 -> 4.7 -- /p was built against ..."})
+
+    state, detail = upl.probe_language_state("http://h", "/p")
+
+    assert state == "stale"
+    assert "4.6 -> 4.7" in detail
+
+
+def test_a_read_only_open_for_another_reason_is_unknown_not_current(monkeypatch):
+    _probe_env(monkeypatch, opened={"success": True, "read_only": True,
+                                    "read_only_reason": "file is in use"})
+
+    assert upl.probe_language_state("http://h", "/p")[0] == "unknown"
+
+
 def test_a_minor_language_change_is_reported_as_STALE(monkeypatch):
-    """FrontEndProgramProvider passes okToUpgrade=false, so a stale program
-    surfaces this message instead of being silently upgraded."""
+    """The GUI passes okToUpgrade=false, so a stale program surfaces this
+    message instead of being silently upgraded."""
     _probe_env(monkeypatch, opened={"success": False,
                                     "error": "Minor language change 4.6 -> 4.7"})
 
@@ -1013,9 +1033,10 @@ def test_a_preexisting_checkout_is_reused_and_NOT_released_by_the_probe(monkeypa
 
 def test_a_checkout_the_probe_cannot_release_is_appended_to_leaked(monkeypatch):
     monkeypatch.setattr(upl, "mcp_get", lambda base, endpoint, timeout=60.0, **p:
-                        {"checkouts": []} if endpoint == "server/checkouts" else {"success": True})
+                        {"checkouts": []})
     monkeypatch.setattr(upl, "mcp_post", lambda base, endpoint, **p:
                         {"status": "checked_out"} if endpoint.endswith("/checkout")
+                        else {"success": True} if endpoint == "open_program"
                         else {"error": "is in use"})
     leaked: list[str] = []
 
@@ -1027,15 +1048,14 @@ def test_a_checkout_the_probe_cannot_release_is_appended_to_leaked(monkeypatch):
 def test_a_transport_failure_mid_probe_is_unknown_and_still_releases(monkeypatch):
     released: list[str] = []
 
-    def fake_get(base, endpoint, timeout=60.0, **params):
-        if endpoint == "server/checkouts":
-            return {"checkouts": []}
-        raise OSError("socket closed")
+    def fake_post(base, endpoint, **params):
+        if endpoint == "open_program":
+            raise OSError("socket closed")
+        released.append(endpoint)
+        return {"status": "checked_out" if endpoint.endswith("/checkout") else "checkout_undone"}
 
-    monkeypatch.setattr(upl, "mcp_get", fake_get)
-    monkeypatch.setattr(upl, "mcp_post", lambda base, endpoint, **p: (
-        released.append(endpoint), {"status": "checked_out" if endpoint.endswith("/checkout")
-                                    else "checkout_undone"})[1])
+    monkeypatch.setattr(upl, "mcp_get", lambda base, endpoint, timeout=60.0, **p: {"checkouts": []})
+    monkeypatch.setattr(upl, "mcp_post", fake_post)
 
     state, detail = upl.probe_language_state("http://h", "/p")
 
@@ -1391,21 +1411,23 @@ def test_the_username_has_a_last_resort_default(tmp_path, monkeypatch):
 
 
 def test_the_repo_alone_can_come_from_the_live_instance(tmp_path, monkeypatch):
-    """`--server` without `--repo` must still consult /project/info rather than
+    """`--server` without `--repo` must still consult /get_project_info rather than
     short-circuiting on the partial flag pair."""
+    asked = []
     monkeypatch.setattr(upl, "mcp_get", lambda base, endpoint, timeout=60.0, **p:
-                        {"project": "diablo2"})
+                        asked.append(endpoint) or {"project_name": "local", "server_repo": "diablo2"})
 
     server, repo, origin = upl.resolve_server_and_repo("http://h", tmp_path, "h:13100", None)
 
     assert (server, repo) == ("h:13100", "diablo2")
     assert "live Ghidra" in origin
+    assert asked == ["get_project_info"]
 
 
 def test_the_server_falls_back_to_the_dotenv_host_and_port(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(
         "GHIDRA_SERVER_HOST=ghidra-host\nGHIDRA_SERVER_PORT=13100\n", encoding="utf-8")
-    monkeypatch.setattr(upl, "mcp_get", lambda *a, **k: {"project": "diablo2"})
+    monkeypatch.setattr(upl, "mcp_get", lambda *a, **k: {"server_repo": "diablo2"})
 
     server, repo, origin = upl.resolve_server_and_repo("http://h", tmp_path, None, None)
 

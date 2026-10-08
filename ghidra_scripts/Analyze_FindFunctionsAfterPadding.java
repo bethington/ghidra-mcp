@@ -6,9 +6,9 @@
 // Output: Creates new functions at discovered entry points in the program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Find and create functions after padding bytes
-// @menupath Diablo 2.Analysis.Find Functions After Padding
+// @menupath GhidraMCP.Analysis.Find Functions After Padding
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

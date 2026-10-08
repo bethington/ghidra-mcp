@@ -1,6 +1,6 @@
 // Verify __thiscall calling conventions for all functions using Claude AI
 //@author Ben Ethington
-//@category Diablo 2
+//@category GhidraMCP
 //@keybinding
 //@menupath Tools.MCP.Verify Thiscall Conventions
 //@toolbar

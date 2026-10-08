@@ -48,47 +48,6 @@ public final class ServiceUtils {
     }
 
     /**
-     * Unescape JSON string escape sequences: \n -> newline, \" -> quote, \\ -> backslash, etc.
-     */
-    public static String unescapeJsonString(String s) {
-        if (s == null || s.isEmpty()) return s;
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' && i + 1 < s.length()) {
-                char next = s.charAt(i + 1);
-                switch (next) {
-                    case 'n':  sb.append('\n'); i++; break;
-                    case 'r':  sb.append('\r'); i++; break;
-                    case 't':  sb.append('\t'); i++; break;
-                    case '"':  sb.append('"');  i++; break;
-                    case '\\': sb.append('\\'); i++; break;
-                    case '/':  sb.append('/');  i++; break;
-                    case 'u':
-                        if (i + 5 < s.length()) {
-                            try {
-                                int cp = Integer.parseInt(s.substring(i + 2, i + 6), 16);
-                                sb.append((char) cp);
-                                i += 5;
-                            } catch (NumberFormatException e) {
-                                sb.append(c);
-                            }
-                        } else {
-                            sb.append(c);
-                        }
-                        break;
-                    default:
-                        sb.append(c);
-                        break;
-                }
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
      * Serialize a List of objects to a JSON array string.
      * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
      */
@@ -191,40 +150,6 @@ public final class ServiceUtils {
     // Numeric/Boolean Parsing
     // ========================================================================
 
-    /**
-     * Parse an integer from a string, returning defaultValue if null or invalid.
-     */
-    public static int parseIntOrDefault(String val, int defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Integer.parseInt(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a double from a string, returning defaultValue if null or invalid.
-     */
-    public static double parseDoubleOrDefault(String val, double defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Double.parseDouble(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a boolean from an Object (Boolean, String, or null), returning defaultValue if unrecognized.
-     */
-    public static boolean parseBoolOrDefault(Object obj, boolean defaultValue) {
-        if (obj == null) return defaultValue;
-        if (obj instanceof Boolean) return (Boolean) obj;
-        if (obj instanceof String) return Boolean.parseBoolean((String) obj);
-        return defaultValue;
-    }
-
     // ========================================================================
     // Collection Utilities
     // ========================================================================
@@ -263,6 +188,27 @@ public final class ServiceUtils {
     }
 
     /**
+     * Paged envelope for {@code /list_program_items}: one {@code items} array
+     * regardless of kind, so agents learn one shape instead of eight.
+     */
+    public static Response pagedProgramItems(String kind, List<?> all, int offset, int limit) {
+        int start = Math.max(0, offset);
+        int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
+        List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("kind", kind);
+        out.put("items", page);
+        out.put("count", page.size());
+        out.put("offset", start);
+        if (limit > 0) {
+            out.put("limit", limit);
+        }
+        out.put("total", all.size());
+        return Response.ok(out);
+    }
+
+    /**
      * List envelope for tools that do not paginate.
      *
      * <pre>{@code {"entry_points": [...], "count": 12}}</pre>
@@ -272,26 +218,6 @@ public final class ServiceUtils {
         out.put(key, all);
         out.put("count", all.size());
         return Response.ok(out);
-    }
-
-    /**
-     * Convert a list of strings into a newline-delimited string, applying offset and limit.
-     *
-     * @deprecated Produces plain text, which violates the response contract
-     *     (see {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}). Use
-     *     {@link #paged(String, List, int, int)} instead. Retained only while
-     *     the staged text-to-JSON migration is in flight.
-     */
-    @Deprecated
-    public static String paginateList(List<String> items, int offset, int limit) {
-        int start = Math.max(0, offset);
-        int end = Math.min(items.size(), offset + limit);
-
-        if (start >= items.size()) {
-            return "";
-        }
-        List<String> sub = items.subList(start, end);
-        return String.join("\n", sub);
     }
 
     /**
@@ -347,47 +273,6 @@ public final class ServiceUtils {
     // ========================================================================
     // String Utilities
     // ========================================================================
-
-    /**
-     * Escape non-ASCII characters to \\xHH hex notation.
-     */
-    public static String escapeNonAscii(String input) {
-        if (input == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (char c : input.toCharArray()) {
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else {
-                sb.append("\\x");
-                sb.append(Integer.toHexString(c & 0xFF));
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Escape special characters in a string for display.
-     */
-    public static String escapeString(String input) {
-        if (input == null) return "";
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < input.length(); i++) {
-            char c = input.charAt(i);
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else {
-                sb.append(String.format("\\x%02x", (int) c & 0xFF));
-            }
-        }
-        return sb.toString();
-    }
 
     /**
      * Check if a string meets quality criteria: 4+ chars, 80%+ printable ASCII.
@@ -521,40 +406,209 @@ public final class ServiceUtils {
         return func;
     }
 
-    /**
-     * Resolve a function by either address or name.
-     * Resolution order:
-     * 1. Try parsing as an address → getFunctionAt → getFunctionContaining
-     * 2. If address resolution fails, try exact name match via SymbolTable
-     * Returns null if no function is found.
-     */
-    public static Function resolveFunction(Program program, String functionRef) {
-        if (functionRef == null || functionRef.trim().isEmpty()) return null;
-        functionRef = functionRef.trim();
+    /** A function reference resolved, or the reason it was not (and the message to say so). */
+    public record FunctionOrError(Function function, String message) {
+        public boolean hasError() { return function == null; }
 
-        // Try as address first (parseAddress never throws)
-        Address addr = parseAddress(program, functionRef);
+        /** The failure as a response. Only meaningful when {@link #hasError()}. */
+        public Response error() { return Response.err(message); }
+    }
+
+    /** How many candidate functions an ambiguity message lists. */
+    private static final int MAX_LISTED_CANDIDATES = 8;
+
+    /**
+     * Whether a reference is unmistakably an address: a {@code 0x} prefix or a
+     * {@code space:offset} form. Anything else, bare hex included, may also be a name.
+     */
+    private static boolean looksLikeExplicitAddress(String ref) {
+        return ref.startsWith("0x") || ref.startsWith("0X") || ref.indexOf(':') >= 0;
+    }
+
+    /**
+     * The one function a reference names: an address, or a function name.
+     *
+     * <p>This is the only place that decides what a function reference means; every endpoint
+     * that takes one goes through it, so the same text resolves the same way everywhere
+     * and fails with the same message. Before it there were two resolvers, and a name typed
+     * in the wrong case worked in some tools and not others.
+     *
+     * <p>Order:
+     * <ol>
+     *   <li>A bare token (no {@code 0x}, no {@code :}) that exactly names a function is that
+     *       function. A function called {@code add} or {@code dead} must not resolve to
+     *       whatever lives at {@code 0xadd}.</li>
+     *   <li>An address: the function at it, else the function containing it.</li>
+     *   <li>A case-insensitive name, only when nothing matched exactly.</li>
+     * </ol>
+     * A name several functions share (two namespaces, a thunk and its target) is an error
+     * listing their addresses, never the first hit: a non-thunk beats a thunk, and if that
+     * still leaves more than one, the caller must pass the address. That matches what
+     * {@code ProjectProgramProvider.match} does for programs.
+     */
+    public static FunctionOrError getFunctionOrError(Program program, String ref) {
+        if (ref == null || ref.isBlank()) {
+            return functionError("Function name or address is required");
+        }
+        String s = ref.trim();
+        boolean explicit = looksLikeExplicitAddress(s);
+
+        if (!explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+
+        Address addr = parseAddress(program, s);
         if (addr != null) {
             Function func = getFunctionForAddress(program, addr);
-            if (func != null) return func;
+            if (func != null) {
+                return new FunctionOrError(func, null);
+            }
         }
-        // Clear lastParseError before the name-lookup path so a failed address parse
-        // doesn't leave a misleading error on the thread-local if name lookup also fails.
+        String parseError = getLastParseError();
         lastParseError.remove();
 
-        // Try as exact function name via symbol table
-        FunctionManager funcManager = program.getFunctionManager();
+        if (explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+        List<Function> anyCase = functionsNamedIgnoreCase(program, s);
+        if (!anyCase.isEmpty()) {
+            return pickFunction(anyCase, s);
+        }
+
+        String why;
+        if (addr != null) {
+            why = "no function at or containing that address, and no function has that name";
+        } else if (explicit && parseError != null && !parseError.isEmpty()) {
+            why = parseError;
+        } else {
+            why = "not a function name, and not an address";
+        }
+        return functionError("Function not found: '" + s + "' (" + why + ")");
+    }
+
+    /**
+     * The entry point of the function a reference names, for call sites that need an
+     * {@code Address} rather than a {@link Function}. On failure returns null and leaves
+     * the reason in {@link #getLastParseError()}, which every caller already reports.
+     *
+     * <p>An address argument behaves exactly as {@link #parseAddress}, including an
+     * interior address, which stays interior so a following {@code getFunctionAt} still
+     * rejects it. A name resolves as in {@link #getFunctionOrError}.
+     *
+     * <p>That asymmetry is why a dozen tools advertised "function address" and meant it
+     * literally, even though the resolver behind them took either form.
+     */
+    public static Address resolveFunctionAddress(Program program, String ref) {
+        String s = ref == null ? "" : ref.trim();
+        if (!s.isEmpty() && !looksLikeExplicitAddress(s)) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                FunctionOrError picked = pickFunction(exact, s);
+                if (picked.hasError()) {
+                    lastParseError.set(picked.message());
+                    return null;
+                }
+                return picked.function().getEntryPoint();
+            }
+        }
+        Address parsed = parseAddress(program, s);
+        if (parsed != null) {
+            return parsed;
+        }
+        FunctionOrError byName = getFunctionOrError(program, s);
+        if (!byName.hasError()) {
+            return byName.function().getEntryPoint();
+        }
+        lastParseError.set(byName.message());
+        return null;
+    }
+
+    /** The function a reference names, or null; for callers with nothing to say about a miss. */
+    public static Function resolveFunction(Program program, String functionRef) {
+        return getFunctionOrError(program, functionRef).function();
+    }
+
+    /**
+     * The symbol a global name refers to, or null: a symbol in the global namespace, else
+     * the first non-function symbol under that name in any namespace. The lookup
+     * {@code rename_symbol} runs twice (its naming-rule check, then the rename itself),
+     * which used to be two copies that had to agree.
+     */
+    public static Symbol findGlobalSymbol(Program program, String name) {
         SymbolTable symbolTable = program.getSymbolTable();
-        SymbolIterator symbols = symbolTable.getSymbols(functionRef);
+        List<Symbol> inGlobalNamespace = symbolTable.getSymbols(name, program.getGlobalNamespace());
+        if (!inGlobalNamespace.isEmpty()) {
+            return inGlobalNamespace.get(0);
+        }
+        SymbolIterator anywhere = symbolTable.getSymbols(name);
+        while (anywhere.hasNext()) {
+            Symbol symbol = anywhere.next();
+            if (symbol.getSymbolType() != SymbolType.FUNCTION) {
+                return symbol;
+            }
+        }
+        return null;
+    }
+
+    private static FunctionOrError functionError(String message) {
+        return new FunctionOrError(null, message);
+    }
+
+    /** Functions whose name is exactly {@code name}, by entry point. */
+    private static List<Function> functionsNamed(Program program, String name) {
+        FunctionManager funcManager = program.getFunctionManager();
+        Map<Address, Function> found = new LinkedHashMap<>();
+        SymbolIterator symbols = program.getSymbolTable().getSymbols(name);
         while (symbols.hasNext()) {
             Symbol symbol = symbols.next();
             if (symbol.getSymbolType() == SymbolType.FUNCTION) {
                 Function func = funcManager.getFunctionAt(symbol.getAddress());
-                if (func != null) return func;
+                if (func != null) {
+                    found.putIfAbsent(func.getEntryPoint(), func);
+                }
             }
         }
+        return new ArrayList<>(found.values());
+    }
 
-        return null;
+    /** Functions whose name matches ignoring case: a linear scan, so a last resort. */
+    private static List<Function> functionsNamedIgnoreCase(Program program, String name) {
+        List<Function> found = new ArrayList<>();
+        for (Function func : program.getFunctionManager().getFunctions(true)) {
+            if (func.getName().equalsIgnoreCase(name)) {
+                found.add(func);
+            }
+        }
+        return found;
+    }
+
+    private static FunctionOrError pickFunction(List<Function> candidates, String ref) {
+        if (candidates.size() == 1) {
+            return new FunctionOrError(candidates.get(0), null);
+        }
+        List<Function> real = candidates.stream().filter(f -> !f.isThunk()).toList();
+        if (real.size() == 1) {
+            return new FunctionOrError(real.get(0), null);
+        }
+        List<String> listed = new ArrayList<>();
+        for (Function f : candidates) {
+            if (listed.size() == MAX_LISTED_CANDIDATES) {
+                break;
+            }
+            listed.add(f.getEntryPoint() + (f.isThunk() ? " (thunk)" : "")
+                + (f.getParentNamespace() != null && !f.getParentNamespace().isGlobal()
+                    ? " in " + f.getParentNamespace().getName(true) : ""));
+        }
+        return functionError("Function name '" + ref + "' is ambiguous: it matches "
+            + candidates.size() + " functions (" + String.join(", ", listed)
+            + (candidates.size() > listed.size() ? ", ..." : "")
+            + "). Pass the address of the one you mean.");
     }
 
     // ========================================================================
@@ -581,9 +635,22 @@ public final class ServiceUtils {
      * {@link DecompInterface#dispose()} when finished.
      */
     public static DecompInterface createConfiguredDecompiler(Program program) {
+        return createConfiguredDecompiler(program, null);
+    }
+
+    /**
+     * As above, but with a hook to adjust the options before they are applied.
+     *
+     * <p>Exists so one endpoint can deviate without moving the default for the ten call
+     * sites that share {@code decompileFunctionNoRetry}: {@code analyze_function_completeness}
+     * counts comment lines in this text, so a change here is a change to a scoring input.
+     */
+    public static DecompInterface createConfiguredDecompiler(Program program,
+            java.util.function.Consumer<DecompileOptions> tune) {
         DecompInterface decomp = new DecompInterface();
         DecompileOptions opts = new DecompileOptions();
         opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+        if (tune != null) tune.accept(opts);
         decomp.setOptions(opts);
         decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
         decomp.openProgram(program);                // openProgram AFTER setOptions
@@ -595,18 +662,6 @@ public final class ServiceUtils {
     // ========================================================================
 
     /**
-     * Generate a JSON error response for when a program cannot be found.
-     * @deprecated Use {@link #getProgramOrError(ProgramProvider, String)} instead.
-     */
-    @Deprecated
-    public static String programNotFoundError(String programName) {
-        if (programName == null || programName.isEmpty()) {
-            return "{\"error\": \"No program is currently open\"}";
-        }
-        return "{\"error\": \"Program not found: " + escapeJson(programName) + "\"}";
-    }
-
-    /**
      * Type-safe result from program resolution.
      * Replaces the Object[] {Program, String} pattern used across all services.
      */
@@ -615,32 +670,141 @@ public final class ServiceUtils {
     }
 
     /**
-     * Resolve the target program by name, or the current program if name is null/empty.
-     * Returns a ProgramOrError with either a valid Program or a Response.Err.
+     * Which program this HTTP request actually resolved, if any.
+     *
+     * <p>HTTP threads are pooled. An uncleared value lets request N+1 inherit
+     * request N's program name and report data as belonging to a binary it never
+     * touched — the multi-program survey confusion wearing an authoritative label.
+     * {@link AnnotationScanner} clears on entry and in {@code finally}; background
+     * jobs (SweepJob, DirtyQueue) do not use this path.
+     */
+    private static final ThreadLocal<Program> resolvedProgram = new ThreadLocal<>();
+
+    /** Record the resolved program for response labeling. Call only on success. */
+    static void recordResolvedProgram(Program program) {
+        if (program != null) {
+            resolvedProgram.set(program);
+        }
+    }
+
+    /** Clear before/after each annotation-driven request (entry + finally). */
+    public static void clearResolvedProgramName() {
+        resolvedProgram.remove();
+    }
+
+    /** Peek the name recorded for this thread, or null if none. */
+    public static String peekResolvedProgramName() {
+        Program program = resolvedProgram.get();
+        return program != null ? program.getName() : null;
+    }
+
+    /** The program this request resolved, or null if none. */
+    static Program peekResolvedProgram() {
+        return resolvedProgram.get();
+    }
+
+    /**
+     * Format the open-program list for error messages (leading space when non-empty).
+     */
+    private static String formatAvailablePrograms(ProgramProvider provider) {
+        Program[] all = provider.getAllOpenPrograms();
+        if (all == null || all.length == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(" Available programs: ");
+        for (int i = 0; i < all.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(all[i].getName());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Resolve the target program by name, or the sole open program when name is omitted.
+     *
+     * <p>When {@code programName} is omitted (null/blank):
+     * <ul>
+     *   <li>exactly one program open → that program (no verbosity tax on the common case)</li>
+     *   <li>more than one open → error naming every open program; with more than one
+     *       candidate, guessing is never acceptable. Measured failure mode: a
+     *       17-program survey that omitted {@code program} returned the same binary's
+     *       numbers 17 times because headless never reassigned {@code currentProgram}
+     *       after the first load.</li>
+     *   <li>zero open → {@code "No program loaded."}</li>
+     * </ul>
+     * An explicit name that misses keeps the existing not-found error.
+     *
+     * <p>{@code /switch_program} does NOT create an exemption for later calls —
+     * having switched N calls ago is exactly the stale implicit state this closes.
+     * Endpoints whose contract IS the active program use
+     * {@link #getActiveProgramOrError} instead.
      */
     public static ProgramOrError getProgramOrError(ProgramProvider provider, String programName) {
-        Program program = null;
         if (programName != null && !programName.isEmpty()) {
-            program = provider.getProgram(programName);
-        } else {
-            program = provider.getCurrentProgram();
-        }
-        if (program == null) {
-            String available = "";
-            Program[] all = provider.getAllOpenPrograms();
-            if (all != null && all.length > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < all.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(all[i].getName());
-                }
-                available = " Available programs: " + sb;
+            Program program;
+            try {
+                program = provider.getProgram(programName);
+            } catch (AmbiguousProgramException e) {
+                return new ProgramOrError(null, Response.err(e.getMessage()));
             }
-            String msg = programName != null && !programName.isEmpty()
-                    ? "Program not found: " + programName + available
-                    : "No program loaded." + available;
-            return new ProgramOrError(null, Response.err(msg));
+            if (program == null) {
+                return new ProgramOrError(null, Response.err(
+                        "Program not found: " + programName + formatAvailablePrograms(provider)));
+            }
+            recordResolvedProgram(program);
+            return new ProgramOrError(program, null);
         }
+
+        // Omitted: refuse to guess when more than one program is open.
+        Program[] all = provider.getAllOpenPrograms();
+        if (all != null && all.length > 1) {
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < all.length; i++) {
+                if (i > 0) names.append(", ");
+                names.append(all[i].getName());
+            }
+            return new ProgramOrError(null, Response.err(
+                    "Multiple programs open; 'program' is required. Open programs: " + names));
+        }
+
+        Program program = provider.getCurrentProgram();
+        if (program == null) {
+            return new ProgramOrError(null, Response.err(
+                    "No program loaded." + formatAvailablePrograms(provider)));
+        }
+        recordResolvedProgram(program);
+        return new ProgramOrError(program, null);
+    }
+
+    /**
+     * Resolve the active (current) program without the multi-program omit rule.
+     *
+     * <p>Use ONLY for endpoints whose contract IS the active program:
+     * {@code /get_ui_cursor} (program facet), {@code /list_open_programs},
+     * {@code /switch_program}. A distinct helper (not a boolean on
+     * {@link #getProgramOrError}) keeps the exemption a greppable list rather
+     * than a flag someone can flip by accident.
+     *
+     * <p>{@code /switch_program} does NOT create an exemption for later calls —
+     * having switched N calls ago is exactly the stale implicit state
+     * {@link #getProgramOrError} closes. That is deliberate.
+     */
+    public static ProgramOrError getActiveProgramOrError(ProgramProvider provider) {
+        Program program = provider.getCurrentProgram();
+        if (program == null) {
+            // Distinguish "nothing is open" from "several are open and none is
+            // active". Headless no longer has a current-program concept, so this
+            // returns null the moment a second program opens — and answering
+            // "No program loaded." while listing two loaded programs is a message
+            // that contradicts its own evidence.
+            Program[] all = provider.getAllOpenPrograms();
+            String message = (all != null && all.length > 1)
+                    ? "Multiple programs open and none is active; 'program' is required."
+                            + formatAvailablePrograms(provider)
+                    : "No program loaded." + formatAvailablePrograms(provider);
+            return new ProgramOrError(null, Response.err(message));
+        }
+        recordResolvedProgram(program);
         return new ProgramOrError(program, null);
     }
 

@@ -43,19 +43,15 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
     }
 
     public void testGetXrefsToDegradesGracefully() {
-        assertNoProgram(xref.getXrefsTo("0x401000", 0, 100, ""));
+        assertNoProgram(xref.getXrefsTo("0x401000", null, 0, 100, ""));
     }
 
     public void testGetXrefsFromDegradesGracefully() {
         assertNoProgram(xref.getXrefsFrom("0x401000", 0, 100, ""));
     }
 
-    public void testGetFunctionJumpTargetsDegradesGracefully() {
-        assertNoProgram(xref.getFunctionJumpTargets("FUN_00401000", 0, 100));
-    }
-
     public void testProgramNotFoundWhenNamedProgramMissing() {
-        Response r = xref.getXrefsTo("0x401000", 0, 100, "Nonexistent.dll");
+        Response r = xref.getXrefsTo("0x401000", null, 0, 100, "Nonexistent.dll");
         assertTrue("expected program-not-found error, got: " + r.toJson(),
                 r.toJson().contains("Program not found: Nonexistent.dll"));
     }
@@ -93,7 +89,7 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
         when(caller.getEntryPoint()).thenReturn(entry);
         when(entry.toString()).thenReturn("00100000");
 
-        Response r = service.getFunctionCallers("target", "", 0, 10, "");
+        Response r = service.getFunctionCallers("target", 0, 10, "");
 
         // 7.0.0 response contract: list-shaped results are JSON with a named
         // plural key plus count/total, not a formatted "name @ addr" listing.

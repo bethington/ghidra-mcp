@@ -13,6 +13,7 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 import javax.swing.SwingUtilities;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
@@ -61,21 +62,39 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/get_function_hash", description = "Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=). On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionHash(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+            @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
+                   description = "Function to hash: a name, or an address as 0x<hex> (default space) or "
+                               + "<space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous. Omit to hash many functions (offset, limit, "
+                               + "filter).") String functionAddress,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Bulk mode: number of matching functions to skip before this page "
+                               + "starts; 0 begins at the first. The filter is applied before the skip, "
+                               + "so paging is stable only within one filter value.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Bulk mode: maximum functions whose hash is computed and returned in "
+                               + "this page (default 100). The walk still visits every function to "
+                               + "produce total_matching, so 0 returns an EMPTY page rather than "
+                               + "everything.") int limit,
+            @Param(value = "filter", defaultValue = "",
+                   description = "Bulk mode: `documented` keeps functions with a real name, "
+                               + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
+                               + "with `switch`). Omit for all.") String filter,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if (functionAddress == null || functionAddress.trim().isEmpty()) {
+            return getFunctionHashes(program, offset, limit, filter);
+        }
+
         try {
-            Address addr = ServiceUtils.parseAddress(program, functionAddress);
+            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
             if (addr == null) {
                 return Response.err(ServiceUtils.getLastParseError());
             }
@@ -101,11 +120,6 @@ public class DocumentationHashService {
         } catch (Exception e) {
             return Response.err("Failed to compute hash: " + e.getMessage());
         }
-    }
-
-    // Backward compatibility overload
-    public Response getFunctionHash(String functionAddress) {
-        return getFunctionHash(functionAddress, null);
     }
 
     /**
@@ -229,25 +243,11 @@ public class DocumentationHashService {
     // -----------------------------------------------------------------------
 
     /**
-     * Get hashes for multiple functions efficiently
+     * Hashes for many functions, paged, optionally only the documented or undocumented ones.
+     * The walk visits every function to produce total_matching, so limit bounds the hashing
+     * work, not the walk.
      */
-    @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation")
-    public Response getBulkFunctionHashes(
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of matching functions to skip before this page starts; 0 begins "
-                               + "at the first. The filter is applied before the skip, so paging is stable "
-                               + "only within one filter value.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum functions whose hash is computed and returned in this page "
-                               + "(default 100). The walk still visits every function to produce "
-                               + "total_matching, so 0 returns an EMPTY page rather than "
-                               + "everything.") int limit,
-            @Param(value = "filter", description = "Name filter") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    private Response getFunctionHashes(Program program, int offset, int limit, String filter) {
         try {
             FunctionManager funcMgr = program.getFunctionManager();
             int total = 0;
@@ -299,11 +299,6 @@ public class DocumentationHashService {
         }
     }
 
-    // Backward compatibility overload
-    public Response getBulkFunctionHashes(int offset, int limit, String filter) {
-        return getBulkFunctionHashes(offset, limit, filter, null);
-    }
-
     // -----------------------------------------------------------------------
     // Function Documentation Export/Import
     // -----------------------------------------------------------------------
@@ -315,9 +310,9 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -329,7 +324,7 @@ public class DocumentationHashService {
         Program program = pe.program();
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, functionAddress);
+            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
             if (addr == null) {
                 return Response.err(ServiceUtils.getLastParseError());
             }
@@ -477,7 +472,7 @@ public class DocumentationHashService {
         return applyFunctionDocumentation(jsonBody, null);
     }
 
-    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.WRITE)
     public Response applyFunctionDocumentation(
             @Param(value = "json_body", source = ParamSource.BODY,
                    description = "The whole payload as one JSON STRING, in the shape "
@@ -522,7 +517,7 @@ public class DocumentationHashService {
 
             try {
                 SwingUtilities.invokeAndWait(() -> {
-                    int tx = program.startTransaction("Apply Function Documentation");
+                    WriteTx tx = WriteTx.begin(program, "Apply Function Documentation");
                     try {
                         // Apply function name
                         if (functionName != null && !functionName.isEmpty() && !functionName.equals(func.getName())) {
@@ -585,7 +580,7 @@ public class DocumentationHashService {
                     } catch (Exception e) {
                         errorMsg.set(e.getMessage());
                     } finally {
-                        program.endTransaction(tx, success.get());
+                        tx.end(success.get());
                     }
                 });
             } catch (Exception e) {
@@ -747,7 +742,7 @@ public class DocumentationHashService {
         return compareProgramsDocumentation(null);
     }
 
-    @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation")
+    @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response compareProgramsDocumentation(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         try {
@@ -802,7 +797,7 @@ public class DocumentationHashService {
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response findUndocumentedByString(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -881,7 +876,7 @@ public class DocumentationHashService {
      * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
      * This helps identify undocumented functions that can be matched using string anchors.
      */
-    @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation")
+    @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response batchStringAnchorReport(
             @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -979,42 +974,11 @@ public class DocumentationHashService {
     // -----------------------------------------------------------------------
 
     /**
-     * Get the function signature (feature vector) for a function at the given address.
-     */
-    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
-    public Response handleGetFunctionSignature(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) return Response.err("No function at address: " + addressStr);
-
-            BinaryComparisonService.FunctionSignature sig =
-                BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
-            return Response.ok(sig.toMap());
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-    }
-
-    /**
      * Find functions in target program similar to the source function.
      */
-    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleFindSimilarFunctionsFuzzy(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -1041,7 +1005,7 @@ public class DocumentationHashService {
         Program tgtProgram = tgtPe.program();
 
         try {
-            Address addr = ServiceUtils.parseAddress(srcProgram, addressStr);
+            Address addr = ServiceUtils.resolveFunctionAddress(srcProgram, addressStr);
             if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
             Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
@@ -1057,7 +1021,7 @@ public class DocumentationHashService {
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation")
+    @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleBulkFuzzyMatch(
             @Param(value = "source_program", description = "Source program name") String sourceProgramName,
             @Param(value = "target_program", description = "Target program name") String targetProgramName,
@@ -1097,7 +1061,7 @@ public class DocumentationHashService {
     /**
      * Compute a structured diff between two functions.
      */
-    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
+    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleDiffFunctions(
             @Param(value = "address_a", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1169,7 +1133,7 @@ public class DocumentationHashService {
             + "the orphan-rescue workflow: source is typically '<name>_recovered', target is the original "
             + "'<name>.dll'. Idempotent — re-running on an already-merged target only fills gaps. Set "
             + "dry_run=true to count without writing.",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response mergeProgramDocumentation(
             @Param(value = "source", source = ParamSource.BODY,
                 description = "Source program path or name (read-only — the rescued copy)") String sourceName,
@@ -1202,8 +1166,8 @@ public class DocumentationHashService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         Runnable mergeTask = () -> {
-            int tx = -1;
-            if (!dryRun) tx = target.startTransaction("Merge from " + source.getName());
+            // Dry run writes nothing, so it needs no transaction at all.
+            WriteTx tx = dryRun ? null : WriteTx.begin(target, "Merge from " + source.getName());
             boolean commit = false;
             try {
                 // ----- 1. Standalone data types (must precede signature/data def merges) -----
@@ -1560,12 +1524,12 @@ public class DocumentationHashService {
             } catch (Throwable t) {
                 errorMsg.set(t.getClass().getSimpleName() + ": " + t.getMessage());
             } finally {
-                if (!dryRun && tx != -1) target.endTransaction(tx, commit);
+                if (tx != null) tx.end(commit);
             }
         };
 
         try {
-            SwingUtilities.invokeAndWait(mergeTask);
+            threadingStrategy.runOnUi(mergeTask);
         } catch (Throwable t) {
             return Response.err("Merge invocation failed: " + t.getMessage());
         }
@@ -1626,11 +1590,11 @@ public class DocumentationHashService {
     }
 
     // -----------------------------------------------------------------------
-    // Function-doc archive ingestion (MCP → re-kb FastAPI)
+    // Function-doc archive ingestion (MCP → configured doc archive service)
     // -----------------------------------------------------------------------
     //
-    // Seeds the cross-version documentation archive at re_kb.functions
-    // with the user's existing fun-doc work. Walks every function in a
+    // Seeds the configured cross-version documentation archive with the
+    // documentation already in the program. Walks every function in a
     // program, builds a doc payload mirroring what merge_program_documentation
     // reads, and POSTs each to /v1/doc_archive/upsert. Idempotent — re-runs
     // route through the field-level merge resolution on the archive side.
@@ -1640,10 +1604,10 @@ public class DocumentationHashService {
     //     GHIDRA_MCP_ARCHIVE_URL to opt in to an explicitly chosen service.
     //
     // Identity scheme:
-    //   - binary_name: program name (e.g. "Bnclient.dll")
+    //   - binary_name: program name (e.g. "example.dll")
     //   - version:     extracted from project path; default heuristic walks
-    //                  /Mods/<VERSION>/... or /Vanilla/<VERSION>/... and uses
-    //                  the second segment. Override via version_override param.
+    //                  /<BUCKET>/<VERSION>/... (e.g. /Project/1.0/...) and
+    //                  uses the second segment. Override via version_override param.
     //   - address:     "0x" + hex (canonical Ghidra form)
 
     private static String getArchiveUrl() {
@@ -1654,9 +1618,9 @@ public class DocumentationHashService {
     /**
      * Best-effort version extraction from a Program's DomainFile path.
      * Examples:
-     *   /Mods/PD2-S12/Bnclient.dll       -> "PD2-S12"
-     *   /Vanilla/1.13d/D2Common.dll      -> "1.13d"
-     *   /LoD/1.00/D2Common.dll           -> "1.00"
+     *   /Project/1.0/example.dll         -> "1.0"
+     *   /Releases/2.3b/example.dll       -> "2.3b"
+     *   /Builds/nightly/example.exe      -> "nightly"
      * Falls back to "unknown" if the path doesn't match.
      */
     private static String extractVersion(Program program) {
@@ -1666,23 +1630,23 @@ public class DocumentationHashService {
         if (pathname == null) return "unknown";
         String[] parts = pathname.split("/");
         // Skip leading empty + the project-bucket segment, take the next:
-        //   "" / "Mods" / "PD2-S12" / "Bnclient.dll"  -> parts[2] = "PD2-S12"
+        //   "" / "Project" / "1.0" / "example.dll"  -> parts[2] = "1.0"
         if (parts.length >= 3 && !parts[2].isEmpty()) return parts[2];
         return "unknown";
     }
 
-    @McpTool(path = "/archive_ingest_function", method = "POST",
+    @McpTool(path = "/archive_ingest_function", dryRun = false, method = "POST",
         description = "Ingest a single function's documentation into the cross-version "
-            + "archive (re_kb.functions on bsim Postgres). Idempotent; field-level merge "
+            + "archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL). Idempotent; field-level merge "
             + "resolution happens on the archive side. Use archive_ingest_program for bulk.",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestFunction(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                 description = "Function entry-point address (Ghidra hex form)") String functionAddress,
             @Param(value = "program",
                 description = "Target program path/name", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
-                description = "Override the auto-extracted version (e.g. 'PD2-S12')",
+                description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build payload but skip the POST") boolean dryRun) {
@@ -1693,10 +1657,10 @@ public class DocumentationHashService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
         Function fn = program.getFunctionManager().getFunctionAt(addr);
-        if (fn == null) return Response.err("No function at " + functionAddress);
+        if (fn == null) return Response.err("No function at address: " + functionAddress);
 
         String version = (versionOverride != null && !versionOverride.isEmpty())
             ? versionOverride : extractVersion(program);
@@ -1723,16 +1687,16 @@ public class DocumentationHashService {
         }
     }
 
-    @McpTool(path = "/archive_ingest_program", method = "POST",
+    @McpTool(path = "/archive_ingest_program", dryRun = false, method = "POST",
         description = "Bulk-ingest every function in a program into the cross-version "
             + "documentation archive. Posts each to /v1/doc_archive/upsert. Returns "
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
-        category = "documentation")
+        category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestProgram(
             @Param(value = "program",
                 description = "Target program path/name", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
-                description = "Override the auto-extracted version (e.g. 'PD2-S12')",
+                description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
             @Param(value = "limit", source = ParamSource.QUERY, defaultValue = "0",
                 description = "Stop after N functions (0 = no limit)") int limit,

@@ -33,16 +33,31 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("name is required"));
     }
 
-    public void testEmbedStructFieldRejectsMissingEmbeddedStruct() {
-        Response r = dataTypes.embedStructField("Parent", "field_a", "", "");
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("embedded_struct is required"));
-    }
-
-    public void testModifyStructFieldTypeRequiresProgram() {
-        Response r = dataTypes.modifyStructFieldType("S", "f", "uint", "");
+    public void testModifyStructFieldRequiresProgram() {
+        Response r = dataTypes.modifyStructField("S", "f", "uint", "", "");
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("No program loaded"));
+    }
+
+    public void testCreateDerivedTypeRejectsAnUnknownKind() {
+        Response r = dataTypes.createDerivedType("union", "int", "", 1, "");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("kind must be typedef, array or pointer"));
+    }
+
+    public void testCreateDerivedTypeTypedefNeedsAName() {
+        Response r = dataTypes.createDerivedType("typedef", "int", "", 1, "");
+        assertTrue(((Response.Err) r).message().contains("Typedef name is required"));
+    }
+
+    public void testCreateDerivedTypeArrayLengthMustBePositive() {
+        Response r = dataTypes.createDerivedType("array", "int", "", 0, "");
+        assertTrue(((Response.Err) r).message().contains("Array length must be positive"));
+    }
+
+    public void testCreateDerivedTypeNeedsABaseType() {
+        Response r = dataTypes.createDerivedType("pointer", "", "", 1, "");
+        assertTrue(((Response.Err) r).message().contains("Base type is required"));
     }
 
     public void testResizeStructRejectsInvalidNewSize() {
@@ -96,7 +111,7 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
 
     // Note on H05/H06 test coverage: the production fixes for
     // create_function_signature (accumulate params, call setArguments once
-    // after the loop) and create_typedef (delegate to
+    // after the loop) and create_derived_type (delegate to
     // ServiceUtils.resolveDataType for pointer-depth recursion) cannot be
     // exercised in this offline Maven suite because instantiating Ghidra
     // DataType classes (IntegerDataType, FunctionDefinitionDataType,

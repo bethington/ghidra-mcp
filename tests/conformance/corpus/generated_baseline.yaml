@@ -271,16 +271,6 @@ tool_cases:
   tier: read
   snapshot: false
   skip: 'no synthetic value for required param(s): [''text'']'
-- tool: create_array_type
-  tier: write
-  args:
-    base_type: int
-    name: calc_crc16
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: create_data_type_category
   tier: write
   args:
@@ -290,6 +280,10 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
+- tool: create_derived_type
+  tier: write
+  snapshot: false
+  skip: 'no synthetic value for required param(s): [''base_type'', ''kind'']'
 - tool: create_enum
   tier: write
   snapshot: false
@@ -312,15 +306,6 @@ tool_cases:
   tier: write
   snapshot: false
   skip: 'no synthetic value for required param(s): [''parameters'', ''return_type'']'
-- tool: create_function_tag
-  tier: write
-  args:
-    name: calc_crc16
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: create_label
   tier: write
   args:
@@ -335,16 +320,6 @@ tool_cases:
   tier: destructive
   snapshot: false
   skip: 'destructive: covered by the opt-in --destructive tier'
-- tool: create_pointer_type
-  tier: write
-  args:
-    base_type: int
-    name: calc_crc16
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: create_property_map
   tier: write
   args:
@@ -358,16 +333,6 @@ tool_cases:
   tier: write
   snapshot: false
   skip: 'no synthetic value for required param(s): [''fields'']'
-- tool: create_typedef
-  tier: write
-  args:
-    name: calc_crc16
-    base_type: int
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: create_union
   tier: write
   snapshot: false
@@ -428,11 +393,11 @@ tool_cases:
   tier: read
   snapshot: false
   skip: needs a live TraceRmi debug session (Phase 2 fixture)
-- tool: debugger_step_into
+- tool: debugger_step
   tier: write
   snapshot: false
   skip: needs a live TraceRmi debug session (Phase 2 fixture)
-- tool: debugger_step_out
+- tool: debugger_step_into
   tier: write
   snapshot: false
   skip: needs a live TraceRmi debug session (Phase 2 fixture)
@@ -444,15 +409,6 @@ tool_cases:
   tier: read
   snapshot: false
   skip: needs a live TraceRmi debug session (Phase 2 fixture)
-- tool: decompile_function
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: delete_bookmark
   tier: write
   args:
@@ -551,10 +507,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: embed_struct_field
-  tier: write
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''embedded_struct'', ''parent_struct'']'
 - tool: emulate_function
   tier: write
   snapshot: false
@@ -593,10 +545,27 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
+- tool: find_data_types
+  tier: read
+  args:
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: false
 - tool: find_dead_code
   tier: read
   args:
     function_name: calc_crc16
+    program: Benchmark.dll
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: find_functions
+  tier: read
+  args:
+    limit: 10
     program: Benchmark.dll
   assert:
     is_error: false
@@ -651,21 +620,6 @@ tool_cases:
   tier: write
   snapshot: false
   skip: 'no synthetic value for required param(s): [''include_patterns'', ''xref_sources'']'
-- tool: get_bulk_function_hashes
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    filter: ''
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_bulk_xrefs
-  tier: write
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''addresses'']'
 - tool: get_comment
   tier: read
   args:
@@ -675,28 +629,34 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_current_address
-  tier: read
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_current_function
-  tier: read
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_current_program_info
+- tool: get_ui_cursor
   tier: read
   args:
-    program: Benchmark.dll
+    type: address
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_ui_cursor
+  tier: read
+  args:
+    type: function
+  assert:
+    is_error: false
+    nonempty: true
+  snapshot: true
+- tool: get_ui_cursor
+  tier: read
+  args:
+    type: program
   assert:
     is_error: false
     nonempty: true
   snapshot: false
-- tool: get_current_selection
+- tool: get_ui_cursor
   tier: read
+  args:
+    type: selection
   assert:
     is_error: false
     nonempty: true
@@ -735,45 +695,12 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_function_by_address
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_function_call_graph
   tier: read
   args:
     name: calc_crc16
     address: '0x10001000'
     direction: both
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_callees
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_callers
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
     program: Benchmark.dll
   assert:
     is_error: false
@@ -805,74 +732,10 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: get_function_jump_targets
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_labels
-  tier: read
-  args:
-    name: calc_crc16
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: get_function_pcode
   tier: read
   args:
     function_address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_signature
-  tier: read
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_tags
-  tier: read
-  args:
-    function: calc_crc16
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_variables
-  tier: read
-  args:
-    function_name: calc_crc16
-    address: '0x10001000'
-    program: Benchmark.dll
-    limit: 5
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_function_xrefs
-  tier: read
-  args:
-    name: calc_crc16
-    address: '0x10001000'
-    offset: 0
-    limit: 5
     program: Benchmark.dll
   assert:
     is_error: false
@@ -925,12 +788,6 @@ tool_cases:
   args:
     category: ''
     program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: get_version
-  tier: read
   assert:
     is_error: false
     nonempty: true
@@ -1003,68 +860,7 @@ tool_cases:
   tier: read
   snapshot: false
   skip: 'no synthetic value for required param(s): [''class_name'']'
-- tool: list_classes
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_data_items
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: list_data_items_by_xrefs
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_data_type_categories
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_data_types
-  tier: read
-  args:
-    category: ''
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_exports
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_external_locations
   tier: read
   args:
     offset: 0
@@ -1084,55 +880,7 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: list_functions
-  tier: read
-  args:
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_functions_enhanced
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: list_globals
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_imports
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_methods
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: list_namespaces
   tier: read
   args:
     offset: 0
@@ -1148,14 +896,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: false
-- tool: list_option_groups
-  tier: read
-  args:
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: list_project_files
   tier: read
   snapshot: false
@@ -1164,23 +904,16 @@ tool_cases:
   tier: read
   snapshot: false
   skip: 'no synthetic value for required param(s): [''map'']'
-- tool: list_property_maps
-  tier: read
-  args:
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
 - tool: list_scripts
   tier: read
   assert:
     is_error: false
     nonempty: true
   snapshot: false
-- tool: list_segments
+- tool: list_program_items
   tier: read
   args:
+    kind: segments
     offset: 0
     limit: 5
     program: Benchmark.dll
@@ -1218,10 +951,6 @@ tool_cases:
   tier: write
   snapshot: false
   skip: 'no synthetic value for required param(s): [''struct_name'']'
-- tool: modify_struct_field_type
-  tier: write
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''field_name'', ''struct_name'']'
 - tool: move_data_type_to_category
   tier: write
   args:
@@ -1357,41 +1086,6 @@ tool_cases:
   tier: read
   args:
     pattern: int
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: search_data_types
-  tier: read
-  args:
-    pattern: int
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: search_functions
-  tier: read
-  args:
-    offset: 0
-    limit: 5
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: search_functions_by_tag
-  tier: read
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''tag'']'
-- tool: search_functions_enhanced
-  tier: read
-  args:
-    offset: 0
-    limit: 5
     program: Benchmark.dll
   assert:
     is_error: false
@@ -1557,12 +1251,6 @@ tool_cases:
   tier: write
   args:
     address: '0x10001000'
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
-- tool: tool_launch_codebrowser
-  tier: write
   assert:
     is_error: false
     nonempty: true

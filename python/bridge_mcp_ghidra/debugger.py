@@ -1,45 +1,59 @@
-"""Debugger proxy tools — forward to the standalone debugger server.
+"""Debugger proxy tools — forward to an external debugger server.
 
-Each tool proxies an HTTP request to the standalone debugger server (which
-lives in the ``d2-game-exe`` repo) on
-``GHIDRA_DEBUGGER_URL`` (see :data:`bridge_mcp_ghidra.config.DEBUGGER_URL`).
+Each tool proxies an HTTP request to an external dbgeng (WinDbg engine)
+debugger server — not part of this repo — on ``GHIDRA_DEBUGGER_URL`` (see
+:data:`bridge_mcp_ghidra.config.DEBUGGER_URL`).
+
+The tools are OFF BY DEFAULT: they register only when ``GHIDRA_DEBUGGER_URL``
+is explicitly set or ``GHIDRA_DEBUGGER_TOOLS`` is truthy. See
+:func:`_debugger_enabled`.
 """
 
 import http.client
 import inspect
 import json
 import os
-import sys
 from urllib.parse import urlencode, urlparse
 
 from . import config
 from . import dispatch
 from . import state
-from .config import DEBUGGER_URL, DEBUGGER_TOOL_NAMES, logger
+from .config import (
+    DEBUGGER_URL,
+    DEBUGGER_URL_EXPLICIT,
+    DEBUGGER_TOOL_NAMES,
+    DESTRUCTIVE_TOOL,
+    READ_ONLY_TOOL,
+    WRITE_TOOL,
+    logger,
+)
 from .server import mcp
 from .validation import validate_server_url
 
-# Hosts for which a debugger server is local to this machine. On a non-Windows
-# host a local debugger server can never run (dbgeng/WinDbg is Windows-only), so
-# debugger proxy tools pointing at one of these are not registered.
-_LOCAL_DEBUGGER_HOSTS = {"", "127.0.0.1", "localhost", "::1", "0.0.0.0"}
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _debugger_enabled(
-    url: str = DEBUGGER_URL,
-    platform: str = sys.platform,
+    url_explicit: bool = DEBUGGER_URL_EXPLICIT,
     override: str | None = None,
 ) -> bool:
-    """Whether to register the WinDbg debugger proxy tools on this host.
+    """Whether to register the 22 debugger proxy tools in this process.
 
-    The standalone debugger server (d2-game-exe repo) wraps dbgeng/WinDbg via
-    pybag and only runs on Windows. Registering ~22 proxy tools that can never
-    work just clutters the tool list, so registration is gated:
+    The proxies forward to an external dbgeng/WinDbg debugger server that is
+    not part of this repo. Most users never run one, and registering 22 tools
+    that can only ever answer "server not running" clutters every client's
+    tool list, so the tools are OFF BY DEFAULT:
 
-      - GHIDRA_DEBUGGER_TOOLS=1/0 (or true/false/yes/no/on/off) forces on/off.
-      - On Windows the server can run locally -> enabled.
-      - On non-Windows a *local* DEBUGGER_URL can never be served -> disabled;
-        a *remote* host (a Windows box running the server) -> enabled.
+      - ``GHIDRA_DEBUGGER_TOOLS`` set and non-blank decides outright:
+        1/true/yes/on -> enabled, anything else (0/false/no/off) -> disabled.
+        It wins over the URL, so ``GHIDRA_DEBUGGER_TOOLS=0`` turns the tools
+        off even with a URL configured.
+      - Otherwise the tools register only when ``GHIDRA_DEBUGGER_URL`` was
+        explicitly set in the environment. The built-in default URL does not
+        count: having a default port is not evidence that a server exists.
+
+    The host platform plays no part: being on Windows says nothing about
+    whether a debugger server is running.
 
     The tool *functions* are always defined regardless; only their MCP
     registration is gated. Call-time failures (server down) are handled
@@ -48,11 +62,8 @@ def _debugger_enabled(
     if override is None:
         override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
     if override is not None and override.strip():
-        return override.strip().lower() in {"1", "true", "yes", "on"}
-    if platform.startswith("win"):
-        return True
-    host = (urlparse(url).hostname or "").lower()
-    return host not in _LOCAL_DEBUGGER_HOSTS
+        return override.strip().lower() in _TRUTHY
+    return bool(url_explicit)
 
 
 _DEBUGGER_ACTIVE = _debugger_enabled()
@@ -63,9 +74,9 @@ if _DEBUGGER_ACTIVE:
 def _debugger_tool(*dargs, **dkwargs):
     """Decorator: register a debugger proxy tool only when the backend is usable.
 
-    When the debugger is inactive on this host the decorated function is left
+    When the debugger is disabled (the default) the decorated function is left
     untouched (still importable / directly callable / unit-testable) but is not
-    exposed as an MCP tool, keeping the tool list uncluttered on non-Windows.
+    exposed as an MCP tool, keeping the tool list uncluttered by default.
     """
     if _DEBUGGER_ACTIVE:
         registrar = mcp.tool(*dargs, **dkwargs)
@@ -141,7 +152,8 @@ def _debugger_request(
         return json.dumps(
             {
                 "error": f"Debugger server not running at {DEBUGGER_URL}. "
-                "Start it with: uv run python -m debugger (or: python -m debugger)"
+                "Start your external debugger server, or point GHIDRA_DEBUGGER_URL "
+                "at the address it listens on."
             }
         )
     except Exception as e:
@@ -152,7 +164,7 @@ def _debugger_request(
         conn.close()
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_attach(target: str) -> str:
     """Attach the debugger to a running process for live dynamic analysis.
 
@@ -161,7 +173,7 @@ def debugger_attach(target: str) -> str:
     set breakpoints.
 
     Args:
-        target: Process name (e.g. "Game.exe") or PID.
+        target: Process name (e.g. "target.exe") or PID.
     """
     result = _debugger_request("POST", "/debugger/attach", {"target": target})
 
@@ -211,19 +223,19 @@ def debugger_attach(target: str) -> str:
     return result
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_detach() -> str:
     """Detach from the debugged process. The process continues running."""
     return _debugger_request("POST", "/debugger/detach")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_status() -> str:
     """Get debugger connection status, loaded modules, active traces/watches."""
     return _debugger_request("GET", "/debugger/status")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_modules() -> str:
     """List loaded modules (DLLs) with runtime and Ghidra base addresses.
 
@@ -233,21 +245,23 @@ def debugger_modules() -> str:
     return _debugger_request("GET", "/debugger/modules")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     """Resolve a DLL ordinal export to its runtime and Ghidra addresses.
 
-    Uses the ordinal export tables from dll_exports/*.txt combined with
-    the current runtime address map.
+    The lookup is performed by the external debugger server, using whatever
+    export data it holds for ``dll``, and the result is mapped through the
+    current runtime <-> Ghidra address map. Fails if the server has no export
+    information for that module.
 
     Args:
-        dll: DLL name (e.g. "D2Common.dll").
-        ordinal: Ordinal number (e.g. 10624).
+        dll: DLL name (e.g. "example.dll").
+        ordinal: Ordinal number (e.g. 1).
     """
     return _debugger_request("GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_set_breakpoint(
     ghidra_address: str,
     module: str = "",
@@ -258,7 +272,7 @@ def debugger_set_breakpoint(
 
     Args:
         ghidra_address: Address in Ghidra (e.g. "0x6FD9F450").
-        module: DLL name for disambiguation (e.g. "D2Common.dll").
+        module: DLL name for disambiguation (e.g. "example.dll").
         bp_type: "software" (INT3) or "hardware" (debug register).
         oneshot: If true, breakpoint is removed after first hit.
     """
@@ -274,7 +288,7 @@ def debugger_set_breakpoint(
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_remove_breakpoint(bp_id: int) -> str:
     """Remove a breakpoint by its ID.
 
@@ -284,13 +298,13 @@ def debugger_remove_breakpoint(bp_id: int) -> str:
     return _debugger_request("DELETE", f"/debugger/breakpoint/{bp_id}")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_list_breakpoints() -> str:
     """List all active breakpoints with their addresses and status."""
     return _debugger_request("GET", "/debugger/breakpoints")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_continue() -> str:
     """Resume execution of the debugged process.
 
@@ -300,7 +314,7 @@ def debugger_continue() -> str:
     return _debugger_request("POST", "/debugger/go")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_step_into(count: int = 1) -> str:
     """Single-step into the next instruction(s). Follows calls.
 
@@ -310,7 +324,7 @@ def debugger_step_into(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_into", {"count": count})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_step_over(count: int = 1) -> str:
     """Step over the next instruction(s). Steps over calls.
 
@@ -320,7 +334,7 @@ def debugger_step_over(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_over", {"count": count})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_registers() -> str:
     """Read all CPU registers. Must be stopped at a breakpoint.
 
@@ -329,7 +343,7 @@ def debugger_registers() -> str:
     return _debugger_request("GET", "/debugger/registers")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_read_memory(address: str, size: int = 64, address_type: str = "runtime", module: str = "") -> str:
     """Read memory from the debugged process.
 
@@ -353,7 +367,7 @@ def debugger_read_memory(address: str, size: int = 64, address_type: str = "runt
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_stack_trace(depth: int = 20) -> str:
     """Get the call stack backtrace with return addresses mapped to Ghidra symbols.
 
@@ -363,7 +377,7 @@ def debugger_stack_trace(depth: int = 20) -> str:
     return _debugger_request("GET", "/debugger/stack", query={"depth": str(depth)})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names: str = "") -> str:
     """Read function arguments at the current breakpoint based on calling convention.
 
@@ -373,7 +387,7 @@ def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names:
     Args:
         convention: __stdcall, __fastcall, __thiscall, or __cdecl.
         count: Number of arguments to read.
-        arg_names: Comma-separated names for readability (e.g. "pUnit,nSkillId").
+        arg_names: Comma-separated names for readability (e.g. "pContext,nIndex").
     """
     return _debugger_request(
         "GET",
@@ -382,7 +396,7 @@ def debugger_read_args(convention: str = "__stdcall", count: int = 4, arg_names:
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_trace_function(
     ghidra_address: str,
     module: str = "",
@@ -393,17 +407,18 @@ def debugger_trace_function(
     max_hits: int = 0,
 ) -> str:
     """Start non-breaking tracing on a function. Logs every call with arguments
-    WITHOUT stopping the game.
+    WITHOUT stopping the target process.
 
-    The handler reads arguments and auto-resumes execution in ~0.5ms,
-    invisible at the game's 25fps. Use debugger_trace_log() to read results.
+    The handler reads arguments and auto-resumes execution in ~0.5ms, so the
+    overhead is negligible for most targets. Use debugger_trace_log() to read
+    results.
 
     Args:
         ghidra_address: Function address in Ghidra.
-        module: DLL name (e.g. "D2Common.dll").
+        module: DLL name (e.g. "example.dll").
         convention: __stdcall, __fastcall, __thiscall, __cdecl.
         arg_count: Number of arguments to capture.
-        arg_names: Comma-separated arg names (e.g. "pUnit,nSkillId,nWeaponSpeed").
+        arg_names: Comma-separated arg names (e.g. "pContext,nIndex,nFlags").
         capture_return: Also capture return value (EAX).
         max_hits: Stop tracing after N hits (0 = unlimited).
     """
@@ -422,7 +437,7 @@ def debugger_trace_function(
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_trace_stop(trace_id: int = -1) -> str:
     """Stop a function trace. Use trace_id=-1 to stop all traces.
 
@@ -432,7 +447,7 @@ def debugger_trace_stop(trace_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/trace/stop", {"trace_id": trace_id})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     """Read the trace log. Shows timestamped function calls with arguments.
 
@@ -447,13 +462,13 @@ def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_trace_list() -> str:
     """List all active and completed traces with hit counts."""
     return _debugger_request("GET", "/debugger/trace/list")
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=WRITE_TOOL, structured_output=False)
 def debugger_watch_memory(ghidra_address: str, size: int = 4, access: str = "write", module: str = "") -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
@@ -478,7 +493,7 @@ def debugger_watch_memory(ghidra_address: str, size: int = 4, access: str = "wri
     )
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=DESTRUCTIVE_TOOL, structured_output=False)
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.
 
@@ -488,7 +503,7 @@ def debugger_watch_stop(watch_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/watch/stop", {"watch_id": watch_id})
 
 
-@_debugger_tool()
+@_debugger_tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
     """Read the watchpoint hit log. Shows memory accesses with values and accessors.
 

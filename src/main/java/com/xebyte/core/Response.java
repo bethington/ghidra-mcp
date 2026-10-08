@@ -13,6 +13,19 @@ public sealed interface Response permits Response.Ok, Response.Err, Response.Tex
     /** Serialize this response to a JSON/text string for HTTP output. */
     String toJson();
 
+    /**
+     * This response as a value to embed in another payload: an Ok's data as-is, an
+     * Err as {@code {"error": ...}}, Text as its string. Embedding by re-parsing
+     * {@link #toJson()} instead turns every integer into a double ({@code 4.0}).
+     */
+    default Object asEmbeddable() {
+        return switch (this) {
+            case Ok ok -> ok.data();
+            case Err err -> JsonHelper.mapOf("error", err.message());
+            case Text text -> text.content();
+        };
+    }
+
     /** Success response with structured data (serialized via Gson). */
     record Ok(Object data) implements Response {
         @Override

@@ -68,16 +68,17 @@ public class ListingServiceValidationTest extends TestCase {
         assertNoProgram(listing.searchStrings("pattern", 4, "", 0, 100, ""));
     }
 
-    public void testSearchFunctionsByNameDegradesGracefully() {
-        assertNoProgram(listing.searchFunctionsByName("Foo", 0, 100, ""));
+    public void testFindFunctionsDegradesGracefully() {
+        assertNoProgram(listing.findFunctions("Foo", false, null, null, "", null, null, null,
+                                              "", "address", 0, 100, ""));
     }
 
-    public void testListImportsDegradesGracefully() {
-        assertNoProgram(listing.listImports(0, 100, ""));
+    public void testListProgramItemsDegradesGracefully() {
+        assertNoProgram(listing.listProgramItems("imports", 0, 100, ""));
     }
 
     @SuppressWarnings("unchecked")
-    public void testListExternalLocationsHandlesNullExternalAddress() {
+    public void testExternalLocationsNullAddressViaKind() {
         Program program = mock(Program.class);
         ExternalManager extMgr = mock(ExternalManager.class);
         ExternalLocation loc = mock(ExternalLocation.class);
@@ -95,14 +96,22 @@ public class ListingServiceValidationTest extends TestCase {
         when(loc.getOriginalImportedName()).thenReturn("__android_log_write");
 
         ListingService svc = new ListingService(provider);
-        Response r = svc.listExternalLocations(0, 10, "");
+        Response r = svc.listProgramItems("external_locations", 0, 10, "");
 
         assertTrue(r instanceof Response.Ok);
-        List<Map<String, Object>> data = (List<Map<String, Object>>) ((Response.Ok) r).data();
-        assertEquals(1, data.size());
-        assertEquals("liblog.so", data.get(0).get("library"));
-        assertEquals("__android_log_write", data.get(0).get("name"));
-        assertTrue(data.get(0).containsKey("address"));
-        assertNull(data.get(0).get("address"));
+        Map<String, Object> data = okData(r);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) data.get("items");
+        assertEquals(1, items.size());
+        assertEquals("liblog.so", items.get(0).get("library"));
+        assertEquals("__android_log_write", items.get(0).get("name"));
+        assertTrue(items.get(0).containsKey("address"));
+        assertNull(items.get(0).get("address"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> okData(Response r) {
+        assertTrue(r instanceof Response.Ok);
+        return (Map<String, Object>) ((Response.Ok) r).data();
     }
 }

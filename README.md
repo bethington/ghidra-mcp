@@ -9,7 +9,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Ghidra](https://img.shields.io/badge/Ghidra-12.1.3-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
+[![Ghidra](https://img.shields.io/badge/Ghidra-12.1.4-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-6C5CE7?style=for-the-badge&logoColor=white)](https://modelcontextprotocol.io/)
 
 [![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
@@ -22,13 +22,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **253 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **210 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **253 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **210 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -59,7 +59,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Core MCP Integration
 
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **253 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
+- **210 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -82,7 +82,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Dynamic Analysis (v5.4.0)
 
 - **P-code Emulation** — Run any function in isolation via Ghidra's `EmulatorHelper`; brute-force API hash resolution in milliseconds
-- **Live Debugger Integration** — 17 Java endpoints + 22 Python bridge tools over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise): attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
+- **Live Debugger Integration** — 17 Java endpoints over Ghidra's TraceRmi framework (dbgeng on Windows PE, gdb/lldb otherwise), plus 22 opt-in bridge proxies for an external debugger server: attach, step, breakpoints, registers, memory reads, non-breaking function tracing, ASLR-aware static↔dynamic address translation
 
 ### AI-Powered Reverse Engineering Workflows
 
@@ -107,14 +107,14 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.1.3** (or compatible version)
+- **Ghidra 12.1.4** (or compatible version)
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
-> Shared Ghidra Server users: Ghidra 12.1.3 clients require a Ghidra
+> Shared Ghidra Server users: Ghidra 12.1.4 clients require a Ghidra
 > Server at 12.1, 12.0.5, or a newer compatible version. Upgrade the
 > server before using this plugin from a 12.1 client.
 >
-> Ghidra 12.1.3 ships Jython as an optional extension. Java scripts work
+> Ghidra 12.1.4 ships Jython as an optional extension. Java scripts work
 > by default, but `.py` scripts in `ghidra_scripts/` require installing
 > the Jython extension from **File > Install Extensions** and restarting
 > Ghidra.
@@ -136,27 +136,31 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 2. **Recommended: run environment preflight first:**
 
    ```text
-   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra:**
 
    ```text
-   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
    `deploy` saves/closes an already-running matching Ghidra instance when
    needed, installs the extension, starts Ghidra, waits for MCP health, and runs
    schema smoke checks.
 
+   Prefer to click through Ghidra's own dialogs, or installing a release zip on
+   a machine without the repo? Follow the illustrated
+   [manual GUI install guide](docs/INSTALL_GUI.md).
+
 4. **Optional strict/manual mode** (advanced):
 
    ```text
    # Skip automatic prerequisite setup
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
    ```
 
 5. **Show command help**:
@@ -226,15 +230,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 3. **Run environment preflight:**
 
    ```bash
-   python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup preflight --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
 
    ```bash
-   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.1.4_PUBLIC
    python -m tools.setup build
-   python -m tools.setup deploy --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup deploy --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
    This will:
@@ -247,7 +251,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 5. **Optional: setup only Maven dependencies:**
 
    ```bash
-   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.1.3_PUBLIC
+   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.1.4_PUBLIC
    ```
 
 6. **Show command help:**
@@ -291,7 +295,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
        --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
 
-   The extension is installed to `~/Library/ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/`.
+   The extension is installed to `~/Library/ghidra/ghidra_12.1.4_PUBLIC/Extensions/GhidraMCP/`.
 
    > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
 
@@ -301,7 +305,8 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    /opt/homebrew/opt/ghidra/libexec/ghidraRun
    ```
 
-   In the main project window: **Tools > GhidraMCP > Start MCP Server**
+   The server starts with the plugin. Check it from the project window:
+   **Tools > GhidraMCP > Server Status**
 
 6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`) — use the **absolute
    path** to `uv` (`which uv`), not the bare name; GUI-launched clients do not
@@ -439,7 +444,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 #### Lazy tool loading is the default (issue #440)
 
-Advertising all 253 endpoints in a single `tools/list` is over a hard limit for
+Advertising all 210 endpoints in a single `tools/list` is over a hard limit for
 at least one major provider. Gemini compiles function declarations into a
 constrained-decoding state machine and rejects the whole request before any tool
 is ever called:
@@ -571,48 +576,48 @@ Verify any allowlist against the running server rather than against this table:
 `curl http://127.0.0.1:8089/mcp/schema` lists every tool with the `category`
 the bridge groups it by.
 
-#### Optional: Connect a standalone debugger server
+#### Optional: Connect an external debugger server
 
-The debugger server itself moved to the `d2-game-exe` repository on 2026-08-11
-(its D2 calling-convention layer made it game-specific). Start it there, then
-point this bridge at it:
+The bridge can proxy 22 `debugger_*` tools to an external dbgeng/WinDbg
+debugger server speaking the bridge's debugger HTTP API. That server is **not
+part of this repository**; this repo ships only the proxies. They are **off by
+default** and register only when you opt in:
 
 ```bash
+# point the bridge at your debugger server (loopback only)
 export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+
+# or force registration against the default URL (http://127.0.0.1:8099)
+export GHIDRA_DEBUGGER_TOOLS=1
 ```
 
-The bridge's 22 `debugger_*` proxy tools register only when that variable is
-set, so leaving it unset costs nothing — the tools simply do not appear rather
-than appearing and failing.
+`GHIDRA_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
+registers the tools, anything else (`0`, `false`, ...) keeps them off even with
+a URL configured. With neither variable set the tools simply do not appear,
+rather than appearing and failing. The host platform plays no part.
 
-Debugger server flags:
-
-| Flag | Default | Description |
-| ------ | --------- | ------------- |
-| `--port` | `8099` | HTTP server port |
-| `--host` | `127.0.0.1` | Bind address (`0.0.0.0` to expose on LAN) |
-| `--exports-dir` | — | Path to a `dll_exports/` directory for ordinal-to-name resolution |
-| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
-
-Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so the bridge can find it.
+Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
+...) are separate: they live in the GUI plugin and need no extra server.
 
 #### In Ghidra
 
 1. Start Ghidra and open a **CodeBrowser** window
-2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
+2. In **CodeBrowser**, enable the plugin via **File > Configure > Utility > Configure > GhidraMCPPlugin**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
-4. Start the server via **Tools > GhidraMCP > Start MCP Server**
+4. The server starts with the plugin; check it via **Tools > GhidraMCP > Server Status** in the project window
 5. The server runs on `http://127.0.0.1:8089/` by default
+
+Screenshots of every step: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 
 #### Verify It's Working
 
 ```bash
 # Quick health check
 curl http://127.0.0.1:8089/check_connection
-# Expected: "Connected: GhidraMCP plugin running with program '<name>'"
+# Expected: {"status": "ok", "server_kind": "gui", "version": "7.0.0", "program": "<name>"}
 
 # Get version info
-curl http://127.0.0.1:8089/get_version
+curl http://127.0.0.1:8089/mcp/health
 ```
 
 ## Support This Project
@@ -633,7 +638,7 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 | --- | --- |
 | `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are exempt. |
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
-| `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/load_program`, `/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+| `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
 
 Name-quality enforcement is separate from security. By default,
 `rename_function` and global write endpoints reject names that fail
@@ -661,7 +666,7 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 
 When connecting to a shared Ghidra Server, GhidraMCP can suppress the password dialog automatically. It resolves credentials in this order (first non-empty value wins):
 
-Compatibility note: Ghidra 12.1.3 clients require Ghidra Server 12.1.2,
+Compatibility note: Ghidra 12.1.4 clients require Ghidra Server 12.1.2,
 12.0.5, or a newer compatible server. Older shared servers are not safe
 targets for a 12.1 client upgrade.
 
@@ -730,8 +735,10 @@ path is the smaller and more portable fix.
 **Solution:**
 
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
-2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
+2. Enable the plugin: **File > Configure > Utility > Configure > GhidraMCPPlugin** (check the box)
 3. **Restart Ghidra** after installation/enabling
+
+Illustrated walkthrough: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 
 ### Server not responding / Connection refused
 
@@ -739,7 +746,7 @@ path is the smaller and more portable fix.
 
 **Solution:**
 
-1. Ensure you started the server: **Tools > GhidraMCP > Start MCP Server**
+1. Check the server state: **Tools > GhidraMCP > Server Status** (it starts with the plugin; use **Restart Server** if it is stopped)
 2. Check configured port: **Edit > Tool Options > GhidraMCP HTTP Server**
 3. Check if port is in use:
 
@@ -778,20 +785,20 @@ bridge-mcp-ghidra
 
 ### The `debugger_*` tools do not appear
 
-**Cause:** They are registered only when `GHIDRA_DEBUGGER_URL` is set, and only
-on Windows. The debugger server they proxy to lives in the `d2-game-exe`
-repository since 2026-08-11 — this repo ships the proxies, not the server.
+**Cause:** The 22 bridge-side debugger proxies are off by default. They register
+only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`, and they
+forward to an external debugger server that is not part of this repository.
 
-**Solution:** start the debugger server from that repo, then set the URL before
-launching the bridge:
+**Solution:** start your debugger server, then set the URL before launching the
+bridge:
 
 ```text
 export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
-A `ModuleNotFoundError` for `pybag` or `comtypes` while starting that server is
-a missing optional dependency on its side; install its Windows-only extras from
-that repo, and make sure you install into and run from the same interpreter.
+If the tools appear but every call reports that the server is not running,
+the URL is wrong or the server is down. `GHIDRA_DEBUGGER_TOOLS=0` turns them off
+again even with a URL configured.
 
 ### 500 Internal Server Errors
 
@@ -810,13 +817,13 @@ that repo, and make sure you install into and run from the same interpreter.
 
 **Solution:**
 
-1. Verify endpoint exists: `curl http://127.0.0.1:8089/get_version`
+1. Verify endpoint exists: `curl http://127.0.0.1:8089/mcp/health`
 2. Check for typos in endpoint name
 3. Ensure you're using correct HTTP method (GET vs POST)
 
 ### Python Ghidra scripts fail with "No script provider found"
 
-**Cause:** In Ghidra 12.1.3, Jython support is no longer enabled by
+**Cause:** In Ghidra 12.1.4, Jython support is no longer enabled by
 default. `.py` scripts need the bundled Jython extension; Python 3
 scripts should use PyGhidra instead of the Ghidra Script Manager.
 
@@ -832,8 +839,10 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 **Solution:**
 
-1. Manual install location: `~/.ghidra/ghidra_12.1.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
-2. Or use: **File > Install Extensions > Add** and select the ZIP file
+1. Manual install location: `~/.config/ghidra/ghidra_12.1.4_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+   (`%APPDATA%\ghidra\...` on Windows, `~/Library/ghidra/...` on macOS)
+2. Or use: **File > Install Extensions > Add** and select the ZIP file — see the
+   [illustrated guide](docs/INSTALL_GUI.md)
 3. Ensure JAR/ZIP was built for your Ghidra version
 
 ### Build fails with "Ghidra dependencies not found"
@@ -844,12 +853,12 @@ scripts should use PyGhidra instead of the Ghidra Script Manager.
 
 ```text
 # Windows (recommended)
-python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 ```
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 253 tools fully implemented (the whole catalog; the GUI plugin serves 239 of them and the headless server 226)
+- **MCP Tools**: 210 tools fully implemented (the whole catalog; the GUI plugin serves 206 of them and the headless server 191)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -860,9 +869,9 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-253 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+210 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
-212 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (27) or **(headless only)** (14) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
+187 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (19) or **(headless only)** (4) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
 
 ### Program & Session Management
 
@@ -874,7 +883,6 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 - `delete_property_map` - Delete a user property map and all values it holds
 - `exit_ghidra` - Save and exit Ghidra
 - `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
-- `get_current_program_info` - Get current program info
 - `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
 - `get_metadata` - Get program metadata
 - `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
@@ -882,10 +890,8 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
 - `list_bookmarks` - List bookmarks
 - `list_open_programs` - List open programs
-- `list_option_groups` - List program option groups (e.g
 - `list_project_files` - List project files
 - `list_properties` - List (address, value) entries stored in a property map, with pagination
-- `list_property_maps` - List user-defined property maps â€” typed per-address keyâ†’value stores
 - `list_scripts` - List available Ghidra scripts
 - `open_program` - Open program from project
 - `read_memory` - Read raw memory
@@ -898,90 +904,70 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.3_PUBLIC
 - `save_program` - Save current program
 - `set_bookmark` - Set bookmark
 - `set_image_base` - Set the base address of the program (rebases all addresses)
+- `set_memory_block` - Change an existing memory block's permissions or volatility
 - `set_program_option` - Set a typed program option
 - `set_property` - Set a value at an address in a property map
 - `switch_program` - Switch current program
 
 ### Project Organization
 
+- `archive_project` - Archive the currently open project to a Ghidra-native .gar file
 - `create_folder` - Create a folder in the project
 - `delete_file` - Delete a file from the project
 - `delete_project` - Delete a Ghidra project **(headless only)**
+- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf)
+- `get_project_info` - Get info about the currently open project
+- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/')
 - `list_projects` - List available Ghidra projects **(headless only)**
 - `move_file` - Move a program file to a different folder in the project, preserving analysis and documentation
 - `move_folder` - Move a project folder and everything under it into another folder
-- `project_info` - Get detailed project info including running tools and open programs **(GUI only)**
+- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`
 
 ### Headless Project & Program Lifecycle
 
 Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
-- `archive_project` - Archive the currently open project to a Ghidra-native .gar file **(headless only)**
-- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version **(headless only)**
 - `close_project` - Close the currently open project **(headless only)**
 - `create_project` - Create a new Ghidra project **(headless only)**
-- `export_program` - Export an open or project-resident program to a Ghidra Zip File (.gzf) **(headless only)**
-- `get_project_info` - Get info about the currently open project **(headless only)**
-- `import_program` - Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/') **(headless only)**
-- `load_program` - Load a binary file into the headless server for analysis **(headless only)**
-- `load_program_from_project` - Load program from Ghidra project (headless) **(headless only)**
 - `open_project` - Open an existing Ghidra project (.gpr file or directory)
-- `restore_project` - Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name` **(headless only)**
-- `server_status` - Check headless server connection status
 
 ### Listing & Enumeration
 
 - `convert_number` - Convert number between bases
+- `find_functions` - Find functions: every filter is optional, so with none it lists the whole program a page at a time
 - `get_entry_points` - Get program entry points
 - `get_external_location` - Get external location details
 - `get_function_count` - Return the number of functions in the loaded program
 - `list_calling_conventions` - List available calling conventions
-- `list_classes` - List namespace/class names
-- `list_data_items` - List defined data
 - `list_data_items_by_xrefs` - List data sorted by xref count
-- `list_exports` - List exported symbols
-- `list_external_locations` - List external locations
-- `list_functions` - List functions with addresses
-- `list_functions_enhanced` - List functions with metadata
 - `list_globals` - List global variables
-- `list_imports` - List imported symbols
-- `list_methods` - List all function names with pagination
-- `list_namespaces` - List all namespaces
-- `list_segments` - List memory segments
+- `list_program_items` - List one kind of program inventory with pagination
 - `list_shadowed_globals` - List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them
 - `list_strings` - List defined strings
-- `search_functions` - Search functions by name
 - `search_strings` - Search defined strings by a regex/substring pattern
 
 ### Current GUI Context
 
-- `get_current_address` - Get cursor address (GUI only)
-- `get_current_function` - Get function at cursor (GUI only)
-- `get_current_selection` - Get highlighted address ranges in the CodeBrowser listing (GUI only) **(GUI only)**
+- `get_ui_cursor` - What the analyst is looking at right now: cursor address, the function under it, the listing selection, and the focused program — one call instead of four
 
 ### Functions: Decompile, Rename, Prototypes & Variables
 
-- `add_function_tag` - Attach one or more tags to a function
+- `add_function_tag` - Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...])
 - `batch_rename_function_components` - Batch rename function components
 - `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
 - `clear_instruction_flow_override` - Clear flow override
 - `create_function` - Create function at address
-- `create_function_tag` - Create a program-wide function tag definition with an optional comment
-- `decompile_function` - Decompile function
 - `delete_function` - Delete function at address
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
 - `force_decompile` - Force fresh decompilation
-- `get_function_by_address` - Get function at address
-- `get_function_tags` - List all tags assigned to a specific function
-- `get_function_variables` - List all variables in a function
+- `get_functions` - Everything about one or many functions in a single call
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
 - `remove_function_tag` - Detach one or more tags from a function
 - `rename_function` - Rename function by name
 - `rename_variables` - Batch rename variables
-- `search_functions_by_tag` - List all functions that have a specified tag attached
 - `set_function_no_return` - Set no-return attribute
 - `set_function_prototype` - Set function prototype (return type, param types, calling convention)
 - `set_function_tag_comment` - Update the comment/description on an existing program-wide function tag
@@ -995,7 +981,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `can_rename_at_address` - Check if address can be renamed
 - `create_label` - Create label
 - `delete_label` - Delete label at address
-- `get_function_labels` - Get labels in function
 - `rename_symbol` - Rename a symbol of any kind
 
 ### Cross-References & Call Graphs
@@ -1003,53 +988,42 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `add_memory_reference` - Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables)
 - `analyze_call_graph` - Analyze function call graph patterns
 - `get_assembly_context` - Get assembly context
-- `get_bulk_xrefs` - Get xrefs for multiple addresses
 - `get_full_call_graph` - Get full call graph
 - `get_function_call_graph` - Get call graph
-- `get_function_callees` - Get functions called
-- `get_function_callers` - Get calling functions
-- `get_function_jump_targets` - Get jump targets
-- `get_function_xrefs` - Get function cross-references
 - `get_xrefs_from` - Get references from address
 - `get_xrefs_to` - Get references to address
-- `remove_reference` - Remove memory cross-reference(s) from one address to another â€” the inverse of add_memory_reference
+- `remove_reference` - Remove memory cross-reference(s) from one address to another — the inverse of add_memory_reference
 
 ### Data Types & Structures
 
 - `add_struct_field` - Add struct field
-- `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale â€” the data-address analog of analyze_function_completeness
+- `analyze_global_completeness` - Score a global variable's documentation completeness on a budgeted 0-100 scale — the data-address analog of analyze_function_completeness
 - `analyze_struct_field_usage` - Analyze struct field usage
 - `apply_data_classification` - Apply data classification
 - `apply_data_type` - Apply data type
 - `audit_global` - Audit a global variable's documentation state
 - `audit_globals_in_function` - Audit every global variable referenced from within a function in one call
 - `clone_data_type` - Clone data type
-- `create_array_type` - Create array type
 - `create_data_type_category` - Create data type category
+- `create_derived_type` - Create a type built on another: a typedef alias, an array or a pointer
 - `create_enum` - Create enumeration
 - `create_function_signature` - Create function signature type
-- `create_pointer_type` - Create pointer type
 - `create_struct` - Create structure
-- `create_typedef` - Create typedef
 - `create_union` - Create union
 - `delete_data_type` - Delete data type
-- `embed_struct_field` - Replace a structure field with an embedded struct type by value (e.g
+- `find_data_types` - Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path)
 - `get_enum_values` - Get enumeration values
 - `get_struct_layout` - Get structure layout
 - `get_type_size` - Get data type size and info
 - `get_valid_data_types` - Get valid data type names
 - `import_data_types` - Import data types from GDT
-- `list_data_type_categories` - List data type categories
-- `list_data_types` - List data types
-- `modify_struct_field` - Modify struct field
-- `modify_struct_field_type` - Set a structure field's type by name or offset (offset:N)
+- `modify_struct_field` - Modify a field in a structure: retype it (new_type, which also embeds a struct by value, e.g
 - `move_data_type_to_category` - Move data type to category
 - `recreate_struct` - Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct)
 - `remove_struct_field` - Remove struct field
 - `rename_data_type` - Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it
 - `resize_struct` - Grow or shrink an existing structure by total byte size
 - `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
-- `search_data_types` - Search data types
 - `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
 - `suggest_field_names` - Suggest field names
 - `validate_data_type` - Validate data type syntax
@@ -1057,10 +1031,9 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Comments
 
-- `batch_get_comments` - Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
-- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike)
+- `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c)
 - `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
 
 ### Analysis
@@ -1071,8 +1044,8 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
-- `batch_apply_documentation` - Apply all documentation to a function in one call **(GUI only)**
-- `configure_analyzer` - Configure an analysis plugin **(headless only)**
+- `batch_apply_documentation` - Apply all documentation to a function in one call
+- `configure_analyzer` - Configure an analysis plugin
 - `detect_array_bounds` - Detect array bounds
 - `find_code_gaps` - Find gaps of undefined bytes between functions in executable memory
 - `find_dead_code` - Find dead code
@@ -1084,7 +1057,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `list_analyzers` - List available analysis plugins
 - `run_analysis` - Run auto-analysis on the current program
 - `search_byte_patterns` - Search for byte patterns
-- `search_functions_enhanced` - Advanced function search
 - `search_instructions` - Search for instructions by mnemonic and/or operand substring
 
 ### Malware & Anti-Analysis
@@ -1098,7 +1070,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 ### Cross-Binary Documentation & Archive
 
 - `apply_function_documentation` - Apply function documentation
-- `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (re_kb.functions on bsim Postgres)
+- `archive_ingest_function` - Ingest a single function's documentation into the cross-version archive (the doc archive service configured via GHIDRA_MCP_ARCHIVE_URL)
 - `archive_ingest_program` - Bulk-ingest every function in a program into the cross-version documentation archive
 - `batch_string_anchor_report` - Report of source file strings and their FUN_* functions
 - `bulk_fuzzy_match` - Bulk cross-binary function matching
@@ -1106,21 +1078,16 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `diff_functions` - Diff two functions
 - `find_similar_functions_fuzzy` - Cross-binary fuzzy function matching
 - `find_undocumented_by_string` - Find undocumented functions referencing string
-- `get_bulk_function_hashes` - Get bulk function hashes
 - `get_function_documentation` - Export function documentation
-- `get_function_hash` - Get function hash
-- `get_function_signature` - Get function feature signature
+- `get_function_hash` - Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=)
 - `merge_program_documentation` - Bulk merge: copy all RE documentation (function names, signatures, plate comments, instruction comments at EOL/PRE/POST, non-default labels & global symbols) from one program to another at matching addresses
 
 ### Health, Schema & Tool Control
 
-- `check_connection` - Health check endpoint
-- `get_version` - Get plugin version
-- `health` - Health check endpoint for headless server **(headless only)**
-- `mcp_health` - HTTP server health: pool stats, uptime, memory, active request count **(GUI only)**
+- `check_connection` - Liveness probe: {status, server_kind (gui/headless), version, program when one is current}
+- `mcp_health` - Server health: kind (gui/headless), build, current program, uptime, HTTP pool, memory, endpoint count
 - `mcp_schema` - Machine-readable API schema with endpoint metadata
 - `tool_goto_address` - Navigate CodeBrowser listing and decompiler to a specific address **(GUI only)**
-- `tool_launch_codebrowser` - Open a file in CodeBrowser, launching a new one if needed **(GUI only)**
 - `tool_running_tools` - List all running Ghidra tool windows **(GUI only)**
 
 ### Emulation
@@ -1130,11 +1097,12 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Ghidra Server & Version Control
 
+- `checkin_program` - Check an open program back in to the shared Ghidra Server as a new version
 - `server_admin_set_permissions` - Set user permissions on a repository
 - `server_admin_terminate_all_checkouts` - Terminate all checkouts in a folder recursively
 - `server_admin_terminate_checkout` - Terminate all checkouts on a single file
 - `server_admin_users` - List all users on the server
-- `server_authenticate` - Register server credentials for programmatic authentication **(GUI only)**
+- `server_authenticate` - Register server credentials for programmatic authentication
 - `server_checkouts` - List all checked-out files in a folder, including server-side checkouts
 - `server_connect` - Report/establish the Ghidra server connection
 - `server_disconnect` - Disconnect from the Ghidra server
@@ -1142,15 +1110,15 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `server_repository_create` - Create a new repository on the server
 - `server_repository_file` - Get file info from a server repository
 - `server_repository_files` - List files in a server repository folder
+- `server_status` - Check headless server connection status
 - `server_version_control_add` - Add a file to version control
-- `server_version_control_checkin` - Check in a version-controlled file
 - `server_version_control_checkout` - Check out a version-controlled file
 - `server_version_control_undo_checkout` - Undo a file checkout
 - `server_version_history` - Get version history for a file
 
 ### Debugger (Ghidra TraceRmi)
 
-On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix (e.g. `debugger_status_2`).
+When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a proxy tool with the same name (e.g. `debugger_status`) replaces the TraceRmi tool below. Leave the proxies off to use these.
 
 - `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
 - `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**
@@ -1166,9 +1134,7 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 - `debugger_stack_trace` - Get the call stack backtrace for the current thread **(GUI only)**
 - `debugger_static_to_dynamic` - Translate a static Ghidra program address to a runtime dynamic address in the current trace **(GUI only)**
 - `debugger_status` - Get debugger status: active trace, thread, execution state, module count **(GUI only)**
-- `debugger_step_into` - Single-step into the next instruction (follows calls) **(GUI only)**
-- `debugger_step_out` - Step out of the current function (run to return) **(GUI only)**
-- `debugger_step_over` - Step over the next instruction (does not follow calls) **(GUI only)**
+- `debugger_step` - Single-step the debugged process: into the next instruction (follows calls), over it (does not follow calls), or out of the current function (run to return) **(GUI only)**
 - `debugger_traces` - List all open debug traces **(GUI only)**
 
 ### System
@@ -1177,7 +1143,7 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 
 ### Bridge Static Tools
 
-Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge also proxies 22 `debugger_*` WinDbg tools when `GHIDRA_DEBUGGER_URL` points at the standalone debugger server.
+Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.
 
 - `check_tools` - Report which tools are currently registered and callable
 - `connect_instance` - Connect the bridge to a specific Ghidra instance
@@ -1207,9 +1173,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (253 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (239 endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 226 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (210 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (206 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 191 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -1218,9 +1184,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ```bash
 # Recommended: direct Python-first workflow
-python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup build
-python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Version bump (updates all maintained version references atomically)
 python -m tools.setup bump-version --new X.Y.Z
@@ -1267,12 +1233,12 @@ rather than skipped. See [Testing and Release Regression](docs/TESTING.md).
 
 ```text
 # Standard first-time setup and deploy
-python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup build
-python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Preflight check before deploying
-python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 
 # Version bump and tag
 python -m tools.setup bump-version --new X.Y.Z --tag
@@ -1289,11 +1255,11 @@ python -m tools.setup --help
 ```text
 ghidra-mcp/
 ├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 253 catalog entries)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 210 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (239 endpoints)
-│       ├── headless/                    # Headless server (226 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (206 endpoints)
+│       ├── headless/                    # Headless server (191 endpoints)
 │       └── core/                        # Shared service layer (14 services)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
@@ -1304,9 +1270,6 @@ ghidra-mcp/
 │   ├── releases/           # Version release notes
 │   └── project-management/ # Contributor planning docs (Gradle migration, etc.)
 ├── tools/setup/             # Build and deployment CLI (python -m tools.setup)
-├── fun-doc/                 # Internal RE curation tool — not part of the MCP plugin
-│                            #   Priority-queue worker, LLM scoring, web dashboard.
-│                            #   See fun-doc/README.md for details.
 └── .github/workflows/      # CI/CD pipelines
 ```
 
@@ -1319,7 +1282,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 The tool enforces version consistency between:
 
 - `pom.xml` (`ghidra.version`)
-- `--ghidra-path` version segment (e.g., `ghidra_12.1.3_PUBLIC`)
+- `--ghidra-path` version segment (e.g., `ghidra_12.1.4_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
@@ -1333,12 +1296,12 @@ If you see a version mismatch error, align both values:
 Then rerun:
 
 ```text
-python -m tools.setup preflight --ghidra-path "C:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup preflight --ghidra-path "C:\ghidra_12.1.4_PUBLIC"
 ```
 
 ```text
 # Windows
-python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.3_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.4_PUBLIC"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**
@@ -1414,16 +1377,17 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v7.0.0
+# {"status": "ok", "server_kind": "headless", "version": "7.0.0"}
 ```
 
 ### Headless API Workflow
 
 ```bash
-# 1. Load a binary
-curl -X POST -d "file=/data/program.exe" http://localhost:8089/load_program
+# 1. Import a binary into the open project (auto-analysis runs by default)
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"file_path": "/data/program.exe"}' http://localhost:8089/import_file
 
-# 2. Run auto-analysis (identifies functions, strings, data types)
+# 2. Re-run auto-analysis later if needed
 curl -X POST http://localhost:8089/run_analysis
 
 # 3. List discovered functions
@@ -1440,7 +1404,8 @@ curl http://localhost:8089/get_metadata
 
 | Endpoint | Method | Description |
 | ---------- | -------- | ------------- |
-| `/load_program` | POST | Load binary file for analysis |
+| `/import_file` | POST | Import a binary into the project and open it |
+| `/open_program` | POST | Open a program already in the project (any `program=` also opens on demand) |
 | `/run_analysis` | POST | Run Ghidra auto-analysis |
 | `/list_functions` | GET | List all discovered functions |
 | `/list_exports` | GET | List exported symbols |
@@ -1483,9 +1448,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 | Metric | Value |
 | -------- | ------- |
 | **Version** | 7.0.0 |
-| **MCP Tools** | 253 fully implemented |
-| **GUI Endpoints** | 239 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 226 (GhidraMCPHeadlessServer) |
+| **MCP Tools** | 210 fully implemented |
+| **GUI Endpoints** | 206 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 191 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |

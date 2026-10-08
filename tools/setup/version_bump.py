@@ -62,23 +62,6 @@ def build_rules(
             rf"\g<1>{new_version}",
         ),
         ReplacementRule(
-            repo_root / "src/main/java/com/xebyte/GhidraMCPPlugin.java",
-            rf'"{escaped_old}"',
-            f'"{new_version}"',
-        ),
-        ReplacementRule(
-            repo_root
-            / "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java",
-            rf'"{escaped_old}-headless"',
-            f'"{new_version}-headless"',
-        ),
-        ReplacementRule(
-            repo_root
-            / "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java",
-            rf'"{escaped_old}-headless"',
-            f'"{new_version}-headless"',
-        ),
-        ReplacementRule(
             repo_root / "tests/endpoints.json",
             r'("version":\s*")\d+\.\d+\.\d+(")',
             rf"\g<1>{new_version}\g<2>",

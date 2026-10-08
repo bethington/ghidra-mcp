@@ -39,22 +39,6 @@ def repo(tmp_path: Path) -> Path:
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "MANIFEST.MF").write_text(f"Plugin-Version: {OLD}\n", encoding="utf-8")
 
-    # Java source files
-    plugin_dir = tmp_path / "src" / "main" / "java" / "com" / "xebyte"
-    plugin_dir.mkdir(parents=True)
-    (plugin_dir / "GhidraMCPPlugin.java").write_text(
-        f'private static final String VERSION = "{OLD}";\n', encoding="utf-8"
-    )
-
-    headless_dir = plugin_dir / "headless"
-    headless_dir.mkdir(parents=True)
-    (headless_dir / "HeadlessEndpointHandler.java").write_text(
-        f'return "{OLD}-headless";\n', encoding="utf-8"
-    )
-    (headless_dir / "GhidraMCPHeadlessServer.java").write_text(
-        f'static final String VER = "{OLD}-headless";\n', encoding="utf-8"
-    )
-
     # endpoints.json
     (tmp_path / "tests").mkdir(parents=True)
     (tmp_path / "tests" / "endpoints.json").write_text(
@@ -195,122 +179,20 @@ def test_rule_manifest_plugin_version(repo: Path):
     assert OLD not in content
 
 
-def test_rule_java_plugin_version_string(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
+def test_java_sources_carry_no_version_literal():
+    """Both servers read the version from version.properties (core VersionInfo).
+    Headless used to hard-code "7.0.0-headless" and report it for every build
+    after 7.0.0, which is why no bump rule targets Java any more."""
+    from tools.setup.versioning import read_pom_versions
 
-    apply_version_bump(repo, NEW, old_version=OLD)
+    repo_root = Path(__file__).resolve().parents[2]
+    version = read_pom_versions(repo_root).project_version
+    for rel in ("src/main/java/com/xebyte/GhidraMCPPlugin.java",
+                "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java",
+                "src/main/java/com/xebyte/core/VersionInfo.java"):
+        text = (repo_root / rel).read_text(encoding="utf-8")
+        assert f'"{version}' not in text, rel
 
-    content = (repo / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java").read_text(encoding="utf-8")
-    assert f'"{NEW}"' in content
-    assert OLD not in content
-
-
-def test_rule_headless_endpoint_handler(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (
-        repo / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "HeadlessEndpointHandler.java"
-    ).read_text(encoding="utf-8")
-    assert f'"{NEW}-headless"' in content
-    assert OLD not in content
-
-
-def test_rule_headless_server(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (
-        repo / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
-    ).read_text(encoding="utf-8")
-    assert f'"{NEW}-headless"' in content
-    assert OLD not in content
-
-
-def test_rule_endpoints_json_version(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "tests" / "endpoints.json").read_text(encoding="utf-8")
-    assert f'"version": "{NEW}"' in content
-    assert OLD not in content
-
-
-def test_rule_claude_md_version(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "CLAUDE.md").read_text(encoding="utf-8")
-    assert f"**Version**: {NEW}" in content
-    assert OLD not in content
-
-
-def test_rule_readme_table_version(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "README.md").read_text(encoding="utf-8")
-    assert NEW in content
-    # Badge and headless title should also be updated — check OLD is gone entirely
-    assert OLD not in content
-
-
-def test_rule_readme_badge_version(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "README.md").read_text(encoding="utf-8")
-    assert f"Version-{NEW}-brightgreen" in content
-
-
-def test_rule_readme_headless_server_title(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "README.md").read_text(encoding="utf-8")
-    assert f"GhidraMCP Headless Server v{NEW}" in content
-
-
-def test_rule_agents_md_version(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "AGENTS.md").read_text(encoding="utf-8")
-    assert f"**Version**: {NEW}" in content
-    assert OLD not in content
-
-
-def test_rule_docs_releases_header(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "docs" / "releases" / "README.md").read_text(encoding="utf-8")
-    assert f"### v{NEW} (Latest)" in content
-    assert f"### v{OLD} (Latest)" not in content
-
-
-def test_rule_docs_releases_date_reference(repo: Path):
-    from tools.setup.version_bump import apply_version_bump
-
-    apply_version_bump(repo, NEW, old_version=OLD)
-
-    content = (repo / "docs" / "releases" / "README.md").read_text(encoding="utf-8")
-    assert f"(v{NEW})" in content
-    assert f"(v{OLD})" not in content
-
-
-# ---------------------------------------------------------------------------
-# build_rules — structural checks
-# ---------------------------------------------------------------------------
 
 def test_build_rules_covers_all_expected_files(tmp_path: Path):
     from tools.setup.version_bump import build_rules
@@ -321,9 +203,6 @@ def test_build_rules_covers_all_expected_files(tmp_path: Path):
     expected = {
         "pom.xml",
         "src/main/resources/META-INF/MANIFEST.MF",
-        "src/main/java/com/xebyte/GhidraMCPPlugin.java",
-        "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java",
-        "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java",
         "tests/endpoints.json",
         "CLAUDE.md",
         "README.md",

@@ -1,14 +1,14 @@
 // Batch Checkin Folder
 //
-// Checks in all checked-out files within a specified project folder to the shared Ghidra server with a standard commit message.
+// Checks in all checked-out files within a specified project folder to the shared Ghidra server with a check-in comment (script arg, or a generic default).
 //
-// Usage: Args: [0]=folder path (e.g., /Vanilla/1.13c).
+// Usage: Args: [0]=folder path (e.g., /MyProduct/v1.0), [1]=optional check-in comment.
 // Output: Checks in all modified files to the version control server.
 //
 // @author Ben Ethington
-// @category Diablo 2.Project
+// @category GhidraMCP.Project
 // @description Batch check in all files in a project folder
-// @menupath Diablo 2.Project.Batch Checkin Folder
+// @menupath GhidraMCP.Project.Batch Checkin Folder
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.*;
@@ -20,12 +20,14 @@ public class Project_BatchCheckinFolder extends GhidraScript {
     public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length < 1) {
-            println("ERROR: Need args: folder_path");
+            println("ERROR: Need args: folder_path [comment]");
             return;
         }
 
         String folderPath = args[0];
-        String comment = "1.13c documentation: 2590 functions named via hash propagation + manual RE";
+        String comment = (args.length > 1 && !args[1].isBlank())
+            ? args[1].trim()
+            : "Batch check-in of " + folderPath + " via Project_BatchCheckinFolder";
 
         var projectData = state.getProject().getProjectData();
         var folder = projectData.getFolder(folderPath);

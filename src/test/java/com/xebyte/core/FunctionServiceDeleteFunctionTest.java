@@ -58,10 +58,6 @@ public class FunctionServiceDeleteFunctionTest {
             return action.call();
         }
 
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     }
 
     /** Wires a mocked Program/FunctionManager/Function so deleteFunctionAtAddress runs for real. */

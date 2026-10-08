@@ -71,13 +71,11 @@ configuration, or change project state. Therefore `mcp_initialize_healthy` is
 every requested check passed; exit code `1` preserves the failing layer and
 the recommended next action in the report.
 
-The default `--server-kind auto` recognizes the GUI and headless
-`/check_connection` responses. For a headless server it checks `/health` and
-records GUI-only `/mcp/instance_info` as not applicable; use
-`--server-kind headless` when a custom wrapper does not use the standard
-connection banner. Use `--server-kind gui` to require the GUI endpoints.
-That split follows `tests/endpoints.json`: `/mcp/health` is GUI-only, `/health`
-is headless-only, and `/check_connection` plus `/mcp/schema` are served by both.
+The default `--server-kind auto` reads `server_kind` from the JSON
+`/check_connection` answers. Both kinds are then asked the same things:
+`/mcp/instance_info`, `/mcp/health` and `/mcp/schema`, all served identically by
+the GUI and the headless server. A plain-text `/check_connection` banner means a
+build older than this one.
 The live probe still uses the banner to choose the server; the catalog is the
 regression check that the chosen route has not drifted.
 

@@ -8,7 +8,8 @@ survivor.
 
 > **Where it landed.** This table describes the consolidation pass only. Two
 > endpoints were added later in the 7.0.0 cycle — `/list_shadowed_globals` and
-> `/batch_get_comments` — so the shipped catalog is **253**, not 251. The
+> `/batch_get_comments` — and `/get_functions` then replaced nine function readers, so
+> the shipped catalog is **215**, not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees
 > with it.
@@ -35,7 +36,7 @@ call site is rewritten.
 | `batch_remove_function_tags(assignments)` | `remove_function_tag` (+ `assignments[]`) | `remove_function_tag(assignments=[...])` |
 | `batch_create_labels(labels)` | `create_label` (+ `labels[]`) | `create_label(labels=[...])` |
 | `batch_delete_labels(labels)` | `delete_label` (+ `labels[]`) | `delete_label(labels=[...])` |
-| `batch_decompile(functions)` | `decompile_function` (+ `functions=`) | `decompile_function(functions="a,b,c")` |
+| `batch_decompile(functions)` | `get_functions` (+ `functions=`, `fields=decompiled_code`) | `get_functions(functions="a,b,c", fields="decompiled_code")` |
 | `batch_analyze_completeness(addresses)` | `analyze_function_completeness` (+ `addresses[]`) | `analyze_function_completeness(addresses=[...])` |
 | `rename_variable(...)` | `rename_variables` (already many; also accepts one) | `rename_variables(function_address, variable_renames=[{old,new}])` |
 | `batch_set_variable_types(function_address, variable_types)` | `set_variables` | `set_variables(function_address, variables=[{name,type}])` |
@@ -105,8 +106,60 @@ fails on a descriptor with no registered route, which is what caught the leftove
    (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`), README API reference
    regenerated (`python -m tools.gen_readme_api_reference --write`) → 251 tools.
 4. **Verification:** offline Java (390 tests), `tests/unit/`, and the offline
-   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 253
+   `tests/performance/` set are green. **Open:** deploy → confirm live `/mcp/schema` = 215
    → integration tiers + the four live-Ghidra performance files → fun-doc benchmark.
+
+## Folds after the consolidation
+
+Fifteen more tools folded into a sibling, still within one permission tier. Each survivor
+keeps its own single-item call unchanged and gains the removed tool's job.
+
+| REMOVE | SURVIVOR | Transform |
+| --- | --- | --- |
+| `modify_struct_field_type(struct_name, field_name, new_type)` | `modify_struct_field` | `modify_struct_field(struct_name, field_name, new_type=...)` |
+| `embed_struct_field(parent_struct, field_name, embedded_struct)` | `modify_struct_field` | `modify_struct_field(struct_name=parent_struct, field_name, new_type=embedded_struct)` |
+| `create_typedef(name, base_type)` | `create_derived_type` | `create_derived_type(kind="typedef", name, base_type)` |
+| `create_array_type(base_type, length, name)` | `create_derived_type` | `create_derived_type(kind="array", base_type, length, name)` |
+| `create_pointer_type(base_type, name)` | `create_derived_type` | `create_derived_type(kind="pointer", base_type, name)` |
+| `list_data_types(category)` | `find_data_types` | `find_data_types(category=...)`; entries are now records (`name`, `kind`, `category`, `size`, `path`) under `data_types`, not `name \| category \| size \| path` strings |
+| `search_data_types(pattern)` | `find_data_types` | `find_data_types(pattern=...)`; same record shape, sorted by path |
+| `list_data_type_categories()` | `find_data_types` | `find_data_types(categories=true)` |
+| `batch_get_comments(addresses, only_with_comments)` | `get_comment` | `get_comment(addresses="a,b,c", only_with_comments=...)` |
+| `get_bulk_function_hashes(offset, limit, filter)` | `get_function_hash` | `get_function_hash(offset, limit, filter)`, omitting `function` |
+| `list_option_groups()` | `get_program_options` | `get_program_options()`, omitting `group` |
+| `list_property_maps()` | `list_properties` | `list_properties()`, omitting `map` |
+| `debugger_step_into()` | `debugger_step` | `debugger_step(kind="into")` |
+| `debugger_step_over()` | `debugger_step` | `debugger_step(kind="over")` |
+| `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
+| `get_function_tags(function)` | `get_functions` | `get_functions(function, fields="tags")`; `tags` is a list of names, and is part of the default bundle |
+| `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)`, or several names for any-of; every result also carries its `tags` |
+| `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`; attaching creates the definition |
+
+The bridge's own `debugger_step_into` / `debugger_step_over` proxies, which forward to the
+external debugger server, are unaffected: only the GUI plugin's `/debugger/step_*` routes
+folded.
+
+## For consumers outside this repository (fun-doc, d2-game-exe)
+
+This repository no longer contains fun-doc, so nothing here catches a break on that side.
+Search the consumer for each item.
+
+- **Retired and never coming back:** `/decompile_function` (use `get_functions`),
+  `/health`, `/project/info`, `/load_program*`, `/tool/launch_codebrowser`,
+  `/server/version_control/checkin` (use `/checkin_program`).
+- **`/check_connection` is JSON now** (`status`, `server_kind`, `version`, `program`), not
+  plain text; a client comparing it to a literal breaks.
+- **`/server/*` is snake_case only** and answers the same way on both servers:
+  `keep_checked_out`, `checkout_id`, `access_level`. `/server/repository/files` is the
+  server's repository, not the project tree.
+- **A name shared by several functions is an error** that lists their addresses, and a name
+  typed in the wrong case resolves everywhere instead of in some tools.
+- **Every tool listed under "Folds after the consolidation"** is gone. `find_data_types` returns
+  records under `data_types`, not preformatted strings.
+- **Function tags:** `get_function_tags`, `search_functions_by_tag` and
+  `create_function_tag` are gone (`doc_lint`, `conformance_dashboard`, `fun_doc`,
+  `battletest_promoter`, `adversarial_reproof` and `golden_bench` call them). Reads are
+  `get_functions(fields="tags")` and `find_functions(tag=...)`; `list_function_tags` stays.
 
 ## Call-shape changes worth knowing
 

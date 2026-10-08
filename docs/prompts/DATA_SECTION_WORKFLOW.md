@@ -39,7 +39,7 @@ Targeted pass for .data/.rdata: enumerate, type, rename, and document globals an
 ### 5) Inline Context and Comments
 
 - Add concise inline comments where globals are heavily used to explain key fields, invariants, or role
-- For function-pointer tables or ordinals, add brief purpose comments (e.g., /* D2Common.GetUnitStat */)
+- For function-pointer tables or ordinals, add brief purpose comments (e.g., /* Engine.GetEntityStat */)
 
 ### 6) Validation Pass
 

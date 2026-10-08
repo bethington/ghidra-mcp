@@ -6,9 +6,9 @@
 // Output: Applies unified names to ordinal functions across all versions.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Unify ordinal function names across all versions
-// @menupath Diablo 2.Propagation.Unify Ordinal Names
+// @menupath GhidraMCP.Propagation.Unify Ordinal Names
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.model.*;
@@ -27,7 +27,7 @@ import javax.swing.JOptionPane;
  * Unify function names across versions using hash-based matching.
  * 
  * Purpose: When the same function exists in multiple binary versions but has different names
- * (e.g., SMemAlloc in 1.07 vs Ordinal_401 in 1.08+), this script identifies the best name
+ * (e.g., MemAlloc in v1.0 vs Ordinal_401 in v1.1+), this script identifies the best name
  * and applies it consistently across all versions.
  * 
  * Algorithm:

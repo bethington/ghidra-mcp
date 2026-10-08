@@ -151,8 +151,8 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 
 ### Health & Metadata
 
-- `GET /check_connection` - Health check
-- `GET /get_version` - Server version
+- `GET /check_connection` - Liveness: `{status, server_kind, version}`, plus `program` when one is current
+- `GET /mcp/health` - Build, uptime, HTTP pool, memory, endpoint count
 - `GET /get_metadata` - Program metadata
 
 ### Listing
@@ -169,9 +169,8 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 
 ### Analysis
 
-- `GET /decompile_function` - Decompile function
+- `GET /get_functions` - One or many functions: decompiled code, signature, callers, callees, comments
 - `GET /disassemble_function` - Disassemble function
-- `GET /get_function_by_address` - Get function info
 - `GET /get_xrefs_to` - Get cross-references to address
 - `GET /get_xrefs_from` - Get cross-references from address
 - `GET /search_functions` - Search functions by name
@@ -190,8 +189,9 @@ The headless server exposes the same REST API as the GUI plugin. Currently imple
 - `GET /list_open_programs` - List loaded programs
 - `GET /get_current_program_info` - Current program info
 - `POST /switch_program` - Switch active program
-- `POST /load_program` - Load program from file (headless only)
-- `POST /close_program` - Close a program (headless only)
+- `POST /import_file` - Import a binary into the project and open it
+- `POST /open_program` - Open a program from the project (any `program=` also opens on demand)
+- `POST /close_program` - Close a program (`save=false` discards its unsaved edits)
 
 ## Testing
 
@@ -255,7 +255,7 @@ Multi-Instance Setup:
 
 ### No program loaded
 
-1. Load a program via API: `curl -X POST -d "file=/data/binary.exe" http://localhost:8089/load_program`
+1. Import a program via API: `curl -X POST -H 'Content-Type: application/json' -d '{"file_path": "/data/binary.exe"}' http://localhost:8089/import_file`
 2. Or set `PROGRAM_FILE` environment variable
 
 ### Memory issues

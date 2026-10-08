@@ -81,7 +81,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
         builder.withTransaction(() -> target.setNoReturn(false));
 
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
         Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
 
@@ -96,7 +96,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
     @Test
     public void leavesCallReturnOverrideWhenTargetIsStillNoReturn() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
 
         Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
@@ -138,7 +138,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
         });
 
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
         Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
 
@@ -244,7 +244,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
 
     private FunctionService service() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         return new FunctionService(provider, new DirectThreadingStrategy());
     }
 }

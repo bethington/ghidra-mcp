@@ -6,9 +6,9 @@
 // Output: Console JSON with match results including similarity scores and source binaries.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Query BSim for matches to a specific function
-// @menupath Diablo 2.Analysis.BSim Query And Propagate
+// @menupath GhidraMCP.Analysis.BSim Query And Propagate
 
 import java.net.URL;
 import java.util.Iterator;

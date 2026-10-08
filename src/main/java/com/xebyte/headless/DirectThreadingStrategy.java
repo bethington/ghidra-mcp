@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.ThreadingStrategy;
+import com.xebyte.core.WriteTx;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
@@ -52,37 +53,37 @@ public class DirectThreadingStrategy implements ThreadingStrategy {
         }
 
         globalLock.lock();
-        int tx = -1;
-        boolean success = false;
-
+        // The unlock has a finally of its own. It used to sit after tx.end and the event
+        // flush in one finally block, so an exception from ending the transaction skipped
+        // it: the lock stayed held by a pool thread that had already returned, and every
+        // later write on this server waited for it forever (found on a live headless
+        // instance: renames timing out while comments, saves and check-ins still worked).
         try {
-            tx = program.startTransaction(txName);
-            T result = action.call();
-            success = true;
-            return result;
-        } catch (Exception e) {
-            Msg.error(this, "Error during transaction '" + txName + "'", e);
-            throw e;
-        } finally {
-            if (tx != -1) {
-                program.endTransaction(tx, success);
-            }
-
-            // Force event processing in headless mode
-            if (success) {
-                try {
-                    program.flushEvents();
-                } catch (Exception e) {
-                    Msg.warn(this, "Error flushing events: " + e.getMessage());
+            WriteTx tx = null;
+            boolean success = false;
+            try {
+                tx = WriteTx.begin(program, txName);
+                T result = action.call();
+                success = true;
+                return result;
+            } catch (Exception e) {
+                Msg.error(this, "Error during transaction '" + txName + "'", e);
+                throw e;
+            } finally {
+                if (tx != null) {
+                    tx.end(success);
+                }
+                // Force event processing in headless mode
+                if (success) {
+                    try {
+                        program.flushEvents();
+                    } catch (Exception e) {
+                        Msg.warn(this, "Error flushing events: " + e.getMessage());
+                    }
                 }
             }
-
+        } finally {
             globalLock.unlock();
         }
-    }
-
-    @Override
-    public boolean isHeadless() {
-        return true;
     }
 }
