@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 211,
+  "total_endpoints": 218,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -20,7 +20,8 @@
     "symbol": "Create/rename/delete labels, rename data, globals, external locations",
     "system": "Server-side prompt/automation policy",
     "utility": "Health checks, schema, version, tool control",
-    "xref": "Cross-references, call graphs, incoming/outgoing calls, data refs"
+    "xref": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+    "decompile-tree": "Decompilation tree: a browsable on-disk tree of a program's decompiled functions that keeps itself current as the program changes"
   },
   "endpoints": [
     {
@@ -1033,6 +1034,124 @@
         "gui"
       ],
       "description": "List all open debug traces"
+    },
+    {
+      "path": "/decompile_tree_configure",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "tree",
+        "root",
+        "strategies",
+        "band_size",
+        "max_file_bytes",
+        "exclusions",
+        "include_only",
+        "throttle_percent",
+        "disassemble_missing"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Change a tree's configuration: exclusions (tag: / partition: / range:), enabled strategies, band size, max file bytes, throttle. Exclusions are how you keep library code out of the tree — on a driver DLL, excluding two CRT compartments took it from 3,230 functions to 2,036. Classifies the change and acts on it: narrowing deletes now-out-of-scope bodies immediately (leaving them would be a lie a Grep would still hit); widening marks STALE with pending_functions; repartitioning sets requires_full_resweep. Never starts a sweep."
+    },
+    {
+      "path": "/decompile_tree_create",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "program",
+        "root",
+        "strategies",
+        "band_size",
+        "max_file_bytes",
+        "exclusions",
+        "include_only",
+        "throttle_percent",
+        "disassemble_missing"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the root and reconciles it against the live program; trees this server created are also adopted automatically when their program opens. The root must be empty, absent, or an existing tree (it holds tree.json). Unrelated to Ghidra version-control checkouts (/server/version_control/*)."
+    },
+    {
+      "path": "/decompile_tree_delete",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "tree",
+        "delete_files"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Deregister a tree; with delete_files=true also remove the files it wrote, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched."
+    },
+    {
+      "path": "/decompile_tree_pin_module",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "function",
+        "address",
+        "name",
+        "function_address",
+        "function_name",
+        "module",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Pin a function to a tree compartment forever. Use this when you have learned the real module boundary — e.g. after reading evidence that a function belongs with driver code despite the cascade placing it in an address band — and you want that placement to stick across resweeps, tree delete/recreate, and every other tool. Stored as a program property map (TreeModule) at the function entry, not in tree config. Empty module string unpins. Does not rewrite the tree by itself — the next sweep (or reconcile) honours the pin ahead of the whole partitioner cascade."
+    },
+    {
+      "path": "/decompile_tree_refresh",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "tree",
+        "addresses",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Reconcile a tree with the live program. Three primitives cover every change: replace (re-decompile a function still in both), insert (place a new function by pin or address containment, split the file if over budget), remove (drop a deleted function's block and its file if emptied). Pass addresses to target a set; omit them for a full index-driven pass that compares address sets and input fingerprints and decompiles only mismatches. There is no mark_stale — the reconciler is closed under every program change. Filesystem-only: does not mutate program state. Bridge-only — the agent never calls this; the bridge invokes it after writes so the tree stays current without agent reasoning.",
+      "internal": true
+    },
+    {
+      "path": "/decompile_tree_run",
+      "method": "POST",
+      "category": "decompile-tree",
+      "params": [
+        "tree",
+        "action"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Start or stop the sweep that fills a tree. action=start enqueues it (then poll decompile_tree_status): returns in milliseconds with phase queued and the resource URI. Sweeps run one at a time JVM-wide and yield to auto-analysis and to interactive requests. Measured: ~4 s for a 700-function firmware, ~28 s for a 3,200-function driver DLL, ~11 min for a 25,000-function static binary. action=stop cancels a queued or running sweep and is idempotent: stopping an idle or complete tree is success, not an error. The partial tree is left in place and STATUS.md records state: cancelled, so whatever was already written stays safe to Grep."
+    },
+    {
+      "path": "/decompile_tree_status",
+      "method": "GET",
+      "category": "decompile-tree",
+      "params": [
+        "tree"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Status, config and root path of a decompilation tree — poll this after decompile_tree_run(action=start), then Grep the reported root. READ_ONLY, so it is safe to call while planning. Reports phase, progress, and freshness against the live program. Never errors when the program is closed or the root is missing — reports program:\"closed\" / root_present:false instead, because that is exactly when you are asking. With no selector, lists every tree plus adoptable trees found on disk."
     },
     {
       "path": "/delete_bookmark",
@@ -3088,7 +3207,7 @@
         "gui",
         "headless"
       ],
-      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels."
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels. Every function may decompile differently afterwards, so decompilation trees are marked stale (resweep)."
     },
     {
       "path": "/set_program_option",

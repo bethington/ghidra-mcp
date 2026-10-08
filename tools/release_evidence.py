@@ -252,7 +252,7 @@ def verify(repo_root: Path, *, version: str) -> dict:
     recorded_paths = data.get("fingerprinted_paths")
     if recorded_paths != list(SOURCE_PATHS):
         problems.append(
-            f"evidence fingerprinted {recorded_paths!r}, this checkout "
+            f"evidence fingerprinted {recorded_paths!r}, this tree "
             f"fingerprints {list(SOURCE_PATHS)!r} -- the two are not comparable"
         )
     else:

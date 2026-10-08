@@ -1023,7 +1023,7 @@ def test_a_refused_checkout_is_unknown_and_takes_no_checkout_to_undo(monkeypatch
 
 
 def test_a_preexisting_checkout_is_reused_and_NOT_released_by_the_probe(monkeypatch):
-    """Releasing a checkout the operator already held would discard their
+    """Releasing a tree the operator already held would discard their
     local work."""
     posted = _probe_env(monkeypatch, checkouts=("/p",), opened={"success": True})
 

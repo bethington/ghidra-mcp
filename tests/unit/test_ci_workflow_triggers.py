@@ -141,7 +141,7 @@ def test_default_branch_constant_matches_git():
             check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        pytest.skip("origin/HEAD is not resolvable in this checkout")
+        pytest.skip("origin/HEAD is not resolvable in this tree")
 
     actual = resolved.rsplit("/", 1)[-1]
     assert actual == DEFAULT_BRANCH, (

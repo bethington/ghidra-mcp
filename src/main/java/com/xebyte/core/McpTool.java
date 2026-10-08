@@ -46,6 +46,14 @@ public @interface McpTool {
     ToolAccess access() default ToolAccess.UNSPECIFIED;
 
     /**
+     * Bridge-only HTTP route: still registered and callable, but omitted from
+     * {@code /mcp/schema} so no MCP tool is generated and the model never sees
+     * it. Use for endpoints the bridge invokes automatically (e.g. checkout
+     * refresh after writes) — listing them invites the agent to reason about
+     * staleness the bridge already handles.
+     */
+    boolean internal() default false;
+    /**
      * Whether {@code dry_run} can preview this tool. The scanner implements a dry run as
      * "call the tool inside a program transaction, then roll it back", which only undoes
      * changes to the program database. A tool whose effect is elsewhere (saving, closing,

@@ -1,5 +1,7 @@
 package com.xebyte.core;
 
+import com.xebyte.core.tree.DecompTree;
+import com.xebyte.core.tree.TreeRegistry;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
@@ -79,6 +81,8 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     protected ProjectProgramProvider(Object consumer, boolean okToUpgrade) {
         this.consumer = consumer != null ? consumer : this;
         this.okToUpgrade = okToUpgrade;
+        // DirtyQueue re-resolves Programs through us; an observer must never hold one.
+        TreeRegistry.getInstance().setProgramLookup(this::lookupForDecompTree);
     }
 
     private static int resolveMaxCachedPrograms() {
@@ -352,6 +356,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
         }
         cachePut(key, program);
         onOpened(program);
+        maybeAttachTreeObserver(program);
         Msg.info(this, "Opened program from project: " + key);
         return program;
     }
@@ -369,7 +374,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     private void cachePut(String key, Program program) {
         Program displaced = cache.put(key, program);
         if (displaced != null && displaced != program) {
-            // Two instances for one key: a re-import, or an orphan a checkout cycle left
+            // Two instances for one key: a re-import, or an orphan a tree cycle left
             // behind. Holding both leaks a consumer reference and the DB buffers behind it.
             release(key, displaced, true);
         }
@@ -452,6 +457,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
             if (save) {
                 ProgramSaves.saveIfChanged(program, monitor);
             }
+            detachTreeObservers(program);
             program.release(consumer);
             onReleased(program);
             Msg.info(this, "Released program: " + key);
@@ -571,7 +577,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
 
     /**
      * Why an open may have failed, as far as the server binding explains it. The recurring
-     * case (#119): a checkout on a standalone server connection syncs nothing into a
+     * case (#119): a tree on a standalone server connection syncs nothing into a
      * local-only project, so the file the caller checked out is simply not there.
      */
     public String describeServerBinding() {
@@ -685,6 +691,32 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
                 return null;
             }
         }
+        maybeAttachTreeObserver(resolved);
         return resolved;
+    }
+
+    // ------------------------------------------------------ checkout observers
+
+    /** Domain path first (version-safe), then name -- the order DecompTreeService polls in. */
+    private Program lookupForDecompTree(DecompTree decompTree) {
+        if (decompTree == null) {
+            return null;
+        }
+        try {
+            Program byPath = resolve(decompTree.domainPath());
+            return byPath != null ? byPath : resolve(decompTree.programName());
+        } catch (AmbiguousProgramException e) {
+            return null;
+        }
+    }
+
+    private static void maybeAttachTreeObserver(Program program) {
+        TreeRegistry.getInstance().programOpened(program);
+    }
+
+    private static void detachTreeObservers(Program program) {
+        if (program != null) {
+            TreeRegistry.getInstance().detachObservers(program);
+        }
     }
 }

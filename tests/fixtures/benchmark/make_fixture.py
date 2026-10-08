@@ -513,7 +513,7 @@ def _emit_exe_entry(asm: Assembler) -> None:
 
     # Step over argv[0] before looking for mode characters. GetCommandLineA
     # returns the program path too, and skipping this cost real debugging time:
-    # run from a checkout whose path contains a hyphen -- a git worktree named
+    # run from a tree whose path contains a hyphen -- a git worktree named
     # `agent-...`, or the repository's own `ghidra-mcp` -- the scan found a '-'
     # in the executable's own path and every invocation took the three-minute
     # sleep branch. The bug is invisible from a directory whose name happens to

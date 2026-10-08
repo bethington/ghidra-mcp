@@ -136,7 +136,7 @@ public final class ProjectVersionControl {
     /**
      * The state after an operation, re-read from the project. A checkin with
      * keep_checked_out=false answering {@code is_checked_out: true} is not necessarily
-     * stale: measured against a live server, the checkout genuinely survived it.
+     * stale: measured against a live server, the tree genuinely survived it.
      */
     private Response report(String status, boolean success, DomainFile file, Map<String, Object> extras) {
         DomainFile current = refreshed(file);

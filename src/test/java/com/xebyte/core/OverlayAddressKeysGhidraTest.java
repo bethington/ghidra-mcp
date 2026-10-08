@@ -1,7 +1,13 @@
 package com.xebyte.core;
 
+import com.xebyte.core.tree.BlockSplicer;
+import com.xebyte.core.AddressKeys;
+import com.xebyte.core.tree.TreeLayout;
+import com.xebyte.core.tree.TreeFiles;
+import com.xebyte.core.tree.FunctionBlock;
 import ghidra.GhidraApplicationLayout;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.program.database.ProgramBuilder;
@@ -22,9 +28,9 @@ import static org.junit.Assert.*;
 import static org.junit.Assume.assumeTrue;
 
 /**
- * Two functions at one offset, in the default space and an overlay, have two spellings. Bare
- * hex gave them one, so anything keyed by address (a get_functions result, a resource URI)
- * could not tell them apart.
+ * Two functions at one offset, in the default space and an overlay, stay two functions in a
+ * tree. Bare hex gave them one key: one by-address row, one file name, and a splice of
+ * either could replace the other's block.
  */
 public class OverlayAddressKeysGhidraTest {
 
@@ -92,5 +98,38 @@ public class OverlayAddressKeysGhidraTest {
         assertSame(overlay, AddressKeys.function(program, "OVL:00001000"));
         assertEquals("a caller's spelling of the default space becomes the bare key",
             "00001000", AddressKeys.canonical(program, "0x1000"));
+    }
+
+    @Test
+    public void bothBlocksLiveInOneFileAndEachIsFoundByItsOwnKey() {
+        String a = block(base);
+        String b = block(overlay);
+        assertTrue(a, a.startsWith("// fn: FUN_00001000 @ 00001000 size="));
+        assertTrue(b, b.startsWith("// fn: in_overlay @ OVL:00001000 size="));
+        assertTrue("the resource URI carries the space: " + b,
+            b.contains("/OVL:00001000\n"));
+        assertEquals("OVL:00001000", TreeFiles.addressFromChunk(b));
+
+        String file = a + "\n" + b;
+        assertSame(null, BlockSplicer.findBlock(file, "00001001"));
+        assertTrue(BlockSplicer.findBlock(file, "00001000").contains("FUN_00001000"));
+        assertTrue(BlockSplicer.findBlock(file, "OVL:00001000").contains("in_overlay"));
+    }
+
+    @Test
+    public void theyNeverShareAFileName() {
+        assertEquals("0000000000001000.c", TreeLayout.compartmentFileName("00001000", 8));
+        assertEquals("OVL_0000000000001000.c", TreeLayout.compartmentFileName("OVL:00001000", 8));
+    }
+
+    private String block(Function f) {
+        DecompInterface decomp = ServiceUtils.createConfiguredDecompiler(program,
+            FunctionFacts::configureDecompiler);
+        try {
+            return FunctionBlock.build(f, decomp, 30, TaskMonitor.DUMMY, "c00", "address-band",
+                0.5, false, program.getName()).text();
+        } finally {
+            decomp.dispose();
+        }
     }
 }

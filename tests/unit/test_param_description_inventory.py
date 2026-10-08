@@ -500,7 +500,7 @@ class TestMain:
 # The claim itself
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not SRC.is_dir(), reason="Java sources not present in this checkout")
+@pytest.mark.skipif(not SRC.is_dir(), reason="Java sources not present in this tree")
 def test_repo_has_no_undescribed_schema_parameters():
     """The Python-side twin of ParamDescriptionCoverageTest.
 

@@ -29,7 +29,7 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
             params.add(new AnnotationScanner.ParamDescriptor(n, "String", "BODY", false, null, "", "string", false, java.util.List.of()));
         }
         return new AnnotationScanner.ToolDescriptor("/open_project", "POST", "scanner description",
-                "headless", null, ToolAccess.WRITE, params);
+                "headless", null, ToolAccess.WRITE, false, params);
     }
 
     private static JsonObject entry(String description, String category, String... paramNames) {
@@ -73,7 +73,7 @@ public class RegenerateEndpointsJsonMergeTest extends TestCase {
                 "function", "String", "BODY", false, null, "", "string", false,
                 List.of("address", "name")));
         AnnotationScanner.ToolDescriptor withAliases = new AnnotationScanner.ToolDescriptor(
-                "/open_project", "POST", "d", "headless", null, ToolAccess.WRITE, params);
+                "/open_project", "POST", "d", "headless", null, ToolAccess.WRITE, false, params);
         RegenerateEndpointsJson.MergeResult result =
                 RegenerateEndpointsJson.mergeEntry(withAliases, entry("d", "headless", "function"));
         assertEquals(List.of("function", "address", "name"), paramsOf(result.entry));

@@ -205,7 +205,7 @@ public final class ProjectSource {
     /**
      * A candidate is this project only if it has both the Maven descriptor and
      * the main package — {@code pom.xml} alone would also match an unrelated
-     * parent project a contributor happened to nest the checkout inside.
+     * parent project a contributor happened to nest the tree inside.
      */
     private static boolean looksLikeProjectRoot(Path candidate) {
         return Files.isRegularFile(candidate.resolve("pom.xml"))

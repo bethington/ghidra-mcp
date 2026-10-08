@@ -435,7 +435,7 @@ public class ProjectVersionControlTest {
         List<Map<String, Object>> rows = (List<Map<String, Object>>) out.get("checkouts");
         Map<String, Object> first = rows.get(0);
         assertEquals("/fw/mine", first.get("path"));
-        assertEquals("a checkout holding work is visible", true, first.get("modified_since_checkout"));
+        assertEquals("a tree holding work is visible", true, first.get("modified_since_checkout"));
         assertFalse(first.containsKey("server_checkouts"));
         Map<String, Object> second = rows.get(1);
         assertEquals("/fw/sub/theirs", second.get("path"));

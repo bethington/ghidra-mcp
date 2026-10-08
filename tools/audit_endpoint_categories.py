@@ -58,6 +58,7 @@ SCANNED_SERVICES = (
     "FunctionBundleService",
     "TypeReferenceService",
     "PartitionService",
+    "DecompTreeService",
     "VersionControlService",
     "ServerLifecycleService",
     "GuiToolService",

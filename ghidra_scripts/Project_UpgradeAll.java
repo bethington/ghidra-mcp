@@ -114,7 +114,7 @@ public class Project_UpgradeAll extends GhidraScript {
     private void processFile(DomainFile file, String indent) {
         String fileName = file.getName();
 
-        // Only undo a checkout WE took. Undoing a pre-existing one would discard
+        // Only undo a tree WE took. Undoing a pre-existing one would discard
         // whatever work it was holding.
         boolean weCheckedOut = false;
 
