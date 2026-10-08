@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 209,
+  "total_endpoints": 211,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1467,6 +1467,26 @@
       "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
     },
     {
+      "path": "/find_type_users",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "type_name",
+        "name",
+        "data_type",
+        "datatype",
+        "field",
+        "field_name",
+        "timeout_seconds",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Functions whose decompilation references a data type (or one of its fields). Used by resource invalidation after struct/enum edits so only the affected function URIs are refreshed. Runs off the EDT with a hard timeout; a timeout returns the partial set with timed_out=true rather than failing."
+    },
+    {
       "path": "/find_undocumented_by_string",
       "method": "GET",
       "category": "documentation",
@@ -2303,6 +2323,22 @@
         "headless"
       ],
       "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
+    },
+    {
+      "path": "/partition_program",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "band_size",
+        "min_size",
+        "strategies",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Group a program's functions into compartments so you can decide which regions to ignore before reading any of them — on a driver DLL the two library compartments were 42% of the binary and identifiable from their referenced strings alone. Uses a cascade of structural strategies (class names in log strings, peripheral register pages, linker literal locality, address banding); each reports whether it applied and why, and every partition carries the evidence that formed it. Slugs are machine-generated and assert nothing about content. Read-only: reports the partitioning, does not write the Program Tree. Runs off the EDT; costs one pass over every instruction."
     },
     {
       "path": "/prompt_policy",

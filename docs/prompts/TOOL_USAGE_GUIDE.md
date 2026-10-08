@@ -544,3 +544,20 @@ java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadless
 The **truth** axis is falsifiability: mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. These checks are not part of this server; an external documentation orchestrator can run them. When one does, a mechanically certain finding stamps an idempotent `[AUDIT falsify:*]` plate flag and keeps the function in its work queue regardless of its score.
 
 Operationally: treat a high completeness score as "the form is filled in", never as "the content is verified". When a plate carries an `[AUDIT falsify:*]` flag, resolving that contradiction — by correcting the documentation to match the disassembly, never the reverse — takes priority over any score-driven work.
+
+## Partitioning and type users (v7.1.0+)
+
+### `partition_program(band_size=..., min_size=..., strategies=..., program="")`
+
+Group a program's functions into compartments by structural evidence (qualified names in
+strings, MMIO page sets, literal locality, address bands) before you decide what to read
+or exclude. Read-only: it reports partitions and evidence; it does not write Ghidra's
+Program Tree. On a Windows driver the two library compartments were 42% of the binary and
+identifiable from referenced strings alone.
+
+### `find_type_users(type_name, field="", timeout_seconds=10, program="")`
+
+List the functions whose decompilation references a data type, or one field of it. Runs
+off the EDT with a hard timeout; a timeout returns the partial set with `timed_out=true`
+rather than failing.
+
