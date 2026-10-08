@@ -3,7 +3,6 @@
 import argparse
 import hmac
 import json
-import os
 import re
 import secrets
 import socket
@@ -18,6 +17,7 @@ from . import server
 from . import settings
 from . import state
 from .config import AUTH_TOKEN, logger
+from .keys import env_name, startup, value as setting_value
 from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
 
@@ -28,11 +28,6 @@ from .static_tools import _auto_connect, _start_auto_connect_retry
 _INITIALIZE_SNIFF_LIMIT = 256 * 1024
 
 _ALLOWED_HTTP_METHODS = "GET, POST, DELETE, OPTIONS"
-
-# Shared secret required on inbound HTTP requests when set. Unset = no inbound
-# authentication, which is the historical behaviour and fine on loopback.
-_INBOUND_TOKEN_ENV = "GHIDRA_MCP_INBOUND_TOKEN"
-
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -89,8 +84,7 @@ def _policy_hosts(bind_host: str) -> set[str]:
         hosts.add(bind_host)
     # The escape hatch operators reach for when a legitimate client is
     # refused. It must extend BOTH gates, or it fixes one and not the other.
-    extra = os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "")
-    hosts.update(h.strip() for h in extra.split(",") if h.strip())
+    hosts.update(setting_value("bridge.allowed_hosts"))
     return hosts
 
 
@@ -167,7 +161,7 @@ def _cors_origin_regex(bind_host: str) -> str:
     port are always allowed (browser tools like MCP Inspector serve their
     UI from ``http://localhost:<port>``), a non-loopback bind additionally
     allows the bind host itself, a wildcard bind allows the machine's own
-    hostnames/IPs, and ``GHIDRA_MCP_ALLOWED_HOSTS`` extends the list.
+    hostnames/IPs, and ``GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS`` extends the list.
     """
     alternatives = "|".join(sorted(re.escape(h) for h in _bracketed(_policy_hosts(bind_host))))
     return rf"^https?://({alternatives})(:\d+)?$"
@@ -462,7 +456,7 @@ def _build_http_app(transport: str, bind_host: str):
     # Sits outside TransportEdgeGuard so an unauthenticated request never
     # reaches the session manager, and inside CORS so a browser still gets its
     # preflight answered (which cannot carry credentials).
-    token = os.environ.get(_INBOUND_TOKEN_ENV, "")
+    token = setting_value("bridge.inbound_token")
     if token:
         app.add_middleware(BearerTokenGuard, token=token)
     app.add_middleware(
@@ -481,6 +475,7 @@ def _build_http_app(transport: str, bind_host: str):
 
 
 def main():
+    startup()
     parser = argparse.ArgumentParser(description="GhidraMCP Bridge -- MCP<->HTTP multiplexer")
     parser.add_argument(
         "--mcp-host",
@@ -513,7 +508,7 @@ def main():
         help="Load all tool groups on connect. Needed only by clients that "
         "ignore tools/list_changed; rejected outright by the Gemini API "
         "(400 INVALID_ARGUMENT, too many states for serving). "
-        "GHIDRA_MCP_LAZY=0 does the same where argv is not yours to set.",
+        f"{env_name('bridge.lazy')}=0 does the same where argv is not yours to set.",
     )
     parser.add_argument(
         "--default-groups",
@@ -528,7 +523,7 @@ def main():
         default=None,
         help="MCP surface: full (legacy dynamic tools, default), facade (5 stable "
         "ghidra_* tools for Copilot-style clients), hybrid (both). "
-        "Env GHIDRA_MCP_EXPOSE overrides when the flag is absent.",
+        "GHIDRA_MCP_BRIDGE_EXPOSE (bridge.expose) applies when the flag is absent.",
     )
     parser.add_argument(
         "--tools-page-size",
@@ -558,15 +553,15 @@ def main():
     )
     parser.add_argument(
         "--project",
-        default=(os.getenv("GHIDRA_MCP_PROJECT") or "").strip() or None,
-        help="Exact project name to connect on startup (env: GHIDRA_MCP_PROJECT)",
+        default=setting_value("bridge.project") or None,
+        help="Exact project name to connect on startup (bridge.project, env: GHIDRA_MCP_BRIDGE_PROJECT)",
     )
     args = parser.parse_args()
     project = args.project.strip() if args.project is not None else None
     if args.project is not None and not project:
-        parser.error("--project / GHIDRA_MCP_PROJECT must not be blank")
+        parser.error("--project / GHIDRA_MCP_BRIDGE_PROJECT must not be blank")
 
-    # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_LAZY decides, and
+    # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_BRIDGE_LAZY decides, and
     # only then the built-in default. Argparse leaves args.lazy as None when
     # neither flag was given, which is what makes the three levels separable —
     # a store_true default of True would make "not passed" and "passed --lazy"
@@ -581,7 +576,7 @@ def main():
 
     from . import facade as _facade
 
-    expose = args.expose or os.environ.get("GHIDRA_MCP_EXPOSE", "full")
+    expose = args.expose or setting_value("bridge.expose")
     _facade.apply_expose_mode(expose)
     if state._expose_mode == "facade":
         # Facade keeps the whole /mcp/schema in memory and dispatches by
@@ -595,7 +590,7 @@ def main():
         logger.info(
             "Lazy tool loading: tools.autoload (and tools.last_loaded, if tools.restore_loaded) "
             "on connect. Call search_tools()/load_tool_group() for the rest, or pass "
-            "--no-lazy (or set GHIDRA_MCP_LAZY=0) to advertise every group up front."
+            f"--no-lazy (or set {env_name('bridge.lazy')}=0) to advertise every group up front."
         )
     if args.tools_page_size < 0:
         parser.error("--tools-page-size must be 0 (no pagination) or a positive count")
@@ -641,14 +636,14 @@ def main():
         logger.warning(
             "Stateless HTTP cannot deliver tools/list_changed, so a group loaded by "
             "load_tool_group() stays invisible to the client. Pass --no-lazy (or set "
-            "GHIDRA_MCP_LAZY=0) when running stateless; lazy loading is the default."
+            "GHIDRA_MCP_BRIDGE_LAZY=0) when running stateless; lazy loading is the default."
         )
 
     _host = args.mcp_host
     if (
         args.transport in ("sse", "streamable-http")
         and _host not in {"127.0.0.1", "localhost", "::1"}
-        and not os.environ.get(_INBOUND_TOKEN_ENV)
+        and not setting_value("bridge.inbound_token")
     ):
         # Not fatal: refusing to start would break existing remote setups on
         # upgrade. But DNS-rebinding protection does not cover this — it stops a
@@ -659,11 +654,9 @@ def main():
             "this port can drive every Ghidra tool, writes included. Set %s=<secret> "
             "to require Authorization: Bearer <secret>.",
             _host,
-            _INBOUND_TOKEN_ENV,
+            env_name("bridge.inbound_token"),
         )
-    _has_extra_hosts = any(
-        host.strip() for host in os.environ.get("GHIDRA_MCP_ALLOWED_HOSTS", "").split(",")
-    )
+    _has_extra_hosts = bool(setting_value("bridge.allowed_hosts"))
     if _host not in _LOOPBACK_HOSTS or _has_extra_hosts:
         # Wildcard bind is the MOST exposed configuration — keep
         # DNS-rebinding protection ON and allow only the machine's actual
@@ -674,13 +667,13 @@ def main():
         #
         # Legitimate remote clients use the real hostname/IP, so they
         # pass the Host-header check. Operators with custom DNS can
-        # extend the list via GHIDRA_MCP_ALLOWED_HOSTS (comma-separated),
+        # extend the list via GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS (comma-separated),
         # or explicitly opt back into the old unprotected behavior with
-        # GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 (wildcard bind only).
-        if _host in {"0.0.0.0", "::"} and os.environ.get("GHIDRA_MCP_DISABLE_REBIND_PROTECTION") == "1":
+        # GHIDRA_MCP_BRIDGE_REBIND_PROTECTION=false (wildcard bind only).
+        if _host in {"0.0.0.0", "::"} and not setting_value("bridge.rebind_protection"):
             logger.warning(
                 "DNS-rebinding protection DISABLED for wildcard bind via "
-                "GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1 — any page in the "
+                f"{env_name('bridge.rebind_protection')}=false — any page in the "
                 "user's browser can drive this server."
             )
             mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
@@ -688,7 +681,7 @@ def main():
             security = _transport_security(_host)
             logger.info(
                 "Bind %s with DNS-rebinding protection ON; allowed Host "
-                "headers: %s. Extend with GHIDRA_MCP_ALLOWED_HOSTS=host1,host2 "
+                f"headers: %s. Extend with {env_name('bridge.allowed_hosts')}=host1,host2 "
                 "if a legitimate client is rejected — it widens the CORS "
                 "origin policy and this one together.",
                 _host,

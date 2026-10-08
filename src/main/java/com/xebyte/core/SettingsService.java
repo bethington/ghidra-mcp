@@ -97,6 +97,11 @@ public class SettingsService {
             Map<Scope, ScopeStore> stores = stores(program);
             List<Map<String, Object>> rows = new ArrayList<>();
             for (SettingKey key : registry.withPrefix(prefix)) {
+                // SESSION-only keys are the bridge process's own environment; the server
+                // cannot see them, so any value printed here would be a lie.
+                if (key.scopes().size() == 1 && key.scopes().contains(Scope.SESSION)) {
+                    continue;
+                }
                 rows.add(row(SettingsResolver.resolve(key, stores)));
             }
             Map<String, Object> out = new LinkedHashMap<>();

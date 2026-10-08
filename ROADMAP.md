@@ -97,7 +97,7 @@ refused, session-less probes no longer leave sessions behind, failures carry
 `--json-response`, `--stateless-http` and `--tools-page-size` expose the
 transport options some clients need. Community PR #438 (unauthenticated
 non-loopback binding) merged before rc.1, and #553 added an opt-in inbound
-bearer token, `GHIDRA_MCP_INBOUND_TOKEN`, with a warning on a non-loopback bind
+bearer token, `GHIDRA_MCP_BRIDGE_INBOUND_TOKEN`, with a warning on a non-loopback bind
 without one. That matters for the container: a published port cannot reach a
 loopback bind, so the containerised bridge binds `0.0.0.0` while holding a
 credential for Ghidra.

@@ -19,6 +19,32 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — the bridge's environment variables are settings keys
+
+The bridge's own variables are `bridge.*` registry keys at session scope, documented in the
+generated key table and named the derived way. The bridge refuses to start while an old name is
+set, naming the new one. `get_settings` leaves session-only keys out: the server cannot see the
+bridge's environment, so any value it printed would be wrong. `auth.token` keeps its name and now
+lists the session scope too, since the bridge sends the same variable as its bearer token.
+
+| Old variable | Key | Variable now |
+| --- | --- | --- |
+| `GHIDRA_MCP_URL` | `bridge.server_url` | `GHIDRA_MCP_BRIDGE_SERVER_URL` |
+| `GHIDRA_MCP_MAX_CONCURRENT_REQUESTS` | `bridge.max_concurrent_requests` | `GHIDRA_MCP_BRIDGE_MAX_CONCURRENT_REQUESTS` |
+| `GHIDRA_MCP_LOG_LEVEL` | `bridge.log_level` | `GHIDRA_MCP_BRIDGE_LOG_LEVEL` |
+| `GHIDRA_MCP_LAZY` | `bridge.lazy` | `GHIDRA_MCP_BRIDGE_LAZY` |
+| `GHIDRA_MCP_PROJECT` | `bridge.project` | `GHIDRA_MCP_BRIDGE_PROJECT` |
+| `GHIDRA_MCP_EXPOSE` | `bridge.expose` | `GHIDRA_MCP_BRIDGE_EXPOSE` |
+| `GHIDRA_MCP_ALLOWED_HOSTS` | `bridge.allowed_hosts` | `GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS` |
+| `GHIDRA_MCP_INBOUND_TOKEN` | `bridge.inbound_token` (secret) | `GHIDRA_MCP_BRIDGE_INBOUND_TOKEN` |
+| `GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1` | `bridge.rebind_protection` | `GHIDRA_MCP_BRIDGE_REBIND_PROTECTION=false` |
+| `GHIDRA_DEBUGGER_URL` | `bridge.debugger_url` | `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` |
+| `GHIDRA_DEBUGGER_TOOLS` | `bridge.debugger_tools` | `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS` |
+
+Update MCP client configs that set any of these (`"env"` blocks), Docker compose files and
+`.env`. The debugger proxies stay opt-in: setting `bridge.debugger_url` registers them,
+and `bridge.debugger_tools=false` keeps them off even then.
+
 ### Changed — the server's own configuration is settings keys
 
 Every environment variable the server read directly is now a registry key, so `get_settings`

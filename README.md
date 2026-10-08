@@ -412,7 +412,7 @@ MCP client config (`.mcp.json`, `~/.cursor/mcp.json`, Claude Desktop config, …
     "ghidra-mcp": {
       "command": "/home/<you>/.local/bin/uv",
       "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra", "--transport", "stdio"],
-      "env": { "GHIDRA_MCP_URL": "http://127.0.0.1:8089" }
+      "env": { "GHIDRA_MCP_BRIDGE_SERVER_URL": "http://127.0.0.1:8089" }
     }
   }
 }
@@ -465,15 +465,15 @@ Browser-based clients (e.g. [MCP Inspector](https://github.com/modelcontextproto
 work out of the box: the HTTP transports answer CORS preflight (`OPTIONS`) requests and expose
 the `mcp-session-id` / `mcp-protocol-version` headers to scripts. Allowed origins mirror the
 Host-header policy — loopback on any port is always permitted, plus the bind host and any
-hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
+hosts listed in `GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS`.
 
-`GHIDRA_MCP_ALLOWED_HOSTS` also supports clients that route a loopback-bound
+`GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS` also supports clients that route a loopback-bound
 bridge through another network namespace. For example, a container can address
 the host as `host.containers.internal` without exposing the bridge on a LAN
 interface:
 
 ```bash
-GHIDRA_MCP_ALLOWED_HOSTS=host.containers.internal \
+GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS=host.containers.internal \
   uv run bridge-mcp-ghidra --transport streamable-http \
   --mcp-host 127.0.0.1 --mcp-port 8081
 ```
@@ -495,7 +495,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
 | `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
-| `--project` | unset | Exact project name to select at startup, including when multiple instances are running. Overrides `GHIDRA_MCP_PROJECT`. |
+| `--project` | unset | Exact project name to select at startup, including when multiple instances are running. Overrides `GHIDRA_MCP_BRIDGE_PROJECT` (`bridge.project`). |
 | `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
 | `--default-groups` | the project's `tools.autoload` | This session's `tools.autoload`: a comma-separated list replaces the project's groups, `+group`/`-group` adjusts them. |
 | `--tools-page-size` | `0` | Serve `tools/list` in pages of this size (`0` = one page). Only for a client that cannot take one large response; a client that ignores `nextCursor` sees only the first page. |
@@ -503,7 +503,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--stateless-http` | off | streamable-http: no session id and no server-initiated notifications, for running several bridge workers behind a load balancer. Pair it with `--no-lazy`, since a group loaded later can never be announced. |
 
 To require a token from MCP clients of an HTTP transport, set
-`GHIDRA_MCP_INBOUND_TOKEN=<secret>`; clients must then send
+`GHIDRA_MCP_BRIDGE_INBOUND_TOKEN=<secret>`; clients must then send
 `Authorization: Bearer <secret>`. The bridge logs a warning when it binds a
 non-loopback `--mcp-host` without one. Separately, when `GHIDRA_MCP_AUTH_TOKEN`
 (the token the bridge sends to Ghidra) is set and the bridge binds a
@@ -532,10 +532,10 @@ are registered later, and should turn lazy loading off:
 
 ```bash
 uv run bridge-mcp-ghidra --no-lazy          # when you control the command line
-export GHIDRA_MCP_LAZY=0                    # when you don't (Docker, uvx, some client configs)
+export GHIDRA_MCP_BRIDGE_LAZY=0                    # when you don't (Docker, uvx, some client configs)
 ```
 
-`GHIDRA_MCP_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
+`GHIDRA_MCP_BRIDGE_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
 `--lazy`/`--no-lazy` on the command line wins over it. Startup logs which mode
 is in effect.
 
@@ -604,11 +604,11 @@ instead of registering everything:
 
 To select a project before the client discovers tools, use
 `bridge-mcp-ghidra --project MyProject --no-lazy`, or set
-`GHIDRA_MCP_PROJECT=MyProject` and `GHIDRA_MCP_LAZY=0` in the client's environment.
+`GHIDRA_MCP_BRIDGE_PROJECT=MyProject` and `GHIDRA_MCP_BRIDGE_LAZY=0` in the client's environment.
 Project names are matched exactly. A missing or ambiguous match leaves the bridge
 disconnected; background retries retain the selector. Blank environment values mean
 unset, and a blank `--project` is rejected. Without a selector, auto-connect behavior
-is unchanged. For TCP-only servers, `GHIDRA_MCP_URL` limits project discovery to that
+is unchanged. For TCP-only servers, `GHIDRA_MCP_BRIDGE_SERVER_URL` limits project discovery to that
 listener; otherwise the usual local TCP discovery range is searched.
 
 `search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
@@ -685,13 +685,13 @@ default** and register only when you opt in:
 
 ```bash
 # point the bridge at your debugger server (loopback only)
-export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+export GHIDRA_MCP_BRIDGE_DEBUGGER_URL=http://127.0.0.1:8099
 
 # or force registration against the default URL (http://127.0.0.1:8099)
-export GHIDRA_DEBUGGER_TOOLS=1
+export GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1
 ```
 
-`GHIDRA_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
+`GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
 registers the tools, anything else (`0`, `false`, ...) keeps them off even with
 a URL configured. With neither variable set the tools simply do not appear,
 rather than appearing and failing. The host platform plays no part.
@@ -700,9 +700,9 @@ Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
 ...) are separate: they live in the GUI plugin and need no extra server.
 
 Calls are only ever proxied to a loopback URL (`127.0.0.1`, `localhost` or
-`::1`), so a non-loopback `GHIDRA_DEBUGGER_URL` does not register the tools. To
+`::1`), so a non-loopback `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` does not register the tools. To
 reach a debugger server on another machine, forward its port to loopback (for
-example an SSH tunnel) and point `GHIDRA_DEBUGGER_URL` there.
+example an SSH tunnel) and point `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` there.
 
 The bridge reads these from its own process environment (the MCP client's
 `env` block, or your shell); it does not read a `.env` file.
@@ -911,18 +911,18 @@ bridge-mcp-ghidra
 ### The `debugger_*` tools do not appear
 
 **Cause:** The 22 bridge-side debugger proxies are off by default. They register
-only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`, and they
+only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`, and they
 forward to an external debugger server that is not part of this repository.
 
 **Solution:** start your debugger server, then set the URL before launching the
 bridge:
 
 ```text
-export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+export GHIDRA_MCP_BRIDGE_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
 If the tools appear but every call reports that the server is not running,
-the URL is wrong or the server is down. `GHIDRA_DEBUGGER_TOOLS=0` turns them off
+the URL is wrong or the server is down. `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=0` turns them off
 again even with a URL configured.
 
 ### 500 Internal Server Errors
@@ -1250,7 +1250,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Debugger (Ghidra TraceRmi)
 
-When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a TraceRmi tool below that shares a proxy's name gets a `_2` suffix (e.g. `debugger_status_2`), so both stay reachable.
+When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_MCP_BRIDGE_DEBUGGER_URL` or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`), a TraceRmi tool below that shares a proxy's name gets a `_2` suffix (e.g. `debugger_status_2`), so both stay reachable.
 
 - `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
 - `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**
@@ -1284,7 +1284,7 @@ When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_U
 
 ### Bridge Static Tools
 
-Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.
+Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`.
 
 - `check_tools` - Report which tools are currently registered and callable
 - `connect_instance` - Connect the bridge to a specific Ghidra instance

@@ -85,7 +85,7 @@ services:
     environment:
       # Explicit rather than relying on config.DEFAULT_TCP_URL, because this is
       # the line that documents the constraint above.
-      - GHIDRA_MCP_URL=http://127.0.0.1:8089
+      - GHIDRA_MCP_BRIDGE_SERVER_URL=http://127.0.0.1:8089
       # One token, two directions. Outbound it is sent to the Ghidra server as
       # `Authorization: Bearer <token>`. Inbound, once #438 lands, the bridge
       # requires the SAME header from MCP clients, because it binds 0.0.0.0

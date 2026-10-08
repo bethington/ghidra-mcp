@@ -69,7 +69,7 @@ def main():
     args = parser.parse_args()
 
     # Set environment variables
-    os.environ["GHIDRA_MCP_URL"] = args.server
+    os.environ["GHIDRA_MCP_BRIDGE_SERVER_URL"] = args.server
     os.environ["GHIDRA_MCP_TIMEOUT"] = str(args.timeout)
 
     # Build pytest arguments

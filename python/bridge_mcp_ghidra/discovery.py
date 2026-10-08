@@ -3,12 +3,12 @@
 import concurrent.futures
 import http.client
 import json
-import os
 
 from . import state
 from . import transport
 from . import validation
 from .config import DEFAULT_TCP_PORT, TCP_PORT_SCAN_RANGE, logger
+from .keys import value as setting_value
 
 # Upper bound on threads used to probe the TCP scan range. The scan is pure
 # wait (a dropped connection costs the full timeout), so the cap only exists
@@ -263,7 +263,7 @@ def discover_active_tcp_instance() -> dict | None:
 def find_project_instances(project: str, instances: list[dict]) -> list[dict]:
     """Find a unique project across transports, preferring UDS for one process."""
     matches = [dict(i) for i in instances if i.get("project") == project]
-    configured_url = os.getenv("GHIDRA_MCP_URL")
+    configured_url = setting_value("bridge.server_url")
     tcp_instances = []
     if configured_url:
         if not validation.validate_server_url(configured_url):

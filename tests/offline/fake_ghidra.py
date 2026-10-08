@@ -709,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"fake Ghidra plugin on {server.url}")
     print(f"  routes            : {len(server.contract)}")
     print(f"  recorded payloads : {len(server.snapshots)}")
-    print(f"export GHIDRA_MCP_URL={server.url}")
+    print(f"export GHIDRA_MCP_BRIDGE_SERVER_URL={server.url}")
     try:
         while True:
             time.sleep(3600)

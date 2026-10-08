@@ -104,7 +104,7 @@ The bridge itself now follows the protocol more closely (#553): failures come
 back with `isError` set, every tool declares `readOnlyHint` / `destructiveHint`,
 long calls send progress notifications, a bare `OPTIONS` is answered and no
 longer leaks a session, and the HTTP transports gain an optional bearer token
-(`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
+(`GHIDRA_MCP_BRIDGE_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
 `--tools-page-size`.
 
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one

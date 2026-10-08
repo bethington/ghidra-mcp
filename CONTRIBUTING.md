@@ -330,7 +330,7 @@ mvn test                       # includes the Java integration tests
 ```
 
 The bridge and tests target `http://127.0.0.1:8089` by default; override with
-`GHIDRA_MCP_URL`. The deploy-driven release regression, its tiers, and what each
+`GHIDRA_MCP_BRIDGE_SERVER_URL`. The deploy-driven release regression, its tiers, and what each
 one mutates in your Ghidra project are documented in
 [docs/TESTING.md](docs/TESTING.md). Note that some tiers import and reset a
 benchmark binary in the active project — that is why they are opt-in.

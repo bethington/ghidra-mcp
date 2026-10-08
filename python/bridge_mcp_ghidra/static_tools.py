@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import threading
 import time
 from typing import Annotated
@@ -13,6 +12,7 @@ from . import discovery, facade
 from . import dispatch
 from . import registry
 from . import settings
+from .keys import value as setting_value
 from . import state
 from . import transport
 from .config import (
@@ -100,7 +100,7 @@ def _connect_instance_sync(project: str) -> dict:
                 "note": note,
             }
 
-    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    env_tcp = setting_value("bridge.server_url")
     if env_tcp:
         tcp_url = env_tcp
     elif matched_tcp_url:
@@ -719,7 +719,7 @@ def _auto_connect(project: str | None = None) -> bool:
         return False
 
     # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    tcp_url = setting_value("bridge.server_url") or DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
         logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
         return False

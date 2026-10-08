@@ -90,9 +90,9 @@ def test_bridge_ghidra_url_is_one_validate_server_url_accepts():
     """Assert against the real function, not a copy of its rule."""
     from bridge_mcp_ghidra.validation import validate_server_url
 
-    url = _env_map(_compose()["services"][BRIDGE_SERVICE])["GHIDRA_MCP_URL"]
+    url = _env_map(_compose()["services"][BRIDGE_SERVICE])["GHIDRA_MCP_BRIDGE_SERVER_URL"]
     assert validate_server_url(url), (
-        f"GHIDRA_MCP_URL={url!r} is refused by validate_server_url(), so the "
+        f"GHIDRA_MCP_BRIDGE_SERVER_URL={url!r} is refused by validate_server_url(), so the "
         f"bridge would reject its own configured server. It requires the http "
         f"scheme, a loopback host and an explicit port."
     )

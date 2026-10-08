@@ -104,7 +104,7 @@ Cross-referenced all 291 tool names against `tests/` and `src/test/`.
 | analysis | 19 | **Easy** — live GUI (malware/crypto/dataflow/control-flow) |
 | debugger (TraceRmi) | 17 | Hard — needs a debug session |
 | server (VCS/admin) | 17 | Hard — needs a Ghidra Server fixture |
-| debugger-proxy (WinDbg) | 11 | Hard — needs WinDbg + `GHIDRA_DEBUGGER_URL` |
+| debugger-proxy (WinDbg) | 11 | Hard — needs WinDbg + `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` |
 | datatype | 9 | **Easy** — several are merge targets |
 | program | 7 | Mixed — some session-destructive |
 | utility | 6 | **Easy** |

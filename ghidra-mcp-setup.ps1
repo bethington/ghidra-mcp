@@ -1208,7 +1208,7 @@ Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
 Write-Host "   Python: uv run bridge-mcp-ghidra (from the project root), or 'python -m bridge_mcp_ghidra'"
 if ($InstallDebuggerDeps) {
     Write-Host "   Debugger: start your external debugger server, then set"
-    Write-Host "             GHIDRA_DEBUGGER_URL (or GHIDRA_DEBUGGER_TOOLS=1) to register the proxy tools"
+    Write-Host "             GHIDRA_MCP_BRIDGE_DEBUGGER_URL (or GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1) to register the proxy tools"
 }
 Write-Host ""
 Write-LogInfo "Default Server: http://127.0.0.1:8089/"

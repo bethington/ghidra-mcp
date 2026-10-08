@@ -12,7 +12,7 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 ## Directory Structure
 
 - `src/` — Java source for Ghidra extension and headless server
-- `python/bridge_mcp_ghidra/` — Python MCP bridge package (`bridge-mcp-ghidra` console script / `python -m bridge_mcp_ghidra`)
+- `python/bridge_mcp_ghidra/` — Python MCP bridge package (`keys` for session settings, `bridge-mcp-ghidra` console script / `python -m bridge_mcp_ghidra`)
 - `pyproject.toml` + `uv.lock` — uv project (ships the `ghidra-mcp-bridge` wheel; deps via PEP 735 groups)
 - `docs/` — Documentation and workflow prompts
 - `tests/` — Python unit, offline and integration tests, and the endpoint catalog (`tests/endpoints.json`); Java tests are under `src/test/java/`

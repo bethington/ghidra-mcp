@@ -67,7 +67,7 @@ instead. `docker compose config` does not catch a `ports:` entry on such a
 service — it validates cleanly and fails at `up`.
 
 `tests/unit/test_docker_compose_bridge.py` pins all of this, including
-asserting the configured `GHIDRA_MCP_URL` against the real
+asserting the configured `GHIDRA_MCP_BRIDGE_SERVER_URL` against the real
 `validate_server_url()` rather than a restatement of its rule. It needs no
 Docker daemon, which is the point: the daemon is exactly what CI does not have.
 

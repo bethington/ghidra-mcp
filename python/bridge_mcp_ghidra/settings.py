@@ -15,6 +15,7 @@ import os
 
 from . import state, transport
 from .config import CORE_GROUPS
+from .keys import env_name
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,6 @@ _FALSE = {"0", "false", "no", "off", ""}
 SESSION: dict[str, str] = {}
 
 _last_recorded: list[str] | None = None
-
-
-def env_name(key: str) -> str:
-    return "GHIDRA_MCP_" + key.upper().replace(".", "_")
 
 
 def session_raw(key: str) -> str | None:

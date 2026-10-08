@@ -32,7 +32,7 @@ def get_server_url():
     falling back to IPv4, adding ~2000 ms to every test request. Using the
     IPv4 literal directly skips the resolution entirely.
     """
-    return os.environ.get("GHIDRA_MCP_URL", "http://127.0.0.1:8089")
+    return os.environ.get("GHIDRA_MCP_BRIDGE_SERVER_URL", "http://127.0.0.1:8089")
 
 
 def get_test_timeout():

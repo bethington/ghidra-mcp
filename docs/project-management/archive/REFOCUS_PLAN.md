@@ -95,7 +95,7 @@ mentioned.
   against an LLM context window. That is core server work; the plan was wrong
   to list it as a mover.
 - **The 22 debugger proxy tools** in `python/bridge_mcp_ghidra/debugger.py`.
-  They are bridge code and forward to whatever `GHIDRA_DEBUGGER_URL` names, so
+  They are bridge code and forward to whatever `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` names, so
   they work fine with the server hosted elsewhere. The existing env gate means
   they register only when configured.
 - **The `debugger` dependency group** in `pyproject.toml`. It looked dead, but

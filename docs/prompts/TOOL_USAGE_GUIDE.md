@@ -583,7 +583,7 @@ on every platform.
 
 #### B. WinDbg proxy family — standalone dbgeng server (Windows only)
 
-22 static bridge tools proxied to a standalone Python server via `GHIDRA_DEBUGGER_URL`
+22 static bridge tools proxied to a standalone Python server via `GHIDRA_MCP_BRIDGE_DEBUGGER_URL`
 (default `http://127.0.0.1:8099`). That server is not part of this repository. It wraps **dbgeng/WinDbg via `pybag`** —
 **Windows-only** (`pybag` requires `pywin32`). Adds dbgeng-specific capabilities the
 TraceRmi family doesn't have: attach-by-process-name, ordinal resolution, argument
@@ -595,8 +595,8 @@ Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
 registers/memory/stack/modules).
 
 **These tools are off by default** (`_debugger_enabled()` in the bridge). They register
-only when `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS=1`;
-`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
+only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`;
+`GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
 loopback, so reach a server on another machine through a forwarded port.
 
 > Naming note: where the two families share a name (e.g. `debugger_status`), both stay
@@ -874,7 +874,18 @@ replace it.
 | `scripts.allow` | guardrail | bool | `false` | server, project, local | Whether run_ghidra_script and run_script_inline may run code. |
 | `files.root` | guardrail | string | none | server, project, local | Directory that file paths given to tools must lie within; empty for none. |
 | `project.folder_scope` | guardrail | string | none | server, project, local | Project folder that programs must lie within to be served; empty for none. |
-| `auth.token` | secret | string | hidden | server | Bearer token HTTP clients must present; empty disables authentication. |
+| `auth.token` | secret | string | hidden | server, session | Bearer token HTTP clients must present; empty disables authentication. The bridge sends its own value as the bearer token on outbound Ghidra calls. |
+| `bridge.server_url` | operator | string | none | session | Ghidra HTTP URL for this bridge session; empty discovers instances or uses the default loopback port. |
+| `bridge.max_concurrent_requests` | operator | int | `4` | session | Maximum Ghidra requests this bridge executes concurrently; values below 1 become 1. |
+| `bridge.log_level` | operator | string | `INFO` | session | Python logging level for this bridge process. |
+| `bridge.lazy` | operator | string | none | session | Lazy tool loading for this bridge session; empty uses the transport default. |
+| `bridge.project` | operator | string | none | session | Exact project name this bridge session connects to on startup; empty connects as without one. |
+| `bridge.expose` | operator | string | `full` | session | MCP surface this bridge session advertises: full (every tool), facade (five ghidra_* tools) or hybrid (both). |
+| `bridge.allowed_hosts` | operator | list | none | session | Extra hostnames allowed for HTTP/SSE DNS-rebinding and CORS checks (comma-separated). |
+| `bridge.inbound_token` | secret | string | hidden | session | Bearer token MCP HTTP clients must present to this bridge; empty disables inbound auth. |
+| `bridge.rebind_protection` | operator | bool | `true` | session | DNS-rebinding protection for wildcard HTTP binds; set false only on a wildcard bind to opt out. |
+| `bridge.debugger_url` | operator | string | none | session | Loopback URL of an external WinDbg debugger server; setting it registers the 22 debugger_* proxy tools, which are off by default. |
+| `bridge.debugger_tools` | operator | string | none | session | Force the debugger_* proxy tools on (true, at `http://127.0.0.1:8099` when no URL is set) or off (false, even with a URL); empty follows bridge.debugger_url. |
 | `server.bind_address` | operator | string | none | server | When non-empty, also serve HTTP on TCP at this address (headless/Docker). |
 | `programs.max_cached` | operator | int | `8` | server | Maximum programs kept open in the provider cache; values below 2 become 2. |
 | `archive.url` | operator | string | none | server | Documentation archive REST base URL; empty disables archive ingest. |

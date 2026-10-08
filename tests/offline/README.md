@@ -169,7 +169,7 @@ record one with `python -m tests.conformance.run_conformance --tier read
 --record` against a live Ghidra.
 
 Pointing another suite at the fake: add `-p tests.offline.replay_plugin`. The
-plugin boots the fake, sets `GHIDRA_MCP_URL`, and `tests/conftest.py` does the
+plugin boots the fake, sets `GHIDRA_MCP_BRIDGE_SERVER_URL`, and `tests/conftest.py` does the
 rest. Nothing in `tests/integration/` needs editing — deliberately, so the same
 files keep running against a live Ghidra unchanged.
 
