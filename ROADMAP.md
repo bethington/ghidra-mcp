@@ -46,8 +46,8 @@ removing any capability. A second pass after 7.0.0-rc.1 took the 253 that rc.1
 shipped to 209: one function reader (`get_functions`), one function search
 (`find_functions`), one program-inventory tool (`list_program_items`), one GUI
 cursor tool (`get_ui_cursor`), one health answer (`check_connection`), and one
-name per program operation on both servers, plus `set_memory_block`, and one documentation writer (`apply_documentation`). The
-catalog stands at 209 today. See
+name per program operation on both servers, plus `set_memory_block`, and one documentation writer (`apply_documentation`).
+The catalog stands at 209 today. See
 `CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.

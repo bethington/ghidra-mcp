@@ -456,8 +456,7 @@ on every platform.
 #### B. WinDbg proxy family — standalone dbgeng server (Windows only)
 
 22 static bridge tools proxied to a standalone Python server via `GHIDRA_DEBUGGER_URL`
-(default `http://127.0.0.1:8099`). That server is not part of this repository: it
-lives in the `d2-game-exe` repository, and you run it from there. It wraps **dbgeng/WinDbg via `pybag`** —
+(default `http://127.0.0.1:8099`). That server is not part of this repository. It wraps **dbgeng/WinDbg via `pybag`** —
 **Windows-only** (`pybag` requires `pywin32`). Adds dbgeng-specific capabilities the
 TraceRmi family doesn't have: attach-by-process-name, ordinal resolution, argument
 reads, and the trace/watch loops.
@@ -468,8 +467,9 @@ Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
 registers/memory/stack/modules).
 
 **These tools are off by default** (`_debugger_enabled()` in the bridge). They register
-only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`;
-`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set.
+only when `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS=1`;
+`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
+loopback, so reach a server on another machine through a forwarded port.
 
 > Naming note: where the two families share a name (e.g. `debugger_status`), only one
 > is registered. With the proxies off, the TraceRmi tool holds the name. With them on,
