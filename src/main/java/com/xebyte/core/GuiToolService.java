@@ -128,6 +128,7 @@ public class GuiToolService {
                 return Response.err(ServiceUtils.getLastParseError());
             }
 
+            // GoToService drives a CodeBrowser window — must hop to the Swing thread.
             AtomicBoolean moved = new AtomicBoolean(false);
             SwingUtilities.invokeAndWait(() -> moved.set(goTo.goTo(target)));
             if (!moved.get()) {

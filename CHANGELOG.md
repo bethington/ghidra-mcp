@@ -25,6 +25,16 @@ opened inside `runOnUi` or `executeRead`.
 - **`rename_variables` keeps what its fallback renamed.** When the batch failed and it retried
   variable by variable, the outer rollback discarded those renames while reporting them done.
 
+### Changed — tool bodies run on the request thread
+
+`ThreadingStrategy.runOnUi` promised the Swing thread but ran on the caller on both servers,
+outside the server lock, and `SwingThreadingStrategy` was never constructed. Both are gone; the
+tools that used it (decompile and analysis reads, save and close, script runs and listings,
+the rename check, the merge dry run) run directly, as they already did. They stay off the
+server-wide lock on purpose: a script run under it would block every other request for up to
+its 30-minute timeout. Results come back from `executeRead`/`executeWrite` as return values
+instead of through `Atomic*` holders; responses are unchanged.
+
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
 **209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186

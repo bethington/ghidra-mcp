@@ -40,10 +40,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.swing.SwingUtilities;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for function-related operations: decompilation, renaming, prototype management,
@@ -108,6 +104,13 @@ public class FunctionService {
     static record NoReturnUpdateResult(
             boolean functionNoReturn,
             boolean terminalNoReturn) {
+    }
+
+    private record ForceDecompileOutcome(
+            boolean success,
+            String errorMessage,
+            String functionName,
+            String decompiledCode) {
     }
 
     // ========================================================================
@@ -239,22 +242,18 @@ public class FunctionService {
             return Response.err("Function address is required");
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMessage = new AtomicReference<>();
-        final AtomicReference<String> functionName = new AtomicReference<>();
-        final AtomicReference<String> decompiledCode = new AtomicReference<>();
-
         // Resolve address before entering threading lambda
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
+        ForceDecompileOutcome outcome;
         try {
-            threadingStrategy.executeRead(() -> {
+            outcome = threadingStrategy.executeRead(() -> {
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
-                        errorMessage.set("No function at address: " + functionAddrStr);
-                        return null;
+                        return new ForceDecompileOutcome(false, "No function at address: " + functionAddrStr,
+                                null, null);
                     }
 
                     // Create new decompiler interface
@@ -271,25 +270,23 @@ public class FunctionService {
                             if (errorMsg != null && !errorMsg.isEmpty()) {
                                 message += ". Reason: " + errorMsg;
                             }
-                            errorMessage.set(message);
-                            return null;
+                            return new ForceDecompileOutcome(false, message, null, null);
                         }
 
                         // Check if decompiled function is null (can happen even when decompileCompleted returns true)
                         if (results.getDecompiledFunction() == null) {
-                            errorMessage.set("Decompiler completed but returned null decompiled function for "
+                            return new ForceDecompileOutcome(false,
+                                    "Decompiler completed but returned null decompiled function for "
                                     + func.getName() + ". This can happen with functions that have: "
                                     + "invalid control flow or unreachable code; large NOP sleds or padding; "
                                     + "external calls to unknown addresses; stack frame issues. "
-                                    + "Consider using disassemble_function() instead for this function.");
-                            return null;
+                                    + "Consider using disassemble_function() instead for this function.",
+                                    null, null);
                         }
 
-                        functionName.set(func.getName());
-                        decompiledCode.set(results.getDecompiledFunction().getC());
-                        success.set(true);
-
                         Msg.info(this, "Forced decompilation for function: " + func.getName());
+                        return new ForceDecompileOutcome(true, null, func.getName(),
+                                results.getDecompiledFunction().getC());
 
                     } finally {
                         decompiler.dispose();
@@ -297,25 +294,24 @@ public class FunctionService {
 
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMessage.set(msg);
                     Msg.error(this, "Error forcing decompilation", e);
+                    return new ForceDecompileOutcome(false, msg, null, null);
                 }
-                return null;
             });
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            errorMessage.set("Failed to execute on Swing thread: " + msg);
             Msg.error(this, "Failed to execute force decompile on Swing thread", e);
+            outcome = new ForceDecompileOutcome(false, "Failed to execute on Swing thread: " + msg, null, null);
         }
 
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        if (!outcome.success()) {
+            return Response.err(outcome.errorMessage() != null ? outcome.errorMessage() : "Unknown failure");
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "success");
         out.put("address", functionAddrStr);
-        out.put("name", functionName.get());
-        out.put("decompiled", decompiledCode.get());
+        out.put("name", outcome.functionName());
+        out.put("decompiled", outcome.decompiledCode());
         return Response.ok(out);
     }
 
@@ -686,9 +682,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             final HighSymbol finalHighSymbol = highSymbol;
             final HighFunction finalHighFunction = highFunction;
             final Function finalFunction = func;
-            AtomicBoolean successFlag = new AtomicBoolean(false);
-
-            threadingStrategy.executeWrite(program, "Rename variable", () -> {
+            boolean renamed = threadingStrategy.executeWrite(program, "Rename variable", () -> {
                 if (commitRequired) {
                     HighFunctionDBUtil.commitParamsToDatabase(finalHighFunction, false,
                         ReturnCommitOption.NO_COMMIT, finalFunction.getSignatureSource());
@@ -699,11 +693,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                     null,
                     SourceType.USER_DEFINED
                 );
-                successFlag.set(true);
-                return null;
+                return true;
             });
 
-            if (successFlag.get()) {
+            if (renamed) {
                 String varType = finalHighSymbol.getDataType().getName();
                 String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
                 if (hungarianWarning != null) {
@@ -861,25 +854,13 @@ Map<String, Object> out = new LinkedHashMap<>();
             }
         }
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Rename function by address", () -> {
+            String text = threadingStrategy.executeWrite(program, "Rename function by address", () -> {
                 String oldName = targetFunc.getName();
                 targetFunc.setName(newName, SourceType.USER_DEFINED);
-                success.set(true);
-                resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
-                        .append(" from '").append(oldName).append("' to '").append(newName).append("'");
-                return null;
+                return "Success: Renamed function at " + functionAddrStr
+                        + " from '" + oldName + "' to '" + newName + "'";
             });
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute rename function on Swing thread", e);
-        }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
             List<String> nameWarnings = new ArrayList<>(NamingConventions.validateFunctionName(newName, false));
             nameWarnings.addAll(enforcementWarnings);
             Map<String, Object> data = JsonHelper.mapOf("status", "success", "message", text);
@@ -887,8 +868,11 @@ Map<String, Object> out = new LinkedHashMap<>();
                 data.put("warnings", nameWarnings);
             }
             return Response.ok(data);
+        } catch (Exception e) {
+            Msg.error(this, "Failed to execute rename function on Swing thread", e);
+            String text = "Error: Failed to execute rename on Swing thread: " + e.getMessage();
+            return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
         } catch (Exception e) {
             // try-with-resources close path: scopedRequestMode's close()
             // is declared on AutoCloseable so the compiler requires us to
@@ -1069,17 +1053,16 @@ Map<String, Object> out = new LinkedHashMap<>();
         final String finalConvention = resolvedConvention;
 
         final StringBuilder errorMessage = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
+        boolean success = false;
 
         try {
-            threadingStrategy.executeWrite(program, "Set function prototype", () -> {
-                applyFunctionPrototype(program, functionAddrStr, finalPrototype, finalConvention, success, errorMessage);
-                if (!success.get()) {
+            success = Boolean.TRUE.equals(threadingStrategy.executeWrite(program, "Set function prototype", () -> {
+                if (!applyFunctionPrototype(program, functionAddrStr, finalPrototype, finalConvention, errorMessage)) {
                     // The prototype and the convention are one request: a failed step rolls back both.
                     throw new Refusal(errorMessage.toString());
                 }
-                return null;
-            });
+                return true;
+            }));
         } catch (Refusal r) {
             // errorMessage already says why
         } catch (Exception e) {
@@ -1088,7 +1071,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             Msg.error(this, msg, e);
         }
 
-        return new PrototypeResult(success.get(), errorMessage.toString());
+        return new PrototypeResult(success, errorMessage.toString());
     }
 
     /**
@@ -1151,8 +1134,8 @@ Map<String, Object> out = new LinkedHashMap<>();
      * Helper method that applies the function prototype within a transaction.
      * v3.0.1: Preserves existing plate comment across prototype changes.
      */
-    void applyFunctionPrototype(Program program, String functionAddrStr, String prototype,
-                                       String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
+    boolean applyFunctionPrototype(Program program, String functionAddrStr, String prototype,
+                                       String callingConvention, StringBuilder errorMessage) {
         try {
             // Get the address and function
             Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
@@ -1160,7 +1143,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 String msg = ServiceUtils.getLastParseError();
                 errorMessage.append(msg);
                 Msg.error(this, msg);
-                return;
+                return false;
             }
             Function func = ServiceUtils.getFunctionForAddress(program, addr);
 
@@ -1168,7 +1151,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 String msg = "Could not find function at address: " + functionAddrStr;
                 errorMessage.append(msg);
                 Msg.error(this, msg);
-                return;
+                return false;
             }
 
             Msg.info(this, "Setting prototype for function " + func.getName() + ": " + prototype);
@@ -1177,7 +1160,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             String savedPlateComment = func.getComment();
 
             // Use ApplyFunctionSignatureCmd to parse and apply the signature
-            parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, success, errorMessage);
+            boolean applied = parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, errorMessage);
 
             // v3.0.1: Restore plate comment if it was wiped by prototype change
             if (savedPlateComment != null && !savedPlateComment.isEmpty()) {
@@ -1193,19 +1176,21 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
             }
+            return applied;
 
         } catch (Exception e) {
             String msg = "Error setting function prototype: " + e.getMessage();
             errorMessage.append(msg);
             Msg.error(this, msg, e);
+            return false;
         }
     }
 
     /**
      * Parse and apply the function signature with error handling.
      */
-    void parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
-                                              String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
+    boolean parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
+                                              String callingConvention, StringBuilder errorMessage) {
         // Use ApplyFunctionSignatureCmd to parse and apply the signature
         WriteTx txProto = WriteTx.begin(program, "Set function prototype");
         boolean signatureApplied = false;
@@ -1225,7 +1210,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 String msg = "Failed to parse function prototype";
                 errorMessage.append(msg);
                 Msg.error(this, msg);
-                return;
+                return false;
             }
 
             // Create and apply the command
@@ -1259,22 +1244,17 @@ Map<String, Object> out = new LinkedHashMap<>();
             boolean conventionApplied = false;
             try {
                 conventionApplied = applyCallingConvention(program, addr, callingConvention, errorMessage);
-                if (conventionApplied) {
-                    success.set(true);
-                } else {
-                    success.set(false);  // Fail if calling convention couldn't be applied
-                }
+                return conventionApplied;
             } catch (Exception e) {
                 String msg = "Error in calling convention transaction: " + e.getMessage();
                 errorMessage.append(msg);
                 Msg.error(this, msg, e);
-                success.set(false);
+                return false;
             } finally {
                 txConv.end(conventionApplied);
             }
-        } else if (signatureApplied) {
-            success.set(true);
         }
+        return signatureApplied;
     }
 
     /**
@@ -1434,150 +1414,137 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Set variable type", () -> {
-                try {
-                    // Find the function
-                    Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                    if (func == null) {
-                        resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    DecompileResults results = decompileFunction(func, program);
-                    if (results == null || !results.decompileCompleted()) {
-                        resultMsg.append("Error: Decompilation failed for function at ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
-                    if (highFunction == null) {
-                        resultMsg.append("Error: No high function available");
-                        return null;
-                    }
-
-                    // Find the symbol by name
-                    HighSymbol symbol = findSymbolByName(highFunction, variableName);
-                    if (symbol == null) {
-                        // PRIORITY 2 FIX: Provide helpful diagnostic information
-                        resultMsg.append("Error: Variable '").append(variableName)
-                                .append("' not found in decompiled function. ");
-
-                        // List available variables for user guidance
-                        List<String> availableNames = new ArrayList<>();
-                        Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
-                        while (symbols.hasNext()) {
-                            availableNames.add(symbols.next().getName());
-                        }
-
-                        if (!availableNames.isEmpty()) {
-                            resultMsg.append("Available variables: ")
-                                    .append(String.join(", ", availableNames))
-                                    .append(". ");
-                        }
-
-                        // Decompiler-default-name guidance (SSA churn / renamed-away /
-                        // register-resident). Pure function of the requested name + the
-                        // available high-symbol names — see buildVariableNameHint.
-                        resultMsg.append(buildVariableNameHint(variableName, availableNames));
-
-                        // Check if variable exists in low-level API but not high-level (phantom variable)
-                        Variable[] lowLevelVars = func.getLocalVariables();
-                        boolean isPhantomVariable = false;
-                        for (Variable v : lowLevelVars) {
-                            if (v.getName().equals(variableName)) {
-                                isPhantomVariable = true;
-                                break;
-                            }
-                        }
-
-                        if (isPhantomVariable) {
-                            resultMsg.append("NOTE: Variable '").append(variableName)
-                                    .append("' exists in stack frame but not in decompiled code. ")
-                                    .append("This is a phantom variable created by Ghidra's stack analysis ")
-                                    .append("that was optimized away during decompilation. ")
-                                    .append("You cannot set the type of phantom variables. ")
-                                    .append("Only variables visible in the decompiled code can be typed.");
-                        }
-
-                        return null;
-                    }
-
-                    // Get high variable -- may be null for EBP-pinned / SSA-only symbols.
-                    // updateDBVariable works without a HighVariable (rename path proves this),
-                    // so we skip the null guard and fall through to updateVariableType directly.
-                    HighVariable highVar = symbol.getHighVariable();
-                    String oldType = highVar != null
-                        ? highVar.getDataType().getName()
-                        : symbol.getDataType().getName();
-
-                    // Find the data type
-                    DataTypeManager dtm = program.getDataTypeManager();
-                    DataType dataType = ServiceUtils.resolveDataType(dtm, newType);
-
-                    if (dataType == null) {
-                        resultMsg.append("Error: Could not resolve data type: ").append(newType);
-                        // Provide actionable hint for pointer types
-                        if (newType.endsWith("*")) {
-                            String baseTypeName = newType.substring(0, newType.length() - 1).trim();
-                            if (!baseTypeName.isEmpty() && !baseTypeName.equals("void")) {
-                                resultMsg.append(". Hint: struct '").append(baseTypeName)
-                                    .append("' does not exist. Create it first with create_struct(name=\"")
-                                    .append(baseTypeName).append("\", fields=[...]), then retry set_variable_type.");
-                            }
-                        }
-                        return null;
-                    }
-
-                    // Apply the type change in a transaction
-                    StringBuilder errorDetails = new StringBuilder();
-                    if (updateVariableType(program, symbol, dataType, success, errorDetails)) {
-                        resultMsg.append("Success: Changed type of variable '").append(variableName)
-                                .append("' from '").append(oldType).append("' to '")
-                                .append(dataType.getName()).append("'")
-                                .append(". WARNING: Type changes trigger re-decompilation which may create new SSA variables. ")
-                                .append("Call get_functions(fields=parameters,locals) after all type changes to discover any new variables.");
-                    } else {
-                        // Provide detailed error message including storage location
-                        String storageInfo = "unknown";
-                        try {
-                            storageInfo = symbol.getStorage().toString();
-                        } catch (Exception e) {
-                            // If we can't get storage, continue without it
-                        }
-
-                        resultMsg.append("Error: Failed to update variable type for '").append(variableName).append("'");
-                        resultMsg.append(" (Storage: ").append(storageInfo).append(")");
-
-                        if (errorDetails.length() > 0) {
-                            resultMsg.append(". Details: ").append(errorDetails.toString());
-                        }
-
-                        // Add helpful guidance for known limitations
-                        if (storageInfo.startsWith("Stack[-") && storageInfo.contains(":4")) {
-                            resultMsg.append(". Note: Stack-based local variables with 4-byte size may have type-setting limitations in Ghidra's API");
-                        }
-                    }
-
-                } catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
-                    Msg.error(this, "Error setting variable type", e);
+            String text = threadingStrategy.executeWrite(program, "Set variable type", () -> {
+                // Find the function
+                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                if (func == null) {
+                    throw new Refusal("No function at address: " + functionAddrStr);
                 }
-                return null;
-            });
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute set variable type on Swing thread", e);
-        }
 
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
+                DecompileResults results = decompileFunction(func, program);
+                if (results == null || !results.decompileCompleted()) {
+                    throw new Refusal("Decompilation failed for function at " + functionAddrStr);
+                }
+
+                ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
+                if (highFunction == null) {
+                    throw new Refusal("No high function available");
+                }
+
+                // Find the symbol by name
+                HighSymbol symbol = findSymbolByName(highFunction, variableName);
+                if (symbol == null) {
+                    // PRIORITY 2 FIX: Provide helpful diagnostic information
+                    StringBuilder notFound = new StringBuilder();
+                    notFound.append("Variable '").append(variableName)
+                            .append("' not found in decompiled function. ");
+
+                    // List available variables for user guidance
+                    List<String> availableNames = new ArrayList<>();
+                    Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                    while (symbols.hasNext()) {
+                        availableNames.add(symbols.next().getName());
+                    }
+
+                    if (!availableNames.isEmpty()) {
+                        notFound.append("Available variables: ")
+                                .append(String.join(", ", availableNames))
+                                .append(". ");
+                    }
+
+                    // Decompiler-default-name guidance (SSA churn / renamed-away /
+                    // register-resident). Pure function of the requested name + the
+                    // available high-symbol names — see buildVariableNameHint.
+                    notFound.append(buildVariableNameHint(variableName, availableNames));
+
+                    // Check if variable exists in low-level API but not high-level (phantom variable)
+                    Variable[] lowLevelVars = func.getLocalVariables();
+                    boolean isPhantomVariable = false;
+                    for (Variable v : lowLevelVars) {
+                        if (v.getName().equals(variableName)) {
+                            isPhantomVariable = true;
+                            break;
+                        }
+                    }
+
+                    if (isPhantomVariable) {
+                        notFound.append("NOTE: Variable '").append(variableName)
+                                .append("' exists in stack frame but not in decompiled code. ")
+                                .append("This is a phantom variable created by Ghidra's stack analysis ")
+                                .append("that was optimized away during decompilation. ")
+                                .append("You cannot set the type of phantom variables. ")
+                                .append("Only variables visible in the decompiled code can be typed.");
+                    }
+
+                    throw new Refusal(notFound.toString());
+                }
+
+                // Get high variable -- may be null for EBP-pinned / SSA-only symbols.
+                // updateDBVariable works without a HighVariable (rename path proves this),
+                // so we skip the null guard and fall through to updateVariableType directly.
+                HighVariable highVar = symbol.getHighVariable();
+                String oldType = highVar != null
+                    ? highVar.getDataType().getName()
+                    : symbol.getDataType().getName();
+
+                // Find the data type
+                DataTypeManager dtm = program.getDataTypeManager();
+                DataType dataType = ServiceUtils.resolveDataType(dtm, newType);
+
+                if (dataType == null) {
+                    StringBuilder unresolved = new StringBuilder("Could not resolve data type: ").append(newType);
+                    // Provide actionable hint for pointer types
+                    if (newType.endsWith("*")) {
+                        String baseTypeName = newType.substring(0, newType.length() - 1).trim();
+                        if (!baseTypeName.isEmpty() && !baseTypeName.equals("void")) {
+                            unresolved.append(". Hint: struct '").append(baseTypeName)
+                                .append("' does not exist. Create it first with create_struct(name=\"")
+                                .append(baseTypeName).append("\", fields=[...]), then retry set_variable_type.");
+                        }
+                    }
+                    throw new Refusal(unresolved.toString());
+                }
+
+                // Apply the type change in a transaction
+                StringBuilder errorDetails = new StringBuilder();
+                if (updateVariableType(program, symbol, dataType, errorDetails)) {
+                    return "Success: Changed type of variable '" + variableName
+                            + "' from '" + oldType + "' to '"
+                            + dataType.getName() + "'"
+                            + ". WARNING: Type changes trigger re-decompilation which may create new SSA variables. "
+                            + "Call get_functions(fields=parameters,locals) after all type changes to discover any new variables.";
+                }
+
+                // Provide detailed error message including storage location
+                String storageInfo = "unknown";
+                try {
+                    storageInfo = symbol.getStorage().toString();
+                } catch (Exception e) {
+                    // If we can't get storage, continue without it
+                }
+
+                StringBuilder failMsg = new StringBuilder();
+                failMsg.append("Failed to update variable type for '").append(variableName).append("'");
+                failMsg.append(" (Storage: ").append(storageInfo).append(")");
+
+                if (errorDetails.length() > 0) {
+                    failMsg.append(". Details: ").append(errorDetails.toString());
+                }
+
+                // Add helpful guidance for known limitations
+                if (storageInfo.startsWith("Stack[-") && storageInfo.contains(":4")) {
+                    failMsg.append(". Note: Stack-based local variables with 4-byte size may have type-setting limitations in Ghidra's API");
+                }
+                throw new Refusal(failMsg.toString());
+            });
             return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (Exception e) {
+            Msg.error(this, "Failed to execute set variable type on Swing thread", e);
+            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     public Response setLocalVariableType(String functionAddrStr, String variableName, String newType) {
@@ -1635,15 +1602,11 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
+            String text = threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
                 Function func = ServiceUtils.getFunctionForAddress(program, addr);
                 if (func == null) {
-                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                    return null;
+                    throw new Refusal("No function at address: " + functionAddrStr);
                 }
 
                 // The this_type names the owning class. Its base must be an existing structure,
@@ -1652,16 +1615,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType pointerType = resolveThisPointerType(dtm, thisType);
                 if (!(pointerType instanceof Pointer)) {
-                    resultMsg.append("Error: Could not resolve this_type '").append(thisType)
-                            .append("' to a pointer. Create the structure first with create_struct, then retry.");
-                    return null;
+                    throw new Refusal("Could not resolve this_type '" + thisType
+                            + "' to a pointer. Create the structure first with create_struct, then retry.");
                 }
                 DataType base = ((Pointer) pointerType).getDataType();
                 if (!(base instanceof Structure)) {
-                    resultMsg.append("Error: 'this' must point to a structure/class type; '")
-                            .append(base != null ? base.getName() : "void")
-                            .append("' is not a structure. Ghidra derives the 'this' type from a same-named struct.");
-                    return null;
+                    throw new Refusal("'this' must point to a structure/class type; '"
+                            + (base != null ? base.getName() : "void")
+                            + "' is not a structure. Ghidra derives the 'this' type from a same-named struct.");
                 }
                 String className = base.getName();
 
@@ -1676,11 +1637,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                     } catch (Exception ignored) {
                         cc = "";
                     }
-                    resultMsg.append("Error: ").append(func.getName())
-                            .append(" has no implicit 'this' parameter (calling convention '")
-                            .append(cc == null || cc.isEmpty() ? "(default)" : cc)
-                            .append("'). Set it to __thiscall with set_function_prototype, then retry.");
-                    return null;
+                    throw new Refusal(func.getName()
+                            + " has no implicit 'this' parameter (calling convention '"
+                            + (cc == null || cc.isEmpty() ? "(default)" : cc)
+                            + "'). Set it to __thiscall with set_function_prototype, then retry.");
                 }
 
                 // Auto-parameters are immutable via the API; the 'this' auto-parameter instead
@@ -1711,22 +1671,17 @@ Map<String, Object> out = new LinkedHashMap<>();
                 thisParam = findAutoThisParameter(func);
                 DataType resolvedThis = thisParam != null ? thisParam.getDataType() : pointerType;
                 String resolvedName = resolvedThis != null ? resolvedThis.getDisplayName() : (className + " *");
-                success.set(true);
-                resultMsg.append(alreadyInClass ? "Confirmed " : "Moved ").append(func.getName())
-                        .append(alreadyInClass ? " in class " : " into class ").append(className)
-                        .append("; 'this' types as ").append(resolvedName)
-                        .append(" (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.");
-                return null;
+                return (alreadyInClass ? "Confirmed " : "Moved ") + func.getName()
+                        + (alreadyInClass ? " in class " : " into class ") + className
+                        + "; 'this' types as " + resolvedName
+                        + " (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.";
             });
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             return Response.err("set_function_this_type failed: " + e.getMessage());
         }
-
-        if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", resultMsg.toString()));
-        }
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Failed to set 'this' type";
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     /** Locate the implicit {@code this} (auto-parameter or explicit) on a member function. */
@@ -1897,7 +1852,7 @@ Map<String, Object> out = new LinkedHashMap<>();
      * Apply the type update in a transaction.
      */
     boolean updateVariableType(Program program, HighSymbol symbol, DataType dataType,
-                                       AtomicBoolean success, StringBuilder errorDetails) {
+                                       StringBuilder errorDetails) {
         WriteTx tx = WriteTx.begin(program, "Set variable type");
         boolean result = false;
         String storageInfo = "unknown";
@@ -1922,7 +1877,6 @@ Map<String, Object> out = new LinkedHashMap<>();
                 SourceType.USER_DEFINED // Mark as user-defined
             );
 
-            success.set(true);
             result = true;
             Msg.info(this, "Successfully set variable type using HighFunctionDBUtil");
 
@@ -1970,7 +1924,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
             }
         } finally {
-            tx.end(success.get());
+            tx.end(result);
         }
         return result;
     }
@@ -2065,49 +2019,40 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<NoReturnUpdateResult> verifiedResult = new AtomicReference<>();
+        record NoReturnOutcome(String message, NoReturnUpdateResult verified) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Set function no return", () -> {
+            NoReturnOutcome outcome = threadingStrategy.executeWrite(program, "Set function no return", () -> {
 
                 Function func = ServiceUtils.getFunctionForAddress(program, addr);
                 if (func == null) {
-                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                    return null;
+                    throw new Refusal("No function at address: " + functionAddrStr);
                 }
 
                 String oldState = func.hasNoReturn() ? "non-returning" : "returning";
 
                 NoReturnUpdateResult verified = setNoReturnState(func, noReturn);
                 String newState = verified.functionNoReturn() ? "non-returning" : "returning";
-                verifiedResult.set(verified);
-                success.set(true);
 
-                resultMsg.append("Success: Set function '").append(func.getName())
-                        .append("' at ").append(functionAddrStr)
-                        .append(" from ").append(oldState)
-                        .append(" to ").append(newState);
+                String text = "Success: Set function '" + func.getName()
+                        + "' at " + functionAddrStr
+                        + " from " + oldState
+                        + " to " + newState;
 
                 Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName() + " at " + functionAddrStr);
-                return null;
+                return new NoReturnOutcome(text, verified);
             });
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute set no-return on Swing thread", e);
-        }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
-            NoReturnUpdateResult verified = verifiedResult.get();
             return Response.ok(JsonHelper.mapOf(
                 "status", "success",
-                "message", text,
-                "function_no_return", verified.functionNoReturn(),
-                "terminal_no_return", verified.terminalNoReturn()));
+                "message", outcome.message(),
+                "function_no_return", outcome.verified().functionNoReturn(),
+                "terminal_no_return", outcome.verified().terminalNoReturn()));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (Exception e) {
+            Msg.error(this, "Failed to execute set no-return on Swing thread", e);
+            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     public Response setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
@@ -2156,19 +2101,15 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, instructionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
+            String text = threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
 
                 // Get the instruction at the address
                 Listing listing = program.getListing();
                 ghidra.program.model.listing.Instruction instruction = listing.getInstructionAt(addr);
 
                 if (instruction == null) {
-                    resultMsg.append("Error: No instruction found at address ").append(instructionAddrStr);
-                    return null;
+                    throw new Refusal("No instruction found at address " + instructionAddrStr);
                 }
 
                 // Get the current flow override type (if any)
@@ -2177,26 +2118,22 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // Clear the flow override by setting to NONE
                 instruction.setFlowOverride(ghidra.program.model.listing.FlowOverride.NONE);
 
-                success.set(true);
-                resultMsg.append("Success: Cleared flow override at ").append(instructionAddrStr);
-                resultMsg.append(" (was: ").append(oldOverride.toString()).append(", now: NONE)");
+                String msg = "Success: Cleared flow override at " + instructionAddrStr
+                        + " (was: " + oldOverride.toString() + ", now: NONE)";
 
                 // Get the instruction's mnemonic for logging
                 String mnemonic = instruction.getMnemonicString();
                 Msg.info(this, "Cleared flow override for instruction '" + mnemonic + "' at " + instructionAddrStr +
                          " (previous override: " + oldOverride + ")");
-                return null;
+                return msg;
             });
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute clear flow override on Swing thread", e);
-        }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
             return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (Exception e) {
+            Msg.error(this, "Failed to execute clear flow override on Swing thread", e);
+            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     public Response clearInstructionFlowOverride(String instructionAddrStr) {
@@ -2264,23 +2201,16 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMessage = new AtomicReference<>();
-        final AtomicReference<String> functionName = new AtomicReference<>();
-        final AtomicReference<String> oldStorageRef = new AtomicReference<>();
-        final AtomicReference<String> newStorageRef = new AtomicReference<>();
-        final AtomicBoolean enabledCustom = new AtomicBoolean(false);
-        final AtomicReference<String> variableKind = new AtomicReference<>();
-
+        record StorageOutcome(String functionName, String variableKind, String previousStorage,
+                              String storage, boolean enabledCustom) {}
         try {
-            threadingStrategy.executeWrite(program, "Set variable storage", () -> {
+            StorageOutcome outcome = threadingStrategy.executeWrite(program, "Set variable storage", () -> {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMessage.set("No function at address: " + functionAddrStr);
-                    return null;
+                    throw new Refusal("No function at address: " + functionAddrStr);
                 }
-                functionName.set(func.getName());
+                String functionName = func.getName();
 
                 Variable targetVar = null;
                 for (Variable var : func.getAllVariables()) {
@@ -2290,12 +2220,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
                 if (targetVar == null) {
-                    errorMessage.set("Variable '" + variableName + "' not found in function " + func.getName());
-                    return null;
+                    throw new Refusal("Variable '" + variableName + "' not found in function " + func.getName());
                 }
-                oldStorageRef.set(targetVar.getVariableStorage().toString());
+                String previousStorage = targetVar.getVariableStorage().toString();
                 boolean isParam = targetVar instanceof Parameter;
-                variableKind.set(isParam ? "parameter" : "local");
+                String variableKind = isParam ? "parameter" : "local";
+                boolean enabledCustom = false;
 
                 // PARSE BEFORE TOUCHING THE FUNCTION'S STORAGE MODE. Enabling
                 // custom storage is a FUNCTION-WIDE change -- it pins every
@@ -2311,8 +2241,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 try {
                     newStorage = parseStorageSpec(program, storageSpec, defaultSize);
                 } catch (InvalidInputException e) {
-                    errorMessage.set(e.getMessage());
-                    return null;
+                    throw new Refusal(e.getMessage());
                 }
 
                 // A parameter's storage is owned by the calling convention until
@@ -2323,7 +2252,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // variable must be looked up again afterwards.
                 if (isParam && !func.hasCustomVariableStorage()) {
                     func.setCustomVariableStorage(true);
-                    enabledCustom.set(true);
+                    enabledCustom = true;
                     targetVar = null;
                     for (Variable var : func.getAllVariables()) {
                         if (var.getName().equals(variableName)) {
@@ -2332,10 +2261,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
                     if (targetVar == null) {
-                        errorMessage.set("Variable '" + variableName + "' disappeared when custom storage was "
-                                + "enabled on " + func.getName() + "; storage was not changed.");
                         revertCustomStorage(func, enabledCustom);
-                        return null;
+                        throw new Refusal("Variable '" + variableName + "' disappeared when custom storage was "
+                                + "enabled on " + func.getName() + "; storage was not changed.");
                     }
                     currentType = targetVar.getDataType();
                 }
@@ -2347,10 +2275,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                 } catch (InvalidInputException e) {
                     // VariableSizeException extends InvalidInputException, so
                     // this one catch covers both.
-                    errorMessage.set("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
-                            + "': " + e.getMessage());
                     revertCustomStorage(func, enabledCustom);
-                    return null;
+                    throw new Refusal("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
+                            + "': " + e.getMessage());
                 }
 
                 // Read the storage back off the variable rather than echoing the
@@ -2365,54 +2292,48 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
                 if (readBack == null) {
-                    errorMessage.set("Variable '" + variableName + "' could not be read back after the write");
                     revertCustomStorage(func, enabledCustom);
-                    return null;
+                    throw new Refusal("Variable '" + variableName + "' could not be read back after the write");
                 }
                 VariableStorage actual = readBack.getVariableStorage();
-                newStorageRef.set(actual.toString());
                 if (actual.compareTo(newStorage) != 0) {
-                    errorMessage.set("Storage did not take: requested " + newStorage
+                    revertCustomStorage(func, enabledCustom);
+                    throw new Refusal("Storage did not take: requested " + newStorage
                             + " but the variable now reads " + actual
                             + ". This usually means the location overlaps another variable's storage.");
-                    revertCustomStorage(func, enabledCustom);
-                    return null;
                 }
 
-                success.set(true);
                 Msg.info(this, "Set variable storage for " + variableName + " in " + func.getName()
-                        + ": " + oldStorageRef.get() + " -> " + actual);
-                return null;
+                        + ": " + previousStorage + " -> " + actual);
+                return new StorageOutcome(functionName, variableKind, previousStorage, actual.toString(), enabledCustom);
             });
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("status", "success");
+            out.put("variable", variableName);
+            out.put("variable_kind", outcome.variableKind());
+            out.put("function", outcome.functionName());
+            out.put("address", functionAddrStr);
+            out.put("previous_storage", outcome.previousStorage());
+            out.put("storage", outcome.storage());
+            out.put("requested_storage", storageSpec);
+            if (outcome.enabledCustom()) {
+                // Say it: this is a function-wide mode change, not a per-variable
+                // one. Every other parameter is now pinned at whatever the calling
+                // convention had assigned it, and will no longer track a later
+                // change of convention.
+                out.put("custom_storage_enabled", true);
+                out.put("note", "Custom variable storage was switched on for " + outcome.functionName()
+                        + " so this parameter's storage could be set. All of the function's parameters are "
+                        + "now held at their current locations instead of being derived from its calling "
+                        + "convention.");
+            }
+            return Response.ok(out);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Failed to set variable storage: " + e.getMessage());
             Msg.error(this, "Failed to execute set variable storage", e);
+            return Response.err("Failed to set variable storage: " + e.getMessage());
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("variable", variableName);
-        out.put("variable_kind", variableKind.get());
-        out.put("function", functionName.get());
-        out.put("address", functionAddrStr);
-        out.put("previous_storage", oldStorageRef.get());
-        out.put("storage", newStorageRef.get());
-        out.put("requested_storage", storageSpec);
-        if (enabledCustom.get()) {
-            // Say it: this is a function-wide mode change, not a per-variable
-            // one. Every other parameter is now pinned at whatever the calling
-            // convention had assigned it, and will no longer track a later
-            // change of convention.
-            out.put("custom_storage_enabled", true);
-            out.put("note", "Custom variable storage was switched on for " + functionName.get()
-                    + " so this parameter's storage could be set. All of the function's parameters are "
-                    + "now held at their current locations instead of being derived from its calling "
-                    + "convention.");
-        }
-        return Response.ok(out);
     }
 
 
@@ -2431,13 +2352,12 @@ Map<String, Object> out = new LinkedHashMap<>();
      * request that was refused would still have permanently changed the
      * function, which is the mirror image of the bug #446 was filed for.
      */
-    private static void revertCustomStorage(Function func, AtomicBoolean enabledHere) {
-        if (!enabledHere.get()) {
+    private static void revertCustomStorage(Function func, boolean enabledHere) {
+        if (!enabledHere) {
             return;
         }
         try {
             func.setCustomVariableStorage(false);
-            enabledHere.set(false);
         } catch (Exception e) {
             Msg.warn(FunctionService.class, "Could not restore convention-derived storage on "
                     + func.getName() + " after a refused set_variable_storage: " + e.getMessage());
@@ -2571,20 +2491,16 @@ Map<String, Object> out = new LinkedHashMap<>();
         final String filterMode = (filter != null && !filter.isEmpty()) ? filter : "all";
 
         final Program finalProgram = program;
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            threadingStrategy.executeRead(() -> {
-                try {
-                    // The address, when given, overrides the name
-                    String ref = (address != null && !address.isEmpty()) ? address : functionName;
-                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(finalProgram, ref);
-                    if (lookup.hasError()) {
-                        errorMsg.set(lookup.message());
-                        return null;
-                    }
-                    Function func = lookup.function();
+            return threadingStrategy.executeRead(() -> {
+                // The address, when given, overrides the name
+                String ref = (address != null && !address.isEmpty()) ? address : functionName;
+                ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(finalProgram, ref);
+                if (lookup.hasError()) {
+                    return Response.err(lookup.message());
+                }
+                Function func = lookup.function();
 
                     // Use shared decompileFunction (uses existing cache, no forced flush)
                     // The old forced cache flush + re-decompile added 5-30s latency per call.
@@ -2686,25 +2602,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                     if (filteredOut > 0) data.put("filtered_out", filteredOut);
                     if (truncated > 0) data.put("truncated", truncated);
 
-                    resultData.set(data);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error getting function variables", e);
-                }
-                return null;
+                return Response.ok(data);
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
         } catch (Exception e) {
+            Msg.error(this, "Error getting function variables", e);
             return Response.err(e.getMessage());
         }
-
-        if (resultData.get() != null) {
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown error");
     }
 
     // Backward compatibility overload
@@ -2819,19 +2722,18 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
         final DataType finalReturnType = newReturnType;
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicInteger paramsRenamed = new AtomicInteger(0);
-        final AtomicInteger localsRenamed = new AtomicInteger(0);
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
+        record BatchComponentRenameOutcome(int paramsRenamed, int localsRenamed) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
+            BatchComponentRenameOutcome counts = threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorRef.set("No function at address: " + functionAddress);
-                    return null;
+                    throw new Refusal("No function at address: " + functionAddress);
                 }
+
+                int paramsRenamed = 0;
+                int localsRenamed = 0;
 
                 // Rename function
                 if (functionName != null && !functionName.isEmpty()) {
@@ -2845,7 +2747,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         String newName = parameterRenames.get(param.getName());
                         if (newName != null && !newName.isEmpty()) {
                             param.setName(newName, SourceType.USER_DEFINED);
-                            paramsRenamed.incrementAndGet();
+                            paramsRenamed++;
                         }
                     }
                 }
@@ -2857,7 +2759,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         String newName = localRenames.get(local.getName());
                         if (newName != null && !newName.isEmpty()) {
                             local.setName(newName, SourceType.USER_DEFINED);
-                            localsRenamed.incrementAndGet();
+                            localsRenamed++;
                         }
                     }
                 }
@@ -2866,27 +2768,20 @@ Map<String, Object> out = new LinkedHashMap<>();
                     func.setReturnType(finalReturnType, SourceType.USER_DEFINED);
                 }
 
-                success.set(true);
-                return null;
+                return new BatchComponentRenameOutcome(paramsRenamed, localsRenamed);
             });
 
-            if (errorRef.get() != null) {
-                return Response.err(errorRef.get());
-            }
-
-            if (success.get()) {
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "function_renamed", functionName != null,
-                    "parameters_renamed", paramsRenamed.get(),
-                    "locals_renamed", localsRenamed.get()
-                ));
-            }
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "function_renamed", functionName != null,
+                "parameters_renamed", counts.paramsRenamed(),
+                "locals_renamed", counts.localsRenamed()
+            ));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
-
-        return Response.err("Unknown failure");
     }
 
     public Response batchRenameFunctionComponents(String functionAddress, String functionName,
@@ -2925,16 +2820,12 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.resolveFunctionAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.executeWrite(program, "Delete function at address", () -> {
+            Map<String, Object> delResult = threadingStrategy.executeWrite(program, "Delete function at address", () -> {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMsg.set("No function at address: " + addressStr);
-                    return null;
+                    throw new Refusal("No function at address: " + addressStr);
                 }
 
                 String funcName = func.getName();
@@ -2959,29 +2850,22 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                 program.getFunctionManager().removeFunction(addr);
 
-                Map<String, Object> delResult = new LinkedHashMap<>();
-                delResult.put("success", true);
-                delResult.putAll(ServiceUtils.addressToJson(addr, program));
-                delResult.put("deleted_function", funcName);
-                delResult.put("body_size", bodySize);
-                delResult.put("detached_tags", detachedTags);
-                delResult.put("message", "Function '" + funcName + "' deleted at " + addr);
-                resultData.set(delResult);
-                return null;
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("success", true);
+                result.putAll(ServiceUtils.addressToJson(addr, program));
+                result.put("deleted_function", funcName);
+                result.put("body_size", bodySize);
+                result.put("detached_tags", detachedTags);
+                result.put("message", "Function '" + funcName + "' deleted at " + addr);
+                return result;
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(delResult);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             return Response.err("Failed to execute on Swing thread: " + msg);
         }
-
-        if (resultData.get() != null) {
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown failure");
     }
 
     public Response deleteFunctionAtAddress(String addressStr) {
@@ -3023,17 +2907,13 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.executeWrite(program, "Create function at address", () -> {
+            Map<String, Object> data = threadingStrategy.executeWrite(program, "Create function at address", () -> {
 
                 // Check if a function already exists at this address
                 Function existing = program.getFunctionManager().getFunctionAt(addr);
                 if (existing != null) {
-                    errorMsg.set("Function already exists at " + addressStr + ": " + existing.getName());
-                    return null;
+                    throw new Refusal("Function already exists at " + addressStr + ": " + existing.getName());
                 }
 
                 // Optionally disassemble first
@@ -3043,8 +2923,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         ghidra.app.cmd.disassemble.DisassembleCommand disCmd =
                             new ghidra.app.cmd.disassemble.DisassembleCommand(addrSet, null, true);
                         if (!disCmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                            errorMsg.set("Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg());
-                            return null;
+                            throw new Refusal("Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg());
                         }
                     }
                 }
@@ -3053,14 +2932,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                 ghidra.app.cmd.function.CreateFunctionCmd cmd =
                     new ghidra.app.cmd.function.CreateFunctionCmd(addr);
                 if (!cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                    errorMsg.set("Failed to create function at " + addressStr + ": " + cmd.getStatusMsg());
-                    return null;
+                    throw new Refusal("Failed to create function at " + addressStr + ": " + cmd.getStatusMsg());
                 }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMsg.set("Function creation reported success but function not found at " + addressStr);
-                    return null;
+                    throw new Refusal("Function creation reported success but function not found at " + addressStr);
                 }
 
                 // Optionally rename the function
@@ -3080,20 +2957,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
                 createResult.put("body_size", func.getBody().getNumAddresses());
                 createResult.put("message", "Function created successfully at " + addr);
-                resultData.set(createResult);
-                return null;
+                return createResult;
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
-        } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
-        }
-
-        if (resultData.get() != null) {
-            Map<String, Object> data = resultData.get();
             // Validate function name if one was provided
             if (name != null && !name.isEmpty()) {
                 List<String> nameWarnings = NamingConventions.validateFunctionName(name, false);
@@ -3102,8 +2967,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
             }
             return Response.ok(data);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return Response.err("Failed to execute on Swing thread: " + msg);
         }
-        return Response.err("Unknown failure");
     }
 
     public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
@@ -3684,25 +3553,26 @@ Map<String, Object> out = new LinkedHashMap<>();
             return batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicInteger variablesRenamed = new AtomicInteger(0);
-        final AtomicInteger variablesFailed = new AtomicInteger(0);
-        final List<String> errors = new ArrayList<>();
-        final List<String> warnings = new ArrayList<>();
-        final AtomicReference<Function> funcRef = new AtomicReference<>(null);
-        final AtomicReference<Response> fallbackResult = new AtomicReference<>(null);
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
+        record BatchRenameOutcome(Response fallback, String error, int renamed, int failed,
+                                  List<String> errors, List<String> warnings) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Batch Rename Variables", () -> {
+            BatchRenameOutcome outcome = threadingStrategy.executeWrite(program, "Batch Rename Variables", () -> {
                 WriteTx eventTx = WriteTx.begin(program, "Suppress Events");
                 program.flushEvents();
                 boolean batchSuccess = false;
+                int variablesRenamed = 0;
+                int variablesFailed = 0;
+                List<String> errors = new ArrayList<>();
+                List<String> warnings = new ArrayList<>();
+                Response fallbackResult = null;
+                String errorRef = null;
+                Function funcForCache = null;
 
                 try {
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
-                    funcRef.set(func);
+                    funcForCache = func;
                     if (func == null) {
                         throw new Refusal("No function at address: " + functionAddress);
                     }
@@ -3730,7 +3600,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                         for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
                                             String newName = entry.getValue();
                                             if (!entry.getKey().equals(newName) && existingNames.contains(newName)) {
-                                                variablesFailed.incrementAndGet();
+                                                variablesFailed++;
                                                 errors.add("Variable name '" + newName + "' already exists in function");
                                             }
                                         }
@@ -3765,14 +3635,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                                         null,
                                                         SourceType.USER_DEFINED
                                                     );
-                                                    variablesRenamed.incrementAndGet();
+                                                    variablesRenamed++;
                                                     renamedVars.add(oldName);
                                                     // Validate Hungarian prefix against type
                                                     String varType = symbol.getDataType().getName();
                                                     String hw = NamingConventions.validateHungarianPrefix(newName, varType);
                                                     if (hw != null) warnings.add(hw);
                                                 } catch (Exception e) {
-                                                    variablesFailed.incrementAndGet();
+                                                    variablesFailed++;
                                                     errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
                                                 }
                                             }
@@ -3788,10 +3658,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                                                 if (newName != null && !newName.isEmpty() && !oldName.equals(newName) && !renamedVars.contains(oldName)) {
                                                     try {
                                                         var.setName(newName, SourceType.USER_DEFINED);
-                                                        variablesRenamed.incrementAndGet();
+                                                        variablesRenamed++;
                                                         renamedVars.add(oldName);
                                                     } catch (Exception e) {
-                                                        variablesFailed.incrementAndGet();
+                                                        variablesFailed++;
                                                         errors.add("Failed to rename storage variable " + oldName + " to " + newName + ": " + e.getMessage());
                                                     }
                                                 }
@@ -3821,10 +3691,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                     Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
                     try {
                         // Try individual operations (transactions will be closed in finally)
-                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
-                        fallbackResult.set(individualResult);
+                        fallbackResult = batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
                     } catch (Exception fallbackE) {
-                        errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
+                        errorRef = "Batch operation failed and fallback also failed: " + e.getMessage();
                         Msg.error(this, "Both batch and individual rename operations failed", e);
                     }
                 } finally {
@@ -3833,45 +3702,45 @@ Map<String, Object> out = new LinkedHashMap<>();
                     program.flushEvents();
 
                     // Invalidate decompiler cache after successful renames
-                    if (batchSuccess && variablesRenamed.get() > 0 && funcRef.get() != null) {
+                    if (batchSuccess && variablesRenamed > 0 && funcForCache != null) {
                         try {
                             DecompInterface tempDecomp = null;
                             try {
                                 tempDecomp = ServiceUtils.createConfiguredDecompiler(program);
                                 tempDecomp.flushCache();
-                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                                tempDecomp.decompileFunction(funcForCache, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                             } finally {
                                 if (tempDecomp != null) {
                                     try { tempDecomp.dispose(); } catch (Exception ignored) {}
                                 }
                             }
-                            Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
+                            Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed + " variables");
                         } catch (Exception cacheEx) {
                             Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
                         }
                     }
                 }
-                return null;
+                return new BatchRenameOutcome(fallbackResult, errorRef, variablesRenamed, variablesFailed, errors, warnings);
             });
 
-            if (fallbackResult.get() != null) {
-                return fallbackResult.get();
+            if (outcome.fallback() != null) {
+                return outcome.fallback();
             }
 
-            if (errorRef.get() != null) {
-                return Response.err(errorRef.get());
+            if (outcome.error() != null) {
+                return Response.err(outcome.error());
             }
 
             Map<String, Object> resultMap = new LinkedHashMap<>();
             resultMap.put("success", true);
             resultMap.put("method", "batch");
-            resultMap.put("variables_renamed", variablesRenamed.get());
-            resultMap.put("variables_failed", variablesFailed.get());
-            if (!errors.isEmpty()) {
-                resultMap.put("errors", errors);
+            resultMap.put("variables_renamed", outcome.renamed());
+            resultMap.put("variables_failed", outcome.failed());
+            if (!outcome.errors().isEmpty()) {
+                resultMap.put("errors", outcome.errors());
             }
-            if (!warnings.isEmpty()) {
-                resultMap.put("warnings", warnings);
+            if (!outcome.warnings().isEmpty()) {
+                resultMap.put("warnings", outcome.warnings());
             }
             return Response.ok(resultMap);
         } catch (Exception e) {
@@ -4171,29 +4040,16 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicInteger variablesRenamed = new AtomicInteger(0);
-        final AtomicInteger variablesFailed = new AtomicInteger(0);
+        int variablesRenamed = 0;
+        int variablesFailed = 0;
         final List<String> errors = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
 
-        // Get function name for individual operations
-        final String[] functionName = new String[1];
-        try {
-            threadingStrategy.runOnUi(() -> {
-                if (addr != null) {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func != null) {
-                        functionName[0] = func.getName();
-                    }
-                }
-            });
-        } catch (Exception e) {
-            return Response.err("Failed to get function name: " + e.getMessage());
-        }
-
-        if (functionName[0] == null) {
+        Function funcAtAddr = program.getFunctionManager().getFunctionAt(addr);
+        if (funcAtAddr == null) {
             return Response.err("Could not find function at address: " + functionAddress);
         }
+        final String functionName = funcAtAddr.getName();
 
         // Process each variable individually using the reliable method
         for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
@@ -4201,7 +4057,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             String newName = entry.getValue();
 
             try {
-                Response renameResult = renameVariableInFunction(functionName[0], oldName, newName, programName);
+                Response renameResult = renameVariableInFunction(functionName, oldName, newName, programName);
                 // Inspect the Response, do NOT string-compare its serialized form.
                 // renameVariableInFunction returns Response.success("Variable
                 // renamed"), whose toJson() is {"status":"success","message":
@@ -4211,15 +4067,15 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // comparison was written against the pre-Response raw-text
                 // contract and was not updated when that contract changed.
                 if (isVariableRenameSuccess(renameResult)) {
-                    variablesRenamed.incrementAndGet();
+                    variablesRenamed++;
                     collectRenameWarnings(renameResult, oldName, warnings);
                 } else {
-                    variablesFailed.incrementAndGet();
+                    variablesFailed++;
                     errors.add("Failed to rename '" + oldName + "' to '" + newName + "': "
                         + renameResult.toJson());
                 }
             } catch (Exception e) {
-                variablesFailed.incrementAndGet();
+                variablesFailed++;
                 errors.add("Exception renaming '" + oldName + "' to '" + newName + "': " + e.getMessage());
             }
         }
@@ -4227,10 +4083,10 @@ Map<String, Object> out = new LinkedHashMap<>();
         Map<String, Object> resultMap = new LinkedHashMap<>();
         // "success" must reflect what actually happened. Hardcoding true meant a
         // run in which every rename failed still reported success.
-        resultMap.put("success", variablesFailed.get() == 0);
+        resultMap.put("success", variablesFailed == 0);
         resultMap.put("method", "individual");
-        resultMap.put("variables_renamed", variablesRenamed.get());
-        resultMap.put("variables_failed", variablesFailed.get());
+        resultMap.put("variables_renamed", variablesRenamed);
+        resultMap.put("variables_failed", variablesFailed);
         if (!warnings.isEmpty()) {
             resultMap.put("warnings", warnings);
         }
@@ -4560,11 +4416,12 @@ Set<String> currentBefore = new HashSet<>();
         Program program = pe.program();
         if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
 
-        List<Map<String, Object>> results = new ArrayList<>();
-        AtomicInteger tagsAdded = new AtomicInteger(0);
-        AtomicInteger funcsTouched = new AtomicInteger(0);
+        record TagAddCounts(int tagsAdded, int funcsTouched, List<Map<String, Object>> results) {}
         try {
-            threadingStrategy.executeWrite(program, "Batch add function tags via HTTP", () -> {
+            TagAddCounts counts = threadingStrategy.executeWrite(program, "Batch add function tags via HTTP", () -> {
+                List<Map<String, Object>> results = new ArrayList<>();
+                int tagsAdded = 0;
+                int funcsTouched = 0;
                 for (Map<String, String> entry : assignments) {
                     String ref = entry.get("function");
                     String tagsCsv = entry.get("tags");
@@ -4595,8 +4452,8 @@ Set<String> currentBefore = new HashSet<>();
                     List<String> already = new ArrayList<>();
                     List<String> made = new ArrayList<>();
                     attachTags(func, names, tagComments, added, already, made);
-                    tagsAdded.addAndGet(added.size());
-                    if (!added.isEmpty()) funcsTouched.incrementAndGet();
+                    tagsAdded += added.size();
+                    if (!added.isEmpty()) funcsTouched++;
                     row.put("status", "success");
                     row.put("address", func.getEntryPoint().toString());
                     row.put("added", added);
@@ -4604,18 +4461,18 @@ Set<String> currentBefore = new HashSet<>();
                     row.put("created", made);
                     results.add(row);
                 }
-                return null;
+                return new TagAddCounts(tagsAdded, funcsTouched, results);
             });
             program.flushEvents();
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "functions_touched", counts.funcsTouched(),
+                    "tags_added", counts.tagsAdded(),
+                    "results", counts.results()));
         } catch (Exception e) {
             Msg.error(this, "Batch add function tags failed", e);
             return Response.err("Batch failed: " + e.getMessage());
         }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "functions_touched", funcsTouched.get(),
-                "tags_added", tagsAdded.get(),
-                "results", results));
     }
 
     // Bulk helper for remove_function_tag(assignments=[...]). Merged into remove_function_tag
@@ -4631,11 +4488,12 @@ Set<String> currentBefore = new HashSet<>();
         Program program = pe.program();
         if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
 
-        List<Map<String, Object>> results = new ArrayList<>();
-        AtomicInteger tagsRemoved = new AtomicInteger(0);
-        AtomicInteger funcsTouched = new AtomicInteger(0);
+        record TagRemoveCounts(int tagsRemoved, int funcsTouched, List<Map<String, Object>> results) {}
         try {
-            threadingStrategy.executeWrite(program, "Batch remove function tags via HTTP", () -> {
+            TagRemoveCounts counts = threadingStrategy.executeWrite(program, "Batch remove function tags via HTTP", () -> {
+                List<Map<String, Object>> results = new ArrayList<>();
+                int tagsRemoved = 0;
+                int funcsTouched = 0;
                 for (Map<String, String> entry : assignments) {
                     String ref = entry.get("function");
                     String tagsCsv = entry.get("tags");
@@ -4674,25 +4532,25 @@ Set<String> currentBefore = new HashSet<>();
                             notPresent.add(n);
                         }
                     }
-                    tagsRemoved.addAndGet(removed.size());
-                    if (!removed.isEmpty()) funcsTouched.incrementAndGet();
+                    tagsRemoved += removed.size();
+                    if (!removed.isEmpty()) funcsTouched++;
                     row.put("status", "success");
                     row.put("address", func.getEntryPoint().toString());
                     row.put("removed", removed);
                     row.put("not_present", notPresent);
                     results.add(row);
                 }
-                return null;
+                return new TagRemoveCounts(tagsRemoved, funcsTouched, results);
             });
             program.flushEvents();
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "functions_touched", counts.funcsTouched(),
+                    "tags_removed", counts.tagsRemoved(),
+                    "results", counts.results()));
         } catch (Exception e) {
             Msg.error(this, "Batch remove function tags failed", e);
             return Response.err("Batch failed: " + e.getMessage());
         }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "functions_touched", funcsTouched.get(),
-                "tags_removed", tagsRemoved.get(),
-                "results", results));
     }
 }

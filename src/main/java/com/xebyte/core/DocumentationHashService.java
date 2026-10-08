@@ -15,8 +15,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -892,10 +890,12 @@ public class DocumentationHashService {
             "labels", "globals", "external_locations", "bookmarks", "equates"
         };
         for (String k : keys) c.put(k, new int[2]);
-        final AtomicInteger errors = new AtomicInteger();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
 
-        Runnable mergeTask = () -> {
+        record MergeOutcome(int errors, String errorMsg) {}
+
+        java.util.concurrent.Callable<MergeOutcome> mergeTask = () -> {
+            int errors = 0;
+            String errorMsg = null;
             // Dry run writes nothing, so it needs no transaction at all.
             WriteTx tx = dryRun ? null : WriteTx.begin(target, "Merge from " + source.getName());
             boolean commit = false;
@@ -914,7 +914,7 @@ public class DocumentationHashService {
                         try {
                             tgtDtm.resolve(srcDt, ghidra.program.model.data.DataTypeConflictHandler.REPLACE_HANDLER);
                             cc[1]++;
-                        } catch (Throwable t) { errors.incrementAndGet(); }
+                        } catch (Throwable t) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -932,7 +932,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_names"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setName(srcFnName, SourceType.USER_DEFINED); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -946,7 +946,7 @@ public class DocumentationHashService {
                                 try {
                                     ghidra.program.util.FunctionUtility.updateFunction(tgtFn, srcFn);
                                     cc[1]++;
-                                } catch (Throwable t) { errors.incrementAndGet(); }
+                                } catch (Throwable t) { errors++; }
                             } else { cc[1]++; }
                         }
                     } catch (Exception ignored) {}
@@ -958,7 +958,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_plate_comments"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setComment(srcPlate); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -969,7 +969,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_calling_conventions"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setCallingConvention(srcCc); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -978,7 +978,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_no_return_flags"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setNoReturn(srcFn.hasNoReturn()); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -992,7 +992,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_tags"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.addTag(t.getName()); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -1022,7 +1022,7 @@ public class DocumentationHashService {
                                 if (nameDiffers) tgtVar.setName(srcVar.getName(), SourceType.USER_DEFINED);
                                 if (typeDiffers) tgtVar.setDataType(srcVar.getDataType(), SourceType.USER_DEFINED);
                                 cc[1]++;
-                            } catch (Exception e) { errors.incrementAndGet(); }
+                            } catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                 }
@@ -1050,7 +1050,7 @@ public class DocumentationHashService {
                         int[] cc = c.get(key); cc[0]++;
                         if (!dryRun) {
                             try { tgtListing.setComment(addr, ct, srcCmt); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                     // Plate comments at non-function addresses (handled separately above for functions)
@@ -1062,7 +1062,7 @@ public class DocumentationHashService {
                                 int[] cc = c.get("data_plate_comments"); cc[0]++;
                                 if (!dryRun) {
                                     try { tgtListing.setComment(addr, CodeUnit.PLATE_COMMENT, srcPlate); cc[1]++; }
-                                    catch (Exception e) { errors.incrementAndGet(); }
+                                    catch (Exception e) { errors++; }
                                 } else { cc[1]++; }
                             }
                         }
@@ -1087,7 +1087,7 @@ public class DocumentationHashService {
                     ghidra.program.model.symbol.Namespace tgtNs;
                     try {
                         tgtNs = resolveNamespace(target, srcSym.getParentNamespace(), dryRun);
-                    } catch (Exception e) { errors.incrementAndGet(); continue; }
+                    } catch (Exception e) { errors++; continue; }
 
                     // Check existence by (name, namespace) at this address
                     boolean exists = false;
@@ -1104,7 +1104,7 @@ public class DocumentationHashService {
                         try {
                             tgtSt.createLabel(addr, name, tgtNs, SourceType.USER_DEFINED);
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1136,7 +1136,7 @@ public class DocumentationHashService {
                             }
                             tgtListing.createData(addr, resolved);
                             cc[1]++;
-                        } catch (Throwable t) { errors.incrementAndGet(); }
+                        } catch (Throwable t) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1171,7 +1171,7 @@ public class DocumentationHashService {
                             try {
                                 tgtExt.setName(tgtExt.getParentNameSpace(), srcExtName, SourceType.USER_DEFINED);
                                 cc[1]++;
-                            } catch (Exception e) { errors.incrementAndGet(); }
+                            } catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                 }
@@ -1203,7 +1203,7 @@ public class DocumentationHashService {
                         try {
                             tgtBm.setBookmark(addr, type, category != null ? category : "", comment != null ? comment : "");
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1230,7 +1230,7 @@ public class DocumentationHashService {
                             int[] cc = c.get("equates"); cc[0]++;
                             if (!dryRun) {
                                 try { tgtEq.addReference(refAddr, opIndex); cc[1]++; }
-                                catch (Exception e) { errors.incrementAndGet(); }
+                                catch (Exception e) { errors++; }
                             } else { cc[1]++; }
                         }
                         continue;
@@ -1246,36 +1246,38 @@ public class DocumentationHashService {
                                 catch (Exception ignored) {}
                             }
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
                 commit = true;
             } catch (Throwable t) {
-                errorMsg.set(t.getClass().getSimpleName() + ": " + t.getMessage());
+                errorMsg = t.getClass().getSimpleName() + ": " + t.getMessage();
             } finally {
                 if (tx != null) tx.end(commit);
             }
+            return new MergeOutcome(errors, errorMsg);
         };
 
+        MergeOutcome outcome;
         try {
             if (dryRun) {
-                threadingStrategy.runOnUi(mergeTask);
+                outcome = mergeTask.call();
             } else {
-                threadingStrategy.executeWrite(target, "Merge from " + source.getName(), () -> {
-                    mergeTask.run();
-                    if (errorMsg.get() != null) {
-                        throw new Refusal(errorMsg.get());
+                outcome = threadingStrategy.executeWrite(target, "Merge from " + source.getName(), () -> {
+                    MergeOutcome o = mergeTask.call();
+                    if (o.errorMsg() != null) {
+                        throw new Refusal(o.errorMsg());
                     }
-                    return null;
+                    return o;
                 });
             }
         } catch (Refusal r) {
-            // errorMsg already says why
+            return Response.err(r.getMessage());
         } catch (Throwable t) {
             return Response.err("Merge invocation failed: " + t.getMessage());
         }
-        if (errorMsg.get() != null) return Response.err(errorMsg.get());
+        if (outcome.errorMsg() != null) return Response.err(outcome.errorMsg());
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("dry_run", dryRun);
@@ -1287,7 +1289,7 @@ public class DocumentationHashService {
             int[] cc = c.get(k);
             resp.put(k, JsonHelper.mapOf("planned", cc[0], "applied", cc[1]));
         }
-        resp.put("errors", errors.get());
+        resp.put("errors", outcome.errors());
         return Response.ok(resp);
     }
 
@@ -1459,20 +1461,20 @@ public class DocumentationHashService {
             ? versionOverride : extractVersion(program);
         String runId = "ghidra-mcp-ingest-" + binaryName + "-" + System.currentTimeMillis();
 
-        AtomicInteger total = new AtomicInteger();
-        AtomicInteger created = new AtomicInteger();
-        AtomicInteger updated = new AtomicInteger();
-        AtomicInteger conflicts = new AtomicInteger();
-        AtomicInteger skipped = new AtomicInteger();
-        AtomicInteger errors = new AtomicInteger();
+        int total = 0;
+        int created = 0;
+        int updated = 0;
+        int conflicts = 0;
+        int skipped = 0;
+        int errors = 0;
         List<String> errorList = new ArrayList<>();
 
         for (Function fn : program.getFunctionManager().getFunctions(true)) {
-            if (limit > 0 && total.get() >= limit) break;
-            total.incrementAndGet();
+            if (limit > 0 && total >= limit) break;
+            total++;
 
             if (skipDefault && isDefaultSymbolName(fn.getName())) {
-                skipped.incrementAndGet();
+                skipped++;
                 continue;
             }
 
@@ -1480,20 +1482,20 @@ public class DocumentationHashService {
                 Map<String, Object> payload = buildArchivePayload(program, fn,
                     binaryName, version, runId);
                 if (dryRun) {
-                    created.incrementAndGet();  // would-be
+                    created++;  // would-be
                     continue;
                 }
                 Map<String, Object> result = postToArchive("/v1/doc_archive/upsert", payload);
                 Object createdFlag = result.get("created");
                 if (Boolean.TRUE.equals(createdFlag)) {
-                    created.incrementAndGet();
+                    created++;
                 } else {
-                    updated.incrementAndGet();
+                    updated++;
                 }
                 Number conflictsThis = (Number) result.get("conflicts_enqueued");
-                if (conflictsThis != null) conflicts.addAndGet(conflictsThis.intValue());
+                if (conflictsThis != null) conflicts += conflictsThis.intValue();
             } catch (Exception e) {
-                errors.incrementAndGet();
+                errors++;
                 if (errorList.size() < 10) {
                     errorList.add(fn.getEntryPoint() + " (" + fn.getName() + "): " + e.getMessage());
                 }
@@ -1505,12 +1507,12 @@ public class DocumentationHashService {
             "version",             version,
             "source_run_id",       runId,
             "dry_run",             dryRun,
-            "total_functions",     total.get(),
-            "created",             created.get(),
-            "updated",             updated.get(),
-            "conflicts_enqueued",  conflicts.get(),
-            "skipped_default_named", skipped.get(),
-            "errors",              errors.get(),
+            "total_functions",     total,
+            "created",             created,
+            "updated",             updated,
+            "conflicts_enqueued",  conflicts,
+            "skipped_default_named", skipped,
+            "errors",              errors,
             "first_errors",        errorList,
             "archive_url",         getArchiveUrl()
         ));
