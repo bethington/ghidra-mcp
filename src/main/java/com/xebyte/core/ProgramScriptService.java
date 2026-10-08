@@ -28,9 +28,6 @@ import ghidra.util.task.TimeoutTaskMonitor;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for program management, script execution, memory, and bookmark operations.
@@ -562,18 +559,16 @@ public class ProgramScriptService {
                 "program", program.getName()));
         }
 
-        final AtomicBoolean removed = new AtomicBoolean(false);
+        final boolean removed;
         try {
-            threadingStrategy.executeWrite(program, "Delete Property Map", () -> {
-                removed.set(mgr.removePropertyMap(name));
-                return null;
-            });
+            removed = threadingStrategy.executeWrite(program, "Delete Property Map",
+                () -> mgr.removePropertyMap(name));
         } catch (Exception e) {
             return Response.err("Failed to delete property map: " + e.getMessage());
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", removed.get(),
+            "success", removed,
             "name", name,
             "note", "Call save_program to persist this change to the database.",
             "program", program.getName()));
@@ -735,18 +730,16 @@ public class ProgramScriptService {
             return Response.err(ServiceUtils.getLastParseError());
         }
 
-        final AtomicBoolean removed = new AtomicBoolean(false);
+        final boolean removed;
         try {
-            threadingStrategy.executeWrite(program, "Remove Property", () -> {
-                removed.set(map.remove(address));
-                return null;
-            });
+            removed = threadingStrategy.executeWrite(program, "Remove Property",
+                () -> map.remove(address));
         } catch (Exception e) {
             return Response.err("Failed to remove property: " + e.getMessage());
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", removed.get(),
+            "success", removed,
             "map", mapName,
             "address", address.toString(),
             "note", "Call save_program to persist this change to the database.",
@@ -875,56 +868,37 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    ghidra.framework.model.DomainFile df = program.getDomainFile();
-                    if (df == null) {
-                        errorMsg.set("Program has no domain file");
-                        return;
-                    }
-                    // Nothing to save. Saving anyway writes the file, so a checked-out file
-                    // read modified_since_checkout=true after a save with no edits.
-                    if (!program.isChanged()) {
-                        resultData.set(JsonHelper.mapOf(
-                            "success", true,
-                            "program", program.getName(),
-                            "saved", false,
-                            "message", "No unsaved changes"
-                        ));
-                        return;
-                    }
-                    String unsaveable = ProgramSaves.unsaveableReason(program);
-                    if (unsaveable != null) {
-                        errorMsg.set(unsaveable);
-                        return;
-                    }
-                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                    resultData.set(JsonHelper.mapOf(
-                        "success", true,
-                        "program", program.getName(),
-                        "saved", true,
-                        "message", "Program saved successfully"
-                    ));
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error saving program", e);
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+            ghidra.framework.model.DomainFile df = program.getDomainFile();
+            if (df == null) {
+                return Response.err("Program has no domain file");
             }
+            // Nothing to save. Saving anyway writes the file, so a checked-out file
+            // read modified_since_checkout=true after a save with no edits.
+            if (!program.isChanged()) {
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "program", program.getName(),
+                    "saved", false,
+                    "message", "No unsaved changes"
+                ));
+            }
+            String unsaveable = ProgramSaves.unsaveableReason(program);
+            if (unsaveable != null) {
+                return Response.err(unsaveable);
+            }
+            ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "program", program.getName(),
+                "saved", true,
+                "message", "Program saved successfully"
+            ));
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            Msg.error(this, "Error saving program", e);
             return Response.err(msg);
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     /**
@@ -946,71 +920,62 @@ public class ProgramScriptService {
             ));
         }
 
-        final AtomicReference<List<Map<String, Object>>> saved = new AtomicReference<>(new ArrayList<>());
-        final AtomicReference<List<Map<String, Object>>> errors = new AtomicReference<>(new ArrayList<>());
-        final AtomicReference<List<String>> unchanged = new AtomicReference<>(new ArrayList<>());
+        List<Map<String, Object>> saved = new ArrayList<>();
+        List<Map<String, Object>> errors = new ArrayList<>();
+        List<String> unchanged = new ArrayList<>();
 
-        Runnable saveTask = () -> {
-            Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-            for (Program program : programs) {
-                if (program == null || !seen.add(program)) {
+        Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Program program : programs) {
+            if (program == null || !seen.add(program)) {
+                continue;
+            }
+
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("program", program.getName());
+            try {
+                ghidra.framework.model.DomainFile df = program.getDomainFile();
+                if (df == null) {
+                    info.put("error", "Program has no domain file");
+                    errors.add(info);
                     continue;
                 }
-
-                Map<String, Object> info = new LinkedHashMap<>();
-                info.put("program", program.getName());
-                try {
-                    ghidra.framework.model.DomainFile df = program.getDomainFile();
-                    if (df == null) {
-                        info.put("error", "Program has no domain file");
-                        errors.get().add(info);
-                        continue;
-                    }
-                    info.put("path", df.getPathname());
-                    // Nothing to save. Saving anyway writes the file: a checked-out file then
-                    // reads modified_since_checkout=true with no edit made, and a read-only
-                    // copy reports an error for a program that loses nothing.
-                    if (!program.isChanged()) {
-                        unchanged.get().add(df.getPathname());
-                        continue;
-                    }
-                    // A DomainFile that is not in a writable project is a proxy
-                    // (no on-disk location) \u2014 calling save() on it throws the
-                    // cryptic "Location does not exist for a save operation!".
-                    // Surface a specific message so callers know to re-load
-                    // with an active project open.
-                    if (!df.isInWritableProject()) {
-                        info.put("error",
-                            "Program is not attached to a writable project "
-                            + "(transient DomainFileProxy); re-load it with a "
-                            + "project open before saving.");
-                        errors.get().add(info);
-                        continue;
-                    }
-                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                    saved.get().add(info);
-                } catch (Throwable e) {
-                    info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
-                    errors.get().add(info);
-                    Msg.error(this, "Error saving program " + program.getName(), e);
+                info.put("path", df.getPathname());
+                // Nothing to save. Saving anyway writes the file: a checked-out file then
+                // reads modified_since_checkout=true with no edit made, and a read-only
+                // copy reports an error for a program that loses nothing.
+                if (!program.isChanged()) {
+                    unchanged.add(df.getPathname());
+                    continue;
                 }
+                // A DomainFile that is not in a writable project is a proxy
+                // (no on-disk location) \u2014 calling save() on it throws the
+                // cryptic "Location does not exist for a save operation!".
+                // Surface a specific message so callers know to re-load
+                // with an active project open.
+                if (!df.isInWritableProject()) {
+                    info.put("error",
+                        "Program is not attached to a writable project "
+                        + "(transient DomainFileProxy); re-load it with a "
+                        + "project open before saving.");
+                    errors.add(info);
+                    continue;
+                }
+                ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+                saved.add(info);
+            } catch (Throwable e) {
+                info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
+                errors.add(info);
+                Msg.error(this, "Error saving program " + program.getName(), e);
             }
-        };
-
-        try {
-            threadingStrategy.runOnUi(saveTask);
-        } catch (Throwable e) {
-            return Response.err("Failed to save all programs: " +
-                    (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", errors.get().isEmpty(),
-            "saved_count", saved.get().size(),
+            "success", errors.isEmpty(),
+            "saved_count", saved.size(),
             "open_program_count", programs.length,
-            "programs", saved.get(),
-            "unchanged", unchanged.get(),
-            "errors", errors.get()
+            "programs", saved,
+            "unchanged", unchanged,
+            "errors", errors
         ));
     }
 
@@ -1098,57 +1063,50 @@ public class ProgramScriptService {
                 + " Pass save=false to close and discard them.");
         }
 
-        AtomicInteger closedCount = new AtomicInteger(0);
-        AtomicReference<String> error = new AtomicReference<>();
+        int closedCount = 0;
+        String error = null;
         ghidra.framework.model.DomainFile targetFile = target.getDomainFile();
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    for (ProgramManager pm : programManagers()) {
-                        for (Program program : pm.getAllOpenPrograms()) {
-                            boolean same = program == target || (targetFile != null
-                                && program.getDomainFile() != null
-                                && program.getDomainFile().getPathname().equals(targetFile.getPathname()));
-                            if (!same) {
-                                continue;
-                            }
-                            if (save && program.isChanged()) {
-                                ghidra.framework.model.DomainFile df = program.getDomainFile();
-                                if (df != null && df.isInWritableProject()) {
-                                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                                }
-                            }
-                            // ignoreChanges=true unconditionally: the fate of unsaved edits
-                            // was decided above (saved, or deliberately discarded), so Ghidra
-                            // must never fall back to its interactive "Save changes?" dialog,
-                            // which blocks the Swing thread -- and every MCP request behind
-                            // it -- until a human clicks.
-                            pm.closeProgram(program, true);
-                            closedCount.incrementAndGet();
+            for (ProgramManager pm : programManagers()) {
+                for (Program program : pm.getAllOpenPrograms()) {
+                    boolean same = program == target || (targetFile != null
+                        && program.getDomainFile() != null
+                        && program.getDomainFile().getPathname().equals(targetFile.getPathname()));
+                    if (!same) {
+                        continue;
+                    }
+                    if (save && program.isChanged()) {
+                        ghidra.framework.model.DomainFile df = program.getDomainFile();
+                        if (df != null && df.isInWritableProject()) {
+                            ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                         }
                     }
-                } catch (Exception e) {
-                    error.set(e.getMessage() != null ? e.getMessage() : e.toString());
+                    // ignoreChanges=true unconditionally: the fate of unsaved edits
+                    // was decided above (saved, or deliberately discarded), so Ghidra
+                    // must never fall back to its interactive "Save changes?" dialog,
+                    // which blocks the Swing thread -- and every MCP request behind
+                    // it -- until a human clicks.
+                    pm.closeProgram(program, true);
+                    closedCount++;
                 }
-            });
+            }
         } catch (Exception e) {
-            return Response.err("Failed to close program: " +
-                    (e.getMessage() != null ? e.getMessage() : e.toString()));
+            error = e.getMessage() != null ? e.getMessage() : e.toString();
         }
-        if (error.get() != null) {
-            return Response.err("Failed to close program: " + error.get());
+        if (error != null) {
+            return Response.err("Failed to close program: " + error);
         }
 
         // The provider's own handle, with the same save choice. Releasing it used to
         // save unconditionally, so save=false in the GUI still saved the discarded edits.
         boolean releasedCache = programProvider.closeProgram(target, save);
-        if (closedCount.get() == 0 && releasedCache) {
-            closedCount.incrementAndGet();
+        if (closedCount == 0 && releasedCache) {
+            closedCount++;
         }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
-            "closed_count", closedCount.get(),
+            "closed_count", closedCount,
             "released_cache", releasedCache,
             "name", search
         ));
@@ -2239,252 +2197,251 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        // Why the run failed, in one line, so a caller gets the reason and not only a flag.
-        final AtomicReference<String> failure = new AtomicReference<>();
-        final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
-        final PrintStream originalOut = System.out;
-        final PrintStream originalErr = System.err;
-
-        // Track whether we copied the script (for cleanup)
-        final File[] copiedScript = {null};
-
-        // Holders so the catch block can surface OSGi build/activate output
-        // captured into scriptWriter before a failure. The PrintWriter holder
-        // lets the failure path flush buffered output into the StringWriter
-        // before reading it, otherwise the captured text can be truncated.
-        final StringWriter[] scriptWriterHolder = {null};
-        final PrintWriter[] scriptPrintWriterHolder = {null};
-        final TimeoutTaskMonitor[] scriptMonitorHolder = {null};
-
-        // The analyst's windows, for script state (GUI mode only)
-        final Workbench workbench = programProvider.workbench();
-
-        try {
-            threadingStrategy.runOnUi(() -> {
-                StringWriter scriptWriter = new StringWriter();
-                try {
-                    // Capture console output
-                    PrintStream captureStream = new PrintStream(outputCapture);
-                    System.setOut(captureStream);
-                    System.setErr(captureStream);
-
-                    resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
-                    resultMsg.append("Script: ").append(scriptPath).append("\n");
-                    resultMsg.append("Program: ").append(program.getName()).append("\n");
-                    resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
-
-                    // Resolve script file - search standard locations
-                    File ghidraScriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
-                    String[] possiblePaths = {
-                        scriptPath,  // Absolute or relative path as-is
-                        new File(ghidraScriptsDir, scriptPath).getPath(),
-                        new File(ghidraScriptsDir, new File(scriptPath).getName()).getPath(),
-                        "./ghidra_scripts/" + scriptPath,
-                        "./ghidra_scripts/" + new File(scriptPath).getName()
-                    };
-
-                    File resolvedFile = null;
-                    for (String p : possiblePaths) {
-                        try {
-                            File candidate = new File(p);
-                            if (candidate.exists() && candidate.isFile()) {
-                                resolvedFile = candidate;
-                                break;
-                            }
-                        } catch (Exception e) {
-                            // Continue
-                        }
-                    }
-
-                    if (resolvedFile == null) {
-                        resultMsg.append("ERROR: Script file not found. Searched:\n");
-                        for (String p : possiblePaths) {
-                            resultMsg.append("  - ").append(p).append("\n");
-                        }
-                        return;
-                    }
-
-                    // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
-                    // copy it there so Ghidra's OSGi class loader can find the source bundle.
-                    File scriptFileForExecution = resolvedFile;
-                    try {
-                        ghidraScriptsDir.mkdirs();
-                        String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
-                        String canonicalResolved = resolvedFile.getCanonicalPath();
-                        if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
-                            // Copy to ~/ghidra_scripts/
-                            File dest = new File(ghidraScriptsDir, resolvedFile.getName());
-                            java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                            scriptFileForExecution = dest;
-                            copiedScript[0] = dest;
-                            resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
-                        }
-                    } catch (Exception e) {
-                        resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
-                    }
-
-                    try {
-                        ensureScriptBundleHostInitialized(scriptFileForExecution.getParentFile());
-                    } catch (Exception e) {
-                        resultMsg.append("ERROR: Could not initialize Ghidra script bundle host for: ")
-                                .append(scriptFileForExecution.getParentFile().getAbsolutePath())
-                                .append("\n")
-                                .append(e.getClass().getSimpleName())
-                                .append(": ")
-                                .append(e.getMessage())
-                                .append("\n");
-                        return;
-                    }
-
-                    generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
-
-                    resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
-                    resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
-
-                    // Get script provider
-                    ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
-                    if (provider == null) {
-                        resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
-                        if (scriptFile.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".py")) {
-                            resultMsg.append("Ghidra 12.1 ships Jython as an optional extension. ")
-                                    .append("Install the Jython extension from File > Install Extensions, ")
-                                    .append("restart Ghidra, then refresh Script Manager before running .py scripts.\n");
-                        }
-                        return;
-                    }
-
-                    resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
-
-                    // Create script instance
-                    PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
-                    scriptWriterHolder[0] = scriptWriter;
-                    scriptPrintWriterHolder[0] = scriptPrintWriter;
-
-                    ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
-                    if (script == null) {
-                        resultMsg.append("ERROR: Failed to create script instance\n");
-                        return;
-                    }
-
-                    // Set up script state
-                    ghidra.app.script.GhidraState scriptState = scriptState(workbench, program);
-
-                    ghidra.util.task.TaskMonitor scriptMonitor;
-                    if (timeoutSeconds > 0) {
-                        TimeoutTaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(
-                                timeoutSeconds,
-                                TimeUnit.SECONDS,
-                                new ConsoleTaskMonitor());
-                        scriptMonitorHolder[0] = timeoutMonitor;
-                        scriptMonitor = timeoutMonitor;
-                    }
-                    else {
-                        scriptMonitor = new ConsoleTaskMonitor();
-                    }
-
-                    script.set(scriptState, scriptMonitor, scriptPrintWriter);
-
-                    // Issue #1 + #5 fix: Parse and set script args BEFORE execution,
-                    // so getScriptArgs() returns them instead of falling through to askString()
-                    String[] args = new String[0];
-                    if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
-                        args = scriptArgs.trim().split("\\s+");
-                        script.setScriptArgs(args);
-                        resultMsg.append("Script args: ").append(Arrays.toString(args)).append("\n");
-                    }
-
-                    resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
-
-                    // Execute the script
-                    script.runScript(scriptFile.getName(), args);
-
-                    // Get script output
-                    String scriptOutput = scriptWriter.toString();
-                    if (!scriptOutput.isEmpty()) {
-                        resultMsg.append(scriptOutput).append("\n");
-                    }
-
-                    success.set(true);
-                    resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
-
-                } catch (Exception e) {
-                    String scriptOutput = scriptWriter.toString();
-                    if (!scriptOutput.isEmpty()) {
-                        resultMsg.append("\n--- SCRIPT BUILD OUTPUT ---\n");
-                        resultMsg.append(scriptOutput).append("\n");
-                    }
-                    resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
-                    resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
-                    failure.set(failureReason(e, new File(scriptPath).getName()));
-
-                    StringWriter sw = new StringWriter();
-                    PrintWriter pw = new PrintWriter(sw);
-                    e.printStackTrace(pw);
-                    resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
-
-                    // Surface any build/activate output that was captured into the
-                    // script writer before the failure (e.g. OSGi/Felix compile
-                    // errors from JavaScriptProvider.activateAll()). Flush the
-                    // PrintWriter first so buffered text reaches the StringWriter,
-                    // and bound the result so a verbose compiler failure can't
-                    // blow up the response payload.
-                    try {
-                        PrintWriter pw2 = scriptPrintWriterHolder[0];
-                        if (pw2 != null) {
-                            pw2.flush();
-                        }
-                        StringWriter sw2 = scriptWriterHolder[0];
-                        if (sw2 != null) {
-                            String capturedBuild = sw2.toString();
-                            if (!capturedBuild.isEmpty()) {
-                                resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
-                                        .append(boundTail(capturedBuild, MAX_BUILD_OUTPUT_CHARS))
-                                        .append("\n");
-                            }
-                        }
-                    } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }
-
-                    Msg.error(this, "Script execution failed: " + scriptPath, e);
-                } finally {
-                    if (scriptMonitorHolder[0] != null) {
-                        scriptMonitorHolder[0].cancel();
-                    }
-                    // Restore original output streams
-                    System.setOut(originalOut);
-                    System.setErr(originalErr);
-
-                    // Append any captured console output
-                    String capturedOutput = outputCapture.toString();
-                    if (!capturedOutput.isEmpty()) {
-                        resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
-                        resultMsg.append(capturedOutput).append("\n");
-                    }
-
-                    // Clean up copied script
-                    if (copiedScript[0] != null) {
-                        if (!copiedScript[0].delete()) {
-                            copiedScript[0].deleteOnExit();
-                        }
-                    }
-                }
-            });
-        } catch (Exception e) {
-            resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
-            failure.compareAndSet(null, "Failed to execute on the UI thread: " + e.getMessage());
-            Msg.error(this, "Failed to execute on Swing thread", e);
-        }
+        Workbench workbench = programProvider.workbench();
+        ScriptRunOutcome outcome = executeGhidraScriptBody(
+            scriptPath, scriptArgs, program, timeoutSeconds, workbench);
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("success", success.get());
-        if (!success.get()) {
-            out.put("error", failure.get() != null ? failure.get()
+        out.put("success", outcome.success);
+        if (!outcome.success) {
+            out.put("error", outcome.failure != null ? outcome.failure
                 : "The script did not complete; see console_output.");
         }
-        out.put("console_output", resultMsg.toString());
+        out.put("console_output", outcome.consoleOutput);
         return Response.ok(out);
+    }
+
+    private record ScriptRunOutcome(boolean success, String failure, String consoleOutput) {}
+
+    /**
+     * Runs on the HTTP request thread — must not take the server lock (scripts may run for
+     * a long time or call back into MCP).
+     */
+    private ScriptRunOutcome executeGhidraScriptBody(
+            String scriptPath,
+            String scriptArgs,
+            Program program,
+            int timeoutSeconds,
+            Workbench workbench) {
+        StringBuilder resultMsg = new StringBuilder();
+        boolean success = false;
+        String failure = null;
+        ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+        File copiedScript = null;
+        StringWriter capturedWriter = null;
+        PrintWriter capturedPrintWriter = null;
+        TimeoutTaskMonitor activeMonitor = null;
+
+        StringWriter scriptWriter = new StringWriter();
+        try {
+            // Capture console output
+            PrintStream captureStream = new PrintStream(outputCapture);
+            System.setOut(captureStream);
+            System.setErr(captureStream);
+
+            resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
+            resultMsg.append("Script: ").append(scriptPath).append("\n");
+            resultMsg.append("Program: ").append(program.getName()).append("\n");
+            resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
+
+            // Resolve script file - search standard locations
+            File ghidraScriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
+            String[] possiblePaths = {
+                scriptPath,  // Absolute or relative path as-is
+                new File(ghidraScriptsDir, scriptPath).getPath(),
+                new File(ghidraScriptsDir, new File(scriptPath).getName()).getPath(),
+                "./ghidra_scripts/" + scriptPath,
+                "./ghidra_scripts/" + new File(scriptPath).getName()
+            };
+
+            File resolvedFile = null;
+            for (String p : possiblePaths) {
+                try {
+                    File candidate = new File(p);
+                    if (candidate.exists() && candidate.isFile()) {
+                        resolvedFile = candidate;
+                        break;
+                    }
+                } catch (Exception e) {
+                    // Continue
+                }
+            }
+
+            if (resolvedFile == null) {
+                resultMsg.append("ERROR: Script file not found. Searched:\n");
+                for (String p : possiblePaths) {
+                    resultMsg.append("  - ").append(p).append("\n");
+                }
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
+            // copy it there so Ghidra's OSGi class loader can find the source bundle.
+            File scriptFileForExecution = resolvedFile;
+            try {
+                ghidraScriptsDir.mkdirs();
+                String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
+                String canonicalResolved = resolvedFile.getCanonicalPath();
+                if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
+                    // Copy to ~/ghidra_scripts/
+                    File dest = new File(ghidraScriptsDir, resolvedFile.getName());
+                    java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    scriptFileForExecution = dest;
+                    copiedScript = dest;
+                    resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
+                }
+            } catch (Exception e) {
+                resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
+            }
+
+            try {
+                ensureScriptBundleHostInitialized(scriptFileForExecution.getParentFile());
+            } catch (Exception e) {
+                resultMsg.append("ERROR: Could not initialize Ghidra script bundle host for: ")
+                        .append(scriptFileForExecution.getParentFile().getAbsolutePath())
+                        .append("\n")
+                        .append(e.getClass().getSimpleName())
+                        .append(": ")
+                        .append(e.getMessage())
+                        .append("\n");
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
+
+            resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
+            resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
+
+            // Get script provider
+            ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
+            if (provider == null) {
+                resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
+                if (scriptFile.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".py")) {
+                    resultMsg.append("Ghidra 12.1 ships Jython as an optional extension. ")
+                            .append("Install the Jython extension from File > Install Extensions, ")
+                            .append("restart Ghidra, then refresh Script Manager before running .py scripts.\n");
+                }
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
+
+            // Create script instance
+            PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
+            capturedWriter = scriptWriter;
+            capturedPrintWriter = scriptPrintWriter;
+
+            ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
+            if (script == null) {
+                resultMsg.append("ERROR: Failed to create script instance\n");
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            // Set up script state
+            ghidra.app.script.GhidraState scriptState = scriptState(workbench, program);
+
+            ghidra.util.task.TaskMonitor scriptMonitor;
+            if (timeoutSeconds > 0) {
+                TimeoutTaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(
+                        timeoutSeconds,
+                        TimeUnit.SECONDS,
+                        new ConsoleTaskMonitor());
+                activeMonitor = timeoutMonitor;
+                scriptMonitor = timeoutMonitor;
+            }
+            else {
+                scriptMonitor = new ConsoleTaskMonitor();
+            }
+
+            script.set(scriptState, scriptMonitor, scriptPrintWriter);
+
+            // Issue #1 + #5 fix: Parse and set script args BEFORE execution,
+            // so getScriptArgs() returns them instead of falling through to askString()
+            String[] args = new String[0];
+            if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
+                args = scriptArgs.trim().split("\\s+");
+                script.setScriptArgs(args);
+                resultMsg.append("Script args: ").append(Arrays.toString(args)).append("\n");
+            }
+
+            resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
+
+            // Execute the script
+            script.runScript(scriptFile.getName(), args);
+
+            // Get script output
+            String scriptOutput = scriptWriter.toString();
+            if (!scriptOutput.isEmpty()) {
+                resultMsg.append(scriptOutput).append("\n");
+            }
+
+            success = true;
+            resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
+
+        } catch (Exception e) {
+            String scriptOutput = scriptWriter.toString();
+            if (!scriptOutput.isEmpty()) {
+                resultMsg.append("\n--- SCRIPT BUILD OUTPUT ---\n");
+                resultMsg.append(scriptOutput).append("\n");
+            }
+            resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
+            resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
+            failure = failureReason(e, new File(scriptPath).getName());
+
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
+
+            // Surface any build/activate output that was captured into the
+            // script writer before the failure (e.g. OSGi/Felix compile
+            // errors from JavaScriptProvider.activateAll()). Flush the
+            // PrintWriter first so buffered text reaches the StringWriter,
+            // and bound the result so a verbose compiler failure can't
+            // blow up the response payload.
+            try {
+                if (capturedPrintWriter != null) {
+                    capturedPrintWriter.flush();
+                }
+                StringWriter sw2 = capturedWriter;
+                if (sw2 != null) {
+                    String capturedBuild = sw2.toString();
+                    if (!capturedBuild.isEmpty()) {
+                        resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
+                                .append(boundTail(capturedBuild, MAX_BUILD_OUTPUT_CHARS))
+                                .append("\n");
+                    }
+                }
+            } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }
+
+            Msg.error(this, "Script execution failed: " + scriptPath, e);
+        } finally {
+            if (activeMonitor != null) {
+                activeMonitor.cancel();
+            }
+            // Restore original output streams
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+
+            // Append any captured console output
+            String capturedOutput = outputCapture.toString();
+            if (!capturedOutput.isEmpty()) {
+                resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
+                resultMsg.append(capturedOutput).append("\n");
+            }
+
+            // Clean up copied script
+            if (copiedScript != null) {
+                if (!copiedScript.delete()) {
+            copiedScript.deleteOnExit();
+                }
+            }
+        }
+
+        return new ScriptRunOutcome(success, failure, resultMsg.toString());
     }
 
     /**
@@ -2711,39 +2668,25 @@ public class ProgramScriptService {
     @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program", access = ToolAccess.READ_ONLY)
     public Response listGhidraScripts(
             @Param(value = "filter", description = "Script name filter", defaultValue = "") String filter) {
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    resultData.set(JsonHelper.mapOf(
-                        "note", "Script listing requires Ghidra GUI access",
-                        "filter", filter != null ? filter : "none",
-                        "instructions", List.of(
-                            "To view available scripts:",
-                            "1. Open Ghidra's Script Manager (Window -> Script Manager)",
-                            "2. Browse scripts by category",
-                            "3. Use the search filter at the top"
-                        ),
-                        "common_script_locations", List.of(
-                            "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
-                            "<user_home>/ghidra_scripts/"
-                        )
-                    ));
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error in list scripts handler", e);
-                }
-            });
+            return Response.ok(JsonHelper.mapOf(
+                "note", "Script listing requires Ghidra GUI access",
+                "filter", filter != null ? filter : "none",
+                "instructions", List.of(
+                    "To view available scripts:",
+                    "1. Open Ghidra's Script Manager (Window -> Script Manager)",
+                    "2. Browse scripts by category",
+                    "3. Use the search filter at the top"
+                ),
+                "common_script_locations", List.of(
+                    "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
+                    "<user_home>/ghidra_scripts/"
+                )
+            ));
         } catch (Exception e) {
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            Msg.error(this, "Error in list scripts handler", e);
+            return Response.err(e.getMessage());
         }
-
-        if (errorMsg.get() != null) {
-            return Response.err(errorMsg.get());
-        }
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================

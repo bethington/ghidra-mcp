@@ -714,8 +714,8 @@ public final class ServiceUtils {
      * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
      *
      * THREADING: Must be called on the HTTP worker thread, BEFORE entering any
-     * threadingStrategy.executeRead/executeWrite lambda. SwingThreadingStrategy transfers
-     * execution to the EDT inside execute*; a ThreadLocal set there is invisible to the caller.
+     * threadingStrategy.executeRead/executeWrite lambda. A ThreadLocal set inside the
+     * lambda is invisible to the caller after execute* returns — set it beforehand.
      */
     public static Address parseAddress(Program program, String addressStr) {
         lastParseError.remove();
