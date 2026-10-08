@@ -130,10 +130,6 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: apply_function_documentation
-  tier: write
-  snapshot: false
-  skip: 'no synthetic value for required param(s): [''json_body'']'
 - tool: archive_ingest_function
   tier: write
   args:
@@ -170,7 +166,7 @@ tool_cases:
     is_error: false
     nonempty: true
   snapshot: true
-- tool: batch_apply_documentation
+- tool: apply_documentation
   tier: write
   args:
     address: '0x10001000'

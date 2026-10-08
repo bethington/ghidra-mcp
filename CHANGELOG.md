@@ -6,7 +6,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**210 tools** — 206 served by the GUI plugin, 191 by the headless server, 187 by
+**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186 by
 both. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 245 after `/list_shadowed_globals` and `/batch_get_comments`, 219
 after `/get_functions` replaced nine function readers, 215 after the listing,
@@ -14,7 +14,9 @@ xref, tag, utility and GUI-cursor folds, 211 once both servers shared one set of
 program-operation names (`/load_program`, `/load_program_from_project`,
 `/project/info` and headless `/health` retired), 209 once version control and
 the CodeBrowser tools became shared services (`/server/version_control/checkin`
-and `/tool/launch_codebrowser` retired), and **210** with `/set_memory_block`.
+and `/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and
+**209** once `/apply_documentation` replaced `/apply_function_documentation` and
+`/batch_apply_documentation`.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -46,6 +48,23 @@ This project is a generic Ghidra MCP server; game-specific tooling lives elsewhe
   maintainer's local path.
 - Removed `workflows/` and three session-note docs; tool descriptions, docs and
   `.env.template` use generic examples.
+### Changed — `apply_documentation` replaces both documentation writers
+
+- **`apply_documentation` is the one tool for writing a function's documentation.**
+  It merges `/apply_function_documentation` (a JSON *string* read with a flat regex
+  extractor, whose failures to rename, retype or set a convention were only logged) and
+  `/batch_apply_documentation` (typed fields, but no labels, offsets or return type). It
+  takes the fields `get_function_documentation` exports (`target_address`,
+  `function_name`, `parameters`, `comments` and `labels` by `relative_offset`,
+  `pre_comment`/`eol_comment`) plus prototype, variable types and renames, and applies
+  them through the same services the single tools use, so the naming rules hold and every
+  step reports its own result. Pass the fields at the top level for one function or
+  `entries=[...]` for many: each entry gets its own result, one failing does not stop the
+  rest, and `score` defaults to on for one function and off for many. Exported
+  placeholders (`param_N`, `undefined*`) are skipped, so an export applies back without
+  reverting anything. It is a shared service and runs on headless too; only `goto` needs
+  a window. **Breaking:** `/apply_function_documentation` and
+  `/batch_apply_documentation` are gone (see the migration guide).
 
 ### Fixed — check-in dry run, firmware memory permissions, shared-project paths
 

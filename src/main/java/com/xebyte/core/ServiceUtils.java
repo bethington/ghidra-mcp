@@ -16,8 +16,6 @@ import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Shared static utility methods used by all service classes.
@@ -104,46 +102,6 @@ public final class ServiceUtils {
         }
         sb.append("}");
         return sb.toString();
-    }
-
-    /**
-     * Extract a JSON string value by key using regex.
-     */
-    public static String extractJsonString(String json, String key) {
-        String pattern = "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"";
-        Pattern p = Pattern.compile(pattern);
-        Matcher m = p.matcher(json);
-        if (m.find()) {
-            return m.group(1).replace("\\\"", "\"").replace("\\n", "\n");
-        }
-        // Check for null value
-        pattern = "\"" + key + "\"\\s*:\\s*null";
-        if (json.matches(".*" + pattern + ".*")) {
-            return null;
-        }
-        return null;
-    }
-
-    /**
-     * Extract a JSON array as a string by key using bracket matching.
-     */
-    public static String extractJsonArray(String json, String key) {
-        int startIdx = json.indexOf("\"" + key + "\"");
-        if (startIdx < 0) return null;
-
-        int arrayStart = json.indexOf('[', startIdx);
-        if (arrayStart < 0) return null;
-
-        int depth = 1;
-        int arrayEnd = arrayStart + 1;
-        while (arrayEnd < json.length() && depth > 0) {
-            char c = json.charAt(arrayEnd);
-            if (c == '[') depth++;
-            else if (c == ']') depth--;
-            arrayEnd++;
-        }
-
-        return json.substring(arrayStart, arrayEnd);
     }
 
     // ========================================================================
