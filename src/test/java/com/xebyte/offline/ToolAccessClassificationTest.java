@@ -76,8 +76,9 @@ public class ToolAccessClassificationTest extends TestCase {
     /** A classified tool serializes both hints; an unclassified one emits neither. */
     public void testSchemaJsonCarriesTheHints() {
         String json = scanner.generateSchema();
-        assertTrue("schema should carry read_only flags", json.contains("\"read_only\": true"));
-        assertTrue("schema should carry destructive flags", json.contains("\"destructive\": true"));
+        // Compact Gson: "read_only":true (no space). Pin keys + values, not spacing.
+        assertTrue("schema should carry read_only flags", json.contains("\"read_only\":true"));
+        assertTrue("schema should carry destructive flags", json.contains("\"destructive\":true"));
 
         AnnotationScanner.ToolDescriptor unspecified = new AnnotationScanner.ToolDescriptor(
             "/unclassified", "GET", "d", "cat", "", ToolAccess.UNSPECIFIED, List.of());

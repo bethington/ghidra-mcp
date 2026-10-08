@@ -46,38 +46,41 @@ public record EndpointDef(String path, String method, EndpointHandler handler,
     public record ParamDef(String name, String type, String source,
                            boolean required, String defaultValue, String description) {
 
-        /** Serialize to JSON. */
-        public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"name\": \"").append(ServiceUtils.escapeJson(name)).append("\"");
-            sb.append(", \"type\": \"").append(type).append("\"");
-            sb.append(", \"source\": \"").append(source).append("\"");
-            sb.append(", \"required\": ").append(required);
+        /** Map form used by {@link #toJson()} and by the parent endpoint schema. */
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("name", name);
+            out.put("type", type);
+            out.put("source", source);
+            out.put("required", required);
             if (defaultValue != null) {
-                sb.append(", \"default\": \"").append(ServiceUtils.escapeJson(defaultValue)).append("\"");
+                out.put("default", defaultValue);
             }
             if (description != null && !description.isEmpty()) {
-                sb.append(", \"description\": \"").append(ServiceUtils.escapeJson(description)).append("\"");
+                out.put("description", description);
             }
-            sb.append("}");
-            return sb.toString();
+            return out;
+        }
+
+        /** Serialize to JSON via Gson (field order matches the former hand-built string). */
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
         }
     }
 
-    /** Serialize endpoint schema to JSON. */
+    /** Serialize endpoint schema to JSON via Gson. */
     public String schemaJson() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"path\": \"").append(ServiceUtils.escapeJson(path)).append("\"");
-        sb.append(", \"method\": \"").append(method).append("\"");
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("path", path);
+        out.put("method", method);
         if (description != null && !description.isEmpty()) {
-            sb.append(", \"description\": \"").append(ServiceUtils.escapeJson(description)).append("\"");
+            out.put("description", description);
         }
-        sb.append(", \"params\": [");
-        for (int i = 0; i < params.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(params.get(i).toJson());
+        List<Map<String, Object>> paramMaps = new ArrayList<>();
+        for (ParamDef p : params) {
+            paramMaps.add(p.toMap());
         }
-        sb.append("]}");
-        return sb.toString();
+        out.put("params", paramMaps);
+        return JsonHelper.toJson(out);
     }
 }
