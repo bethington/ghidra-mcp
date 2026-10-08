@@ -27,6 +27,12 @@ Changes on `dev` after 7.1.0.
 - `search_data_types` gains an optional kind filter and accepts an empty pattern;
   `get_type_size` reports members, signatures and base types.
 
+### Added — structure descriptions
+
+- `set_comment(type="struct", struct_name=..., comment=...)` sets, replaces, or clears a structure's description
+  in both GUI and headless mode without changing its layout or field comments.
+  `get_struct_layout` now includes the description for read-back.
+
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
 **220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by

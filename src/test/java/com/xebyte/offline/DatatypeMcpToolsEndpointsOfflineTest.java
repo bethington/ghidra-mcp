@@ -30,6 +30,8 @@ public class DatatypeMcpToolsEndpointsOfflineTest extends TestCase {
             new Expected("POST", "datatype", "delete_demangler_stub", "program", "type_name"));
         EXPECTED.put("/create_struct",
             new Expected("POST", "datatype", "category_path", "fields", "name", "program", "replace_placeholder"));
+        EXPECTED.put("/set_comment",
+            new Expected("POST", "comment", "address", "comment", "type", "program", "struct_name"));
         EXPECTED.put("/delete_data_type",
             new Expected("POST", "datatype", "force", "program", "resolve_demangler_duplicate", "type_name"));
         EXPECTED.put("/resize_struct",
@@ -72,6 +74,17 @@ public class DatatypeMcpToolsEndpointsOfflineTest extends TestCase {
             }
             assertEquals(path + " param set mismatch", exp.params, actual);
         }
+    }
+
+    public void testStructDescriptionModeNeedsNoAddressAndAllowsClearing() throws Exception {
+        java.lang.reflect.Method method = com.xebyte.core.CommentService.class.getMethod("setComment",
+            ghidra.program.model.address.Address.class, String.class, String.class,
+            ghidra.program.model.listing.Program.class, String.class);
+        com.xebyte.core.Param address = method.getParameters()[0].getAnnotation(com.xebyte.core.Param.class);
+        com.xebyte.core.Param comment = method.getParameters()[1].getAnnotation(com.xebyte.core.Param.class);
+        assertEquals("", address.defaultValue());
+        assertTrue(comment.allowEmpty());
+        assertEquals(com.xebyte.core.Param.NO_DEFAULT, comment.defaultValue());
     }
 
     private Map<String, AnnotationScanner.ToolDescriptor> indexByPath() {

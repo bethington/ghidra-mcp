@@ -75,6 +75,53 @@ public class DataTypeEditingGhidraTest {
         assertEquals("void", ((FunctionDefinition) program.getDataTypeManager().getDataType("/Types/Callback")).getReturnType().getName());
     }
 
+    @Test public void structDescriptionsCanBeSetReplacedAndClearedWithoutChangingLayout() {
+        ok(service.createStruct("S", "[{\"name\":\"value\",\"type\":\"uint\",\"comment\":\"field documentation\"}]", false, program, "/Types"));
+        Structure original = structure();
+        String fieldName = original.getComponent(0).getFieldName();
+        String description = "Object metadata\nContains \"quoted\" text and Unicode: café";
+        ok(service.setStructDescription("S", description, program));
+        assertEquals(description, original.getDescription());
+        com.google.gson.JsonObject layout = com.google.gson.JsonParser.parseString(
+            service.getStructLayout("/Types/S", program).toJson()).getAsJsonObject();
+        assertEquals(description, layout.get("description").getAsString());
+        ok(service.setStructDescription("/Types/S", "Replacement", program));
+        assertEquals("Replacement", original.getDescription());
+        ok(service.setStructDescription("S", "", program));
+        assertEquals("", original.getDescription());
+        assertSame(original, structure());
+        assertEquals(4, original.getLength());
+        assertEquals(fieldName, original.getComponent(0).getFieldName());
+        assertEquals("field documentation", original.getComponent(0).getComment());
+    }
+
+    @Test public void structDescriptionsRejectMissingInputsAndNonStructures() {
+        ok(service.createStruct("S", "[{\"name\":\"value\",\"type\":\"uint\"}]", false, program, "/Types"));
+        ok(service.setStructDescription("S", "Keep me", program));
+        assertTrue(service.setStructDescription("S", null, program) instanceof Response.Err);
+        assertTrue(service.setStructDescription(null, "text", program) instanceof Response.Err);
+        assertTrue(service.setStructDescription(" ", "text", program) instanceof Response.Err);
+        assertTrue(service.setStructDescription("Missing", "text", program) instanceof Response.Err);
+        ok(service.createEnum("Mode", "[{\"name\":\"A\",\"value\":1}]", 4, program, "/Types"));
+        assertTrue(service.setStructDescription("/Types/Mode", "text", program) instanceof Response.Err);
+        assertEquals("Keep me", structure().getDescription());
+    }
+
+    @Test public void structDescriptionEndpointAcceptsEmptyBodyTextAndQualifiedNames() throws Exception {
+        String fields = "[{\"name\":\"value\",\"type\":\"uint\"}]";
+        ok(service.createStruct("S", fields, false, program, "/Types"));
+        ok(service.createStruct("S", fields, false, program, "/Other"));
+        EndpointDef endpoint = new AnnotationScanner(scannerProvider, new CommentService(scannerProvider, new DirectThreadingStrategy())).getEndpoints().stream()
+            .filter(e -> e.path().equals("/set_comment")).findFirst().orElseThrow();
+        ok(endpoint.handler().handle(java.util.Map.of(), java.util.Map.of("type", "struct", "struct_name", "/Other/S", "comment", "Other description")));
+        assertEquals("Other description", program.getDataTypeManager().getDataType("/Other/S").getDescription());
+        assertEquals("", structure().getDescription());
+        ok(endpoint.handler().handle(java.util.Map.of(), java.util.Map.of("type", "struct", "struct_name", "/Other/S", "comment", "")));
+        assertEquals("", program.getDataTypeManager().getDataType("/Other/S").getDescription());
+        assertTrue(endpoint.handler().handle(java.util.Map.of(), java.util.Map.of("type", "struct", "struct_name", "/Other/S")) instanceof Response.Err);
+        assertTrue(endpoint.handler().handle(java.util.Map.of(), java.util.Map.of("type", "struct", "comment", "text")) instanceof Response.Err);
+    }
+
     @Test public void typedefReplacementAndReferencedDeletionRequireConsent() throws Exception {
         ok(service.createDerivedType("typedef", "int *", "Alias", 1, program));
         ok(service.createDerivedType("typedef", "int *", "Alias", 1, program));
