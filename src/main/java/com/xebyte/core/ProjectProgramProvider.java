@@ -56,7 +56,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public abstract class ProjectProgramProvider implements ProgramProvider {
 
-    /** Max on-demand programs held open. {@code GHIDRA_MCP_MAX_CACHED_PROGRAMS}, min 2. */
+    /** Max on-demand programs held open ({@code programs.max_cached}), min 2. */
     public static final int MAX_CACHED_PROGRAMS = resolveMaxCachedPrograms();
 
     // Keyed by project path; a program with no DomainFile (an import not yet saved, a
@@ -86,15 +86,8 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     }
 
     private static int resolveMaxCachedPrograms() {
-        String raw = System.getenv("GHIDRA_MCP_MAX_CACHED_PROGRAMS");
-        if (raw != null && !raw.isBlank()) {
-            try {
-                return Math.max(2, Integer.parseInt(raw.trim()));
-            } catch (NumberFormatException ignored) {
-                // default below
-            }
-        }
-        return 8;
+        long configured = com.xebyte.core.settings.ServerSettings.intValue("programs.max_cached");
+        return (int) Math.max(2, configured);
     }
 
     // ------------------------------------------------------------------ hooks

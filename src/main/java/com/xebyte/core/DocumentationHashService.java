@@ -1260,8 +1260,7 @@ public class DocumentationHashService {
     //   - address:     "0x" + hex (canonical Ghidra form)
 
     private static String getArchiveUrl() {
-        String env = System.getenv("GHIDRA_MCP_ARCHIVE_URL");
-        return env == null ? "" : env.trim();
+        return com.xebyte.core.settings.ServerSettings.string("archive.url").trim();
     }
 
     /**
@@ -1299,7 +1298,9 @@ public class DocumentationHashService {
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build payload but skip the POST") boolean dryRun) {
         if (!dryRun && getArchiveUrl().isEmpty()) {
-            return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
+            return Response.err("archive exchange is disabled; set "
+                + com.xebyte.core.settings.SettingsRegistry.DEFAULT.get("archive.url").envName()
+                + " to opt in");
         }
 
         if (fn == null) return Response.err("function is required");
@@ -1347,7 +1348,9 @@ public class DocumentationHashService {
             @Param(value = "dry_run", source = ParamSource.QUERY, defaultValue = "false",
                 description = "Build all payloads but skip the POSTs") boolean dryRun) {
         if (!dryRun && getArchiveUrl().isEmpty()) {
-            return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
+            return Response.err("archive exchange is disabled; set "
+                + com.xebyte.core.settings.SettingsRegistry.DEFAULT.get("archive.url").envName()
+                + " to opt in");
         }
         String binaryName = program.getName();
         String version = (versionOverride != null && !versionOverride.isEmpty())

@@ -1,10 +1,9 @@
 package com.xebyte.core;
 
-import com.xebyte.core.settings.Scope;
-import com.xebyte.core.settings.ScopeStore;
+import com.xebyte.core.settings.DotEnv;
+import com.xebyte.core.settings.ServerSettings;
 import com.xebyte.core.settings.SettingRefusedException;
 import com.xebyte.core.settings.SettingsRegistry;
-import com.xebyte.core.settings.SettingsResolver;
 import ghidra.util.Msg;
 
 import java.io.File;
@@ -83,16 +82,15 @@ public final class SecurityConfig {
     private record CanonicalRoot(String raw, Path path) {}
 
     private SecurityConfig() {
-        String rawToken = System.getenv(SettingsRegistry.DEFAULT.get("auth.token").envName());
-        this.tokenBytes = (rawToken != null && !rawToken.isEmpty())
-                ? rawToken.getBytes(StandardCharsets.UTF_8)
-                : null;
+        String rawToken = ServerSettings.string("auth.token");
+        this.tokenBytes = rawToken.isEmpty()
+                ? null
+                : rawToken.getBytes(StandardCharsets.UTF_8);
     }
 
-    /** Before a server wires its settings in: the operator's environment alone. */
+    /** Before a server wires its settings in: server-scope settings alone. */
     private static Object fromEnvironment(String key) {
-        return SettingsResolver.resolve(SettingsRegistry.DEFAULT.get(key),
-            Map.of(Scope.SERVER, ScopeStore.env(System.getenv()))).value();
+        return ServerSettings.value(key);
     }
 
     /** Resolve guardrails through {@code settings}, so project and local values apply. */
@@ -112,23 +110,34 @@ public final class SecurityConfig {
         return guardrails.apply(key);
     }
 
-    /** Guardrail variables renamed in 7.3.0, with their names now. */
-    private static final Map<String, String> RETIRED = Map.of(
-        "GHIDRA_MCP_ALLOW_SCRIPTS", "GHIDRA_MCP_SCRIPTS_ALLOW",
-        "GHIDRA_MCP_FILE_ROOT", "GHIDRA_MCP_FILES_ROOT",
-        "GHIDRA_MCP_PROJECT_FOLDER", "GHIDRA_MCP_PROJECT_FOLDER_SCOPE");
+    /** Environment variables renamed in 7.3.0+, mapped to their registry-derived names. */
+    private static final Map<String, String> RETIRED = Map.ofEntries(
+        Map.entry("GHIDRA_MCP_ALLOW_SCRIPTS", "GHIDRA_MCP_SCRIPTS_ALLOW"),
+        Map.entry("GHIDRA_MCP_FILE_ROOT", "GHIDRA_MCP_FILES_ROOT"),
+        Map.entry("GHIDRA_MCP_PROJECT_FOLDER", "GHIDRA_MCP_PROJECT_FOLDER_SCOPE"),
+        Map.entry("GHIDRA_MCP_BIND_ADDRESS", SettingsRegistry.DEFAULT.get("server.bind_address").envName()),
+        Map.entry("GHIDRA_MCP_MAX_CACHED_PROGRAMS", SettingsRegistry.DEFAULT.get("programs.max_cached").envName()),
+        Map.entry("GHIDRA_MCP_SHARED_PROJECT_DIR", SettingsRegistry.DEFAULT.get("project.shared_dir").envName()),
+        Map.entry("GHIDRA_SERVER_HOST", SettingsRegistry.DEFAULT.get("ghidra_server.host").envName()),
+        Map.entry("GHIDRA_SERVER_PORT", SettingsRegistry.DEFAULT.get("ghidra_server.port").envName()),
+        Map.entry("GHIDRA_SERVER_USER", SettingsRegistry.DEFAULT.get("ghidra_server.user").envName()),
+        Map.entry("GHIDRA_SERVER_PASSWORD", SettingsRegistry.DEFAULT.get("ghidra_server.password").envName()));
 
     /**
-     * A startup refusal naming any retired guardrail variable that is set, or {@code null}.
-     * Ignoring one would not be harmless: an unset {@code files.root} or
-     * {@code project.folder_scope} means unconfined, so a server started with the old name
-     * would run looser than its operator configured.
+     * A startup refusal naming any retired variable present in the process environment or
+     * standard {@code .env} files, or {@code null}.
      */
-    public static String retiredVariables(Map<String, String> env) {
-        List<String> set = RETIRED.keySet().stream().filter(env::containsKey).sorted()
+    public static String retiredVariables() {
+        return retiredVariables(System.getenv(), DotEnv.loadStandard());
+    }
+
+    public static String retiredVariables(Map<String, String> processEnv, Map<String, String> dotEnv) {
+        List<String> set = RETIRED.keySet().stream()
+            .filter(name -> processEnv.containsKey(name) || dotEnv.containsKey(name))
+            .sorted()
             .map(old -> old + " (now " + RETIRED.get(old) + ")").toList();
         return set.isEmpty() ? null : "Retired environment variable(s) set: " + String.join(", ", set)
-            + ". Rename them: the server will not start with a guardrail it would ignore.";
+            + ". Rename them; the server does not read the old names.";
     }
 
     public static SecurityConfig getInstance() {

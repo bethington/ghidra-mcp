@@ -73,6 +73,10 @@ public final class SettingsResolver {
 
     /** Refuse a write or unset at a scope an agent may not touch for this key. */
     public static void checkScope(SettingKey key, Scope scope) {
+        if (key.kind() == Kind.OPERATOR) {
+            throw new SettingRefusedException(
+                key.key() + " is set by the server operator in the server's environment.");
+        }
         if (key.kind() == Kind.SECRET) {
             throw new SettingRefusedException(
                 key.key() + " is a secret held by the server operator; tools can neither read nor set it.");

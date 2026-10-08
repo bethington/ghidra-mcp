@@ -163,11 +163,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // GhidraMCPAuthInitializer implements ModuleInitializer, but that ExtensionPoint
         // is only reliable for Ghidra's own built-in modules — user extensions may not be
         // discovered by ClassSearcher in time. Call run() explicitly here as a guaranteed
-        // fallback; it has an idempotency guard so double-invocation is safe.
-        if (!com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
-            new com.xebyte.core.GhidraMCPAuthInitializer().run();
-        }
-        if (com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
+        // fallback; registering again only refreshes the same authenticator.
+        if (com.xebyte.core.ServerCredentials.registerFromSettings()) {
             Msg.info(this, "GhidraMCP: Server authenticator registered — auto-login active");
         } else {
             Msg.info(this, "GhidraMCP: No server credentials configured — GUI auth will be used");

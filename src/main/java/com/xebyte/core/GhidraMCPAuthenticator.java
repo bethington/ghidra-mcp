@@ -32,6 +32,8 @@ import ghidra.util.Msg;
  */
 public class GhidraMCPAuthenticator implements ClientAuthenticator {
     private volatile String username;
+    /** Why the process's last login was not as the configured user, or null when it was. */
+    private static volatile String nameNotice;
     private volatile char[] password;
 
     /** The process's authenticator: Ghidra's client accepts exactly one. */
@@ -66,6 +68,16 @@ public class GhidraMCPAuthenticator implements ClientAuthenticator {
         this.password = password;
     }
 
+    /**
+     * {@code failure}, followed by why the login used another name than the configured one,
+     * when that is what happened: "Authentication failed" alone sends an operator checking
+     * a password that was never the problem.
+     */
+    public static String explain(String failure) {
+        String notice = nameNotice;
+        return notice == null || failure.contains(notice) ? failure : failure + " " + notice;
+    }
+
     public String getUsername() {
         return username;
     }
@@ -87,8 +99,19 @@ public class GhidraMCPAuthenticator implements ClientAuthenticator {
             javax.security.auth.callback.ChoiceCallback choiceCb, AnonymousCallback anonymousCb,
             String loginError) {
         try {
-            if (nameCb != null) {
+            // A Ghidra Server only asks for a name when started with -u; otherwise the
+            // client logs in as the OS user whatever name is configured here.
+            boolean nameChosen = nameCb != null && nameEditable;
+            if (nameChosen) {
                 nameCb.setName(username);
+            }
+            String login = nameChosen ? username : ghidra.framework.client.ClientUtil.getUserName();
+            nameNotice = login.equals(username) ? null
+                : "The Ghidra Server at " + serverName + " does not let clients choose a user name"
+                    + " (it runs without -u), so the login was as the OS user '" + login
+                    + "', not ghidra_server.user '" + username + "'.";
+            if (nameNotice != null) {
+                Msg.warn(this, nameNotice);
             }
             if (passCb != null) {
                 passCb.setPassword(password);
@@ -99,7 +122,7 @@ public class GhidraMCPAuthenticator implements ClientAuthenticator {
             if (anonymousCb != null) {
                 anonymousCb.setAnonymousAccessRequested(false);
             }
-            Msg.info(this, "GhidraMCP authenticator provided credentials for user: " + username);
+            Msg.info(this, "GhidraMCP authenticator provided credentials for user: " + login);
             return true;
         } catch (Exception e) {
             Msg.error(this, "Password callback failed: " + e.getMessage());

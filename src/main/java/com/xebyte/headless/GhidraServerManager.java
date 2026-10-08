@@ -18,6 +18,8 @@ package com.xebyte.headless;
 import com.xebyte.core.GhidraMCPAuthenticator;
 import com.xebyte.core.Response;
 import com.xebyte.core.ServerSession;
+import com.xebyte.core.settings.ServerSettings;
+import com.xebyte.core.settings.SettingsRegistry;
 import ghidra.framework.client.ClientUtil;
 import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.client.RepositoryServerAdapter;
@@ -31,19 +33,16 @@ import java.io.IOException;
  * Manages connections to a shared Ghidra repository server.
  *
  * Provides connectivity to a Ghidra server for centralized analysis storage
- * and team collaboration. Configuration is driven by environment variables:
- *
- * <ul>
- *   <li>GHIDRA_SERVER_HOST - Server hostname (default: localhost)</li>
- *   <li>GHIDRA_SERVER_PORT - Server port (default: 13100)</li>
- *   <li>GHIDRA_SERVER_USER - Service account username (required for auth)</li>
- *   <li>GHIDRA_SERVER_PASSWORD - Service account password (required for auth)</li>
- * </ul>
+ * and team collaboration. Configuration is driven by server-scope settings
+ * ({@code ghidra_server.host}, {@code ghidra_server.port}, {@code ghidra_server.user},
+ * {@code ghidra_server.password}).
  */
 public class GhidraServerManager implements ServerSession {
 
     private static final String DEFAULT_HOST = "localhost";
     private static final int DEFAULT_PORT = 13100;
+
+    private static final SettingsRegistry REG = SettingsRegistry.DEFAULT;
 
     private final String host;
     private final int port;
@@ -57,23 +56,47 @@ public class GhidraServerManager implements ServerSession {
     /** Open project — DomainFile VC ops need this, not RepositoryAdapter alone. */
 
     public GhidraServerManager() {
-        this.host = getEnvOrDefault("GHIDRA_SERVER_HOST", DEFAULT_HOST);
-        this.port = parsePort(System.getenv("GHIDRA_SERVER_PORT"), DEFAULT_PORT);
-        this.user = System.getenv("GHIDRA_SERVER_USER");
-        String pwd = System.getenv("GHIDRA_SERVER_PASSWORD");
-        this.password = (pwd != null) ? pwd.toCharArray() : null;
-        
-        // Register our custom authenticator
-        registerAuthenticator();
+        this(fromServerSettings());
     }
 
+    /** Hermetic tests supply explicit connection parameters. */
     public GhidraServerManager(String host, int port, String user, String password) {
         this.host = (host != null && !host.isEmpty()) ? host : DEFAULT_HOST;
         this.port = port > 0 ? port : DEFAULT_PORT;
         this.user = user;
         this.password = (password != null) ? password.toCharArray() : null;
-        
-        registerAuthenticator();
+    }
+
+    private GhidraServerManager(ConnectionConfig config) {
+        this.host = config.host;
+        this.port = config.port;
+        this.user = config.user;
+        this.password = config.password;
+    }
+
+    private record ConnectionConfig(String host, int port, String user, char[] password) {}
+
+    static ConnectionConfig fromServerSettings() {
+        String host = ServerSettings.string("ghidra_server.host");
+        if (host.isEmpty()) {
+            host = DEFAULT_HOST;
+        }
+        int port = parsePort(ServerSettings.intValue("ghidra_server.port"), DEFAULT_PORT);
+        String configuredUser = ServerSettings.string("ghidra_server.user");
+        String pwd = ServerSettings.string("ghidra_server.password");
+        char[] password = pwd.isEmpty() ? null : pwd.toCharArray();
+        String user = resolveUser(configuredUser, password);
+        return new ConnectionConfig(host, port, user, password);
+    }
+
+    private static String resolveUser(String configuredUser, char[] password) {
+        if (password != null && password.length > 0) {
+            if (configuredUser != null && !configuredUser.isEmpty()) {
+                return configuredUser;
+            }
+            return System.getProperty("user.name");
+        }
+        return (configuredUser != null && !configuredUser.isEmpty()) ? configuredUser : null;
     }
 
     /** Register the credentials the environment configured, if it configured any. */
@@ -108,7 +131,9 @@ public class GhidraServerManager implements ServerSession {
         }
 
         if (user == null || password == null) {
-            lastError = "Credentials not configured. Set GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD";
+            lastError = "Credentials not configured. Set "
+                + REG.get("ghidra_server.user").envName() + " and "
+                + REG.get("ghidra_server.password").envName();
             return Response.err(lastError);
         }
 
@@ -123,11 +148,11 @@ public class GhidraServerManager implements ServerSession {
                 System.out.println("Connected to Ghidra server at " + host + ":" + port + " as " + user);
                 return Response.ok(connection("connected"));
             }
-            lastError = "Connection returned but server reports not connected";
+            lastError = GhidraMCPAuthenticator.explain("Connection returned but server reports not connected");
             return Response.err(lastError);
         } catch (Exception e) {
             connected = false;
-            lastError = e.getMessage();
+            lastError = GhidraMCPAuthenticator.explain(e.getMessage());
             System.err.println("Failed to connect to Ghidra server at " + host + ":" + port
                     + " - " + e.getMessage());
             e.printStackTrace();
@@ -246,14 +271,17 @@ public class GhidraServerManager implements ServerSession {
             if (!host.equalsIgnoreCase(targetHost) || port != targetPort) {
                 throw new IOException("Already connected to " + host + ":" + port
                         + " but URL targets " + targetHost + ":" + targetPort
-                        + ". /server/disconnect first, or set GHIDRA_SERVER_HOST/PORT to match.");
+                        + ". /server/disconnect first, or set "
+                        + REG.get("ghidra_server.host").envName() + "/"
+                        + REG.get("ghidra_server.port").envName() + " to match.");
             }
             return serverAdapter;
         }
         if (!host.equalsIgnoreCase(targetHost) || port != targetPort) {
             throw new IOException("URL targets " + targetHost + ":" + targetPort
-                    + " but GHIDRA_SERVER_HOST/PORT is " + host + ":" + port
-                    + ". Align the env vars (or reconnect) before /open_project.");
+                    + " but " + REG.get("ghidra_server.host").envName() + "/"
+                    + REG.get("ghidra_server.port").envName() + " is " + host + ":" + port
+                    + ". Align the settings (or reconnect) before /open_project.");
         }
         connect();
         if (!isConnected()) {
@@ -269,21 +297,11 @@ public class GhidraServerManager implements ServerSession {
         return getRepository(repoName);
     }
 
-    private static String getEnvOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return (value != null && !value.isEmpty()) ? value : defaultValue;
-    }
-
-    private static int parsePort(String value, int defaultPort) {
-        if (value == null || value.isEmpty()) {
+    private static int parsePort(long value, int defaultPort) {
+        if (value <= 0) {
             return defaultPort;
         }
-        try {
-            int port = Integer.parseInt(value);
-            return port > 0 ? port : defaultPort;
-        } catch (NumberFormatException e) {
-            return defaultPort;
-        }
+        return (int) value;
     }
 
 }

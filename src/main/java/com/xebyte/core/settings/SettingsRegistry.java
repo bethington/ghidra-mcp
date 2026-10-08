@@ -46,7 +46,31 @@ public final class SettingsRegistry {
             "Project folder that programs must lie within to be served; empty for none."),
         new SettingKey("auth.token", Type.STRING, "",
             EnumSet.of(SERVER), Kind.SECRET, Merge.OVERRIDE, null,
-            "Bearer token HTTP clients must present; empty disables authentication.")));
+            "Bearer token HTTP clients must present; empty disables authentication."),
+        new SettingKey("server.bind_address", Type.STRING, "",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "When non-empty, also serve HTTP on TCP at this address (headless/Docker)."),
+        new SettingKey("programs.max_cached", Type.INT, "8",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Maximum programs kept open in the provider cache; values below 2 become 2."),
+        new SettingKey("archive.url", Type.STRING, "",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Documentation archive REST base URL; empty disables archive ingest."),
+        new SettingKey("project.shared_dir", Type.STRING, "",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Root directory for persistent local shared-server projects; empty uses the default under the home directory."),
+        new SettingKey("ghidra_server.host", Type.STRING, "localhost",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Ghidra Server hostname for shared-repository connections."),
+        new SettingKey("ghidra_server.port", Type.INT, "13100",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Ghidra Server RMI port for shared-repository connections."),
+        new SettingKey("ghidra_server.user", Type.STRING, "",
+            EnumSet.of(SERVER), Kind.OPERATOR, Merge.OVERRIDE, null,
+            "Ghidra Server username; empty uses the OS user."),
+        new SettingKey("ghidra_server.password", Type.STRING, "",
+            EnumSet.of(SERVER), Kind.SECRET, Merge.OVERRIDE, null,
+            "Ghidra Server password for programmatic login; empty leaves server auth unset.")));
 
     private final Map<String, SettingKey> keys = new LinkedHashMap<>();
 

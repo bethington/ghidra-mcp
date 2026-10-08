@@ -15,6 +15,7 @@
  */
 package com.xebyte.headless;
 
+import com.xebyte.core.GhidraMCPAuthenticator;
 import com.xebyte.core.ProjectProgramProvider;
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.client.RepositoryAdapter;
@@ -244,7 +245,8 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
         if (serverManager == null) {
             return OpenProjectResult.fail(
                     "Opening a ghidra:// URL requires the headless server manager "
-                            + "(credentials via GHIDRA_SERVER_USER/PASSWORD, then /server/connect)");
+                            + "(credentials via GHIDRA_MCP_GHIDRA_SERVER_USER and "
+                            + "GHIDRA_MCP_GHIDRA_SERVER_PASSWORD, then /server/connect)");
         }
 
         final SharedProjectLocator.Parsed parsed;
@@ -274,8 +276,8 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
             }
         } catch (Exception e) {
             return OpenProjectResult.fail(
-                    "Server connection failed for " + parsed.host() + ":" + parsed.port()
-                            + ": " + e.getMessage());
+                    GhidraMCPAuthenticator.explain("Server connection failed for " + parsed.host()
+                            + ":" + parsed.port() + ": " + e.getMessage()));
         }
 
         if (project != null) {
@@ -304,7 +306,7 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
             return OpenProjectResult.fail(
                     "Shared project directory locked by another Ghidra instance at "
                             + projectParent + ": " + e.getMessage()
-                            + " (each JVM needs its own GHIDRA_MCP_SHARED_PROJECT_DIR)");
+                            + " (each JVM needs its own GHIDRA_MCP_PROJECT_SHARED_DIR)");
         } catch (Exception e) {
             Msg.error(this, "Failed to open/create shared project for " + ghidraUrl, e);
             return OpenProjectResult.fail(

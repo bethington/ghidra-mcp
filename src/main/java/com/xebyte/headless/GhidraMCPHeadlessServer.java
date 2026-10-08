@@ -22,6 +22,9 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.CoreServices;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.SecurityConfig;
+import com.xebyte.core.ServerCredentials;
+import com.xebyte.core.settings.ServerSettings;
+import com.xebyte.core.settings.SettingsRegistry;
 import com.xebyte.core.VersionControlService;
 import com.xebyte.core.VersionInfo;
 import ghidra.GhidraApplicationLayout;
@@ -88,6 +91,13 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     @Override
     public void launch(GhidraApplicationLayout layout, String[] args) throws Exception {
+        // Before anything reads a setting: an old name would otherwise be ignored while the
+        // project opens with the defaults it was meant to override.
+        String retired = SecurityConfig.retiredVariables();
+        if (retired != null) {
+            throw new java.io.IOException(retired);
+        }
+
         // Parse command line arguments
         parseArgs(args);
 
@@ -100,6 +110,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         services = CoreServices.build(programProvider, threadingStrategy);
         SecurityConfig.getInstance().useSettings(services.settings());
+
+        // Before any ghidra:// project open — same registration the GUI gets from ModuleInitializer.
+        ServerCredentials.registerFromSettings();
 
         // Create server manager for shared Ghidra server support
         serverManager = new GhidraServerManager();
@@ -137,8 +150,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void parseArgs(String[] args) {
-        // Check environment variable for bind address (Docker container support)
-        String envBindAddress = System.getenv("GHIDRA_MCP_BIND_ADDRESS");
+        String envBindAddress = ServerSettings.string("server.bind_address");
         if (envBindAddress != null && !envBindAddress.isEmpty()) {
             bindAddress = envBindAddress;
             tcp = true;
@@ -195,7 +207,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         System.out.println("  --version, -v          Show version");
         System.out.println();
         System.out.println("Environment Variables:");
-        System.out.println("  GHIDRA_MCP_BIND_ADDRESS  Override bind address (for Docker)");
+        System.out.println("  " + SettingsRegistry.DEFAULT.get("server.bind_address").envName()
+            + "  Override bind address (for Docker)");
         System.out.println();
         System.out.println("Examples:");
         System.out.println("  # Start server with no initial program");

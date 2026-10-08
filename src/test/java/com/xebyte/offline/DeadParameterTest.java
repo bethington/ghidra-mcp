@@ -31,7 +31,7 @@ import java.util.stream.Stream;
  * path ran regardless, including for an in-tree caller that explicitly asked
  * for individual mode), and {@code host}/{@code port} on
  * {@code /server/connect} (vestiges of a connection model replaced by
- * {@code GHIDRA_SERVER_HOST}/{@code GHIDRA_SERVER_PORT}). Prompt-level care
+ * the {@code ghidra_server.host}/{@code ghidra_server.port} settings). Prompt-level care
  * had not caught any of them in the years they were live, which is the case
  * for enforcing it in the test layer instead.
  *

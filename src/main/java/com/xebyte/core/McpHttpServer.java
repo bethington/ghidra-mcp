@@ -98,7 +98,7 @@ public final class McpHttpServer {
     }
 
     public synchronized void start(Config config) throws IOException {
-        String retired = SecurityConfig.retiredVariables(System.getenv());
+        String retired = SecurityConfig.retiredVariables();
         if (retired != null) {
             throw new IOException(retired);
         }

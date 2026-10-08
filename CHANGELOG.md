@@ -19,6 +19,39 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — the server's own configuration is settings keys
+
+Every environment variable the server read directly is now a registry key, so `get_settings`
+shows what is in force and the generated key table documents it. They are a new kind,
+`operator`: set in the server's environment, read-only to agents (`set_setting` refuses them).
+The variable names derive from the key like every other setting, and the server refuses to start
+while an old name is set, in its environment or in a `.env` file, naming the new one.
+
+| Old variable | Key | Variable now |
+| --- | --- | --- |
+| `GHIDRA_MCP_BIND_ADDRESS` | `server.bind_address` | `GHIDRA_MCP_SERVER_BIND_ADDRESS` |
+| `GHIDRA_MCP_MAX_CACHED_PROGRAMS` | `programs.max_cached` | `GHIDRA_MCP_PROGRAMS_MAX_CACHED` |
+| `GHIDRA_MCP_SHARED_PROJECT_DIR` | `project.shared_dir` | `GHIDRA_MCP_PROJECT_SHARED_DIR` |
+| `GHIDRA_SERVER_HOST` | `ghidra_server.host` | `GHIDRA_MCP_GHIDRA_SERVER_HOST` |
+| `GHIDRA_SERVER_PORT` | `ghidra_server.port` | `GHIDRA_MCP_GHIDRA_SERVER_PORT` |
+| `GHIDRA_SERVER_USER` | `ghidra_server.user` | `GHIDRA_MCP_GHIDRA_SERVER_USER` |
+| `GHIDRA_SERVER_PASSWORD` | `ghidra_server.password` (secret) | `GHIDRA_MCP_GHIDRA_SERVER_PASSWORD` |
+| `GHIDRA_MCP_ARCHIVE_URL` | `archive.url` | unchanged |
+
+- **`.env` files apply to every server setting.** `.env` in the Ghidra directory and in the home
+  directory used to be read for the two credentials only; they now back the whole server scope,
+  with the process environment winning. The Java side no longer reads `.ghidra-cred`;
+  `ghidra-mcp-setup.ps1` still turns that file into the environment variable.
+- **Credentials are registered once, by one method, on both servers.** The GUI's module
+  initializer and the headless server's startup both call `ServerCredentials.registerFromSettings`.
+- **A login as the wrong user says so.** A Ghidra Server started without `-u` never lets a client
+  choose its user name, so `ghidra_server.user` is replaced by the OS user and the login fails
+  as plain "Authentication failed". The server now logs that, and the connection or project-open
+  error ends with it ("The Ghidra Server at host does not let clients choose a user name (it runs
+  without -u), so the login was as the OS user 'alice', not ghidra_server.user 'svc-ghidra'.").
+  Both connection paths behave the same; the earlier report that `/server/connect` used the
+  configured name only held because the OS user also existed on that server.
+
 ### Changed — checks and `force_decompile` fold into the calls they stood in for
 
 - **`/validate_function_prototype` is `set_function_prototype(dry_run=true)`.** The validator

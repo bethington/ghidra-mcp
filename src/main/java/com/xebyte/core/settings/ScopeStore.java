@@ -14,12 +14,20 @@ public interface ScopeStore {
 
     void remove(SettingKey key);
 
-    /** The server's environment, read through each key's derived variable name. Read-only. */
-    static ScopeStore env(Map<String, String> env) {
+    /**
+     * The server scope: each key's derived variable in the process environment, else in the
+     * {@code .env} files. Read-only.
+     */
+    static ScopeStore server(Map<String, String> processEnv, Map<String, String> dotEnv) {
         return new ScopeStore() {
             @Override
             public Optional<String> read(SettingKey key) {
-                return Optional.ofNullable(env.get(key.envName()));
+                String name = key.envName();
+                String v = processEnv.get(name);
+                if (v != null) {
+                    return Optional.of(v);
+                }
+                return Optional.ofNullable(dotEnv.get(name));
             }
 
             @Override

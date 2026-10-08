@@ -2933,7 +2933,7 @@
         "gui",
         "headless"
       ],
-      "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the GHIDRA_SERVER_HOST and GHIDRA_SERVER_PORT environment variables."
+      "description": "Report/establish the Ghidra server connection. Takes no parameters: GUI mode uses the open project, headless mode uses the ghidra_server.host, ghidra_server.port, ghidra_server.user and ghidra_server.password settings."
     },
     {
       "path": "/server/disconnect",

@@ -24,8 +24,8 @@ public class SettingsResolverTest {
         for (int i = 0; i < scopeKeyValue.length; i += 3) {
             Scope scope = (Scope) scopeKeyValue[i];
             ScopeStore store = scope == Scope.SERVER
-                ? ScopeStore.env(Map.of(REG.get((String) scopeKeyValue[i + 1]).envName(),
-                    (String) scopeKeyValue[i + 2]))
+                ? ScopeStore.server(Map.of(REG.get((String) scopeKeyValue[i + 1]).envName(),
+                    (String) scopeKeyValue[i + 2]), Map.of())
                 : ScopeStore.memory(Map.of((String) scopeKeyValue[i + 1], (String) scopeKeyValue[i + 2]));
             out.put(scope, store);
         }
@@ -164,17 +164,23 @@ public class SettingsResolverTest {
     }
 
     @Test
-    public void aRetiredGuardrailVariableStopsTheServerRatherThanRunningUnconfined() {
-        assertNull(com.xebyte.core.SecurityConfig.retiredVariables(Map.of("GHIDRA_MCP_FILES_ROOT", "/x")));
+    public void aRetiredVariableStopsTheServerRatherThanBeingIgnored() {
+        assertNull(com.xebyte.core.SecurityConfig.retiredVariables(Map.of("GHIDRA_MCP_FILES_ROOT", "/x"), Map.of()));
         String refusal = com.xebyte.core.SecurityConfig.retiredVariables(
-            Map.of("GHIDRA_MCP_FILE_ROOT", "/x", "GHIDRA_MCP_PROJECT_FOLDER", "/Mods"));
+            Map.of("GHIDRA_MCP_FILE_ROOT", "/x", "GHIDRA_MCP_PROJECT_FOLDER", "/Mods"), Map.of());
         assertTrue(refusal, refusal.contains("GHIDRA_MCP_FILE_ROOT (now GHIDRA_MCP_FILES_ROOT)"));
         assertTrue(refusal, refusal.contains("GHIDRA_MCP_PROJECT_FOLDER (now GHIDRA_MCP_PROJECT_FOLDER_SCOPE)"));
+        assertTrue(refusal, refusal.contains("does not read the old names"));
         // every retired name points at the variable its registry key derives
         Map<String, String> retiredByKey = Map.of("scripts.allow", "GHIDRA_MCP_ALLOW_SCRIPTS",
-            "files.root", "GHIDRA_MCP_FILE_ROOT", "project.folder_scope", "GHIDRA_MCP_PROJECT_FOLDER");
+            "files.root", "GHIDRA_MCP_FILE_ROOT", "project.folder_scope", "GHIDRA_MCP_PROJECT_FOLDER",
+            "server.bind_address", "GHIDRA_MCP_BIND_ADDRESS",
+            "programs.max_cached", "GHIDRA_MCP_MAX_CACHED_PROGRAMS",
+            "project.shared_dir", "GHIDRA_MCP_SHARED_PROJECT_DIR",
+            "ghidra_server.host", "GHIDRA_SERVER_HOST", "ghidra_server.port", "GHIDRA_SERVER_PORT",
+            "ghidra_server.user", "GHIDRA_SERVER_USER", "ghidra_server.password", "GHIDRA_SERVER_PASSWORD");
         retiredByKey.forEach((key, old) -> assertTrue(old, com.xebyte.core.SecurityConfig
-            .retiredVariables(Map.of(old, "1")).contains("(now " + REG.get(key).envName() + ")")));
+            .retiredVariables(Map.of(old, "1"), Map.of()).contains("(now " + REG.get(key).envName() + ")")));
     }
 
     @Test

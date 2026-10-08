@@ -796,11 +796,10 @@ Compatibility note: Ghidra 12.1.4 clients require Ghidra Server 12.1.2,
 12.0.5, or a newer compatible server. Older shared servers are not safe
 targets for a 12.1 client upgrade.
 
-1. `GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
-2. `~/.ghidra-cred` — single-line password file in your home directory
-3. `<ghidra-install-dir>/.ghidra-cred`
+1. `GHIDRA_MCP_GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
+2. `ghidra-mcp-setup.ps1` can read `.ghidra-cred` and export the password into the environment
 
-Username resolves similarly: `GHIDRA_SERVER_USER` env var → `user.name` system property.
+Username resolves similarly: `GHIDRA_MCP_GHIDRA_SERVER_USER` env var → `user.name` system property.
 
 If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env` (see `.env.template` for the full block) to enable silent auth.
 
@@ -1587,7 +1586,7 @@ Environment variables for Docker:
 
 - `GHIDRA_MCP_AUTH_TOKEN` - Bearer token, **required** by the compose files (see above)
 - `GHIDRA_MCP_PORT` - Server port (default: 8089)
-- `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
+- `GHIDRA_MCP_SERVER_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
 - `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
 
 ## 🤝 Contributing

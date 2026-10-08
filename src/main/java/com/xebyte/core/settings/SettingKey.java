@@ -27,11 +27,11 @@ public record SettingKey(String key, Type type, String defaultRaw, Set<Scope> sc
     public enum Type { BOOL, INT, STRING, LIST }
 
     /**
-     * Preferences are the agent's to set. A guardrail is the operator's: values from scopes an
-     * agent can write only ever tighten it. A secret is set and unset by the operator and never
-     * read back.
+     * Preferences are the agent's to set. Operator kinds are read-only to agents: a
+     * {@link Kind#OPERATOR} is ordinary server configuration; a {@link Kind#GUARDRAIL} may only
+     * be tightened from project/local scopes; a {@link Kind#SECRET} is never exposed.
      */
-    public enum Kind { PREFERENCE, GUARDRAIL, SECRET }
+    public enum Kind { PREFERENCE, OPERATOR, GUARDRAIL, SECRET }
 
     /**
      * {@code OVERRIDE}: the highest scope with a value wins. {@code LIST_DELTA}: a scope's

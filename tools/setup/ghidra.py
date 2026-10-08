@@ -536,7 +536,7 @@ def resolve_mcp_url(repo_root: Path) -> str:
     if env_values.get("GHIDRA_MCP_URL"):
         return env_values["GHIDRA_MCP_URL"].rstrip("/")
     port = env_values.get("GHIDRA_MCP_PORT", "8089").strip() or "8089"
-    bind = env_values.get("GHIDRA_MCP_BIND_ADDRESS", "127.0.0.1").strip()
+    bind = env_values.get("GHIDRA_MCP_SERVER_BIND_ADDRESS", "127.0.0.1").strip()
     if not bind or bind in {"0.0.0.0", "::"}:
         bind = "127.0.0.1"
     return f"http://{bind}:{port}".rstrip("/")

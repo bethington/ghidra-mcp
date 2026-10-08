@@ -18,7 +18,7 @@ def test_archive_exchange_is_disabled_by_default():
         "src/main/java/com/xebyte/core/DocumentationHashService.java"
     )
 
-    assert 'env == null ? "" : env.trim()' in java_source
+    assert 'ServerSettings.string("archive.url")' in java_source
     assert "DEFAULT_ARCHIVE_URL" not in java_source
 
 

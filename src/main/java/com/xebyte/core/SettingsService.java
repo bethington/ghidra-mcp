@@ -3,6 +3,7 @@ package com.xebyte.core;
 import com.xebyte.core.settings.ProjectStores;
 import com.xebyte.core.settings.Scope;
 import com.xebyte.core.settings.ScopeStore;
+import com.xebyte.core.settings.ServerSettings;
 import com.xebyte.core.settings.SettingKey;
 import com.xebyte.core.settings.SettingRefusedException;
 import com.xebyte.core.settings.SettingsRegistry;
@@ -28,7 +29,7 @@ import java.util.Optional;
 public class SettingsService {
 
     private final ProgramProvider provider;
-    private final Map<String, String> env;
+    private final ScopeStore serverStore;
     private final SettingsRegistry registry = SettingsRegistry.DEFAULT;
 
     private Project storesProject;
@@ -36,18 +37,23 @@ public class SettingsService {
     private ScopeStore localStore;
 
     public SettingsService(ProgramProvider provider) {
-        this(provider, System.getenv());
+        this(provider, ServerSettings.store());
     }
 
+    /** Tests: a server scope holding exactly {@code env}. */
     public SettingsService(ProgramProvider provider, Map<String, String> env) {
+        this(provider, ScopeStore.server(env, Map.of()));
+    }
+
+    private SettingsService(ProgramProvider provider, ScopeStore serverStore) {
         this.provider = provider;
-        this.env = env;
+        this.serverStore = serverStore;
     }
 
     /** The stores for the open project (and a program, if given), built once per project. */
     synchronized Map<Scope, ScopeStore> stores(Program program) {
         Map<Scope, ScopeStore> out = new EnumMap<>(Scope.class);
-        out.put(Scope.SERVER, ScopeStore.env(env));
+        out.put(Scope.SERVER, serverStore);
         Project project = provider.getProject();
         if (project != storesProject) {
             storesProject = project;

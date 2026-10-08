@@ -1282,12 +1282,12 @@ if (Test-Path $destinationPath) {
         }
 
         # Programmatic server authentication via env var.
-        # Password resolution order: -ServerPassword param > GHIDRA_SERVER_PASSWORD env var > .ghidra-cred file
-        # The GhidraMCPPlugin constructor reads GHIDRA_SERVER_PASSWORD and registers a
+        # Password resolution order: -ServerPassword param > GHIDRA_MCP_GHIDRA_SERVER_PASSWORD env var > .ghidra-cred file
+        # GhidraMCPAuthInitializer reads GHIDRA_MCP_GHIDRA_SERVER_PASSWORD and registers a
         # ClientAuthenticator that handles server auth without GUI dialogs.
         $resolvedPassword = $ServerPassword
         if (-not $resolvedPassword) {
-            $resolvedPassword = $env:GHIDRA_SERVER_PASSWORD
+            $resolvedPassword = $env:GHIDRA_MCP_GHIDRA_SERVER_PASSWORD
         }
         if (-not $resolvedPassword) {
             $credFile = Join-Path $PSScriptRoot ".ghidra-cred"
@@ -1296,8 +1296,8 @@ if (Test-Path $destinationPath) {
             }
         }
         if ($resolvedPassword) {
-            $env:GHIDRA_SERVER_PASSWORD = $resolvedPassword
-            Write-LogInfo "Server credentials configured via GHIDRA_SERVER_PASSWORD (auth dialog will be bypassed)"
+            $env:GHIDRA_MCP_GHIDRA_SERVER_PASSWORD = $resolvedPassword
+            Write-LogInfo "Server credentials configured via GHIDRA_MCP_GHIDRA_SERVER_PASSWORD (auth dialog will be bypassed)"
         }
 
         Write-LogInfo "Starting Ghidra..."

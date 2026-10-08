@@ -875,6 +875,14 @@ replace it.
 | `files.root` | guardrail | string | none | server, project, local | Directory that file paths given to tools must lie within; empty for none. |
 | `project.folder_scope` | guardrail | string | none | server, project, local | Project folder that programs must lie within to be served; empty for none. |
 | `auth.token` | secret | string | hidden | server | Bearer token HTTP clients must present; empty disables authentication. |
+| `server.bind_address` | operator | string | none | server | When non-empty, also serve HTTP on TCP at this address (headless/Docker). |
+| `programs.max_cached` | operator | int | `8` | server | Maximum programs kept open in the provider cache; values below 2 become 2. |
+| `archive.url` | operator | string | none | server | Documentation archive REST base URL; empty disables archive ingest. |
+| `project.shared_dir` | operator | string | none | server | Root directory for persistent local shared-server projects; empty uses the default under the home directory. |
+| `ghidra_server.host` | operator | string | `localhost` | server | Ghidra Server hostname for shared-repository connections. |
+| `ghidra_server.port` | operator | int | `13100` | server | Ghidra Server RMI port for shared-repository connections. |
+| `ghidra_server.user` | operator | string | none | server | Ghidra Server username; empty uses the OS user. |
+| `ghidra_server.password` | secret | string | hidden | server | Ghidra Server password for programmatic login; empty leaves server auth unset. |
 <!-- settings-keys:end -->
 
 The bridge reads the `tools.*` keys when it connects: it loads `tools.autoload`, plus
