@@ -279,8 +279,30 @@ public class DataTypeService {
         out.put("name", struct.getName());
         out.put("size", struct.getLength());
         out.put("alignment", struct.getAlignment());
+        out.put("description", struct.getDescription());
         out.put("fields", fields);
         return Response.ok(out);
+    }
+
+    public Response setStructDescription(String structName, String description, Program program) {
+        if (structName == null || structName.isBlank()) return Response.err("Structure name is required");
+        if (description == null) return Response.err("Description is required; pass an empty string to clear it");
+
+        try {
+            return threadingStrategy.executeWrite(program, "Set struct description", () -> {
+                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(
+                    program.getDataTypeManager(), structName);
+                if (dataType == null) return Response.err("Structure not found: " + structName);
+                if (!(dataType instanceof Structure struct)) {
+                    return Response.err("Data type is not a structure: " + structName);
+                }
+                struct.setDescription(description);
+                return Response.ok(JsonHelper.mapOf("status", "success", "struct_name", struct.getName(),
+                    "path", struct.getPathName(), "description", struct.getDescription()));
+            });
+        } catch (Exception e) {
+            return Response.err("Error setting struct description: " + e.getMessage());
+        }
     }
 
     /**

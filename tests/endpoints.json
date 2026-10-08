@@ -3027,13 +3027,14 @@
         "address",
         "comment",
         "type",
-        "program"
+        "program",
+        "struct_name"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; sets a PLATE comment on a function or a data global alike."
+      "description": "Set a listing comment at ANY address (data or code), or a structure data type's description. type = plate|pre|eol|post|repeatable|struct (aliases: decompiler=pre, disassembly=eol). For type=struct, pass struct_name instead of address; comment is the description text, and an empty string clears it without changing fields or layout. Read structure descriptions with get_struct_layout, listing comments with get_comment. Plate writes surface structural warnings and flush the decompiler cache."
     },
     {
       "path": "/set_function_calling_convention",

@@ -1135,7 +1135,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `batch_set_comments` - Set multiple comments
 - `clear_function_comments` - Clear all comments for a function
 - `get_comment` - Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c)
-- `set_comment` - Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses
+- `set_comment` - Set a listing comment at ANY address (data or code), or a structure data type's description
 
 ### Analysis
 

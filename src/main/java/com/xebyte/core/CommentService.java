@@ -173,16 +173,21 @@ public class CommentService {
      * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
      * comment on a data global via Listing.setComment.
      */
-    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment", access = ToolAccess.WRITE)
+    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment at ANY address (data or code), or a structure data type's description. type = plate|pre|eol|post|repeatable|struct (aliases: decompiler=pre, disassembly=eol). For type=struct, pass struct_name instead of address; comment is the description text, and an empty string clears it without changing fields or layout. Read structure descriptions with get_struct_layout, listing comments with get_comment. Plate writes surface structural warnings and flush the decompiler cache.", category = "comment", access = ToolAccess.WRITE)
     public Response setComment(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") Address addr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>. Required unless type=struct.") Address addr,
             @Param(value = "comment", source = ParamSource.BODY, allowEmpty = true,
-                   description = "Comment text. An empty string clears this comment kind at the address.") String comment,
+                   description = "Comment text, or structure description for type=struct. An empty string clears it.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
-                   description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
-            @Param(value = "program", defaultValue = "") Program program) {
+                   description = "Comment kind: plate | pre | eol | post | repeatable | struct (default plate)") String type,
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "struct_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Required for type=struct: existing structure name or full category path, e.g. /Types/MyStruct. Address is ignored in this mode.") String structName) {
         String t = (type == null || type.trim().isEmpty()) ? "plate" : type.trim().toLowerCase();
+        if (t.equals("struct")) {
+            return new DataTypeService(programProvider, threadingStrategy).setStructDescription(structName, comment, program);
+        }
         int ct;
         switch (t) {
             case "plate":                 ct = CodeUnit.PLATE_COMMENT;      break;
@@ -191,7 +196,7 @@ public class CommentService {
             case "post":                  ct = CodeUnit.POST_COMMENT;       break;
             case "repeatable":            ct = CodeUnit.REPEATABLE_COMMENT; break;
             default:
-                return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
+                return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable|struct)");
         }
         return setCommentAtAddress(addr, comment, ct, "Set " + t + " comment", program);
     }

@@ -160,6 +160,12 @@ every one named in
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
 
+### Added — structure descriptions
+
+- `set_comment(type="struct", struct_name=..., comment=...)` sets, replaces, or clears a structure's description
+  in both GUI and headless mode without changing its layout or field comments.
+  `get_struct_layout` now includes the description for read-back.
+
 ### Fixed — class and namespace rename resolution
 
 - `rename_symbol(kind=class|namespace)` resolves addressless namespaces through
