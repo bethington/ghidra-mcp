@@ -23,8 +23,11 @@ import java.util.function.Supplier;
 /**
  * Interface for executing code with proper threading and transaction handling.
  *
- * In GUI mode, this wraps SwingUtilities.invokeAndWait() for EDT safety.
- * In headless mode, this executes directly with synchronized blocks.
+ * Both the GUI plugin and the headless server use {@code DirectThreadingStrategy}:
+ * tool bodies run on the request thread, and reads/writes go through
+ * {@link #executeRead}/{@link #executeWrite} (which take the server-wide lock).
+ * Code that drives windows calls {@code SwingUtilities.invokeAndWait} or
+ * Ghidra's {@code Swing.runNow} itself.
  */
 public interface ThreadingStrategy {
 
@@ -116,17 +119,5 @@ public interface ThreadingStrategy {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    /**
-     * Run an action on the UI thread and wait for it: the Swing event thread on the GUI, the
-     * calling thread headless, where there is none. For work that touches windows or must
-     * share the event thread's ordering with the GUI's own edits.
-     *
-     * @param action The action to run
-     * @throws Exception if the action fails
-     */
-    default void runOnUi(Runnable action) throws Exception {
-        action.run();
     }
 }
