@@ -6,6 +6,7 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.GlobalNamespace;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.*;
 
@@ -1145,6 +1146,446 @@ public class ListingService {
         }
         return extAddr != null && extAddr.toString().equalsIgnoreCase(rawAddress.strip());
     }
+
+    // ======================================================================
+    // Equate endpoints (the only writers in this service)
+    //
+    // Equate names are printed verbatim by the decompiler, which is how a magic
+    // constant gets a readable name (value 404 -> "sizeof(tagIecTaskNode)").
+    // dry_run is deliberately NOT declared as a parameter: the framework wraps
+    // every POST endpoint in a transaction and rolls it back when the request
+    // carries dry_run=true (see AnnotationScanner), so declaring it here would
+    // only move it into the body and bypass that wrapper.
+    // ======================================================================
+
+    @McpTool(path = "/list_equates",
+            description = "List equate definitions (name/value/reference count) with optional filters, optionally "
+                    + "expanded into their (address, operand_index) references. Equate names are printed verbatim "
+                    + "by the decompiler.",
+            category = "listing")
+    public Response listEquates(
+            @Param(value = "value", defaultValue = "",
+                    description = "Only equates with this value: decimal, 0x-hex, or a character literal like '\\x03'") String valueText,
+            @Param(value = "name_contains", defaultValue = "",
+                    description = "Only equates whose name contains this substring (case-insensitive)") String nameContains,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                    description = "Only equates referenced at this address") String addressText,
+            @Param(value = "include_references", defaultValue = "false",
+                    description = "Expand each equate into its (address, operand_index) references") boolean includeReferences,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "200") int limit,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        boolean valueGiven = valueText != null && !valueText.isBlank();
+        Long want = parseEquateValue(valueText);
+        if (valueGiven && want == null) return Response.err("Invalid `value`: " + valueText);
+
+        Address filterAddr = null;
+        if (addressText != null && !addressText.isBlank()) {
+            filterAddr = ServiceUtils.parseAddress(program, addressText);
+            if (filterAddr == null) return Response.err("Invalid `address`: " + ServiceUtils.getLastParseError());
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        EquateTable table = program.getEquateTable();
+        for (Iterator<Equate> it = table.getEquates(); it.hasNext(); ) {
+            Equate eq = it.next();
+            if (want != null && eq.getValue() != want.longValue()) continue;
+            if (nameContains != null && !nameContains.isBlank()
+                    && !eq.getName().toLowerCase().contains(nameContains.toLowerCase().strip())) continue;
+
+            List<Map<String, Object>> refs = new ArrayList<>();
+            if (includeReferences || filterAddr != null) {
+                for (EquateReference ref : eq.getReferences()) {
+                    if (filterAddr != null && !filterAddr.equals(ref.getAddress())) continue;
+                    refs.add(equateReferenceToMap(ref));
+                }
+                if (filterAddr != null && refs.isEmpty()) continue;
+            }
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("name", eq.getName());
+            item.put("value", eq.getValue());
+            item.put("display_value", eq.getDisplayValue());
+            item.put("reference_count", eq.getReferenceCount());
+            item.put("enum_based", eq.isEnumBased());
+            if (includeReferences || filterAddr != null) item.put("references", refs);
+            items.add(item);
+        }
+
+        int from = Math.max(0, Math.min(offset, items.size()));
+        int to = Math.min(items.size(), from + Math.max(0, limit));
+        return Response.ok(JsonHelper.mapOf(
+                "equates", new ArrayList<>(items.subList(from, to)),
+                "total", items.size(),
+                "offset", offset,
+                "limit", limit,
+                "program", program.getName()));
+    }
+
+    @McpTool(path = "/apply_equate", method = "POST",
+            description = "Create an equate (if it does not exist yet) and attach it to scalar operand(s). Use it to "
+                    + "give magic constants a readable name: value 404 -> \"sizeof(tagIecTaskNode)\", value 3 -> "
+                    + "\"TASKSTAT_SUSPEND\". Select one instruction with `address` (plus `operand_index`; -1 = every "
+                    + "operand of that instruction) or a whole function with `function_address`; `value` filters which "
+                    + "scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see "
+                    + "the targets without writing (the framework rolls the transaction back).",
+            category = "listing")
+    public Response applyEquate(
+            @Param(value = "name", source = ParamSource.BODY,
+                    description = "Equate name — arbitrary text, printed verbatim by the decompiler") String name,
+            @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
+                    description = "Scalar value to match: decimal, 0x-hex, or a character literal like '\\x03'") String valueText,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                    description = "Instruction address (single-operand mode)") String addressText,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                    description = "Operand index at `address`; -1 = every operand carrying a matching scalar") int operandIndex,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                    description = "Scan every instruction of the function containing this address") String functionAddressText,
+            @Param(value = "max_hits", source = ParamSource.BODY, defaultValue = "1000",
+                    description = "Safety cap on how many operands may be modified by one call") int maxHits,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (name == null || name.isBlank()) return Response.err("`name` is required");
+
+        boolean valueGiven = valueText != null && !valueText.isBlank();
+        Long want = parseEquateValue(valueText);
+        if (valueGiven && want == null) return Response.err("Invalid `value`: " + valueText);
+
+        boolean byFunction = functionAddressText != null && !functionAddressText.isBlank();
+        boolean byAddress = addressText != null && !addressText.isBlank();
+        if (!byFunction && !byAddress) return Response.err("`address` or `function_address` is required");
+
+        List<OperandHit> hits = new ArrayList<>();
+        String scope;
+        if (byFunction) {
+            Address funcAddr = ServiceUtils.parseAddress(program, functionAddressText);
+            if (funcAddr == null) {
+                return Response.err("Invalid `function_address`: " + ServiceUtils.getLastParseError());
+            }
+            Function func = ServiceUtils.getFunctionForAddress(program, funcAddr);
+            if (func == null) return Response.err("No function contains address " + functionAddressText);
+            scope = "function " + func.getName();
+            InstructionIterator it = program.getListing().getInstructions(func.getBody(), true);
+            while (it.hasNext()) collectScalarOperands(it.next(), want, -1, hits);
+        } else {
+            Address addr = ServiceUtils.parseAddress(program, addressText);
+            if (addr == null) return Response.err("Invalid `address`: " + ServiceUtils.getLastParseError());
+            Instruction ins = program.getListing().getInstructionAt(addr);
+            if (ins == null) return Response.err("No instruction at " + addressText);
+            scope = "instruction " + ins.getAddress();
+            collectScalarOperands(ins, want, operandIndex, hits);
+        }
+        if (hits.isEmpty()) {
+            return Response.err("No scalar operand matched" + (valueGiven ? " value " + valueText : "")
+                    + " in " + scope);
+        }
+        if (hits.size() > maxHits) {
+            return Response.err("Refusing to modify " + hits.size() + " operands (max_hits=" + maxHits + ")");
+        }
+        long hitValue = hits.get(0).value();
+        for (OperandHit hit : hits) {
+            if (hit.value() != hitValue) {
+                return Response.err("Matched operands have different values (" + hitValue + " and " + hit.value()
+                        + "); pass `value` to disambiguate");
+            }
+        }
+        long equateValue = (want != null) ? want.longValue() : hitValue;
+        List<Map<String, Object>> targets = hitsToMaps(hits);
+
+        EquateTable table = program.getEquateTable();
+        Equate existing = table.getEquate(name);
+        if (existing != null && existing.getValue() != equateValue) {
+            return Response.err("Equate '" + name + "' already exists with value " + existing.getValue()
+                    + " (requested " + equateValue + ")");
+        }
+        if (existing != null && existing.isEnumBased()) {
+            return Response.err("Equate '" + name + "' is owned by an enum and cannot be re-pointed; "
+                    + "use a different name");
+        }
+
+        int tx = program.startTransaction("apply_equate " + name);
+        boolean commit = false;
+        boolean created = false;
+        int applied = 0;
+        try {
+            Equate equate = existing;
+            if (equate == null) {
+                equate = table.createEquate(name, equateValue);
+                created = true;
+            }
+            for (OperandHit hit : hits) {
+                equate.addReference(hit.address(), hit.operandIndex());
+                applied++;
+            }
+            commit = true;
+        } catch (Exception e) {
+            Msg.error(this, "apply_equate failed: " + e.getMessage(), e);
+            return Response.err("Failed to apply equate: " + e);
+        } finally {
+            program.endTransaction(tx, commit);
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "equate", name,
+                "value", equateValue,
+                "created", created,
+                "applied", applied,
+                "scope", scope,
+                "targets", targets,
+                "program", program.getName()));
+    }
+
+    @McpTool(path = "/remove_equate", method = "POST",
+            description = "Detach an equate from operand(s) and optionally delete the definition itself. Operand "
+                    + "selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` "
+                    + "and `value` filters); with neither selector every reference of `name` is removed. "
+                    + "Pass dry_run=true to preview (the framework rolls the transaction back).",
+            category = "listing")
+    public Response removeEquate(
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                    description = "Only touch equates with exactly this name") String name,
+            @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
+                    description = "Only touch equates with this value (decimal, 0x-hex, or a character literal)") String valueText,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                    description = "Instruction address; omit together with function_address to clear all references of `name`") String addressText,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                    description = "Operand index at `address`; -1 = every operand") int operandIndex,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                    description = "Scan every instruction of the function containing this address") String functionAddressText,
+            @Param(value = "delete_definition", source = ParamSource.BODY, defaultValue = "false",
+                    description = "After detaching, also delete the equate definition (it is shared by every reference)") boolean deleteDefinition,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        boolean hasName = name != null && !name.isBlank();
+        boolean valueGiven = valueText != null && !valueText.isBlank();
+        Long want = parseEquateValue(valueText);
+        if (valueGiven && want == null) return Response.err("Invalid `value`: " + valueText);
+        if (!hasName && !valueGiven) return Response.err("`name` or `value` is required");
+
+        boolean byFunction = functionAddressText != null && !functionAddressText.isBlank();
+        boolean byAddress = addressText != null && !addressText.isBlank();
+
+        EquateTable table = program.getEquateTable();
+        if (!byFunction && !byAddress) {
+            Equate single = table.getEquate(name);
+            if (single == null) return Response.err("No equate named '" + name + "'");
+        } else if (byFunction) {
+            Address funcAddr = ServiceUtils.parseAddress(program, functionAddressText);
+            if (funcAddr == null) {
+                return Response.err("Invalid `function_address`: " + ServiceUtils.getLastParseError());
+            }
+            if (ServiceUtils.getFunctionForAddress(program, funcAddr) == null) {
+                return Response.err("No function contains address " + functionAddressText);
+            }
+        } else {
+            Address addr = ServiceUtils.parseAddress(program, addressText);
+            if (addr == null) return Response.err("Invalid `address`: " + ServiceUtils.getLastParseError());
+            if (program.getListing().getInstructionAt(addr) == null) {
+                return Response.err("No instruction at " + addressText);
+            }
+        }
+
+        List<Map<String, Object>> removed = new ArrayList<>();
+        int tx = program.startTransaction("remove_equate");
+        boolean commit = false;
+        try {
+            if (byFunction || byAddress) {
+                List<Instruction> instructions = new ArrayList<>();
+                if (byFunction) {
+                    Address funcAddr = ServiceUtils.parseAddress(program, functionAddressText);
+                    Function func = ServiceUtils.getFunctionForAddress(program, funcAddr);
+                    InstructionIterator it = program.getListing().getInstructions(func.getBody(), true);
+                    while (it.hasNext()) instructions.add(it.next());
+                } else {
+                    Address addr = ServiceUtils.parseAddress(program, addressText);
+                    instructions.add(program.getListing().getInstructionAt(addr));
+                }
+                for (Instruction ins : instructions) {
+                    int operandCount = ins.getNumOperands();
+                    for (int i = 0; i < operandCount; i++) {
+                        if (operandIndex >= 0 && i != operandIndex) continue;
+                        for (Equate eq : table.getEquates(ins.getAddress(), i)) {
+                            if (hasName && !eq.getName().equals(name)) continue;
+                            if (want != null && eq.getValue() != want.longValue()) continue;
+                            eq.removeReference(ins.getAddress(), i);
+                            removed.add(equateRefToMap(eq.getName(), eq.getValue(),
+                                    ins.getAddress().toString(), i));
+                        }
+                    }
+                }
+            } else {
+                Equate single = table.getEquate(name);
+                for (EquateReference ref : single.getReferences()) {
+                    single.removeReference(ref.getAddress(), ref.getOpIndex());
+                    removed.add(equateRefToMap(single.getName(), single.getValue(),
+                            ref.getAddress().toString(), ref.getOpIndex()));
+                }
+            }
+            if (deleteDefinition && hasName) table.removeEquate(name);
+            commit = true;
+        } catch (Exception e) {
+            Msg.error(this, "remove_equate failed: " + e.getMessage(), e);
+            return Response.err("Failed to remove equate: " + e);
+        } finally {
+            program.endTransaction(tx, commit);
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "removed_count", removed.size(),
+                "removed", removed,
+                "definition_deleted", deleteDefinition && hasName,
+                "program", program.getName()));
+    }
+
+    @McpTool(path = "/rename_equate", method = "POST",
+            description = "Rename an equate definition; every operand reference is preserved (the GUI cannot do this "
+                    + "once an equate has been applied). Pass dry_run=true to preview (the framework rolls the "
+                    + "transaction back).",
+            category = "listing")
+    public Response renameEquate(
+            @Param(value = "old_name", source = ParamSource.BODY,
+                    description = "Existing equate name") String oldName,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                    description = "New name (arbitrary text, printed verbatim by the decompiler)") String newName,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (oldName == null || oldName.isBlank()) return Response.err("`old_name` is required");
+        if (newName == null || newName.isBlank()) return Response.err("`new_name` is required");
+
+        EquateTable table = program.getEquateTable();
+        Equate equate = table.getEquate(oldName);
+        if (equate == null) return Response.err("No equate named '" + oldName + "'");
+        if (equate.isEnumBased()) {
+            return Response.err("Equate '" + oldName + "' is owned by an enum; rename the enum member instead");
+        }
+        Equate clash = table.getEquate(newName);
+        if (clash != null && clash != equate) return Response.err("Equate '" + newName + "' already exists");
+        int references = equate.getReferenceCount();
+
+        int tx = program.startTransaction("rename_equate");
+        boolean commit = false;
+        try {
+            equate.renameEquate(newName);
+            commit = true;
+        } catch (Exception e) {
+            Msg.error(this, "rename_equate failed: " + e.getMessage(), e);
+            return Response.err("Failed to rename equate: " + e);
+        } finally {
+            program.endTransaction(tx, commit);
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "old_name", oldName,
+                "new_name", newName,
+                "references_preserved", references,
+                "program", program.getName()));
+    }
+
+    /** One scalar operand that an equate is attached to. */
+    private record OperandHit(Address address, int operandIndex, long value) {}
+
+    private static Map<String, Object> equateReferenceToMap(EquateReference ref) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("address", ref.getAddress().toString());
+        map.put("operand_index", (int) ref.getOpIndex());
+        return map;
+    }
+
+    private static Map<String, Object> equateRefToMap(String name, long value, String address, int operandIndex) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", name);
+        map.put("value", value);
+        map.put("address", address);
+        map.put("operand_index", operandIndex);
+        return map;
+    }
+
+    private static Map<String, Object> operandHitToMap(OperandHit hit) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("address", hit.address().toString());
+        map.put("operand_index", hit.operandIndex());
+        map.put("value", hit.value());
+        return map;
+    }
+
+    private static List<Map<String, Object>> hitsToMaps(List<OperandHit> hits) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (OperandHit hit : hits) out.add(operandHitToMap(hit));
+        return out;
+    }
+
+    /**
+     * Parses an equate value: decimal, 0x-hex, or a single character / escape literal
+     * (e.g. {@code 'A'}, {@code '\x03'}, {@code '\0'}). Returns null when unparsable.
+     */
+    private static Long parseEquateValue(String text) {
+        if (text == null) return null;
+        String trimmed = text.strip();
+        if (trimmed.isEmpty()) return null;
+        if (trimmed.length() >= 3 && trimmed.charAt(0) == '\''
+                && trimmed.charAt(trimmed.length() - 1) == '\'') {
+            String body = trimmed.substring(1, trimmed.length() - 1);
+            if (body.startsWith("\\") && body.length() >= 2) {
+                char escape = body.charAt(1);
+                if ((escape == 'x' || escape == 'X') && body.length() > 2) {
+                    try {
+                        return Long.parseLong(body.substring(2), 16);
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                }
+                switch (escape) {
+                    case '0': return 0L;
+                    case 'n': return 10L;
+                    case 't': return 9L;
+                    case 'r': return 13L;
+                    case 'a': return 7L;
+                    case 'b': return 8L;
+                    case 'f': return 12L;
+                    case 'v': return 11L;
+                    case '\\': return 92L;
+                    case '\'': return 39L;
+                    default: return (long) escape;
+                }
+            }
+            return body.isEmpty() ? null : (long) body.charAt(0);
+        }
+        try {
+            if (trimmed.startsWith("-0x") || trimmed.startsWith("-0X")) {
+                return -Long.parseLong(trimmed.substring(3), 16);
+            }
+            if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+                return Long.parseLong(trimmed.substring(2), 16);
+            }
+            return Long.parseLong(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Collects the scalar operands of one instruction, filtered by value and/or operand index. */
+    private static void collectScalarOperands(Instruction ins, Long want, int onlyOperand,
+                                              List<OperandHit> out) {
+        int operandCount = ins.getNumOperands();
+        for (int i = 0; i < operandCount; i++) {
+            if (onlyOperand >= 0 && i != onlyOperand) continue;
+            for (Object opObject : ins.getOpObjects(i)) {
+                if (!(opObject instanceof Scalar)) continue;
+                long value = ((Scalar) opObject).getUnsignedValue();
+                if (want != null && value != want.longValue()) continue;
+                out.add(new OperandHit(ins.getAddress(), i, value));
+            }
+        }
+    }
+
 
     // ======================================================================
     // Utility endpoints (not program-scoped)

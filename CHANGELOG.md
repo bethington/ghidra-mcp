@@ -501,6 +501,12 @@ Measured against the spec and against what real clients do with each field.
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
 
+- **Equate management tools** in `ListingService`: `/list_equates`,
+  `/apply_equate`, `/remove_equate`, `/rename_equate` — enumerate, apply (to
+  operands matching a scalar value), delete, and rename named constants
+  (equates). Includes the `OperandHit` helper record plus `collectScalarOperands`
+  / `parseEquateValue` utilities used to locate operand matches.
+
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
 `FunctionManagerDB.doRemoveFunction` iterates a function's own tag set while
