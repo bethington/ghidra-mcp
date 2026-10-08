@@ -1893,11 +1893,14 @@ def run_selected_endpoint_contract_test(repo_root: Path, mcp_url: str) -> None:
         catalog_method = str(catalog_tool.get("method") or "GET").upper()
         if schema_method != catalog_method:
             contract_errors.append(f"{name}: method schema={schema_method} catalog={catalog_method}")
-        schema_params = {
-            str(param.get("name"))
-            for param in schema_tool.get("params") or []
-            if isinstance(param, dict) and param.get("name")
-        }
+        # The catalog lists @Param aliases next to the canonical name (since
+        # #576); the schema lists the canonical name and declares its aliases on
+        # it. A catalog name the schema declares as an alias is present.
+        schema_params: set[str] = set()
+        for param in schema_tool.get("params") or []:
+            if isinstance(param, dict) and param.get("name"):
+                schema_params.add(str(param["name"]))
+                schema_params.update(str(alias) for alias in param.get("aliases") or [])
         catalog_params = {str(param) for param in catalog_tool.get("params") or []}
         missing_params = sorted(catalog_params - schema_params)
         if missing_params:

@@ -885,6 +885,56 @@ def test_selected_endpoint_contract_checks_schema_against_catalog(
     run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
 
 
+def _contract_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog_params, schema_params):
+    """Every selected tool gets the same catalog params and schema params."""
+    from tools.setup import ghidra
+
+    selected = sorted(ghidra.RELEASE_CONTRACT_TOOLS)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "endpoints.json").write_text(
+        json.dumps({"endpoints": [
+            {"path": f"/{n}", "method": "GET", "params": list(catalog_params)} for n in selected
+        ]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (200, {"tools": [
+            {"path": f"/{n}", "method": "GET", "params": schema_params} for n in selected
+        ]}),
+    )
+
+
+def test_selected_endpoint_contract_accepts_catalog_aliases_the_schema_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Since #576 the catalog lists @Param aliases (address, name, ...) next to
+    the canonical name; /mcp/schema lists only the canonical name and carries the
+    aliases on it. A name the schema declares as an alias is present, not missing
+    -- the rc.2 release tier failed on exactly this for 6 tools."""
+    _contract_fixture(
+        tmp_path, monkeypatch,
+        catalog_params=["function", "address", "function_address", "program"],
+        schema_params=[{"name": "function", "aliases": ["address", "function_address"]}, {"name": "program"}],
+    )
+    run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_selected_endpoint_contract_still_reports_an_undeclared_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Alias-awareness must not turn the check into a no-op: a catalog name that
+    is neither a schema param nor a declared alias is still a contract break."""
+    _contract_fixture(
+        tmp_path, monkeypatch,
+        catalog_params=["function", "address", "bogus", "program"],
+        schema_params=[{"name": "function", "aliases": ["address"]}, {"name": "program"}],
+    )
+    with pytest.raises(RuntimeError, match=r"schema missing catalog params \['bogus'\]"):
+        run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
 def test_selected_endpoint_contract_reports_missing_selected_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
