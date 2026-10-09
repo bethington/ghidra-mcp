@@ -26,11 +26,10 @@ from .config import (
     READ_ONLY_TOOL,
     WRITE_TOOL,
     logger,
+    parse_bool,
 )
 from .server import mcp
 from .validation import validate_server_url
-
-_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _debugger_enabled(
@@ -69,7 +68,8 @@ def _debugger_enabled(
     if override is None:
         override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
     if override is not None and override.strip():
-        return override.strip().lower() in _TRUTHY
+        # Non-blank override decides outright; blank falls through to the URL rule.
+        return parse_bool(override, default=False)
     if not url_explicit:
         return False
     if not validate_server_url(url):

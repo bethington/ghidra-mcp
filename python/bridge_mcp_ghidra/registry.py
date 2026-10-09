@@ -20,6 +20,7 @@ from .config import (
     WRITE_TOOL,
     _ALL_STATIC_TOOL_NAMES,
     logger,
+    parse_bool,
 )
 from .schema import _TYPE_MAP, _normalize_tool_def_names, _parse_schema
 from .server import Context, mcp
@@ -93,7 +94,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
 
     def is_truthy(value) -> bool:
         if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
+            return parse_bool(value, default=False, on_unknown="default")
         return bool(value)
 
     def handler(**kwargs):
