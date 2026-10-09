@@ -221,7 +221,9 @@ def test_probe_returns_status_and_a_bounded_decoded_body(monkeypatch):
         seen["timeout"] = timeout
         return FakeResponse()
 
-    monkeypatch.setattr(health.urllib.request, "urlopen", fake_urlopen)
+    from tools import mcp_http
+
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", fake_urlopen)
 
     status, body = health._probe("http://h/check_connection", 3.0)
 
@@ -255,7 +257,9 @@ def test_doctor_request_uses_a_larger_but_bounded_catalog_body_cap(monkeypatch):
         seen["authorization"] = request.get_header("Authorization")
         return FakeResponse()
 
-    monkeypatch.setattr(health.urllib.request, "urlopen", fake_urlopen)
+    from tools import mcp_http
+
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", fake_urlopen)
 
     status, body, headers = health._probe_request(
         "http://h/mcp/schema",

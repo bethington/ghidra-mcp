@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Changed — deploy tiers treat `success: false` / `status: rejected` as failures
+
+`_ensure_mcp_ok` (every post-deploy tier that checks an MCP response) used to fail only on
+a truthy `error` field or a body string starting with `"failed"`. Soft failures that arrive
+as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shapes the bridge
+already treats as tool errors — were ignored, so a tier could exit green after a refused
+write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
+
 ### Changed — write success envelopes go through `Response.success` (+ extras)
 
 Hand-built `{status:"success", message:…}` maps now use `Response.success` /

@@ -9,8 +9,6 @@ import signal
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
@@ -595,12 +593,6 @@ def resolve_deploy_test_modes(repo_root: Path, cli_modes: list[str] | None) -> l
     return list(dict.fromkeys(modes))
 
 
-def _mcp_headers(repo_root: Path) -> dict[str, str]:
-    env_values = load_env_file(repo_root / ".env")
-    token = env_values.get("GHIDRA_MCP_AUTH_TOKEN", "").strip()
-    return {"Authorization": f"Bearer {token}"} if token else {}
-
-
 def _mcp_request(
     repo_root: Path,
     mcp_url: str,
@@ -611,29 +603,28 @@ def _mcp_request(
     params: dict | None = None,
     timeout: int = 10,
 ) -> tuple[int, object]:
-    body = None
-    headers = _mcp_headers(repo_root)
-    if data is not None:
-        body = json.dumps(data).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    url = f"{mcp_url}{path}"
-    if params:
-        url = f"{url}?{urllib.parse.urlencode(params)}"
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        text = response.read().decode("utf-8", errors="replace")
-        try:
-            parsed: object = json.loads(text)
-        except ValueError:
-            parsed = text
-        return response.status, parsed
+    from tools import mcp_http
+
+    token = mcp_http.bearer_token(
+        env_values=load_env_file(repo_root / ".env"),
+        environ={},
+    )
+    return mcp_http.request(
+        mcp_url,
+        path,
+        method=method,
+        data=data,
+        params=params,
+        timeout=timeout,
+        auth_token=token,
+        return_status=True,
+    )
 
 
 def _ensure_mcp_ok(path: str, payload: object) -> None:
-    if isinstance(payload, dict) and payload.get("error"):
-        raise RuntimeError(f"{path} failed: {payload['error']}")
-    if isinstance(payload, str) and payload.lower().startswith("failed"):
-        raise RuntimeError(f"{path} failed: {payload}")
+    from tools import mcp_http
+
+    mcp_http.ensure_ok(path, payload)
 
 
 def _mcp_error_message(payload: object) -> str:

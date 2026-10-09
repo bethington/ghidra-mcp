@@ -17,7 +17,6 @@ import sys
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -36,9 +35,16 @@ SERVER_KINDS = ("auto", "gui", "headless")
 
 
 def _probe(url: str, timeout: float) -> tuple[int, str]:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        body = response.read(MAX_HEALTH_BODY_BYTES).decode("utf-8", "replace")
-        return response.status, body
+    from tools import mcp_http
+
+    status, body = mcp_http.request(
+        url,
+        timeout=timeout,
+        parse_json=False,
+        return_status=True,
+        max_body_bytes=MAX_HEALTH_BODY_BYTES,
+    )
+    return status, body
 
 
 def _probe_request(
@@ -49,17 +55,26 @@ def _probe_request(
     headers: Mapping[str, str] | None = None,
 ) -> tuple[int, str, Mapping[str, str]]:
     """Issue a bounded request and retain HTTP error status for diagnosis."""
+    from tools import mcp_http
 
-    request = urllib.request.Request(url, method=method, headers=dict(headers or {}))
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read(MAX_DOCTOR_BODY_BYTES).decode("utf-8", "replace")
-            response_headers = dict(response.headers.items()) if response.headers else {}
-            return response.status, body, response_headers
-    except urllib.error.HTTPError as exc:
-        body = exc.read(MAX_DOCTOR_BODY_BYTES).decode("utf-8", "replace")
-        response_headers = dict(exc.headers.items()) if exc.headers else {}
-        return exc.code, body, response_headers
+    auth_token = None
+    for key, value in (headers or {}).items():
+        if key.lower() == "authorization" and isinstance(value, str):
+            if value.lower().startswith("bearer "):
+                auth_token = value[7:].strip()
+            break
+
+    return mcp_http.request(
+        url,
+        method=method,
+        timeout=timeout,
+        auth_token=auth_token,
+        parse_json=False,
+        return_status=True,
+        return_headers=True,
+        max_body_bytes=MAX_DOCTOR_BODY_BYTES,
+        retain_http_error=True,
+    )
 
 
 def _normalise_url(value: str, *, strip_endpoint: bool) -> tuple[str | None, str | None, dict[str, Any]]:
