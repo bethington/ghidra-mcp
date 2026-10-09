@@ -80,7 +80,7 @@ public final class SecurityConfig {
     private final boolean scriptsAllowed;
     private final String fileRoot;       // null if disabled
     private final Path fileRootCanonical;
-    private final String projectFolderScope; // null = no enforcement (default)
+    private volatile String projectFolderScope; // null = no enforcement (default)
 
     private SecurityConfig() {
         String rawToken = System.getenv("GHIDRA_MCP_AUTH_TOKEN");
@@ -176,6 +176,14 @@ public final class SecurityConfig {
      */
     public String getProjectFolderScope() {
         return projectFolderScope;
+    }
+
+    /**
+     * Replace the scope read from {@code GHIDRA_MCP_PROJECT_FOLDER}. Package-private: the
+     * environment is the only way a server sets it; tests in this package set it here.
+     */
+    void setProjectFolderScopeForTest(String scope) {
+        projectFolderScope = scope;
     }
 
     /**

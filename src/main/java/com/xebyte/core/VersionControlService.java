@@ -229,10 +229,6 @@ public class VersionControlService {
         return repo;
     }
 
-    private static String parentOf(String path) {
-        int slash = path.lastIndexOf('/');
-        return slash > 0 ? path.substring(0, slash) : "/";
-    }
 
     @McpTool(path = "/server/repositories",
             description = "List the repositories on the connected Ghidra Server.",
@@ -297,9 +293,13 @@ public class VersionControlService {
         try {
             RepositoryAdapter adapter = repository(server, repo);
             if (adapter == null) return Response.err("Repository not found: " + repo);
-            RepositoryItem item = adapter.getItem(parentOf(path), path.substring(path.lastIndexOf('/') + 1));
+            String normalized = ProjectPaths.normalize(path);
+            RepositoryItem item = adapter.getItem(
+                ProjectPaths.parentOf(normalized), ProjectPaths.nameOf(normalized));
             if (item == null) return Response.err("File not found: " + path);
             return Response.ok(itemRow(item));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             return ServiceUtils.fail("get file info", e);
         }

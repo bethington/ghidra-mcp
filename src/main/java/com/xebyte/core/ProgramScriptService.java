@@ -1405,36 +1405,29 @@ if (map instanceof ObjectPropertyMap) {
             return Response.err("No project is currently open");
         }
 
-        ghidra.framework.model.ProjectData projectData = project.getProjectData();
-        ghidra.framework.model.DomainFolder rootFolder = projectData.getRootFolder();
-
-        // If folder path specified, navigate to it
-        ghidra.framework.model.DomainFolder targetFolder = rootFolder;
-        if (folderPath != null && !folderPath.trim().isEmpty() && !folderPath.equals("/")) {
-            // Navigate through path segments (handles nested folders like "Project/1.0")
-            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
-            String[] pathParts = cleanPath.split("/");
-            for (String part : pathParts) {
-                if (part.isEmpty()) continue;
-                ghidra.framework.model.DomainFolder nextFolder = targetFolder.getFolder(part);
-                if (nextFolder == null) {
-                    return Response.err("Folder not found: " + folderPath);
-                }
-                targetFolder = nextFolder;
-            }
+        ghidra.framework.model.DomainFolder targetFolder;
+        try {
+            targetFolder = ProjectPaths.listable(project, folderPath);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
-        // List subfolders
+        // Under a folder scope only the branch toward it shows from an ancestor.
         ghidra.framework.model.DomainFolder[] subfolders = targetFolder.getFolders();
         List<String> folderNames = new ArrayList<>();
         for (ghidra.framework.model.DomainFolder subfolder : subfolders) {
-            folderNames.add(subfolder.getName());
+            if (ProjectPaths.visible(subfolder.getPathname())) {
+                folderNames.add(subfolder.getName());
+            }
         }
 
         // List files in folder
         ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
         List<Map<String, Object>> fileList = new ArrayList<>();
         for (ghidra.framework.model.DomainFile file : files) {
+            if (!SecurityConfig.getInstance().isPathInProjectScope(file.getPathname())) {
+                continue;
+            }
             // With version-control state, so a checkout that still holds uncommitted work
             // (modified_since_checkout) can be told from an idle one without reading icons
             // in the Ghidra GUI. This is what the GUI's /server/repository/files reported.
@@ -1459,24 +1452,13 @@ if (map instanceof ObjectPropertyMap) {
         if (folderPath == null || folderPath.trim().isEmpty() || folderPath.equals("/")) {
             return Response.err("path parameter is required");
         }
-        // Containment: honor GHIDRA_MCP_PROJECT_FOLDER for this mutating op.
-        // No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(folderPath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
-        }
 
         try {
-            ghidra.framework.model.DomainFolder current = project.getProjectData().getRootFolder();
-            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
-            for (String part : cleanPath.split("/")) {
-                if (part.isEmpty()) continue;
-                ghidra.framework.model.DomainFolder next = current.getFolder(part);
-                if (next == null) {
-                    next = current.createFolder(part);
-                }
-                current = next;
-            }
+            ghidra.framework.model.DomainFolder current =
+                ProjectPaths.folder(project, folderPath, true);
             return Response.ok(JsonHelper.mapOf("success", true, "folder", current.getPathname()));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             return ServiceUtils.fail("create folder", e);
         }
@@ -1492,24 +1474,26 @@ if (map instanceof ObjectPropertyMap) {
         if (filePath == null || filePath.trim().isEmpty()) {
             return Response.err("filePath parameter is required");
         }
-        // Containment: a destructive op must honor GHIDRA_MCP_PROJECT_FOLDER.
-        // The read side (FrontEndProgramProvider) already scopes which programs
-        // are returned; without this check a caller could delete files outside
-        // the configured scope. No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final String normalized;
+        try {
+            normalized = ProjectPaths.normalize(filePath);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.DomainFile domainFile = project.getProjectData().getFile(filePath);
+            ghidra.framework.model.DomainFile domainFile = ProjectPaths.findFile(project, normalized);
             if (domainFile == null) {
-                return Response.ok(JsonHelper.mapOf("success", true, "deleted", false, "filePath", filePath));
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true, "deleted", false, "filePath", normalized));
             }
-            if (!programProvider.closeProgramByPath(filePath) && programProvider.workbench() != null) {
-                programProvider.workbench().closeProgramForFile(filePath);
+            if (!programProvider.closeProgramByPath(normalized) && programProvider.workbench() != null) {
+                programProvider.workbench().closeProgramForFile(normalized);
             }
             domainFile.delete();
-            return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
+            return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", normalized));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             return ServiceUtils.fail("delete file", e);
         }
@@ -1547,25 +1531,20 @@ if (map instanceof ObjectPropertyMap) {
         if (destFolder == null || destFolder.trim().isEmpty()) {
             return Response.err("destFolder parameter is required");
         }
-        // Containment: a move is a delete from one scope plus a create in
-        // another, so BOTH ends must sit inside GHIDRA_MCP_PROJECT_FOLDER.
-        // Checking only the source would let a caller relocate a scoped file
-        // straight out of scope. No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)
-                || !SecurityConfig.getInstance().isPathInProjectScope(destFolder)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final String normalizedFile;
+        final ghidra.framework.model.DomainFile domainFile;
+        final ghidra.framework.model.DomainFolder dest;
+        try {
+            normalizedFile = ProjectPaths.normalize(filePath);
+            // Both ends must sit inside project.folder_scope — checking only the
+            // source would let a caller relocate a scoped file straight out of scope.
+            domainFile = ProjectPaths.file(project, normalizedFile);
+            dest = ProjectPaths.folder(project, destFolder, false);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.ProjectData projectData = project.getProjectData();
-            ghidra.framework.model.DomainFile domainFile = projectData.getFile(filePath);
-            if (domainFile == null) {
-                return Response.err("File not found: " + filePath);
-            }
-            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destFolder);
-            if (dest == null) {
-                return Response.err("Destination folder not found: " + destFolder);
-            }
             ghidra.framework.model.DomainFolder parent = domainFile.getParent();
             if (parent != null && parent.getPathname().equals(dest.getPathname())) {
                 return Response.ok(JsonHelper.mapOf(
@@ -1583,18 +1562,20 @@ if (map instanceof ObjectPropertyMap) {
             // side effect "move" should have. Refuse, and say what to do.
             if (domainFile.isChanged()) {
                 return Response.err("Program has unsaved changes: call save_program "
-                        + "(or close_program) before moving " + filePath);
+                        + "(or close_program) before moving " + normalizedFile);
             }
 
-            boolean wasOpen = isProgramOpenForPath(filePath);
+            ghidra.framework.model.DomainFile toMove = domainFile;
+            boolean wasOpen = isProgramOpenForPath(normalizedFile);
             if (wasOpen) {
                 // Ghidra refuses to move a file that is open in a tool. It is
                 // clean (checked above), so save=false discards nothing.
-                closeProgram(filePath, false);
+                closeProgram(normalizedFile, false);
                 // The close can swap the DomainFile instance out from under us.
-                domainFile = projectData.getFile(filePath);
-                if (domainFile == null) {
-                    return Response.err("File vanished while closing it: " + filePath);
+                try {
+                    toMove = ProjectPaths.file(project, normalizedFile);
+                } catch (Refusal r) {
+                    return Response.err("File vanished while closing it: " + normalizedFile);
                 }
             }
             // moveTo returns the RELOCATED DomainFile. The receiver keeps
@@ -1603,16 +1584,16 @@ if (map instanceof ObjectPropertyMap) {
             // successful move to /Project/1.1 still answered
             // "to": "/Project/1.0/example.dll". Anything chaining on that
             // path then operates on a file that no longer exists there.
-            ghidra.framework.model.DomainFile movedFile = domainFile.moveTo(dest);
+            ghidra.framework.model.DomainFile movedFile = toMove.moveTo(dest);
             String newPath = movedFile != null ? movedFile.getPathname()
-                    : dest.getPathname() + "/" + domainFile.getName();
+                    : dest.getPathname() + "/" + toMove.getName();
             boolean reopened = false;
             if (wasOpen) {
                 reopened = openProgramFromProject(newPath, false) instanceof Response.Ok;
             }
             return Response.ok(JsonHelper.mapOf(
                     "success", true, "moved", true,
-                    "from", filePath, "to", newPath,
+                    "from", normalizedFile, "to", newPath,
                     "was_open", wasOpen, "reopened", reopened));
         } catch (Exception e) {
             return ServiceUtils.fail("move file", e);
@@ -1639,23 +1620,18 @@ if (map instanceof ObjectPropertyMap) {
         if (destPath == null || destPath.trim().isEmpty()) {
             return Response.err("destPath parameter is required");
         }
-        if (!SecurityConfig.getInstance().isPathInProjectScope(sourcePath)
-                || !SecurityConfig.getInstance().isPathInProjectScope(destPath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final ghidra.framework.model.DomainFolder source;
+        final ghidra.framework.model.DomainFolder dest;
+        try {
+            source = ProjectPaths.folder(project, sourcePath, false);
+            dest = ProjectPaths.folder(project, destPath, false);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.ProjectData projectData = project.getProjectData();
-            ghidra.framework.model.DomainFolder source = projectData.getFolder(sourcePath);
-            if (source == null) {
-                return Response.err("Source folder not found: " + sourcePath);
-            }
             if (source.getParent() == null) {
                 return Response.err("Cannot move the project root folder");
-            }
-            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destPath);
-            if (dest == null) {
-                return Response.err("Destination folder not found: " + destPath);
             }
             // A folder cannot become its own ancestor. Ghidra's own error for
             // this is opaque, and the subtree is unreachable afterwards, so
@@ -1678,7 +1654,7 @@ if (map instanceof ObjectPropertyMap) {
                     : dest.getPathname() + "/" + source.getName();
             return Response.ok(JsonHelper.mapOf(
                     "success", true, "moved", true,
-                    "from", sourcePath, "to", newPath));
+                    "from", source.getPathname(), "to", newPath));
         } catch (Exception e) {
             return ServiceUtils.fail("move folder", e);
         }
@@ -1902,6 +1878,8 @@ if (map instanceof ObjectPropertyMap) {
                 out.put("codebrowser", shown);
             }
             return Response.ok(out);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null || msg.isEmpty()) {
