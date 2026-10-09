@@ -208,7 +208,7 @@ public class AnalysisService {
                     // Not a boolean option -- skip non-analyzer properties
                 }
             }
-            return Response.ok(JsonHelper.mapOf("analyzers", entries, "count", entries.size()));
+            return ServiceUtils.listed("analyzers", entries);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -1845,7 +1845,7 @@ public class AnalysisService {
                 results.add(JsonHelper.mapOf("error", "Unexpected response shape"));
             }
         }
-        return Response.ok(JsonHelper.mapOf("results", results, "count", addresses.size()));
+        return ServiceUtils.listed("results", results);
     }
 
     /**
