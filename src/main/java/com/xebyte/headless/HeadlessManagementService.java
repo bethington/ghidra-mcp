@@ -104,7 +104,7 @@ public class HeadlessManagementService {
             for (HeadlessProgramProvider.ProjectInfo p : programProvider.listProjects(resolved.getPath())) {
                 projects.add(JsonHelper.mapOf("name", p.name, "path", p.path, "active", p.active));
             }
-            return Response.ok(JsonHelper.mapOf("projects", projects, "count", projects.size()));
+            return ServiceUtils.listed("projects", projects);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }

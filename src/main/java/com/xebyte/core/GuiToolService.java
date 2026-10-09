@@ -82,10 +82,7 @@ public class GuiToolService {
                 }
                 tools.add(row);
             }
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("tools", tools);
-            out.put("count", tools.size());
-            return Response.ok(out);
+            return ServiceUtils.listed("tools", tools);
         } catch (Exception e) {
             return Response.err("Failed to list tools: " + messageOf(e));
         }

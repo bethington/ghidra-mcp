@@ -1051,7 +1051,7 @@ it = map.getPropertyIterator(start, end);
             @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> spaces = buildAddressSpacesList(program);
         spaces.addAll(buildOverlaySpacesList(program));
-        return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
+        return ServiceUtils.listed("address_spaces", spaces);
     }
 
     private List<Map<String, Object>> buildAddressSpacesList(Program program) {

@@ -246,10 +246,7 @@ public class VersionControlService {
         if (server == null) return Response.err(NOT_CONNECTED);
         try {
             String[] names = server.getRepositoryNames();
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("repositories", List.of(names));
-            out.put("count", names.length);
-            return Response.ok(out);
+            return ServiceUtils.listed("repositories", List.of(names));
         } catch (Exception e) {
             return Response.err("Failed to list repositories: " + messageOf(e));
         }
@@ -357,10 +354,7 @@ public class VersionControlService {
                     users.add(Map.of("name", name));
                 }
             }
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("users", users);
-            out.put("count", users.size());
-            return Response.ok(out);
+            return ServiceUtils.listed("users", users);
         } catch (Exception e) {
             return Response.err("Failed to list users (admin access required): " + messageOf(e));
         }

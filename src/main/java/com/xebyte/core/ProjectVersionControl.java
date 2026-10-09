@@ -424,10 +424,7 @@ public final class ProjectVersionControl {
             if (folder == null) return Response.err("Folder not found: " + at);
             collect(folder, repository(), rows);
         }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("checkouts", rows);
-        out.put("count", rows.size());
-        return Response.ok(out);
+        return ServiceUtils.listed("checkouts", rows);
     }
 
     private static void collect(DomainFolder folder, RepositoryAdapter repo, List<Map<String, Object>> rows) {
