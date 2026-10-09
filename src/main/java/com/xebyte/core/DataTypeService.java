@@ -230,17 +230,12 @@ public class DataTypeService {
         if (structName == null || structName.isEmpty()) return Response.err("Struct name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
-        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-        if (dataType == null) {
-            return Response.err("Structure not found: " + structName);
+        final Structure struct;
+        try {
+            struct = ServiceUtils.requireStructure(dtm, structName);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
-
-        if (!(dataType instanceof Structure)) {
-            return Response.err("Data type is not a structure: " + structName);
-        }
-
-        Structure struct = (Structure) dataType;
         List<Map<String, Object>> fields = new ArrayList<>();
         for (DataTypeComponent component : struct.getDefinedComponents()) {
             Map<String, Object> field = new LinkedHashMap<>();
@@ -269,17 +264,12 @@ public class DataTypeService {
         if (enumName == null || enumName.isEmpty()) return Response.err("Enum name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
-        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, enumName);
-
-        if (dataType == null) {
-            return Response.err("Enumeration not found: " + enumName);
+        final ghidra.program.model.data.Enum enumType;
+        try {
+            enumType = ServiceUtils.requireEnum(dtm, enumName);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
-
-        if (!(dataType instanceof ghidra.program.model.data.Enum)) {
-            return Response.err("Data type is not an enumeration: " + enumName);
-        }
-
-        ghidra.program.model.data.Enum enumType = (ghidra.program.model.data.Enum) dataType;
         List<Map<String, Object>> values = new ArrayList<>();
         for (String valueName : enumType.getNames()) {
             long value = enumType.getValue(valueName);
@@ -1097,17 +1087,7 @@ public class DataTypeService {
         try {
             threadingStrategy.executeWrite(program, "Modify struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    throw new Refusal("Structure not found: " + structName);
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    throw new Refusal("Data type '" + structName + "' is not a structure");
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 DataTypeComponent targetComponent = null;
 
                 // Support offset-based lookup: "offset:16" or "offset:0x10"
@@ -1205,15 +1185,7 @@ public class DataTypeService {
         try {
             ResizeStructOutcome outcome = threadingStrategy.executeWrite(program, "Resize structure: " + name, () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
-                if (dataType == null) {
-                    throw new Refusal("Structure not found: " + name);
-                }
-                if (!(dataType instanceof Structure)) {
-                    throw new Refusal("Data type '" + name + "' is not a structure");
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, name);
                 int oldLen = struct.getLength();
                 String clipError = validateStructResize(struct, newSize, force);
                 if (clipError != null) {
@@ -1604,17 +1576,7 @@ public class DataTypeService {
         try {
             threadingStrategy.executeWrite(program, "Add struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    throw new Refusal("Structure not found: " + structName);
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    throw new Refusal("Data type '" + structName + "' is not a structure");
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 DataType newFieldType = ServiceUtils.resolveDataType(dtm, fieldType);
                 if (newFieldType == null) {
                     throw new Refusal("Field data type not found: " + fieldType);
@@ -1700,17 +1662,7 @@ public class DataTypeService {
         try {
             threadingStrategy.executeWrite(program, "Remove struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    throw new Refusal("Structure not found: " + structName);
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    throw new Refusal("Data type '" + structName + "' is not a structure");
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 int targetOrdinal = resolveFieldOrdinal(struct, fieldName);
 
                 if (targetOrdinal == -2) {
