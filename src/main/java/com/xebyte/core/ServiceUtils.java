@@ -151,6 +151,24 @@ public final class ServiceUtils {
     // ========================================================================
 
     /**
+     * Split a comma-separated string into trimmed tokens, skipping blanks.
+     * Null or blank input yields an empty list.
+     */
+    public static List<String> csvTokens(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
+
+    /**
      * Check if a string meets quality criteria: 4+ chars, 80%+ printable ASCII.
      */
     public static boolean isQualityString(String str) {

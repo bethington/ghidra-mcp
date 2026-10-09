@@ -5,6 +5,7 @@ import ghidra.program.model.listing.Program;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -146,19 +147,15 @@ public class FunctionBundleService {
     private Response getFunctionsBulk(Program program, String functionsParam, Set<String> fields,
             boolean includeCallContext, int callContextLimit, int callContextLines,
             boolean includeDisasm) {
-        String[] refs = functionsParam.split(",");
+        List<String> refs = ServiceUtils.csvTokens(functionsParam);
         Map<String, Object> out = new LinkedHashMap<>();
         Map<String, Object> functions = new LinkedHashMap<>();
         int requested = 0;
         int resolved = 0;
 
-        for (String raw : refs) {
+        for (String funcRef : refs) {
             if (requested >= MAX_FUNCTIONS) {
                 break;
-            }
-            String funcRef = raw.trim();
-            if (funcRef.isEmpty()) {
-                continue;
             }
             requested++;
             ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, funcRef);
@@ -186,7 +183,7 @@ public class FunctionBundleService {
         out.put("functions", functions);
         out.put("count", resolved);
         out.put("requested", requested);
-        if (refs.length > MAX_FUNCTIONS || requested > MAX_FUNCTIONS) {
+        if (refs.size() > MAX_FUNCTIONS || requested > MAX_FUNCTIONS) {
             out.put("truncated", true);
             out.put("max_functions", MAX_FUNCTIONS);
         }
@@ -198,16 +195,13 @@ public class FunctionBundleService {
             return null;
         }
         Set<String> fields = new LinkedHashSet<>();
-        for (String part : fieldsParam.split(",")) {
-            String token = part.trim().toLowerCase();
-            if (token.isEmpty()) {
-                continue;
-            }
-            if (!FunctionFacts.FIELDS.contains(token)) {
-                throw new IllegalArgumentException("Unknown field: " + part.trim()
+        for (String token : ServiceUtils.csvTokens(fieldsParam)) {
+            String lower = token.toLowerCase();
+            if (!FunctionFacts.FIELDS.contains(lower)) {
+                throw new IllegalArgumentException("Unknown field: " + token
                     + ". Valid fields: " + String.join(", ", FunctionFacts.FIELDS));
             }
-            fields.add(token);
+            fields.add(lower);
         }
         return fields.isEmpty() ? null : fields;
     }

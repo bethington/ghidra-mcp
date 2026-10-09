@@ -43,9 +43,7 @@ public class XrefCallGraphService {
         ReferenceManager refMgr = program.getReferenceManager();
         boolean qualify = ServiceUtils.getPhysicalSpaceCount(program) > 1;
         Map<String, Object> byAddress = new LinkedHashMap<>();
-        for (String raw : addressesCsv.split(",")) {
-            String addrStr = raw.trim();
-            if (addrStr.isEmpty()) continue;
+        for (String addrStr : ServiceUtils.csvTokens(addressesCsv)) {
             List<Map<String, Object>> refs = new ArrayList<>();
             Address addr = ServiceUtils.parseAddress(program, addrStr);
             if (addr != null) {
@@ -1205,12 +1203,7 @@ public class XrefCallGraphService {
                     }
                 }
             } else if (xrefSourcesObj instanceof String s) {
-                for (String part : s.split(",")) {
-                    String trimmed = part.trim();
-                    if (!trimmed.isEmpty()) {
-                        xrefSources.add(trimmed);
-                    }
-                }
+                xrefSources.addAll(ServiceUtils.csvTokens(s));
             }
 
             Listing listing = program.getListing();

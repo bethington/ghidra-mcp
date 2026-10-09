@@ -367,12 +367,7 @@ public class ListingService {
             }
         }
 
-        Set<String> wantedTags = new java.util.LinkedHashSet<>();
-        if (tagFilter != null) {
-            for (String part : tagFilter.split(",")) {
-                if (!part.trim().isEmpty()) wantedTags.add(part.trim());
-            }
-        }
+        Set<String> wantedTags = new java.util.LinkedHashSet<>(ServiceUtils.csvTokens(tagFilter));
         var tagManager = program.getFunctionManager().getFunctionTagManager();
         for (String wanted : wantedTags) {
             if (tagManager.getFunctionTag(wanted) == null) {

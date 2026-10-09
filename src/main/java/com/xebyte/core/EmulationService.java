@@ -224,8 +224,7 @@ public class EmulationService {
                 // Read registers
                 Map<String, String> regValues = new LinkedHashMap<>();
                 if (returnRegisters != null && !returnRegisters.isEmpty()) {
-                    for (String rn : returnRegisters.split(",")) {
-                        rn = rn.trim();
+                    for (String rn : ServiceUtils.csvTokens(returnRegisters)) {
                         try {
                             BigInteger val = emu.readRegister(rn);
                             regValues.put(rn, "0x" + val.toString(16));
