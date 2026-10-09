@@ -128,9 +128,7 @@ public class CommentService {
         int requested = 0;
         int withComments = 0;
 
-        for (String rawToken : addressesStr.split(",")) {
-            String token = rawToken.trim();
-            if (token.isEmpty()) continue;
+        for (String token : ServiceUtils.csvTokens(addressesStr)) {
             requested++;
 
             Address addr = ServiceUtils.parseAddress(program, token);

@@ -3830,16 +3830,6 @@ Map<String, Object> out = new LinkedHashMap<>();
         return m;
     }
 
-    private static List<String> splitTagList(String raw) {
-        List<String> out = new ArrayList<>();
-        if (raw == null) return out;
-        for (String part : raw.split(",")) {
-            String t = part.trim();
-            if (!t.isEmpty()) out.add(t);
-        }
-        return out;
-    }
-
     @McpTool(path = "/add_function_tag", method = "POST",
              description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and created on the fly (give a new tag a description with tag_comments). Replaces batch_add_function_tags and create_function_tag.",
              category = "function", access = ToolAccess.WRITE)
@@ -3859,7 +3849,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             return batchAddFunctionTags(assignments, tagComments, program);
         }
         if (func == null) return Response.err("function is required (or pass assignments[] for bulk)");
-        List<String> tagNames = splitTagList(tagsCsv);
+        List<String> tagNames = ServiceUtils.csvTokens(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
 List<String> added = new ArrayList<>();
@@ -3924,7 +3914,7 @@ List<String> added = new ArrayList<>();
             return batchRemoveFunctionTags(assignments, program);
         }
         if (func == null) return Response.err("function is required (or pass assignments[] for bulk)");
-        List<String> tagNames = splitTagList(tagsCsv);
+        List<String> tagNames = ServiceUtils.csvTokens(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
 Set<String> currentBefore = new HashSet<>();
@@ -4082,7 +4072,7 @@ Set<String> currentBefore = new HashSet<>();
                         continue;
                     }
                     Function func = lookup.function();
-                    List<String> names = splitTagList(tagsCsv);
+                    List<String> names = ServiceUtils.csvTokens(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");
                         row.put("error", "missing/empty tags field");
@@ -4149,7 +4139,7 @@ Set<String> currentBefore = new HashSet<>();
                         continue;
                     }
                     Function func = lookup.function();
-                    List<String> names = splitTagList(tagsCsv);
+                    List<String> names = ServiceUtils.csvTokens(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");
                         row.put("error", "missing/empty tags field");
