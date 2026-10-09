@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Changed — empty boolean env values mean unset
+
+`GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to
+parse as false because `""` sat in the falsey set. Empty or whitespace now means unset and
+keeps the key's default — the same rule `GHIDRA_MCP_LAZY` already used. Known
+`1/true/yes/on` and `0/false/no/off` spellings are unchanged; each caller still chooses how
+unknown non-empty values behave (default / error / warn) through one `parse_bool` helper.
+
 ### Changed — deploy tiers treat `success: false` / `status: rejected` as failures
 
 `_ensure_mcp_ok` (every post-deploy tier that checks an MCP response) used to fail only on

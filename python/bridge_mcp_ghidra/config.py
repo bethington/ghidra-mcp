@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Literal
 
 from mcp.types import ToolAnnotations
 
@@ -164,3 +165,44 @@ STATIC_TOOL_NAMES = set(MANAGEMENT_TOOL_NAMES)
 
 # Core groups always loaded on connect (essential for basic RE workflow)
 CORE_GROUPS = {"listing", "function", "program"}
+
+
+# ==========================================================================
+# Boolean env / flag parsing
+# ==========================================================================
+# Shared by debugger gating, lazy-mode env, and registry dry-run flags. Empty or
+# whitespace means unset (return default); callers pick on_unknown policy.
+
+_TRUE = frozenset({"1", "true", "yes", "on"})
+_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def parse_bool(
+    raw: str,
+    *,
+    default: bool,
+    on_unknown: Literal["default", "error", "warn"] = "default",
+) -> bool:
+    """Parse a boolean env/flag spelling.
+
+    Empty or whitespace means unset and returns ``default``. Callers keep their
+    prior policy for unrecognised non-empty values via ``on_unknown``.
+    """
+    v = raw.strip().lower()
+    if not v:
+        return default
+    if v in _TRUE:
+        return True
+    if v in _FALSE:
+        return False
+    allowed = ",".join(sorted(_TRUE | _FALSE))
+    if on_unknown == "error":
+        raise ValueError(f"{raw!r} is not one of true/false/1/0/yes/no/on/off")
+    if on_unknown == "warn":
+        logging.getLogger(__name__).warning(
+            "Ignoring boolean value %r: expected one of %s. Using default %s.",
+            raw,
+            allowed,
+            default,
+        )
+    return default
