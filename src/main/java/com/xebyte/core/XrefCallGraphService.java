@@ -300,10 +300,9 @@ public class XrefCallGraphService {
         }
 
         if (matches.isEmpty()) {
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "removed", 0,
-                    "message", "No reference found from " + fromAddr + " to " + toAddr));
+            return Response.success(
+                    "No reference found from " + fromAddr + " to " + toAddr,
+                    JsonHelper.mapOf("removed", 0));
         }
 
         try {

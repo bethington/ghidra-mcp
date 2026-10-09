@@ -8,6 +8,13 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Changed — write success envelopes go through `Response.success` (+ extras)
+
+Hand-built `{status:"success", message:…}` maps now use `Response.success` /
+`successWithWarnings`. `/rename_variable` always returns that one envelope;
+`warnings` is present only when non-empty. Structured extras still follow
+`status`/`message` (some tools previously put `message` last).
+
 ### Changed — structure / enum wrong-kind refusals use one quoted form
 
 `/get_struct_layout` and `/get_enum_values` used to say

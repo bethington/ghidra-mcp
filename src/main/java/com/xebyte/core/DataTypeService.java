@@ -359,8 +359,6 @@ public class DataTypeService {
                             + "...)"));
         }
 
-        int createdSize = 0;
-
         try {
             // Parse the fields JSON (simplified parsing for basic structure)
             // Expected format: [{"name":"field1","type":"int"},{"name":"field2","type":"char"}]
@@ -417,8 +415,9 @@ public class DataTypeService {
 
             // Create the structure through executeWrite: the server's write lock, with
             // transaction commit/rollback handled centrally.
+            final Response created;
             try {
-                createdSize = threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
+                created = threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
                     ghidra.program.model.data.StructureDataType struct =
                         new ghidra.program.model.data.StructureDataType(name, structInitSize);
 
@@ -439,7 +438,13 @@ public class DataTypeService {
                     // Add the structure to the data type manager
                     DataType createdStruct = dtm.addDataType(struct, null);
 
-                    return createdStruct.getLength();
+                    Map<String, Object> extras = new LinkedHashMap<>();
+                    extras.put("name", name);
+                    extras.put("field_count", fieldCount);
+                    extras.put("size", createdStruct.getLength());
+                    return Response.success("Successfully created structure '" + name + "' with "
+                            + fieldCount + " fields, total size: " + createdStruct.getLength() + " bytes",
+                            extras);
                 });
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -454,15 +459,7 @@ public class DataTypeService {
                 Thread.currentThread().interrupt();
             }
 
-            Map<String, Object> resultMap = new LinkedHashMap<>();
-            resultMap.put("status", "success");
-            resultMap.put("message", "Successfully created structure '" + name + "' with "
-                    + fieldCount + " fields, total size: " + createdSize + " bytes");
-            resultMap.put("name", name);
-            resultMap.put("field_count", fieldCount);
-            resultMap.put("size", createdSize);
-            return Response.ok(resultMap);
-
+            return created;
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             return Response.err(msg);
@@ -538,14 +535,10 @@ public class DataTypeService {
                         enumWarnings.addAll(NamingConventions.validateEnumMemberName(memberName));
                     }
 
-                    Map<String, Object> resultMap = new LinkedHashMap<>();
-                    resultMap.put("status", "success");
-                    resultMap.put("message", "Successfully created enumeration '" + name + "' with " + values.size() +
-                                   " values, size: " + size + " bytes");
-                    if (!enumWarnings.isEmpty()) {
-                        resultMap.put("warnings", enumWarnings);
-                    }
-                    return Response.ok(resultMap);
+                    return Response.successWithWarnings(
+                            "Successfully created enumeration '" + name + "' with " + values.size() +
+                                   " values, size: " + size + " bytes",
+                            enumWarnings);
                 });
             } catch (Exception e) {
                 return Response.err("Error creating enumeration: " + e.getMessage());
@@ -610,14 +603,14 @@ public class DataTypeService {
                 dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
                 return new UnionCreateOutcome(union.getNumComponents(), fieldsAdded, fieldsSkipped);
             });
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Union '" + name + "' created successfully with " + outcome.componentCount() + " fields");
-            out.put("name", name);
-            out.put("fields_added", outcome.fieldsAdded());
-            if (!outcome.fieldsSkipped().isEmpty()) out.put("fields_skipped", outcome.fieldsSkipped());
-            out.put("field_count", outcome.componentCount());
-            return Response.ok(out);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("name", name);
+            extras.put("fields_added", outcome.fieldsAdded());
+            if (!outcome.fieldsSkipped().isEmpty()) extras.put("fields_skipped", outcome.fieldsSkipped());
+            extras.put("field_count", outcome.componentCount());
+            return Response.success(
+                    "Union '" + name + "' created successfully with " + outcome.componentCount() + " fields",
+                    extras);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -655,11 +648,9 @@ public class DataTypeService {
                 dtm.addDataType(cloned, DataTypeConflictHandler.REPLACE_HANDLER);
                 return null;
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Data type '" + sourceType + "' cloned as '" + newName + "'",
-                    "source_type", sourceType,
-                    "new_name", newName));
+            return Response.success(
+                    "Data type '" + sourceType + "' cloned as '" + newName + "'",
+                    JsonHelper.mapOf("source_type", sourceType, "new_name", newName));
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -717,16 +708,16 @@ public class DataTypeService {
                 }
                 return dtm.addDataType(built, DataTypeConflictHandler.REPLACE_HANDLER).getName();
             });
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("kind", derived);
-            out.put("name", createdName);
-            out.put("base_type", baseType);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("kind", derived);
+            extras.put("name", createdName);
+            extras.put("base_type", baseType);
             if (derived.equals("array")) {
-                out.put("length", length);
+                extras.put("length", length);
             }
-            out.put("message", "Created " + derived + " type '" + createdName + "' on '" + baseType + "'");
-            return Response.ok(out);
+            return Response.success(
+                    "Created " + derived + " type '" + createdName + "' on '" + baseType + "'",
+                    extras);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -808,14 +799,14 @@ public class DataTypeService {
                 DataType addedFuncDef = dtm.addDataType(funcDef, DataTypeConflictHandler.REPLACE_HANDLER);
                 return new FunctionSignatureOutcome(addedFuncDef.getName(), paramCount, warnings);
             });
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Successfully created function signature: " + outcome.createdName());
-            out.put("name", outcome.createdName());
-            out.put("return_type", returnType);
-            out.put("parameter_count", outcome.paramCount());
-            if (!outcome.warnings().isEmpty()) out.put("warnings", outcome.warnings());
-            return Response.ok(out);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("name", outcome.createdName());
+            extras.put("return_type", returnType);
+            extras.put("parameter_count", outcome.paramCount());
+            if (!outcome.warnings().isEmpty()) extras.put("warnings", outcome.warnings());
+            return Response.success(
+                    "Successfully created function signature: " + outcome.createdName(),
+                    extras);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -969,23 +960,23 @@ public class DataTypeService {
                                                      expectedSize, actualSize, addr.toString()));
                     }
 
-                    Map<String, Object> out = new LinkedHashMap<>();
-                    out.put("status", "success");
-                    out.put("message", "Successfully applied data type '" + typeName + "' at "
-                            + addr.toString() + " (size: " + actualSize + " bytes)");
-                    out.put("type_name", typeName);
-                    out.put("address", addr.toString());
-                    out.put("size", actualSize);
+                    Map<String, Object> extras = new LinkedHashMap<>();
+                    extras.put("type_name", typeName);
+                    extras.put("address", addr.toString());
+                    extras.put("size", actualSize);
 
                     // Add value information if available
                     if (data != null && data.getValue() != null) {
-                        out.put("value", data.getValue().toString());
+                        extras.put("value", data.getValue().toString());
                     }
                     if (!enforcementWarnings.isEmpty()) {
-                        out.put("warnings", enforcementWarnings);
+                        extras.put("warnings", enforcementWarnings);
                     }
 
-                    return Response.ok(out);
+                    return Response.success(
+                            "Successfully applied data type '" + typeName + "' at "
+                            + addr.toString() + " (size: " + actualSize + " bytes)",
+                            extras);
                 });
             } catch (Exception e) {
                 return Response.err("Error applying data type: " + e.getMessage());
@@ -1037,10 +1028,9 @@ public class DataTypeService {
                 }
                 return null;
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Data type '" + typeName + "' deleted successfully",
-                    "type_name", typeName));
+            return Response.success(
+                    "Data type '" + typeName + "' deleted successfully",
+                    JsonHelper.mapOf("type_name", typeName));
         } catch (Refusal r) {
             errorMessage = r.getMessage();
         } catch (Exception e) {
@@ -1138,14 +1128,14 @@ public class DataTypeService {
 
                 return null;
             });
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Successfully modified field '" + fieldName + "' in structure '" + structName + "'");
-            out.put("struct_name", structName);
-            out.put("field_name", fieldName);
-            if (newType != null && !newType.isEmpty()) out.put("new_type", newType);
-            if (newName != null && !newName.isEmpty()) out.put("new_name", newName);
-            return Response.ok(out);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("struct_name", structName);
+            extras.put("field_name", fieldName);
+            if (newType != null && !newType.isEmpty()) extras.put("new_type", newType);
+            if (newName != null && !newName.isEmpty()) extras.put("new_name", newName);
+            return Response.success(
+                    "Successfully modified field '" + fieldName + "' in structure '" + structName + "'",
+                    extras);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1201,12 +1191,10 @@ public class DataTypeService {
                         + oldLen + " to " + struct.getLength() + " bytes";
                 return new ResizeStructOutcome(oldLen, message);
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
+            return Response.success(outcome.message(), JsonHelper.mapOf(
                     "name", name,
                     "old_size", outcome.oldSize(),
-                    "new_size", newSize,
-                    "message", outcome.message()));
+                    "new_size", newSize));
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (IllegalArgumentException e) {
@@ -1601,14 +1589,14 @@ public class DataTypeService {
 
                 return null;
             });
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Successfully added field '" + finalFieldName + "' to structure '" + structName + "'");
-            out.put("struct_name", structName);
-            out.put("field_name", finalFieldName);
-            out.put("field_type", fieldType);
-            if (offset >= 0) out.put("offset", offset);
-            return Response.ok(out);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("struct_name", structName);
+            extras.put("field_name", finalFieldName);
+            extras.put("field_type", fieldType);
+            if (offset >= 0) extras.put("offset", offset);
+            return Response.success(
+                    "Successfully added field '" + finalFieldName + "' to structure '" + structName + "'",
+                    extras);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1676,11 +1664,9 @@ public class DataTypeService {
                 struct.delete(targetOrdinal);
                 return null;
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully removed field '" + fieldName + "' from structure '" + structName + "'",
-                    "struct_name", structName,
-                    "field_name", fieldName));
+            return Response.success(
+                    "Successfully removed field '" + fieldName + "' from structure '" + structName + "'",
+                    JsonHelper.mapOf("struct_name", structName, "field_name", fieldName));
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1720,11 +1706,9 @@ public class DataTypeService {
 
                 return null;
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully moved data type '" + typeName + "' to category '" + categoryPath + "'",
-                    "type_name", typeName,
-                    "category_path", categoryPath));
+            return Response.success(
+                    "Successfully moved data type '" + typeName + "' to category '" + categoryPath + "'",
+                    JsonHelper.mapOf("type_name", typeName, "category_path", categoryPath));
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1792,11 +1776,9 @@ public class DataTypeService {
 
                 return null;
             });
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully renamed data type '" + oldName + "' to '" + newName + "'",
-                    "old_name", oldName,
-                    "new_name", newName));
+            return Response.success(
+                    "Successfully renamed data type '" + oldName + "' to '" + newName + "'",
+                    JsonHelper.mapOf("old_name", oldName, "new_name", newName));
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -2048,10 +2030,8 @@ public class DataTypeService {
                 CategoryPath catPath = new CategoryPath(categoryPath);
                 Category category = dtm.createCategory(catPath);
 
-                return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully created category: " + category.getCategoryPathName()
-                ));
+                return Response.success(
+                        "Successfully created category: " + category.getCategoryPathName());
             });
         } catch (Exception e) {
             return Response.err("Error creating category: " + e.getMessage());

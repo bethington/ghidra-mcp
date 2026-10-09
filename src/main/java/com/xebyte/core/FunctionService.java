@@ -55,9 +55,8 @@ public class FunctionService {
     private static final Pattern CALLING_CONV_PATTERN = Pattern.compile(
             "\\b(__cdecl|__stdcall|__thiscall|__fastcall|__vectorcall)\\b");
 
-    // Shorter cap for the no-retry scoring/analysis path. Chosen so that
-    // handlers with up to 4 sequential no-retry decompiles (e.g.
-    // /analyze_for_documentation -> nested
+    // Shorter cap for the no-retry scoring/analysis path. Chosen so that handlers with up to 4 sequential no-retry
+    // decompiles (e.g. /analyze_for_documentation -> nested
     // /analyze_function_completeness -> validateParameterTypeQuality fallback)
     // still finish under the 60s client-side HTTP timeout:
     //   4 * 12s = 48s < 60s client timeout. Pathological functions that
@@ -235,7 +234,7 @@ public class FunctionService {
         try {
             outcome = threadingStrategy.executeRead(() -> {
                 try {
-                    // Create new decompiler interface
+                            // Create new decompiler interface
                     DecompInterface decompiler = ServiceUtils.createConfiguredDecompiler(program);
 
                     try {
@@ -288,7 +287,7 @@ public class FunctionService {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "success");
-        out.put("address", func.getEntryPoint().toString(false));
+        out.put("address", func);
         out.put("name", outcome.functionName());
         out.put("decompiled", outcome.decompiledCode());
         return Response.ok(out);
@@ -645,10 +644,8 @@ Map<String, Object> out = new LinkedHashMap<>();
             if (renamed) {
                 String varType = finalHighSymbol.getDataType().getName();
                 String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
-                if (hungarianWarning != null) {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
-                }
-                return Response.success("Variable renamed");
+                List<String> warnings = hungarianWarning != null ? List.of(hungarianWarning) : List.of();
+                return Response.successWithWarnings("Variable renamed", warnings);
             }
         } catch (Exception e) {
             String errorMsg = "Rename failed: " + e.getMessage();
@@ -791,11 +788,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             });
             List<String> nameWarnings = new ArrayList<>(NamingConventions.validateFunctionName(newName, false));
             nameWarnings.addAll(enforcementWarnings);
-            Map<String, Object> data = JsonHelper.mapOf("status", "success", "message", text);
-            if (!nameWarnings.isEmpty()) {
-                data.put("warnings", nameWarnings);
-            }
-            return Response.ok(data);
+            return Response.successWithWarnings(text, nameWarnings);
         } catch (Exception e) {
             Msg.error(this, "Rename function failed", e);
             String text = "Error: Rename failed: " + e.getMessage();
@@ -987,7 +980,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") Function func,
+                               + "address is unambiguous.") Function functionAddress,
             @Param(value = "prototype", source = ParamSource.BODY,
                    description = "Full C signature as one string, e.g. "
                                + "int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed "
@@ -1001,7 +994,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "language. When set it OVERRIDES the convention written into the "
                                + "prototype string; omit to use whatever the prototype says.") String callingConvention,
             @Param(value = "program", defaultValue = "") Program program) {
-        PrototypeResult result = setFunctionPrototype(func, prototype, callingConvention, program);
+        PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, program);
         if (result.isSuccess()) {
             List<String> warnings = new ArrayList<>();
             // Warn about __thiscall ECX auto-param limitation
@@ -1018,16 +1011,17 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
             }
 
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Successfully set prototype for function at " + func.getEntryPoint().toString(false));
-            out.put("address", func.getEntryPoint().toString(false));
-            out.put("prototype", prototype);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("address", functionAddress.getEntryPoint().toString(false));
+            extras.put("prototype", prototype);
             if (callingConvention != null && !callingConvention.isEmpty()) {
-                out.put("calling_convention", callingConvention);
+                extras.put("calling_convention", callingConvention);
             }
-            if (!warnings.isEmpty()) out.put("warnings", warnings);
-            return Response.ok(out);
+            if (!warnings.isEmpty()) extras.put("warnings", warnings);
+            return Response.success(
+                    "Successfully set prototype for function at "
+                            + functionAddress.getEntryPoint().toString(false),
+                    extras);
         } else {
             return Response.err("Failed to set function prototype: " + result.getErrorMessage());
         }
@@ -1041,7 +1035,13 @@ Map<String, Object> out = new LinkedHashMap<>();
     boolean applyFunctionPrototype(Program program, Function func, String prototype,
                                       String callingConvention, StringBuilder errorMessage) {
         try {
-            Address addr = func.getEntryPoint();
+            Address addr = ServiceUtils.parseAddress(program, func.getEntryPoint().toString(false));
+            if (addr == null) {
+                String msg = ServiceUtils.getLastParseError();
+                errorMessage.append(msg);
+                Msg.error(this, msg);
+                return false;
+            }
             Msg.info(this, "Setting prototype for function " + func.getName() + ": " + prototype);
 
             // v3.0.1: Save existing plate comment before prototype change (which may wipe it)
@@ -1291,6 +1291,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                     + "Resolve to a concrete type: byte, ushort, int, uint, void *, etc.");
         }
 
+        Address addr = func.getEntryPoint();
+
         try {
             String text = threadingStrategy.executeWrite(program, "Set variable type", () -> {
                     DecompileResults results = decompileFunction(func, program);
@@ -1409,7 +1411,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
                 throw new Refusal(failMsg.toString());
             });
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            return Response.success(text);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1428,14 +1430,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") Function func,
+                               + "address is unambiguous.") Function functionAddress,
             @Param(value = "parameter_name", source = ParamSource.BODY, aliases = {"parameterName"}) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
             @Param(value = "program", defaultValue = "") Program program) {
         if ("this".equals(parameterName)) {
-            return setFunctionThisType(func, newType, program);
+            return setFunctionThisType(functionAddress, newType, program);
         }
-        return setLocalVariableType(func, parameterName, newType, program);
+        return setLocalVariableType(functionAddress, parameterName, newType, program);
     }
 
     /**
@@ -1531,7 +1533,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         + "; 'this' types as " + resolvedName
                         + " (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.";
             });
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            return Response.success(text);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -1566,7 +1568,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Function name or any address within the function that owns the variable. Accepts 0x<hex> "
                                + "(default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use "
                                + "get_address_spaces first on targets that are not "
-                               + "address-space-agnostic.") Function func,
+                               + "address-space-agnostic.") Function functionAddress,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"},
                    description = "Local or parameter to retype, named exactly as the decompiler shows it "
                                + "(get_functions fields=parameters,locals lists them). The literal value 'this' is "
@@ -1579,9 +1581,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "is auto-suffixed with ' *'.") String newType,
             @Param(value = "program", defaultValue = "") Program program) {
         if ("this".equals(variableName)) {
-            return setFunctionThisType(func, newType, program);
+            return setFunctionThisType(functionAddress, newType, program);
         }
-        return setLocalVariableType(func, variableName, newType, program);
+        return setLocalVariableType(functionAddress, variableName, newType, program);
     }
 
     static DataType resolveThisPointerType(DataTypeManager dtm, String thisType) {
@@ -1856,6 +1858,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         if (func == null) {
             return Response.err("Function address is required");
         }
+        // Input validation
 
         record NoReturnOutcome(String message, NoReturnUpdateResult verified) {}
 
@@ -1875,9 +1878,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName() + " at " + func.getEntryPoint().toString(false));
                 return new NoReturnOutcome(text, verified);
             });
-            return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", outcome.message(),
+            return Response.success(outcome.message(), JsonHelper.mapOf(
                 "function_no_return", outcome.verified().functionNoReturn(),
                 "terminal_no_return", outcome.verified().terminalNoReturn()));
         } catch (Refusal r) {
@@ -1950,7 +1951,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                          " (previous override: " + oldOverride + ")");
                 return msg;
             });
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            return Response.success(text);
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
@@ -2475,7 +2476,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") Function func,
+                               + "address is unambiguous.") Function functionAddress,
             @Param(value = "function_name", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional new name for the function; leave empty to keep the current "
                                + "one. Unlike rename_function this writes the name directly and does NOT "
@@ -2517,12 +2518,12 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                 // Rename function
                 if (functionName != null && !functionName.isEmpty()) {
-                    func.setName(functionName, SourceType.USER_DEFINED);
+                    functionAddress.setName(functionName, SourceType.USER_DEFINED);
                 }
 
                 // Rename parameters
                 if (parameterRenames != null && !parameterRenames.isEmpty()) {
-                    Parameter[] params = func.getParameters();
+                    Parameter[] params = functionAddress.getParameters();
                     for (Parameter param : params) {
                         String newName = parameterRenames.get(param.getName());
                         if (newName != null && !newName.isEmpty()) {
@@ -2534,7 +2535,7 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                 // Rename local variables
                 if (localRenames != null && !localRenames.isEmpty()) {
-                    Variable[] locals = func.getLocalVariables();
+                    Variable[] locals = functionAddress.getLocalVariables();
                     for (Variable local : locals) {
                         String newName = localRenames.get(local.getName());
                         if (newName != null && !newName.isEmpty()) {
@@ -2545,7 +2546,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
 
                 if (finalReturnType != null) {
-                    func.setReturnType(finalReturnType, SourceType.USER_DEFINED);
+                    functionAddress.setReturnType(finalReturnType, SourceType.USER_DEFINED);
                 }
 
                 return new BatchComponentRenameOutcome(paramsRenamed, localsRenamed);
@@ -3463,14 +3464,14 @@ Map<String, Object> out = new LinkedHashMap<>();
             category = "function", access = ToolAccess.WRITE)
     public Response setVariables(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                   description = "Function name or any address within the function (entry point address)") Function func,
+                   description = "Function name or any address within the function (entry point address)") Function functionAddress,
             @Param(value = "variables", source = ParamSource.BODY,
                    description = "JSON object mapping old variable names to {name, type} objects. "
                                + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
                                + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
             @Param(value = "program") Program program) {
 
-        if (func == null) {
+        if (functionAddress == null) {
             return Response.err("function is required");
         }
 
@@ -3556,6 +3557,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 List<String> warningsLocal = new ArrayList<>();
                 List<String> errorsLocal = new ArrayList<>();
 
+                Function func = functionAddress;
 
                     // Phase 1: Set types
                     for (Map.Entry<String, Map<String, String>> entry : variables.entrySet()) {
@@ -3728,6 +3730,8 @@ Map<String, Object> out = new LinkedHashMap<>();
      * This method uses decompilation but is more reliable for persistence.
      */
     public Response batchRenameVariablesIndividual(Function func, Map<String, String> variableRenames, Program program) {
+        Address addr = func.getEntryPoint();
+
         int variablesRenamed = 0;
         int variablesFailed = 0;
         final List<String> errors = new ArrayList<>();
@@ -3778,6 +3782,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
         return Response.ok(resultMap);
     }
+
     /**
      * True if a {@link #renameVariableInFunction} response reports a completed
      * rename. {@code warnings} is present only when non-empty.
