@@ -464,9 +464,8 @@ public class DataTypeService {
             final int structInitSize = requiredSize;
             final boolean hasOffsetsFinal = hasOffsets;
 
-            // Create the structure under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock
-            // (headless) with transaction commit/rollback handled centrally.
+            // Create the structure through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
             try {
                 createdSize = threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
                     ghidra.program.model.data.StructureDataType struct =
@@ -581,9 +580,8 @@ public class DataTypeService {
                 return Response.err("Enumeration with name '" + name + "' already exists");
             }
 
-            // Create the enumeration under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock (headless)
-            // with transaction commit/rollback handled centrally.
+            // Create the enumeration through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
             try {
                 return threadingStrategy.executeWrite(program, "Create Enumeration: " + name, () -> {
                     ghidra.program.model.data.EnumDataType enumDt =
@@ -1038,9 +1036,8 @@ public class DataTypeService {
                 if (evictionReject != null) return evictionReject;
             }
 
-            // Apply the data type under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock (headless)
-            // with transaction commit/rollback handled centrally.
+            // Apply the data type through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
             try {
                 return threadingStrategy.executeWrite(program, "Apply Data Type: " + typeName, () -> {
                     // Clear existing code/data if requested. Unconditional over the

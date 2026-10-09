@@ -25,6 +25,18 @@ opened inside `runOnUi` or `executeRead`.
 - **`rename_variables` keeps what its fallback renamed.** When the batch failed and it retried
   variable by variable, the outer rollback discarded those renames while reporting them done.
 
+### Fixed — batch completeness runs on the request thread
+
+`analyze_function_completeness(addresses=...)` queued each function on the Swing thread
+with `invokeLater` and waited up to 90 s for it: the work ran outside the server lock,
+froze the GUI while it ran, and a timed-out function kept running there after the call
+gave up on it. It now runs on the request thread like the single-function call, bounded by
+the decompiler's own timeout. A function that fails is an `{"error": ...}` entry in
+`results` as before; the `chunk_timeout:` / `chunk_error:` / `chunk_exception:` prefixes
+are gone. `SwingHopsOnlyWhereWindowsAreTest` keeps Swing-thread hops in the classes that
+drive windows. Error messages and comments that still named the Swing thread for work that
+no longer runs there say what failed instead (`Rename failed: ...`, `Write failed: ...`).
+
 ### Changed — tool bodies run on the request thread
 
 `ThreadingStrategy.runOnUi` promised the Swing thread but ran on the caller on both servers,

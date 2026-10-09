@@ -269,8 +269,8 @@ public class MemoryBlockContentTest extends TestCase {
     }
 
     /**
-     * An initialized block is real database storage written on the Swing thread, so it
-     * gets a ceiling. An uninitialized block costs nothing per byte and keeps the
+     * An initialized block is real database storage written under the server's write lock,
+     * so it gets a ceiling. An uninitialized block costs nothing per byte and keeps the
      * pre-existing unrestricted behavior — mapping a multi-gigabyte MMIO aperture is
      * a legitimate thing this endpoint already supported.
      */
