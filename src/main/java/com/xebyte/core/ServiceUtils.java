@@ -1237,6 +1237,38 @@ public final class ServiceUtils {
     }
 
     /**
+     * Resolve {@code name} to a {@link Structure}, or refuse with a fixed message.
+     * Not-found: {@code Structure not found: X}. Wrong kind:
+     * {@code Data type 'X' is not a structure}.
+     */
+    public static Structure requireStructure(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Structure not found: " + name);
+        }
+        if (!(dt instanceof Structure)) {
+            throw new Refusal("Data type '" + name + "' is not a structure");
+        }
+        return (Structure) dt;
+    }
+
+    /**
+     * Resolve {@code name} to an enum, or refuse with a fixed message.
+     * Not-found: {@code Enumeration not found: X}. Wrong kind:
+     * {@code Data type 'X' is not an enumeration}.
+     */
+    public static ghidra.program.model.data.Enum requireEnum(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Enumeration not found: " + name);
+        }
+        if (!(dt instanceof ghidra.program.model.data.Enum)) {
+            throw new Refusal("Data type '" + name + "' is not an enumeration");
+        }
+        return (ghidra.program.model.data.Enum) dt;
+    }
+
+    /**
      * Search for a data type by name across all categories.
      */
     public static DataType searchByNameInAllCategories(DataTypeManager dtm, String name) {

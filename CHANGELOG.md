@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Changed — structure / enum wrong-kind refusals use one quoted form
+
+`/get_struct_layout` and `/get_enum_values` used to say
+`Data type is not a structure: X` / `Data type is not an enumeration: X` when the name
+resolved to the wrong kind. They now match the write tools:
+`Data type 'X' is not a structure` / `Data type 'X' is not an enumeration`. Not-found text
+is unchanged (`Structure not found: X` / `Enumeration not found: X`).
+
 ### Changed — the server resolves programs, addresses and functions before a tool runs
 
 Tool parameters are typed as what they name. `AnnotationScanner` reads the caller's string as
