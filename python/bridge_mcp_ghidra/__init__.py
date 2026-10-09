@@ -29,7 +29,6 @@ from . import dispatch  # noqa: F401
 from . import registry  # noqa: F401
 from . import static_tools  # noqa: F401
 from . import debugger  # noqa: F401
-from . import oracle  # noqa: F401
 from . import cli  # noqa: F401
 
 # --- Public re-exports (backwards-compatible flat API) --------------------
@@ -38,8 +37,6 @@ from .config import (  # noqa: F401
     CORE_GROUPS,
     DEBUGGER_URL,
     DEBUGGER_TOOL_NAMES,
-    ORACLE_TOOL_NAMES,
-    ORACLE_URL,
     DEFAULT_TCP_PORT,
     DEFAULT_TCP_URL,
     ENDPOINT_TIMEOUTS,
@@ -112,18 +109,6 @@ from .static_tools import (  # noqa: F401
     load_tool_group,
     search_tools,
     unload_tool_group,
-)
-from .oracle import (  # noqa: F401
-    _ORACLE_ACTIVE,
-    _oracle_enabled,
-    _oracle_request,
-    _oracle_tool,
-    _calling_enabled,
-    oracle_call_function,
-    oracle_modules,
-    oracle_prove_function,
-    oracle_read_memory,
-    oracle_status,
 )
 from .debugger import (  # noqa: F401
     _DEBUGGER_ACTIVE,

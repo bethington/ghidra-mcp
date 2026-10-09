@@ -101,7 +101,7 @@ sz[Category]_[Description][Suffix]
 | Menu labels (Options, Previous) | `szMenu_` | `szMenu_Options` |
 | Option names (Gamma, Contrast) | `szOpt_` | `szOpt_LightQuality` |
 | UI element names | `szUI_` | `szUI_MiniPanel` |
-| Window/dialog titles | `szTitle_` | `szTitle_DiabloII` |
+| Window/dialog titles | `szTitle_` | `szTitle_MainWindow` |
 | Screen identifiers | `szScreen_` | `szScreen_Screen01` |
 
 ### Format and Debug Strings
@@ -133,8 +133,8 @@ sz[Category]_[Description][Suffix]
 
 | Content Pattern | Category | Example Label |
 | ----------------- | ---------- | --------------- |
-| Battle.net strings | `szBnet_` | `szBnet_ChatPrefix` |
-| Server IPs/addresses | `szServer_` | `szServer_BnetIP1` |
+| Online-service strings | `szNet_` | `szNet_ChatPrefix` |
+| Server IPs/addresses | `szServer_` | `szServer_PrimaryIP` |
 | Chat commands (/whisper) | `szChat_` | `szChat_Whisper` |
 | Command strings | `szCmd_` | `szCmd_NoPickup` |
 
@@ -232,10 +232,9 @@ Default fallback                        -> szGame_ or szStr_
 | Tool | Purpose |
 | ------ | --------- |
 | `list_strings` | Retrieve all defined strings with addresses |
-| `create_label` | Apply labels efficiently in batches |
-| `create_label` | Apply single label |
+| `create_label` | Apply one label (`address`, `name`), or many in one call with `labels=[...]` |
 | `get_xrefs_to` | Analyze string usage context |
-| `decompile_function` | Understand how string is used |
+| `get_functions` | Understand how string is used |
 
 ---
 
@@ -250,7 +249,7 @@ labels = [
     {"address": "0x6fb7f5f0", "name": "szCRT_R6029_NetRuntimeError"},
     {"address": "0x6fb7f694", "name": "szCRT_R6028_HeapInitError"}
 ]
-# Use create_label(labels)
+# Use create_label(labels=labels)
 ```
 
 ---

@@ -64,7 +64,7 @@ ENVIRONMENT_COUPLED = {
     "project_info", "list_open_programs", "list_project_files", "list_instances",
     "mcp_instance_info", "mcp_health", "compare_programs_documentation",
     "merge_program_documentation", "tool_running_tools", "server_status",
-    "get_current_program_info", "analysis_status", "list_scripts",
+    "get_ui_cursor", "analysis_status", "list_scripts",
 }
 
 
@@ -109,7 +109,7 @@ class ProgramFacts:
 #    names for -- `function`, `limit`, `program` -- producing a structurally
 #    valid call that the endpoint correctly refuses.
 # 2. One name means different things in different tools. `pattern` is a type
-#    name for `/search_data_types` and a hex byte string for
+#    name for `/find_data_types` and a hex byte string for
 #    `/search_byte_patterns`; `source_type` is a Ghidra reference SourceType for
 #    `/add_memory_reference`, not a data type.
 #

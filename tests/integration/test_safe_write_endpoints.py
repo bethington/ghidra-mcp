@@ -39,13 +39,8 @@ def require_server_and_program(server_available, program_loaded):
 
 @pytest.fixture
 def first_function(http_client):
-    """Get the first function with its details.
-
-    /list_functions declares only `program` -- "List all functions (no
-    pagination)" -- so a `limit` sent here was dropped. The first match in the
-    full listing is what the regex below finds anyway.
-    """
-    response = http_client.get("/list_functions")
+    """Get the first function with its details."""
+    response = http_client.get("/find_functions", params={"limit": 1})
     if response.status_code != 200:
         pytest.skip("Cannot list functions")
 
@@ -63,7 +58,8 @@ def first_function(http_client):
 
     # Get function details
     details_response = http_client.get(
-        "/get_function_by_address", params={"address": address}
+        "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
     )
     if details_response.status_code != 200:
         pytest.skip("Cannot get function details")
@@ -73,12 +69,8 @@ def first_function(http_client):
 
 @pytest.fixture
 def first_named_function(http_client):
-    """Get the first function that has a non-default name.
-
-    /list_functions takes no `limit`; the whole listing is scanned and only
-    the first match is used.
-    """
-    response = http_client.get("/list_functions")
+    """Get the first function that has a non-default name."""
+    response = http_client.get("/find_functions", params={"limit": 50})
     if response.status_code != 200:
         pytest.skip("Cannot list functions")
 
@@ -103,26 +95,35 @@ def first_named_function(http_client):
 @pytest.fixture
 def first_data_item(http_client):
     """Get the first defined data item."""
-    response = http_client.get("/list_data_items", params={"limit": 1})
+    response = http_client.get(
+        "/list_program_items", params={"kind": "data_items", "limit": 1}
+    )
     if response.status_code != 200:
         pytest.skip("Cannot list data items")
 
-    text = response.text
-    # Match address with or without 0x prefix
-    match = re.search(
-        r'(?:at\s+|"address"\s*:\s*"?|^)(?:0x)?([0-9a-fA-F]{6,})', text, re.MULTILINE
-    )
-    if not match:
+    payload = response.json()
+    items = payload.get("items") or []
+    if not items or not isinstance(items[0], dict):
         pytest.skip("No data items found")
-
-    return f"0x{match.group(1)}"
+    addr = items[0].get("address")
+    if not addr:
+        pytest.skip("No data items found")
+    addr_s = str(addr).strip()
+    if not addr_s.lower().startswith("0x"):
+        addr_s = f"0x{addr_s}"
+    return addr_s
 
 
 @pytest.fixture
 def first_label(http_client, first_function):
     """Get the first label in the first function."""
     response = http_client.get(
-        "/get_function_labels", params={"address": first_function["address"]}
+        "/get_functions",
+        params={
+            "address": first_function["address"],
+            "fields": "labels",
+            "include_call_context": "false",
+        },
     )
     if response.status_code != 200:
         pytest.skip("Cannot get function labels")
@@ -252,7 +253,8 @@ class TestSafeFunctionPrototype:
 
         # Get function details which includes prototype
         response = http_client.get(
-            "/get_function_by_address", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
         )
 
         if response.status_code != 200:
@@ -293,19 +295,19 @@ class TestSafeVariableOperations:
         address = first_function["address"]
 
         response = http_client.get(
-            "/get_function_variables", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "parameters,locals"},
         )
 
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
     def test_rename_variable_same_name(self, http_client, first_function):
         """Attempt to rename a variable to its current name."""
         address = first_function["address"]
 
-        # Get variables
         var_response = http_client.get(
-            "/get_function_variables", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "parameters,locals"},
         )
 
         if var_response.status_code != 200:
@@ -363,7 +365,7 @@ class TestSafeDataTypeOperations:
         """Search for a data type and get its size."""
         # Search for int types
         search_response = http_client.get(
-            "/search_data_types", params={"pattern": "int"}
+            "/find_data_types", params={"pattern": "int"}
         )
         assert search_response.status_code == 200
 
@@ -431,8 +433,8 @@ class TestSafeDocumentationOperations:
         document = get_response.json()
         document["target_address"] = address
         response = http_client.post(
-            "/apply_function_documentation",
-            json_data={"json_body": json.dumps(document)},
+            "/apply_documentation",
+            json_data=document,
         )
 
         assert response.status_code == 200, response.text
@@ -448,7 +450,8 @@ class TestSafeNoReturnAttribute:
 
         # Get function details to find no-return status
         response = http_client.get(
-            "/get_function_by_address", params={"address": address}
+            "/get_functions",
+            params={"address": address, "fields": "signature,entry_point"},
         )
 
         if response.status_code != 200:
@@ -591,14 +594,14 @@ class TestSafeHashOperations:
     #
     # The capability their author expected was a PERSISTENT hash index plus a
     # reverse hash -> function lookup. This server has neither. What it does
-    # have is /get_bulk_function_hashes, which computes the same hash for many
+    # have is /get_function_hash, which computes the same hash for many
     # functions in one call, so the two tests below ask the surviving surface
     # the same questions: does bulk hashing work, and does a function's own
     # hash identify it in that listing?
 
-    def test_get_bulk_function_hashes(self, http_client):
+    def test_get_function_hash_bulk(self, http_client):
         """Hash many functions in one call (the surviving bulk-hash surface)."""
-        response = http_client.get("/get_bulk_function_hashes", params={"limit": 10})
+        response = http_client.get("/get_function_hash", params={"limit": 10})
 
         assert response.status_code == 200, response.text
         functions = response.json()["functions"]
@@ -622,7 +625,7 @@ class TestSafeHashOperations:
         hash_value = hash_response.json()["hash"]
         assert hash_value, hash_response.text
 
-        bulk = http_client.get("/get_bulk_function_hashes", params={"limit": 200})
+        bulk = http_client.get("/get_function_hash", params={"limit": 200})
         assert bulk.status_code == 200, bulk.text
         by_address = {
             int(entry["address"], 16): entry["hash"]

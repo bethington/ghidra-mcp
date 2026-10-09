@@ -66,19 +66,22 @@ endpoint_smoke:
     assert:
       type: "nonempty"
 
-  - endpoint: "/list_imports"
+  - endpoint: "/list_program_items"
+    params: { kind: imports }
     assert:
       type: "lines"
       contains: ["ExitProcess", "GetCommandLineA"]
 
-  - endpoint: "/list_segments"
+  - endpoint: "/list_program_items"
+    params:
+      kind: segments
     assert:
       type: "lines"
       min_lines: 4
       contains: [".text", ".rdata", ".data"]
 
 skipped:
-  - endpoint: "/list_exports"
-    reason: "The EXE does export the same eleven functions, but /list_exports is already asserted against Benchmark.dll; duplicating it here would only re-test the same export directory writer"
+  - endpoint: "/list_program_items"
+    reason: "kind=exports: the EXE exports the same eleven functions, but that kind is already asserted against Benchmark.dll; duplicating it here would only re-test the same export directory writer"
   - endpoint: "/debugger/launch"
     reason: "Exercised by run_debugger_live_test, which needs a Ghidra GUI, dbgeng and ghidratrace -- not something a YAML assertion can stand in for"

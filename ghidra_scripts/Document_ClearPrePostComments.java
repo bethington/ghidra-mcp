@@ -6,9 +6,9 @@
 // Output: Removes PRE and POST comments only.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Clear PRE and POST comments (preserve EOL and PLATE)
-// @menupath Diablo 2.Documentation.Clear Pre Post Comments
+// @menupath GhidraMCP.Documentation.Clear Pre Post Comments
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

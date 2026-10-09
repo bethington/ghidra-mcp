@@ -457,6 +457,26 @@ public class AnnotationScannerOfflineTest extends TestCase {
         verify(program2, never()).endTransaction(anyInt(), eq(false));
     }
 
+    /**
+     * A tool whose effect is not a program transaction refuses dry_run before doing anything:
+     * the rollback cannot undo it. Found live: checkin_program(dry_run=true) checked in for real.
+     */
+    public void testDryRunIsRefusedByAToolThatCannotBeRolledBack() throws Exception {
+        DryRunWriteFixture fixture = new DryRunWriteFixture();
+        ProgramProvider provider = mock(ProgramProvider.class);
+        AnnotationScanner fixtureScanner = new AnnotationScanner(provider, new Object[] { fixture });
+        EndpointDef endpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_file_write".equals(ep.path())) endpoint = ep;
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("dry_run", Boolean.TRUE);
+        Response r = endpoint.handler().handle(new HashMap<>(), body);
+        assertTrue(r.toJson(), r instanceof Response.Err);
+        assertTrue(r.toJson(), ((Response.Err) r).message().contains("dry_run is not supported"));
+        assertFalse("nothing may run", fixture.fileWritten);
+    }
+
     /** Tiny fixture service scanned by {@link #testDryRunHonoredFromJsonBody}. */
     static class DryRunWriteFixture {
         volatile boolean invoked;
@@ -467,6 +487,16 @@ public class AnnotationScannerOfflineTest extends TestCase {
                 @Param(value = "program", defaultValue = "") String program) {
             invoked = true;
             return Response.ok("wrote");
+        }
+
+        volatile boolean fileWritten;
+
+        @McpTool(dryRun = false, path = "/test_file_write", method = "POST",
+                 description = "Fixture: a write whose effect is outside the program database")
+        public Response writeFile(
+                @Param(value = "program", defaultValue = "") String program) {
+            fileWritten = true;
+            return Response.ok("wrote a file");
         }
     }
 
@@ -516,10 +546,6 @@ public class AnnotationScannerOfflineTest extends TestCase {
                 }
             }
 
-            @Override
-            public boolean isHeadless() {
-                return true;
-            }
         };
 
         Program program = mock(Program.class);

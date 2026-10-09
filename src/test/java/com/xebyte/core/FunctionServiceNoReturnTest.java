@@ -29,10 +29,6 @@ public class FunctionServiceNoReturnTest {
             return action.call();
         }
 
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     }
 
     private static final class FunctionDouble {

@@ -237,7 +237,9 @@ class TestCreateMemoryBlockWithContent:
     def test_overlay_block_reports_its_own_address_space(self, http_client):
         """An overlay deliberately shadows existing memory, so the overlap
         guard must be skipped and the response must name the new space."""
-        listing = http_client.get("/list_segments", params={"limit": 1}).json()
+        listing = http_client.get(
+            "/list_program_items", params={"kind": "segments", "limit": 1}
+        ).json()
         segments = listing if isinstance(listing, list) else listing.get("segments") or []
         if not segments:
             pytest.skip("no segments to overlay")

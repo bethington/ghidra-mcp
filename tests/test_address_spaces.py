@@ -58,8 +58,20 @@ class TestSanitizeAddress:
     def test_plain_hex_lowercase(self):
         assert sanitize_address("0xABCD") == "0xabcd"
 
-    def test_plain_hex_adds_prefix(self):
-        assert sanitize_address("1000") == "0x1000"
+    def test_bare_hex_passes_through_for_the_server_to_parse(self):
+        assert sanitize_address("1000") == "1000"
+
+    # Name-or-address parameters: a function name must reach the server intact.
+    # The bridge used to prefix 0x and lowercase, so get_functions(function=
+    # "syna_helper_180001000") asked the server for "0xsyna_helper_180001000".
+    def test_function_name_is_not_rewritten(self):
+        assert sanitize_address("syna_helper_180001000") == "syna_helper_180001000"
+
+    def test_mixed_case_name_keeps_its_case(self):
+        assert sanitize_address("FUN_Decode") == "FUN_Decode"
+
+    def test_name_made_of_hex_letters_is_not_turned_into_an_address(self):
+        assert sanitize_address("add") == "add"
 
     # Overlay address forms (dotted / leading-dot names, :: separator)
     def test_overlay_double_colon_passes_through(self):
@@ -100,7 +112,7 @@ class TestSanitizeAddress:
     def test_plain_hex_with_no_colon_still_unaffected(self):
         # Regression guard: broadening the name class must NOT capture
         # colon-free hex strings (they have no ':' so the pattern can't match).
-        assert sanitize_address("deadbeef") == "0xdeadbeef"
+        assert sanitize_address("deadbeef") == "deadbeef"
         assert sanitize_address("0xCAFE") == "0xcafe"
 
 

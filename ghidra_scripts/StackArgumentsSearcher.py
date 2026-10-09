@@ -1,16 +1,16 @@
 #Stack Arguments Searcher
 #
-#This script identifies Diablo 2 functions with incorrect stack parameter counts by analyzing
+#This script identifies functions with incorrect stack parameter counts by analyzing
 #RET instructions (opcode C2). It compares the stack cleanup size in RET with the declared
 #parameter size and automatically adds missing undefined4 parameters to match the actual count.
 #Essential for fixing __stdcall and __fastcall functions where Ghidra misidentifies parameter counts.
 #Also ensures functions with custom variable storage use "unknown" calling convention.
 #
 #@author Ben Ethington
-#@category Diablo 2
+#@category GhidraMCP
 #@description Identifies functions with incorrect stack parameter counts using RET instruction analysis
 #@keybinding
-#@menupath Diablo II.Stack Arguments Searcher
+#@menupath GhidraMCP.Stack Arguments Searcher
 
 import json
 import time
@@ -57,8 +57,6 @@ def main():
     monitor.initialize(currentProgram.getFunctionManager().getFunctionCount())
     c = 0
     for func in currentProgram.functionManager.getFunctions(1): 
-        if "{}".format(func.getEntryPoint()) == "00681a48":
-            break
             
         if func.hasCustomVariableStorage():
             func.setCallingConvention("unknown")

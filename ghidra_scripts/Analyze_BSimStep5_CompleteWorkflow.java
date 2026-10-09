@@ -6,9 +6,9 @@
 // Output: Complete BSim analysis results with quality metrics and reports.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Run the complete automated BSim analysis pipeline
-// @menupath Diablo 2.Analysis.BSim Step 5 Complete Workflow
+// @menupath GhidraMCP.Analysis.BSim Step 5 Complete Workflow
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
@@ -180,7 +180,7 @@ public class Analyze_BSimStep5_CompleteWorkflow extends GhidraScript {
 
     private void processVersionFiltered() throws Exception {
         String versionFilter = askString("Version Filter",
-            "Enter version pattern to match (e.g., '1.14' or 'D2R'):");
+            "Enter version pattern to match (e.g., '1.2' or '2024'):");
 
         if (versionFilter == null || versionFilter.trim().isEmpty()) {
             println("No version filter specified, operation cancelled.");

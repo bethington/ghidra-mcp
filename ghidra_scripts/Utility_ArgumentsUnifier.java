@@ -6,9 +6,9 @@
 // Output: Converts all parameter types to fixed-width equivalents.
 //
 // @author Ben Ethington
-// @category Diablo 2.Utility
+// @category GhidraMCP.Utility
 // @description Standardize parameters to fixed-width types
-// @menupath Diablo 2.Utility.Arguments Unifier
+// @menupath GhidraMCP.Utility.Arguments Unifier
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.services.DataTypeManagerService;
@@ -90,7 +90,6 @@ public class Utility_ArgumentsUnifier extends GhidraScript {
                 monitor.checkCanceled();
                 Function func = funcIter.next();
 
-                if (func.getEntryPoint().toString().equals("00681a48")) break;
 
                 monitor.incrementProgress(1);
                 monitor.setShowProgressValue(true);

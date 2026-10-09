@@ -6,11 +6,18 @@
 
 > **This is a dated measurement, not a live figure.** Every count and token
 > total below was measured against the 251-endpoint catalog this document was
-> generated from. The catalog stands at **253** today — see
+> generated from. The catalog stands at **209** today — see
 > [`tests/endpoints.json`](../tests/endpoints.json), which is authoritative.
 > The figures here have deliberately not been re-labelled: the token totals
 > were measured against that catalog, and re-running the measurement is what
 > would change them.
+>
+> Checked 2026-10-07: these figures predate the 7.0.0 tool consolidation,
+> which merged dozens of single-purpose readers into `get_functions`,
+> `find_functions` and `list_program_items`. They were not re-measured because
+> the scripts count with `tiktoken`, which is not a project dependency; without
+> it they fall back to a characters-divided-by-four estimate that cannot be
+> compared with the totals below.
 
 ---
 

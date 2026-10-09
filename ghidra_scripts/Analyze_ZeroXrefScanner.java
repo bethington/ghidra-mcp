@@ -6,9 +6,9 @@
 // Output: Console listing of all zero-xref functions with sizes.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Scan current program for zero-xref functions
-// @menupath Diablo 2.Analysis.Zero Xref Scanner
+// @menupath GhidraMCP.Analysis.Zero Xref Scanner
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

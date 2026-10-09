@@ -241,17 +241,38 @@ PRESENT_TENSE_SURFACES = [
     ".github/ISSUE_TEMPLATE/feature_request.yml",
 ]
 
+def _default_group_count() -> int:
+    """Endpoints in the tool groups the bridge loads by default under --lazy.
+
+    Derived, never restated: README and ROADMAP said 84 for this long after the
+    consolidation took it to 67, and the exemption below pinned the stale 84 as
+    a literal, so it guarded the wrong number in both directions.
+    """
+    sys.path.insert(0, str(PROJECT_ROOT / "python"))
+    from bridge_mcp_ghidra.config import CORE_GROUPS
+
+    data = json.loads((PROJECT_ROOT / "tests" / "endpoints.json").read_text(encoding="utf-8"))
+    entries = data["endpoints"] if isinstance(data, dict) else data
+    return sum(1 for e in entries if e.get("category") in CORE_GROUPS)
+
+
 #: Numbers next to "tools"/"endpoints" in the surfaces above that are
 #: legitimately NOT catalog counts. A ratchet in both directions: an entry that
 #: stops matching fails, so the list cannot outlive the sentence it excuses.
 #: (file, number, reason)
 NON_CATALOG_COUNTS: list[tuple[str, int, str]] = [
     ("README.md", 4, "the minimum viable read-only tool allowlist, not a catalog size"),
-    ("README.md", 84, "endpoints in the three default tool groups loaded under --lazy"),
-    ("ROADMAP.md", 84, "endpoints in the three default tool groups loaded under --lazy"),
+    ("README.md", _default_group_count(), "endpoints in the three default tool groups loaded under --lazy"),
+    ("ROADMAP.md", _default_group_count(), "endpoints in the three default tool groups loaded under --lazy"),
     ("CLAUDE.md", 5, "REST endpoints on the optional external re-kb archive service"),
     ("CLAUDE.md", 22, "debugger proxy tools in the bridge, not catalog endpoints"),
+    ("CLAUDE.md", 27, "historical category-drift example in the match-change table"),
     ("ROADMAP.md", 272, "the pre-consolidation surface; a statement about the past"),
+    (
+        "CLAUDE.md",
+        27,
+        "tools whose category taxonomy understated them; a measured past figure",
+    ),
 ]
 
 _COUNT_NEAR_NOUN = re.compile(

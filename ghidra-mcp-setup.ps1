@@ -79,7 +79,7 @@ function Show-Usage {
     Write-Host "  -NoAutoPrereqs   Disable automatic prerequisite setup during deploy"
     Write-Host "  -SkipBuild       Deploy existing artifact without rebuilding"
     Write-Host "  -SkipRestart     Do not restart Ghidra after deployment"
-    Write-Host "  -AutoOpen        Auto-open program on restart (e.g., 'F:\GhidraProjects\diablo2|/LoD/1.00/D2Common.dll')"
+    Write-Host "  -AutoOpen        Auto-open program on restart (e.g., 'F:\GhidraProjects\MyProject|/MyProduct/v1.0/engine.dll')"
     Write-Host "  -ServerPassword  Auto-fill Ghidra server password dialog on startup"
     Write-Host "  -Force           Reinstall dependencies even if already present"
     Write-Host "  -DryRun          Print actions without executing commands"
@@ -1207,8 +1207,8 @@ Write-LogInfo "Usage:"
 Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
 Write-Host "   Python: uv run bridge-mcp-ghidra (from the project root), or 'python -m bridge_mcp_ghidra'"
 if ($InstallDebuggerDeps) {
-    Write-Host "   Debugger: server lives in the d2-game-exe repo; start it there,"
-    Write-Host "             then set GHIDRA_DEBUGGER_URL to register the proxy tools"
+    Write-Host "   Debugger: start your external debugger server, then set"
+    Write-Host "             GHIDRA_DEBUGGER_URL (or GHIDRA_DEBUGGER_TOOLS=1) to register the proxy tools"
 }
 Write-Host ""
 Write-LogInfo "Default Server: http://127.0.0.1:8089/"
@@ -1247,7 +1247,7 @@ if (Test-Path $destinationPath) {
         # If AutoOpen specified, inject RUNNING_TOOL into projectState before launch.
         # This makes Ghidra restore CodeBrowser with the target program on startup.
         # Format: "ProjectDir\ProjectName|/folder/file"
-        # Example: "F:\GhidraProjects\diablo2|/LoD/1.00/D2Common.dll"
+        # Example: "F:\GhidraProjects\MyProject|/MyProduct/v1.0/engine.dll"
         if ($AutoOpen -and $AutoOpen.Contains("|")) {
             $parts = $AutoOpen.Split("|", 2)
             $projectPath = $parts[0]

@@ -30,14 +30,67 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
+    /**
+     * The many-at-once form of {@link #getXrefsTo}: a map from each requested address to its
+     * references. Was a separate POST tool (get_bulk_xrefs) answering the exact same question
+     * with getReferencesTo, which meant a caller had to know two tools and two response shapes
+     * to ask "who references this" about one address versus five.
+     *
+     * <p>An address that fails to resolve yields an empty list rather than failing the call —
+     * the batch is the point, and one bad entry should not lose the other ninety-nine.
+     */
+    private Response xrefsToMany(Program program, String addressesCsv) {
+        ReferenceManager refMgr = program.getReferenceManager();
+        boolean qualify = ServiceUtils.getPhysicalSpaceCount(program) > 1;
+        Map<String, Object> byAddress = new LinkedHashMap<>();
+        for (String raw : addressesCsv.split(",")) {
+            String addrStr = raw.trim();
+            if (addrStr.isEmpty()) continue;
+            List<Map<String, Object>> refs = new ArrayList<>();
+            Address addr = ServiceUtils.parseAddress(program, addrStr);
+            if (addr != null) {
+                ReferenceIterator it = refMgr.getReferencesTo(addr);
+                while (it.hasNext()) {
+                    Reference ref = it.next();
+                    Address from = ref.getFromAddress();
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("from_address", from.toString(false));
+                    if (qualify) {
+                        entry.put("from_address_full", from.toString());
+                        entry.put("from_address_space", from.getAddressSpace().getName());
+                    }
+                    entry.put("type", ref.getReferenceType().getName());
+                    Function fromFunc = program.getFunctionManager().getFunctionContaining(from);
+                    if (fromFunc != null) {
+                        entry.put("from_function", fromFunc.getName());
+                    }
+                    refs.add(entry);
+                }
+            }
+            byAddress.put(addrStr, refs);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("references_by_address", byAddress);
+        out.put("count", byAddress.size());
+        return Response.ok(out);
+    }
+
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to ONE address, or to MANY at once "
+        + "(addresses=comma-separated), which returns a map keyed by the address you asked for. "
+        + "Replaces the former get_bulk_xrefs. On programs with multiple address spaces (e.g., embedded "
+        + "targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+        category = "xref", access = ToolAccess.READ_ONLY)
     public Response getXrefsTo(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
+            @Param(value = "addresses", defaultValue = "",
+                   description = "Comma-separated addresses for the many-at-once form. The result is a "
+                               + "map of address to its reference list, and an address that does not "
+                               + "resolve gets an empty list rather than failing the whole call.") String addressesCsv,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -50,7 +103,12 @@ public class XrefCallGraphService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (addressesCsv != null && !addressesCsv.isEmpty()) {
+            return xrefsToMany(program, addressesCsv);
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address (one) or addresses (comma-separated) is required");
+        }
 
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
@@ -87,7 +145,7 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
+    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getXrefsFrom(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -158,7 +216,7 @@ public class XrefCallGraphService {
                         + "pointers, missed jump/switch tables). Leaves the underlying bytes untouched and "
                         + "adds proper bidirectional navigation. On programs with multiple address spaces "
                         + "(e.g. embedded targets), prefix addresses with the space name (mem:1000).",
-            category = "xref")
+            category = "xref", access = ToolAccess.WRITE)
     public Response addMemoryReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from (the table slot / instruction). "
@@ -236,7 +294,7 @@ public class XrefCallGraphService {
                         + "reference on that operand. Removes both user-defined and analyzer-inferred "
                         + "references — the response reports each removed reference's source_type. "
                         + "On multi-space programs, prefix addresses with the space name (mem:1000).",
-            category = "xref")
+            category = "xref", access = ToolAccess.DESTRUCTIVE)
     public Response removeReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
@@ -324,167 +382,20 @@ public class XrefCallGraphService {
         return null;
     }
 
-    /**
-     * Get all references to a specific function by name
-     */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref")
-    public Response getFunctionXrefs(
-            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
-            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-            if (!resolved.isSuccess()) return Response.err("Function not found: " + functionName);
-            Function function = resolved.function();
-
-            List<Map<String, Object>> refs = new ArrayList<>();
-            FunctionManager funcManager = program.getFunctionManager();
-            Address entryPoint = function.getEntryPoint();
-            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
-
-            while (refIter.hasNext()) {
-                Reference ref = refIter.next();
-                Address fromAddr = ref.getFromAddress();
-                RefType refType = ref.getReferenceType();
-
-                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("from_address", fromAddr.toString(false));
-                entry.put("type", refType.getName());
-                if (fromFunc != null) {
-                    entry.put("from_function", fromFunc.getName());
-                }
-                refs.add(entry);
-            }
-
-            return ServiceUtils.paged("references", refs, offset, limit);
-        } catch (Exception e) {
-            return Response.err("Error getting function references: " + e.getMessage());
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Jump Target Methods
-    // -----------------------------------------------------------------------
-
-    /**
-     * Get all jump target addresses from a function's disassembly
-     */
-    public Response getFunctionJumpTargets(String functionName, int offset, int limit) {
-        return getFunctionJumpTargets(functionName, null, offset, limit, null);
-    }
-
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Accepts function name or address.", category = "xref")
-    public Response getFunctionJumpTargets(
-            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
-            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of entries to skip before this page starts; 0 begins at the "
-                               + "first entry. Page by adding `limit` each call until offset reaches the "
-                               + "`total` the response reports.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
-                               + "negative value for no limit; `total` in the response always reports the "
-                               + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        StringBuilder sb = new StringBuilder();
-        FunctionManager functionManager = program.getFunctionManager();
-
-        // Find the function by name or address
-        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-        if (!resolved.isSuccess()) {
-            return Response.err("Function not found: " + functionName);
-        }
-        Function function = resolved.function();
-
-        AddressSetView functionBody = function.getBody();
-        Listing listing = program.getListing();
-        Set<Address> jumpTargets = new HashSet<>();
-
-        // Iterate through all instructions in the function
-        InstructionIterator instructions = listing.getInstructions(functionBody, true);
-        while (instructions.hasNext()) {
-            Instruction instr = instructions.next();
-
-            // Check if this is a jump instruction
-            if (instr.getFlowType().isJump()) {
-                // Get all reference addresses from this instruction
-                Reference[] references = instr.getReferencesFrom();
-                for (Reference ref : references) {
-                    Address targetAddr = ref.getToAddress();
-                    // Only include targets within the function or program space
-                    if (targetAddr != null && program.getMemory().contains(targetAddr)) {
-                        jumpTargets.add(targetAddr);
-                    }
-                }
-
-                // Also check for fall-through addresses for conditional jumps
-                if (instr.getFlowType().isConditional()) {
-                    Address fallThroughAddr = instr.getFallThrough();
-                    if (fallThroughAddr != null) {
-                        jumpTargets.add(fallThroughAddr);
-                    }
-                }
-            }
-        }
-
-        // Convert to sorted list and apply pagination
-        List<Address> sortedTargets = new ArrayList<>(jumpTargets);
-        Collections.sort(sortedTargets);
-
-        // Build the full result set and let the envelope do the paging, so
-        // `total` reports every target rather than just this page.
-        List<Map<String, Object>> targets = new ArrayList<>();
-        for (Address target : sortedTargets) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("address", target.toString(false));
-            Function targetFunc = functionManager.getFunctionContaining(target);
-            if (targetFunc != null) {
-                entry.put("in_function", targetFunc.getName());
-            } else {
-                Symbol symbol = program.getSymbolTable().getPrimarySymbol(target);
-                if (symbol != null) {
-                    entry.put("label", symbol.getName());
-                }
-            }
-            targets.add(entry);
-        }
-
-        return ServiceUtils.paged("jump_targets", targets, offset, limit);
-    }
-
     // -----------------------------------------------------------------------
     // Callee/Caller Methods
     // -----------------------------------------------------------------------
 
     /**
-     * Get all functions called by the specified function (callees)
+     * Get all functions called by the specified function (callees).
+     * Kept for internal callers; agents use {@code /get_functions?fields=callees}.
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Accepts function name or address.", category = "xref")
     public Response getFunctionCallees(
-            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
-            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
+            @Param(value = "function", defaultValue = "",
+                   aliases = {"name", "address", "function_name", "function_address"},
+                   description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
+                               + "One parameter for both: the resolver tries the address form first, "
+                               + "then an exact function name.") String functionRef,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -504,10 +415,8 @@ public class XrefCallGraphService {
         FunctionManager functionManager = program.getFunctionManager();
 
         // Find the function by name or address
-        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-        if (!resolved.isSuccess()) {
-            return Response.err("Function not found: " + functionName);
-        }
+        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (resolved.hasError()) return resolved.error();
         Function function = resolved.function();
 
         Set<Function> callees = new HashSet<>();
@@ -552,12 +461,15 @@ public class XrefCallGraphService {
     }
 
     /**
-     * Get all functions that call the specified function (callers)
+     * Get all functions that call the specified function (callers).
+     * Kept for internal callers; agents use {@code /get_functions?fields=callers}.
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Accepts function name or address.", category = "xref")
     public Response getFunctionCallers(
-            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
-            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
+            @Param(value = "function", defaultValue = "",
+                   aliases = {"name", "address", "function_name", "function_address"},
+                   description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
+                               + "One parameter for both: the resolver tries the address form first, "
+                               + "then an exact function name.") String functionRef,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -578,10 +490,8 @@ public class XrefCallGraphService {
 
         // Find the function by name or address
         Function targetFunction = null;
-        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-        if (!resolved.isSuccess()) {
-            return Response.err("Function not found: " + functionName);
-        }
+        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (resolved.hasError()) return resolved.error();
         targetFunction = resolved.function();
 
         Set<Function> callers = new HashSet<>();
@@ -617,10 +527,13 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Accepts function name or address.", category = "xref")
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Accepts function name or address.", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFunctionCallGraph(
-            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
-            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
+            @Param(value = "function", defaultValue = "",
+                   aliases = {"name", "address", "function_name", "function_address"},
+                   description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
+                               + "One parameter for both: the resolver tries the address form first, "
+                               + "then an exact function name.") String functionRef,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
             @Param(value = "program", defaultValue = "",
@@ -635,10 +548,8 @@ public class XrefCallGraphService {
 
         // Find the function by name or address
         Function rootFunction = null;
-        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
-        if (!resolved.isSuccess()) {
-            return Response.err("Function not found: " + functionName);
-        }
+        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
+        if (resolved.hasError()) return resolved.error();
         rootFunction = resolved.function();
 
         Set<String> visited = new HashSet<>();
@@ -690,8 +601,8 @@ public class XrefCallGraphService {
      */
     private static String resolveToGraphKey(Program program, String nameOrAddr) {
         if (nameOrAddr == null || nameOrAddr.isEmpty()) return nameOrAddr;
-        FunctionRef.Result r = FunctionRef.ofNameOrAddress(nameOrAddr, null).tryResolve(program);
-        return r.isSuccess() ? graphKey(r.function()) : nameOrAddr;
+        Function resolved = ServiceUtils.resolveFunction(program, nameOrAddr);
+        return resolved != null ? graphKey(resolved) : nameOrAddr;
     }
 
     private void buildCallGraphCallees(Function function, int depth, Set<String> visited,
@@ -784,7 +695,7 @@ public class XrefCallGraphService {
     /**
      * Get the complete call graph for the entire program
      */
-    @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref")
+    @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getFullCallGraph(
             @Param(value = "format", defaultValue = "edges", description = "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)") String format,
             @Param(value = "limit", defaultValue = "1000", description = "Max edges to return. 0 = unlimited.") int limit,
@@ -873,7 +784,7 @@ public class XrefCallGraphService {
         // Format output based on requested format
         if ("json_edges".equals(format)) {
             // Address-based JSON edge list — designed for automation tools
-            // (fun-doc call-graph traversal) that need stable identifiers.
+            // (e.g. external call-graph traversal) that need stable identifiers.
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("edge_count", addressEdges != null ? addressEdges.size() : 0);
             result.put("caller_count", callGraph.size());
@@ -946,7 +857,7 @@ public class XrefCallGraphService {
      * Enhanced call graph analysis with cycle detection and path finding
      * Provides advanced graph algorithms for understanding function relationships
      */
-    @McpTool(path = "/analyze_call_graph", description = "Analyze call graph paths between functions", category = "xref")
+    @McpTool(path = "/analyze_call_graph", description = "Analyze call graph paths between functions", category = "xref", access = ToolAccess.READ_ONLY)
     public Response analyzeCallGraph(
             @Param(value = "start_function", description = "Start function name") String startFunction,
             @Param(value = "end_function", description = "End function name") String endFunction,
@@ -1343,88 +1254,6 @@ public class XrefCallGraphService {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Bulk Xref Methods
-    // -----------------------------------------------------------------------
-
-    /**
-     * Retrieve xrefs for multiple addresses in one call
-     */
-    public Response getBulkXrefs(Object addressesObj) {
-        return getBulkXrefs(addressesObj, null);
-    }
-
-    @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
-    public Response getBulkXrefs(
-            @Param(value = "addresses", source = ParamSource.BODY,
-                   description = "Addresses to fetch references TO. Accepts a JSON array of address "
-                               + "strings or one comma-separated string, each entry in the usual 0x<hex> "
-                               + "or <space>:<hex> form. The result is keyed by the exact string you sent. "
-                               + "Beware: an entry that does not parse comes back as an EMPTY array, which "
-                               + "is indistinguishable from an address that genuinely has no "
-                               + "references.") Object addressesObj,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        try {
-            List<String> addresses = new ArrayList<>();
-
-            // Parse addresses array
-            if (addressesObj instanceof List) {
-                for (Object addr : (List<?>) addressesObj) {
-                    if (addr != null) {
-                        addresses.add(addr.toString());
-                    }
-                }
-            } else if (addressesObj instanceof String) {
-                // Handle comma-separated string
-                String[] parts = ((String) addressesObj).split(",");
-                for (String part : parts) {
-                    addresses.add(part.trim());
-                }
-            }
-
-            ReferenceManager refMgr = program.getReferenceManager();
-            Map<String, Object> resultMap = new LinkedHashMap<>();
-
-            for (String addrStr : addresses) {
-                List<Map<String, Object>> refsList = new ArrayList<>();
-
-                try {
-                    Address addr = ServiceUtils.parseAddress(program, addrStr);
-                    if (addr != null) {
-                        ReferenceIterator refIter = refMgr.getReferencesTo(addr);
-
-                        while (refIter.hasNext()) {
-                            Reference ref = refIter.next();
-                            Address fromAddr = ref.getFromAddress();
-                            Map<String, Object> refItem = new LinkedHashMap<>();
-                            refItem.put("from", fromAddr.toString(false));
-                            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
-                                refItem.put("from_full", fromAddr.toString());
-                                refItem.put("from_space", fromAddr.getAddressSpace().getName());
-                            }
-                            refItem.put("type", ref.getReferenceType().getName());
-                            refsList.add(refItem);
-                        }
-                    }
-                } catch (Exception e) {
-                    // Address parsing failed, return empty array
-                }
-
-                resultMap.put(addrStr, refsList);
-            }
-
-            return Response.ok(resultMap);
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-    }
-
     /**
      * Assembly pattern analysis - get assembly context around xref source addresses
      */
@@ -1432,7 +1261,7 @@ public class XrefCallGraphService {
         return getAssemblyContext(xrefSourcesObj, contextInstructions, null);
     }
 
-    @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref")
+    @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getAssemblyContext(
 @Param(value = "xref_sources", source = ParamSource.BODY,
                    description = "Instruction addresses to pull context around. Accepts a JSON array of "

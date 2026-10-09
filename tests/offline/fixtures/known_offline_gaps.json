@@ -72,6 +72,26 @@
       "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_rejects_empty_filters",
       "cause": "recording_gap",
       "reason": "asserts the endpoint REFUSES a call with no filters. The only recorded /search_instructions response was that refusal itself, which #466 deleted as a false golden -- a server's error is not a snapshot of its behaviour. With no recording the fake synthesizes a body, which has no 'error' key, so the assertion cannot be answered offline. Note this test only passed before because the recorded ERROR body happened to contain the key it looks for: it was asserting on the refusal, not on the endpoint. Re-record /search_instructions with a valid mnemonic and the sibling cases unblock too; this one needs a recorded refusal shape."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_list_functions_with_offset",
+      "cause": "recording_gap",
+      "reason": "asserts limit=5 returns at most 5; the one recorded /find_functions response was captured with limit=10, and the fake serves recordings rather than applying the limit."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_find_functions_filters_by_name_pattern",
+      "cause": "recording_gap",
+      "reason": "asserts every hit matches pattern=FUN_; the one recorded /find_functions response is unfiltered (the benchmark's functions are named), and the fake does not filter."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_enhanced",
+      "cause": "recording_gap",
+      "reason": "asserts every hit matches name_pattern=FUN_; same single unfiltered /find_functions recording as test_find_functions_filters_by_name_pattern."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestStringsAndData::test_list_program_items_data_items",
+      "cause": "recording_gap",
+      "reason": "asserts kind=data_items echoes back; /list_program_items has one recording, taken with kind=segments (test_list_program_items_segments answers from it). A second kind needs a second recording, which one-response-per-endpoint cannot hold."
     }
   ]
 }

@@ -6,9 +6,9 @@
 // Output: Renames functions back to their library-matched identities.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Restore library function names from plate comments
-// @menupath Diablo 2.Documentation.Restore Library Names
+// @menupath GhidraMCP.Documentation.Restore Library Names
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

@@ -6,10 +6,23 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**253 tools** — 239 served by the GUI plugin, 226 by the headless server, 212
-by both. The consolidation pass below took the advertised surface from 272 to
-251; `/list_shadowed_globals` and `/batch_get_comments` landed afterwards in
-the same cycle.
+**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
+by both. The advertised surface went from 272 → 251 in the first consolidation
+cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
+7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
+nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
+folds, 211 once both servers shared one set of program-operation names
+(`/load_program`, `/load_program_from_project`, `/project/info` and headless
+`/health` retired), 209 once version control and the CodeBrowser tools
+became shared services (`/server/version_control/checkin` and
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and **209** once `/apply_documentation` replaced
+`/apply_function_documentation` and `/batch_apply_documentation` — 53 tools
+removed and 9 added since rc.1,
+every one named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+
+Entries further down quote the catalog as it stood when they landed (251, 253,
+the 235-tool schema recording); the figures above are the current ones.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -18,6 +31,465 @@ the same cycle.
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Changed — Diablo II–specific content removed (#562)
+
+This project is a generic Ghidra MCP server; game-specific tooling lives elsewhere.
+
+- **The 22 `debugger_*` proxy tools are off by default.** They used to register on
+  every Windows host, pointing at an external debugger server most users do not run,
+  and mixed silently with Ghidra's own TraceRmi debugger tools (#554). They now register
+  only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`;
+  `GHIDRA_DEBUGGER_TOOLS=0` still wins over a set URL.
+- **Removed the five `oracle_*` tools** (`bridge_mcp_ghidra/oracle.py`). They proxied an
+  in-process oracle inside one specific game build and registered by default on Windows.
+- **Plate validation no longer expects a `Source:` file reference.** The check suggested
+  a game-specific source path and counted as an issue on every plate in every binary.
+- **`ghidra_scripts`:** the `Diablo 2.*` script menus are now `GhidraMCP.*`; five
+  game-specific scripts were removed (`ArgumentsRenamer.py`, `Repair_ArgumentsRenamer`,
+  `Analyze_DetectAndApplyConventions`, `signfunction.py`, `Export_FunctionsToJSON`);
+  `Analyze_FixFunctionParameters` infers only standard x86 calling conventions; a
+  hard-coded stop address that truncated eight scripts on any other binary is gone; and
+  reports go to `$GHIDRA_MCP_REPORTS_DIR` (default `~/ghidra-mcp-reports`) instead of a
+  maintainer's local path.
+- Removed `workflows/` and three session-note docs; tool descriptions, docs and
+  `.env.template` use generic examples.
+
+### Changed — `apply_documentation` replaces both documentation writers
+
+- **`apply_documentation` is the one tool for writing a function's documentation.**
+  It merges `/apply_function_documentation` (a JSON *string* read with a flat regex
+  extractor, whose failures to rename, retype or set a convention were only logged) and
+  `/batch_apply_documentation` (typed fields, but no labels, offsets or return type). It
+  takes the fields `get_function_documentation` exports (`target_address`,
+  `function_name`, `parameters`, `comments` and `labels` by `relative_offset`,
+  `pre_comment`/`eol_comment`) plus prototype, variable types and renames, and applies
+  them through the same services the single tools use, so the naming rules hold and every
+  step reports its own result. Pass the fields at the top level for one function or
+  `entries=[...]` for many: each entry gets its own result, one failing does not stop the
+  rest, and `score` defaults to on for one function and off for many. Exported
+  placeholders (`param_N`, `undefined*`) are skipped, so an export applies back without
+  reverting anything. It is a shared service and runs on headless too; only `goto` needs
+  a window. **Breaking:** `/apply_function_documentation` and
+  `/batch_apply_documentation` are gone (see the migration guide).
+
+### Fixed — check-in dry run, firmware memory permissions, shared-project paths
+
+- **`checkin_program(dry_run=true)` reports instead of refusing.** A check-in is not a
+  transaction, so the scanner's rolled-back dry run cannot cover it. The tool now takes
+  `dry_run` itself and reports `would_save`, `would_close`, the version and
+  `modified_since_checkout` without saving, closing or checking in anything. It also moves
+  from the `project` group to `server`, beside checkout and undo.
+- **`/set_memory_block`** changes an existing block's read/write/execute/volatile flags.
+  Firmware loaders often mark flash writable, so the decompiler reads every literal-pool
+  word as a variable (`iVar2 = DAT_08016e58;`) instead of the peripheral base it holds.
+  On a 339-function firmware, marking flash read-only took those pool reads from 1123 to 4
+  and printed the bases as constants or their labels.
+- **Shared projects default to `~/ghidra-shared-projects`.** Ghidra 12.1.3's
+  `ProjectLocator` rejects a path element starting with `.`, so the old
+  `~/.ghidra-mcp/shared-projects` default made every shared-project open fail.
+- **Debugger tools resolve `program` like every other tool**, so an unknown or ambiguous
+  name is an error naming the candidates instead of falling back to the current program.
+- **The bridge keeps loaded tool groups across a Ghidra restart.** It re-registered only
+  the default groups, so the next call to a `load_tool_group()`-ed tool returned
+  "Unknown tool" mid-task.
+- **Catalog parameters are derived, not accumulated.** `RegenerateEndpointsJson` takes
+  parameter lists from the annotations (names plus aliases) and from
+  `ManualToolDescriptors` for hand-registered routes; the old union kept every name ever
+  listed, so a parameter removed from a tool was advertised forever. Catalog descriptions
+  that had drifted from their tools are refreshed, and the conformance schema snapshot
+  records `destructive`/`read_only` again.
+- **91 dead wrapper methods are gone from `GhidraMCPPlugin`** (~790 lines), left behind
+  when their routes moved into the shared services.
+
+### Fixed — headless scripts get the project; failed scripts say why
+
+- **A script run by the headless server had no project.** Its state was built with a null
+  project, so `getState().getProject().getProjectData()` threw a `NullPointerException` in any
+  script that opened another project file. Found live: an agent's label-sync script died on
+  that line.
+- **A failed script reached the caller as "the server reported failure".** The exception was
+  only in `console_output`, which the bridge did not report, so the agent guessed a cause
+  ("scripts may not open server files") and abandoned the approach. A failed
+  `run_script_inline` / `run_ghidra_script` now carries `error`: the exception and the
+  script's own line (`NullPointerException: ... (SyncLabels2.java:15)`), and the bridge quotes
+  the end of `console_output` for any failed call that gives no other reason.
+- **A script on a program with no memory started at a null location.** The runner built
+  `ProgramLocation(program, program.getMinAddress())`, which is null for such a program, and
+  Ghidra reports that as an error (a dialog in the GUI). It now runs with no location. Found by
+  auditing for the same shape as the missing project: a null handed to Ghidra where the server
+  holds, or can check for, the real value. The other constructions, domain-object opens and
+  tool-manager lookups came out clean.
+
+### Changed — shared services on both servers (version control, lifecycle, GUI tools, batch docs)
+
+The GUI plugin and headless server still built overlapping logic in the plugin class,
+`GhidraServerManager`, and hand-registered routes. The remaining duplication moved into
+annotated services both scanners share, and several routes that used to exist on only one
+server now register on both.
+
+**Version control** — `VersionControlService` owns checkout, undo, add, and check-in.
+The duplicate `/server/version_control/checkin` route is retired; use `/checkin_program`.
+
+**Server lifecycle** — `/server/authenticate` and `/exit_ghidra` are `@McpTool` methods on
+`ServerLifecycleService` on both servers instead of GUI-only hand routes.
+
+**GUI tools** — CodeBrowser navigation and running-tool listing live in `GuiToolService`.
+`/tool/launch_codebrowser` is retired; open a program with `/open_program` (and optional
+CodeBrowser launch via project open options) instead of a separate launch route.
+
+**Batch documentation** — `/batch_apply_documentation` is served by
+`DocumentationBatchService` on both servers.
+
+**Project archive and GZF/GAR** — export, import, archive, and restore project routes are
+served by `ProjectLifecycleService` on the GUI as well as headless (catalog `servers`:
+both).
+
+**UI threading** — services that must touch Swing go through
+`ThreadingStrategy.runOnUi` (the Swing thread on the GUI, the calling thread headless)
+instead of calling `SwingUtilities` directly; the analyst's windows are reached through
+`Workbench`. Note that the plugin is still wired with `DirectThreadingStrategy`, not
+`SwingThreadingStrategy`, so today `runOnUi` runs on the calling thread on the GUI too;
+`Workbench` and `GuiToolService` hop to the Swing thread themselves.
+
+**Ghidra Server repositories** — headless `open_project` accepts `ghidra://` repository
+URLs via `SharedProjectLocator` (local `.gpr` paths still use the file-root allow-list on
+both servers).
+
+**Dead code** — reference analysis removed unused helpers in `ServiceUtils`,
+`XrefCallGraph`, and `DocumentationHashService`; headless POST bodies are bounded
+(`SecurityConfig`, `HeadlessPostBodyTest`).
+
+**Every response says which program it acted on.** Of 12 sampled responses, 2 named
+their program, so a survey of 17 programs could return seventeen identical readings
+without anyone noticing. The scanner now stamps `"program"` on every object payload
+whose request resolved one, unless it already carries `program` or `program_name`. HTTP
+threads are pooled, so the resolved program is cleared on entry and in `finally`; a
+request that resolves nothing never inherits the previous one's label.
+
+**Edits to a file that was not checked out vanished, and every tool said success.** A
+versioned file that is not checked out opens as an in-memory copy that saves nowhere.
+`open_program` now reports `read_only: true` with the reason, each edit carries the
+reason in `warnings`, `save_program` names the cause and the remedy, and
+`close_program(save=true)` refuses and asks for `save=false`. A second checkout answers
+`already_checked_out` instead of Ghidra's "private file exists", and a checkout reopens
+an unedited copy on itself (`reopened`) or reports `reopen_required` for an edited one.
+
+**`dry_run` stays refused on the moved tools.** Version control, project lifecycle,
+`/exit_ghidra`, `/server/*` and `/tool/goto_address` are now annotated tools, so they
+declare `dryRun = false` like the routes they replace; a rollback cannot undo any of
+them.
+
+| retired | use instead |
+| --- | --- |
+| `/server/version_control/checkin` | `/checkin_program` |
+| `/tool/launch_codebrowser` | `/open_project` (project/CodeBrowser launch options) |
+
+Catalog: **209** endpoints — **205** on the GUI plugin, **190** headless, **186** on both,
+from 211 / 203 / 189 / 181 (two routes removed, four archive/import routes gained `gui`
+in `servers`, and `/batch_apply_documentation` and `/server/authenticate` gained
+headless).
+
+### Changed — headless and GUI: one program model, one set of names, one health surface
+
+The GUI had one model of programs; headless had another. Headless kept a map, keyed by bare
+filename, of programs someone had explicitly loaded. So on a headless server
+with the program sitting in its project:
+
+- `get_metadata(program=/fw/gnutrue)` answered `Program not found`.
+- `close_program save=true` released without saving.
+- `switch_program` answered success while doing nothing.
+
+**One program model.** Both providers now extend `ProjectProgramProvider`, a
+path-keyed LRU cache over the project that opens a program the first time any
+endpoint names it. The cache holds at most `GHIDRA_MCP_MAX_CACHED_PROGRAMS`
+programs (default 8, minimum 2); set it in a systemd unit's `Environment=` to
+change it. The GUI adds only its CodeBrowser layer on top.
+
+Resolution is one matcher on both servers, in this order: exact path, exact
+name, the project, and only then a unique name substring. A name two versions
+share is an error listing the candidates, never the first hit. `close_program
+save=false` now really discards on the GUI too; the cache release used to save
+regardless. One `ProgramSaves` helper replaces three save paths that had
+drifted apart.
+
+**One name per operation**, served by both servers, with the old names retired
+and no aliases:
+
+| kept | retired |
+| --- | --- |
+| `/open_program` (now POST with a JSON body) | headless `/load_program_from_project` |
+| `/import_file` | headless `/load_program` |
+| `/get_project_info` | GUI `/project/info` |
+| `/checkin_program` | (was headless-only) |
+
+- `/open_program`: when the path is not found, the failure lists the paths the
+  project does contain and whether it is bound to a server. A program that could
+  only be opened read-only reports `read_only` with the reason. That reason
+  matters: a stale SLEIGH language opens read-only, so `success` alone no longer
+  means the program is current, and `upgrade_project_language --verify` reads
+  the reason.
+- `/import_file`: opens a same-named file already in the folder rather than
+  failing on the duplicate (`reused_existing`).
+- `/checkin_program`: saves, then closes every instance, CodeBrowsers included,
+  before checking in.
+- `/server/status`: means "is a Ghidra Server connected" on both servers. The
+  GUI used to answer `connected: true` for any open project.
+- Headless `/exit_ghidra`: saves and reports what it saved, as the GUI's does.
+
+**One health surface.** `McpHttpServer` builds `/check_connection`,
+`/mcp/health` and `/mcp/instance_info` for both servers:
+
+- `/check_connection` is JSON: `{status, server_kind, version}`, plus
+  `program` when one is current.
+- `instance_info` names the kind, version and endpoint count.
+- `/health` is retired.
+- `VersionInfo` moved to core, so headless stops reporting a hard-coded
+  `7.0.0-headless`.
+- The doctor tool used to tell the servers apart by sniffing two English
+  banners. It now reads `server_kind`, and asks both kinds the same questions.
+
+**Construction.** The shared service set is built once, by `CoreServices`, for
+the plugin, the headless server and the offline tests. `HeadlessEndpointHandler`
+is gone: about 2,150 lines, of which five small route bodies were live. Two of those
+bodies moved to `@McpTool`s:
+
+- `/list_projects` and `/delete_project` now apply the file-root allow-list they
+  skipped.
+- `/configure_analyzer` now reports an unknown analyzer instead of `success:
+  true`, and is served by both servers.
+
+The GUI schema also stopped listing every hand-coded route twice.
+
+### Changed — one HTTP server for every transport
+
+The GUI plugin ran two HTTP stacks, TCP and the Unix socket, each wiring its own services,
+so a route could exist on one and not the other: emulation, the debugger, `/prompt_policy`
+and the hand-coded GUI routes were missing from the socket the bridge prefers, and the GUI
+schema listed every hand-coded route twice. The headless server had no Unix socket.
+
+`McpHttpServer` now serves GUI TCP, GUI UDS, headless TCP and headless UDS from one service
+set per server, so both transports of a server give the same answer. Services ask the
+`ProgramProvider` instead of checking which provider they were given. The unused transport
+abstraction is deleted.
+
+### Changed — one call reads a function: `/get_functions` replaces nine readers
+
+Reviewing a function took five round trips (`decompile_function`,
+`get_function_variables`, `get_function_callers`, `get_comment`, `get_function_xrefs`),
+each paying for its own lookup, and most for their own decompile. `/get_functions`
+returns the whole picture in one call, for one function (`function=`, a name or an
+address) or up to 20 (`functions=`, comma-separated).
+
+- **`fields=` picks what comes back, and what it costs.** signature, classification,
+  return type, entry point and body range, decompiled code, plate comment (with the
+  structural issues `NamingConventions` finds in it), comments of every kind, labels,
+  tags, parameters, locals, callers, callees, call context, xrefs, disassembly, jump
+  targets and `refs`. Omitted or empty returns everything. A selection that needs no
+  decompiled text (callers, parameters, labels, …) does not decompile at all.
+- **Decompiled code shows EOL comments** (`// note` above the statement), so a note
+  written with `set_comment(type=eol)` appears in the code read back. Scoped to this
+  endpoint through a new options hook on `ServiceUtils.createConfiguredDecompiler` /
+  `FunctionService.decompileFunctionNoRetry`: `analyze_function_completeness` counts
+  comment lines in the shared path's output, and its scores are unchanged.
+- **Call context is a window**, `call_context_lines` (3 by default, 1 to 21) centred on
+  each call site, with indentation kept, because the guard and the use of the result are
+  on the neighbouring lines. It costs no extra decompilation.
+- **Storage names the register.** Locals printed the raw varnode address
+  (`register:00001200:8`); they now read `RDI:8`, and p-code temporaries omit the field.
+- **`refs`** lists the absolute addresses a function uses: data references, the values of
+  literal-pool words (`value<word`, with the word they were loaded from), and the memory
+  the decompiled code reads and writes, so a register reached as base + offset is listed
+  by its own address.
+- **Addresses outside the default space are `space:hex`** (`OVL:00001000`) in every field,
+  so two functions at one offset in different spaces stay distinct; the default space
+  stays bare hex (`AddressKeys`).
+- A decompile failure carries its reason (`decompile_error`); `revision` reports the
+  program's change token (`ProgramRevision`: saved time, a per-open epoch and the
+  modification counter, so it differs across a reopen even when the counter does not).
+
+Removed, each a slice of the same payload:
+
+| Tool | Now |
+| --- | --- |
+| `decompile_function` | `get_functions(fields=decompiled_code)`; `functions=` for many |
+| `get_function_by_address` | `get_functions(fields=signature,entry_point,body_start,body_end)` |
+| `get_function_variables` | `get_functions(fields=parameters,locals)` |
+| `get_function_xrefs` | `get_functions(fields=xrefs)` |
+| `get_function_callers` / `get_function_callees` | `get_functions(fields=callers)` / `(fields=callees)` |
+| `get_function_labels` | `get_functions(fields=labels)` |
+| `get_function_signature` | `get_functions(fields=signature)` for the prototype |
+| `get_function_jump_targets` | `get_functions(fields=jump_targets)` |
+
+The deploy-regression benchmark reads functions through `/get_functions` too. The
+structural metrics only `/get_function_signature` returned (`basic_block_count`,
+`cyclomatic_complexity`, instruction count, immediate values, string constants) are no
+longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
+
+### Changed — one parameter, and one meaning, for "which function" ([#566](https://github.com/bethington/ghidra-mcp/pull/566))
+
+Function-scoped tools spelled the same locator four ways (`address`, `name`,
+`function_name`, `function_address`), five carried two of them at once, and two
+resolvers disagreed about what a reference meant.
+
+- **One parameter.** Every tool that identifies a function takes `function`, a name or an
+  address. The old spellings stay accepted as aliases, published once in `/mcp/schema`
+  and `tests/endpoints.json`. Tools that only ever parsed an address now also accept a
+  name, through `ServiceUtils.resolveFunctionAddress`; an address behaves exactly as
+  before. `audit_globals_in_function` parsed its argument as an address before resolving
+  it, so a name was rejected.
+- **One rule.** `FunctionRef` had a case-insensitive fallback and
+  `ServiceUtils.resolveFunction` did not, so a name in the wrong case worked in the
+  call-graph tools and failed in the function tools; neither noticed a name two functions
+  share; an address-first order sent a function named `add` or `dead` to whatever sat at
+  `0xadd`; and a miss said one of seven things. `ServiceUtils.getFunctionOrError` is now
+  the only resolver: an `0x` or `space:offset` value is an address; a bare token that
+  exactly names a function is that function; otherwise an address; otherwise a
+  case-insensitive name, only when nothing matched exactly. A shared name is an error
+  listing the addresses (a non-thunk beats a thunk), and a miss says what was tried.
+  `FunctionRef` is gone.
+- **Declared once.** `paramType = Param.FUNCTION_REF` marks a name-or-address parameter
+  and implies the standard aliases in one order; 25 endpoints had repeated the list by
+  hand, in two orders. `batch_rename_function_components` keeps only `address` and
+  `function_address`, because its own `function_name` parameter is the new name.
+- **The bridge leaves names alone.** It normalises only `paramType = address`; a name
+  passed where an address was also accepted used to reach the server as `0x<name>`.
+- Also: `batch_rename_function_components` looked the return type up by exact path, so
+  `int` or `char*` was skipped while the call reported success; it now refuses an unknown
+  type before writing anything.
+
+### Changed — fewer listing, xref, tag, and utility tools
+
+Further consolidation on the same 7.0.0 line: one search tool, one program
+listing tool, bulk xrefs as a parameter, tags carried on function reads, seventeen
+small tools folded into siblings, version identity on `/mcp/health`, and one GUI
+cursor tool.
+
+- **`/find_functions`** replaces five listing/search tools (`list_functions`,
+  `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`,
+  `search_functions_by_tag`). Tag filters and name patterns share one surface;
+  results include each function's `tags` when present.
+- **`/list_program_items`** with `kind=` replaces eight list-* endpoints (classes,
+  methods, namespaces, imports, exports, segments, data items, external
+  locations).
+- **`/get_xrefs_to`** accepts `addresses=` (comma-separated) for the old bulk xref
+  scan; `get_bulk_xrefs` is gone.
+- **Function tags** are a field on `/get_functions` (`fields=tags`) and a filter on
+  `/find_functions` (`tag=`); `get_function_tags`, `search_functions_by_tag`, and
+  `create_function_tag` as a standalone attach path are removed (definitions still
+  via `list_function_tags` / `add_function_tag`).
+- **Fifteen tools** folded into siblings (struct/type helpers, `find_data_types`,
+  comment/hash bulk modes, debugger step kinds, program options/properties) — see
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` "Folds after the
+  consolidation".
+- **`/get_version` is gone.** `/check_connection` returns
+  `{status, server_kind, version}` on both servers, and `/mcp/health` carries the
+  nested `version` block plus pool and memory detail. (This pass first moved the
+  version onto `/mcp/health` and headless `/health`; the server-model change
+  above then retired `/health` and gave both servers the same identity routes.)
+- **`/get_ui_cursor`** (`type=address|function|selection|program|all`) replaces the
+  four `get_current_*` tools; headless reports unavailable facets with reasons instead
+  of faking a GUI cursor.
+
+| Removed | Use instead |
+| --- | --- |
+| `list_functions`, `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`, `search_functions_by_tag` | `find_functions` (`tag=` for the last) |
+| `list_classes`, `list_methods`, `list_namespaces`, `list_imports`, `list_exports`, `list_segments`, `list_data_items`, `list_external_locations` | `list_program_items(kind=…)` |
+| `get_bulk_xrefs` | `get_xrefs_to(addresses=…)` |
+| `get_function_tags` | `get_functions(fields=tags)` |
+| `create_function_tag` | `add_function_tag` (attaching creates the tag; `tag_comments` describes a new one) |
+| `get_version` | `check_connection` (read `.version`) |
+| `get_current_address`, `get_current_function`, `get_current_selection`, `get_current_program_info` | `get_ui_cursor(type=…)` |
+| `batch_get_comments` | `get_comment(addresses=…)` |
+| `create_array_type`, `create_pointer_type`, `create_typedef` | `create_derived_type(kind=…)` |
+| `embed_struct_field`, `modify_struct_field_type` | `modify_struct_field` |
+| `get_bulk_function_hashes` | `get_function_hash` (omit `function` for all) |
+| `list_data_types`, `list_data_type_categories`, `search_data_types` | `find_data_types` |
+| `list_option_groups` | `get_program_options` |
+| `list_property_maps` | `list_properties` |
+| `debugger/step_into`, `debugger/step_over`, `debugger/step_out` | `debugger/step(kind=…)` |
+
+`apply_function_documentation` and `batch_apply_documentation` stay separate tools
+in 7.0.0. Merging them into one `apply_documentation` was deferred; the shared
+`DocumentationBatchService` wiring it waited on has since landed (see the
+shared-services entry above).
+
+### Fixed — writes that lost work or reported success for what did not happen ([#569](https://github.com/bethington/ghidra-mcp/pull/569))
+
+- **A nested write no longer rolls back the enclosing transaction.** Ghidra nests by
+  counting entries on one transaction, so an inner `commit=false` aborted everything the
+  outer owner had done. Endpoints nest by design (`apply_function_documentation` drives the
+  rename and comment paths) and every script runs inside the script manager's transaction;
+  a probe script that rolled back its own write discarded a rename, two comments and a
+  struct made before it. All write sites go through `WriteTx`, which joins an open
+  transaction instead of nesting one. `dry_run` inside an open transaction is refused,
+  since it cannot undo only its own part.
+- **A failed transaction end no longer leaks the headless write lock.** An exception from
+  `endTransaction` skipped the unlock, so every later write that takes the lock
+  (`rename_function`, `batch_rename_function_components`, …) waited forever.
+- **`dry_run` is refused where a rollback cannot undo the effect.** It is implemented as a
+  rolled-back program transaction, but was offered to every write tool:
+  `checkin_program(dry_run=true)` checked in for real. `@McpTool(dryRun = false)` marks the
+  35 tools whose effect is elsewhere (save, close, open, check-in, project and file
+  operations, scripts, analysis, the debugger, archive posts); the scanner refuses before
+  anything runs.
+- **Headless saves before it closes.** Closing a modified program on shutdown or project
+  switch discarded its edits; it now saves to the local working copy first (check-in stays
+  explicit), and the shutdown hook runs before Ghidra disposes its databases, so the save
+  has something to write to.
+- **`import_program(overwrite=true)` deleted the new import.** `setName` returns the renamed
+  file and the old handle names the path the import then takes; deleting through it removed
+  the import, kept the backup, and reported success.
+- **Opening or saving an unedited program no longer writes it.** `open_program` stored the
+  "do not ask to analyze" flag on every open and `save_program` saved with nothing to save,
+  so a checked-out file with no edits read `modified_since_checkout=true`. `save_program`
+  reports `saved: false`; `save_all_programs` lists them as `unchanged`.
+- **Clearing a comment removes it** instead of storing an empty record that the decompiler
+  rendered as a bare `//` line.
+- **`exit_ghidra` exits Ghidra.** It saved and closed every tool but left the front end
+  and the JVM running, with the servers stopped.
+- **Emulation, the debugger and `/prompt_policy` are served on the Unix socket**, which the
+  bridge prefers; they were only on the plugin's TCP server.
+- **`rename_symbol` takes `strict_mode`** (`enforce`/`warn`/`off`) per call, like
+  `rename_function`, so a deliberate name outside the convention (a datasheet register
+  name) can be applied; a refusal names the override.
+
+### Changed — the bridge follows the MCP protocol where it used to approximate it ([#553](https://github.com/bethington/ghidra-mcp/pull/553))
+
+Measured against the spec and against what real clients do with each field.
+
+- **Failures set `isError`.** Every failure — `{"error": ...}`, a naming refusal
+  (`{"status": "rejected", ...}`), a failed load (`{"success": false, ...}`), a
+  transport error — used to come back as an ordinary result, so a client
+  branching on `isError` saw every call succeed. Detection stops at the top level:
+  a per-entry error inside a bulk result is still a successful call. A refusal
+  quotes the server's message and suggestion, not just its code.
+- **Every tool declares `readOnlyHint` / `destructiveHint`.** `@McpTool` gained
+  `access = ToolAccess.READ_ONLY | WRITE | DESTRUCTIVE`; the scanner publishes it
+  in `/mcp/schema` and the bridge maps it onto the tool annotations, as do the
+  static, debugger and oracle tools. Declared per tool, never inferred from the
+  HTTP method: `/switch_program`, `/save_program` and `/open_program` were GETs
+  that mutate. Without it, Claude Code prompted for every tool in plan mode and
+  would not run any of them concurrently.
+- **No false capabilities.** The blanket `outputSchema {"result": string}` is
+  gone, and `prompts` / `resources` are no longer advertised while empty.
+- **Progress while a call is in flight.** A call whose client sent a
+  `progressToken` gets a notification every 5 seconds, sent with the request id
+  so a POST-only streamable-http client actually receives it.
+- **Transport fixes.** A bare `OPTIONS /mcp` is answered `204` with the real
+  `Allow` list (#399), and session-less requests no longer each leave a session
+  behind: 50 bare `OPTIONS` plus 50 session-less pings used to leave 100
+  permanent sessions; they now leave none.
+- **New, opt-in:** `GHIDRA_MCP_INBOUND_TOKEN` requires `Authorization: Bearer`
+  on the HTTP transports (a non-loopback bind without it warns);
+  `--json-response` and `--stateless-http` expose the SDK's two
+  streamable-http modes; `--tools-page-size N` pages `tools/list`.
+- Also: `run_script_inline` no longer poisons its script directory with a
+  failed caller-named class that Ghidra replayed onto every later script's
+  output, and refuses to overwrite a hand-written script of the same name; an
+  offline test fails when an annotated service is missing from the test
+  `ServiceFactory`, so a service can no longer sit outside the parity checks
+  unnoticed.
 
 ### Added
 
@@ -71,7 +543,8 @@ mocked `Program.startTransaction` that throws if called outside
 ### Added — two endpoints, after the consolidation pass
 
 Both landed in the 7.0.0 cycle after the 272 → 251 consolidation, which is why
-the shipped catalog is 253 rather than 251.
+rc.1 shipped 253 rather than 251. `/batch_get_comments` was folded into
+`get_comment(addresses=…)` after rc.1; `/list_shadowed_globals` remains.
 
 - **`/list_shadowed_globals`** (GET, `listing`) — named global DATA symbols
   that have no type of their own because a larger unit starting earlier covers
@@ -109,7 +582,8 @@ Dockerfile nothing builds is a file, not a deployment.
   disagreed with `tests/endpoints.json` and with each other — 272, 267, 251,
   243, 225/175/183/196. All now derive from the catalog, and each says *which*
   count it is (`extension.properties` and `@PluginInfo` describe the GUI
-  extension, so they say 239, not 253). `tests/unit/test_published_counts.py`
+  extension, so they carry the GUI plugin's count — 239 then, 205 now — not the
+  catalog's). `tests/unit/test_published_counts.py`
   pins every one of them with no fallback: an unmatched marker fails rather
   than passing quietly. It also caught a **control character shipping since
   v5.17.0** — a bulk count bump had rewritten `Provides 256 MCP tools for` as
@@ -128,7 +602,10 @@ Dockerfile nothing builds is a file, not a deployment.
   `tests/unit/test_migration_guide_successors.py` reads
   `MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` and checks all 23 removals against
   the shipped catalog. 7.0.0 has no aliases, so that guide is the only
-  migration path there is.
+  migration path there is. `tests/unit/test_migration_guide_coverage.py` later
+  extended this to every tool removed since 6.0.0, against a frozen 6.0.0
+  catalog fixture, because the post-rc.1 passes had removed dozens of tools
+  the guide did not name.
 - **Dependency and action bumps** carried by Dependabot: `gradle-wrapper`
   9.6.1 → 9.7.1, `actions/setup-java` 5.6.0 → 6.0.0, `astral-sh/setup-uv`
   9.0.0 → 10.0.1, `github/codeql-action`, `DavidAnson/markdownlint-

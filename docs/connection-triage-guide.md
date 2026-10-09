@@ -71,23 +71,21 @@ configuration, or change project state. Therefore `mcp_initialize_healthy` is
 every requested check passed; exit code `1` preserves the failing layer and
 the recommended next action in the report.
 
-The default `--server-kind auto` recognizes the GUI and headless
-`/check_connection` responses. For a headless server it checks `/health` and
-records GUI-only `/mcp/instance_info` as not applicable; use
-`--server-kind headless` when a custom wrapper does not use the standard
-connection banner. Use `--server-kind gui` to require the GUI endpoints.
-That split follows `tests/endpoints.json`: `/mcp/health` is GUI-only, `/health`
-is headless-only, and `/check_connection` plus `/mcp/schema` are served by both.
+The default `--server-kind auto` reads `server_kind` from the JSON
+`/check_connection` answers. Both kinds are then asked the same things:
+`/mcp/instance_info`, `/mcp/health` and `/mcp/schema`, all served identically by
+the GUI and the headless server. A plain-text `/check_connection` banner means a
+build older than this one.
 The live probe still uses the banner to choose the server; the catalog is the
 regression check that the chosen route has not drifted.
 
 Interpret the results as follows:
 
-- `200` from `/mcp/health` (GUI) or `/health` (headless) means the HTTP server can
-  answer a health request.
-- `200` from GUI `/mcp/instance_info` means the server can report instance metadata
-  such as its process, project, and open-program state. Headless mode records this
-  GUI-only check as not applicable.
+- `200` from `/mcp/health` means the HTTP server can answer a health request. The
+  GUI plugin and the headless server both serve it; the headless server's old
+  `/health` route is gone.
+- `200` from `/mcp/instance_info` means the server can report instance metadata
+  such as its process, project, and open-program state. Both server kinds serve it.
 - A successful `/check_connection` response proves the basic plugin/headless connection
   path, but it is not a replacement for instance metadata when more than one instance
   may be running.

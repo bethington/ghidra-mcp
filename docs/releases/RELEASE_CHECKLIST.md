@@ -50,6 +50,11 @@ python -m tools.setup verify-version
   endpoints, or environment variables.
 - [ ] Confirm `README.md` examples and version references are current.
 - [ ] If endpoint annotations changed, update `tests/endpoints.json`.
+- [ ] If the release removes or renames a tool, name it with its replacement in
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` (or the
+  release's own migration guide). `test_migration_guide_coverage.py` fails on a
+  removed tool the guide does not name, and
+  `test_migration_guide_successors.py` on a successor the catalog lacks.
 
 For agent-assisted releases, ask the agent to search for stale version and tool
 count references before committing:
@@ -63,8 +68,8 @@ rg -n "OLD_VERSION|NEW_VERSION|MCP Tools|GUI Endpoints|Headless Endpoints|total_
 Run the cheap gates before any live Ghidra work:
 
 ```text
-./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"
-./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"
+./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
 uv build                                  # build the ghidra-mcp-bridge wheel (-> dist/)
 uv run pytest tests/unit/ -v --no-cov
 git diff --check
@@ -87,19 +92,24 @@ For setup/version/catalog changes, also run:
 
 ```text
 pytest tests/unit/test_version_bump.py tests/unit/test_endpoint_catalog.py tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py -v --no-cov
+pytest tests/unit/test_published_counts.py tests/unit/test_audit_server_scope.py tests/unit/test_migration_guide_coverage.py tests/unit/test_migration_guide_successors.py tests/unit/test_release_evidence.py -v --no-cov
 ```
+
+The second line pins every published tool count to the catalog, the catalog's
+`servers` field to the two servers' wiring, and the migration guide to the
+removed tools; `uv run pytest tests/unit/` already includes all of them.
 
 For Java endpoint/catalog changes, run the offline Java scanner/parity tests:
 
 ```text
-./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.3_PUBLIC"
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
 ```
 
 Under Maven the Ghidra JARs must be in the local repository first, or dependency
 resolution fails before any test runs. Gradle needs no such step:
 
 ```text
-python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.1.3_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
 mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
@@ -138,7 +148,7 @@ python tests/fixtures/benchmark/make_fixture.py --check
 - [ ] Run the release-grade deploy regression:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
 ```
 
 - [ ] Record whether the release regression passed, **and read its last line**.
@@ -157,6 +167,12 @@ python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.3_PUBLIC" --test rele
 git add docs/releases/live-regression-evidence.json
 python -m tools.release_evidence verify --version <the version being released>
 ```
+
+For a pre-release the evidence carries the base version: `pre-release.yml`
+verifies `7.0.0` for `7.0.0-rc.2` (it strips everything from the first `-`).
+`python -m tools.release_evidence show` prints what was recorded, and
+`python -m tools.release_evidence fingerprint` the fingerprint of the tree as
+it stands, so a mismatch can be diagnosed before CI reports it.
 
 > **Why the publish gate reads a committed file rather than running the tier.**
 > Until now `release.yml` accepted
@@ -226,12 +242,20 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
+- [ ] **For a pre-release** (`X.Y.Z-rc.N`), run the **Create Pre-Release**
+  workflow (`pre-release.yml`, `workflow_dispatch`) with the version and the
+  branch to build from; it creates and pushes the `vX.Y.Z-rc.N` tag itself and
+  marks the GitHub release as a pre-release. Do not push an rc tag by hand:
+  `release.yml` triggers on `v*.*.*`, which an rc tag also matches, and would
+  publish it as a full release.
+
 - [ ] Enable `run_live_regression` in the release workflow **only** if a
   self-hosted Windows runner is available — today none is registered, so the
   committed evidence file from section 4 is the gate. It calls
   `release-regression.yml` with
   `test_tier: release`, which works again as of 2026-08-31.
-- [ ] Verify release assets include `GhidraMCP-X.Y.Z.zip`.
+- [ ] Verify release assets include `GhidraMCP-X.Y.Z.zip` and
+  `ghidra_mcp_bridge-X.Y.Z-py3-none-any.whl`.
 - [ ] Download the release ZIP and sanity-check that it installs or at least
   contains the expected extension payload.
 

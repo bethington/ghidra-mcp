@@ -7,7 +7,7 @@ is hit by sending a deliberately-bad name and asserting the structured
 rejection comes back.
 
 Strategy:
-  * Use `list_data_items` to find a real global address in the loaded
+  * Use `list_program_items` kind=data_items to find a real global address in the loaded
     program. We don't pick the address blindly; we read the current
     state first so we can restore at the end.
   * For rejection tests, send the bad input and assert the response
@@ -65,26 +65,31 @@ def require_v5_7_endpoints(server_url, http_session):
 def sample_global_address(http_session, server_url):
     """Find a real global data address in the program.
 
-    `list_data_items` returns plain text formatted as
-    `<name> @ <hex> [<type>] (<bytes>)` — one item per line.
+    `list_program_items` kind=data_items returns JSON items with address fields.
     We scan for the first parseable hex address.
     """
     import re
-    response = http_session.get(f"{server_url}/list_data_items", params={"limit": 10}, timeout=15)
+    response = http_session.get(
+        f"{server_url}/list_program_items",
+        params={"kind": "data_items", "limit": 10},
+        timeout=15,
+    )
     if response.status_code != 200:
-        pytest.skip(f"list_data_items unavailable (status {response.status_code})")
-    body = response.text.strip()
-    if not body:
-        pytest.skip("list_data_items returned empty")
-    # Match either "@ <hex>" form (typed item) or a bare DAT_<hex> / hex
-    # address on the line.
-    addr_pattern = re.compile(r"@\s+([0-9a-fA-F]{4,})\b|DAT_([0-9a-fA-F]{4,})\b|\b([0-9a-fA-F]{6,})\b")
-    for line in body.splitlines():
-        m = addr_pattern.search(line)
-        if m:
-            addr = next(g for g in m.groups() if g)
-            return f"0x{addr}"
-    pytest.skip(f"Could not parse address from list_data_items: {body[:120]}")
+        pytest.skip(f"list_program_items unavailable (status {response.status_code})")
+    payload = response.json()
+    items = payload.get("items") or []
+    if not items:
+        pytest.skip("list_program_items returned empty")
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        addr = item.get("address")
+        if addr:
+            addr_s = str(addr).strip()
+            if not addr_s.lower().startswith("0x"):
+                addr_s = f"0x{addr_s}"
+            return addr_s
+    pytest.skip(f"Could not parse address from list_program_items: {items[:3]}")
 
 
 # ---------- audit_global ----------
@@ -347,9 +352,12 @@ def test_audit_globals_in_function_returns_summary(http_client, http_session, se
     + summary histogram. The function might or might not have global
     xrefs; either is fine, we just check the response shape."""
     import json
-    # Find a function to audit. /list_functions declares only `program` --
-    # "List all functions (no pagination)" -- so a `limit` here was dropped.
-    response = http_session.get(f"{server_url}/list_functions", timeout=10)
+    # Find a function to audit. /find_functions supersedes the four listing
+    # tools and, unlike the /list_functions it replaced, honours `limit` -- so
+    # this no longer walks the whole program to use the first match.
+    response = http_session.get(
+        f"{server_url}/find_functions", params={"limit": 50}, timeout=10
+    )
     if response.status_code != 200 or not response.text.strip():
         pytest.skip("No functions available")
     # Try to parse function address.

@@ -66,10 +66,11 @@
     "MD037": false,
 
     // MD029 ordered-list prefix. Several documents number a single logical
-    // sequence across intervening headings -- AUDIT_STRUCTURAL_BACKLOG.md runs
-    // items 1..13 through four `##` sections, and the archived v1.4.0 code
-    // review runs a 1..14 priority plan the same way. CommonMark ends a list at
-    // a heading but honours the start number, so those render exactly as
+    // sequence across intervening headings -- the archived
+    // docs/project-management/archive/AUDIT_STRUCTURAL_BACKLOG.md runs items
+    // 1..13 through four `##` sections, and the archived v1.4.0 code review
+    // runs a 1..14 priority plan the same way. CommonMark ends a list at a
+    // heading but honours the start number, so those render exactly as
     // written; markdownlint sees four lists that each fail to start at 1.
     // Its --fix renumbered all of them to 1,2,3..., producing three separate
     // "item 1"s in a document whose prose refers to items by number, and

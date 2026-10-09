@@ -6,9 +6,9 @@
 // Output: Applies DWORD type at the cursor address.
 //
 // @author Ben Ethington
-// @category Diablo 2.Utility
+// @category GhidraMCP.Utility
 // @description Apply DWORD data type at current cursor address
-// @menupath Diablo 2.Utility.Apply DWORD
+// @menupath GhidraMCP.Utility.Apply DWORD
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

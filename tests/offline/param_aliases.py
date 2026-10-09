@@ -56,6 +56,21 @@ _PARAM = re.compile(r"@Param\s*\(")
 _VALUE_ATTR = re.compile(r'value\s*=\s*"([^"]+)"')
 _ALIASES_ATTR = re.compile(r"aliases\s*=\s*\{([^}]*)\}")
 _QUOTED = re.compile(r'"([^"]*)"')
+_FUNCTION_REF_ATTR = re.compile(r"paramType\s*=\s*(?:Param\.FUNCTION_REF|\"function_ref\")")
+_FUNCTION_REF_ALIASES = re.compile(
+    r"FUNCTION_REF_ALIASES\s*=\s*List\.of\(([^)]*)\)", re.DOTALL)
+
+
+@lru_cache(maxsize=1)
+def function_ref_aliases() -> tuple[str, ...]:
+    """The spellings every ``FUNCTION_REF`` parameter accepts, read from
+    ``AnnotationScanner.FUNCTION_REF_ALIASES`` -- the scanner adds them to each
+    such parameter instead of the annotation listing them, so the annotation
+    alone under-reports. Empty when the declaration cannot be found, which makes
+    the contract ratchet go red rather than excuse anything."""
+    scanner = (JAVA_ROOT / "core" / "AnnotationScanner.java").read_text(encoding="utf-8")
+    match = _FUNCTION_REF_ALIASES.search(scanner)
+    return tuple(_QUOTED.findall(match.group(1))) if match else ()
 
 
 def _balanced(text: str, open_at: int) -> tuple[str, int]:
@@ -107,6 +122,11 @@ def _params_of_signature(signature: str) -> dict[str, tuple[str, ...]]:
         aliases = (
             tuple(_QUOTED.findall(aliases_match.group(1))) if aliases_match else ()
         )
+        if _FUNCTION_REF_ATTR.search(block):
+            # AnnotationScanner.effectiveAliases: declared + the standard set, minus the name.
+            merged = dict.fromkeys(aliases + function_ref_aliases())
+            merged.pop(name, None)
+            aliases = tuple(merged)
         out[name] = aliases
     return out
 

@@ -141,7 +141,7 @@ rename_symbol("0x0040bc08", "szVideoSection")
 # Returns: "Success: Renamed defined data at 0x0040bc08 to 'szVideoSection'"
 
 # Step 6: Set documentation
-set_comment(type='pre', "0x0040bc08", """================================================================================
+set_comment("0x0040bc08", """================================================================================
                     STRING szVideoSection @ 0x0040BC08
 ================================================================================
 TYPE: char[6] (6 bytes) - Null-terminated ASCII string
@@ -149,13 +149,13 @@ TYPE: char[6] (6 bytes) - Null-terminated ASCII string
 VALUE: "VIDEO" (0x56 0x49 0x44 0x45 0x4F 0x00)
 
 PURPOSE:
-INI section name used to read video configuration settings from D2Server.ini file.
+INI section name used to read video configuration settings from Server.ini file.
 Passed to GetPrivateProfileIntA/GetPrivateProfileStringA for retrieving video-related
 configuration keys from the VIDEO section.
 
 XREF COUNT: 2 references
 - LoadVideoConfigurationFromIni (2 calls for boolean and integer INI values)
-""")
+""", type='pre')
 # Returns: "Success: Set comment at 0x0040bc08"
 ```
 
@@ -209,13 +209,13 @@ XREF COUNT: 2 references
 
 - `create_struct(name, fields)` - Create a new structure type
 - `modify_struct_field(struct_name, field_name, new_type, new_name)` - Update fields
-- `search_data_types(pattern)` - Search for structures by name pattern
+- `find_data_types(pattern, kind="struct")` - Search for structures by name pattern
 
 **For analysis:**
 
 - `analyze_data_region(address)` - Get data type and boundaries
 - `inspect_memory_content(address, length)` - Read raw memory
-- `get_bulk_xrefs(addresses)` - Get cross-references
+- `get_xrefs_to(addresses="a,b,c")` - Get cross-references to one or many addresses
 
 **For validation:**
 
@@ -233,7 +233,7 @@ Read or write any typed option in any group (Program Information, Analyzers,
 Decompiler, …).
 
 ```text
-list_option_groups(program="")                       -> group names
+get_program_options(program="")                       -> group names (no group given)
 get_program_options(group, program="")               -> {name: value} in that group
 set_program_option(group, name, value, type="", program="")
 remove_program_option(group, name, program="")
@@ -250,12 +250,12 @@ Where a comment is prose, a property is data. Use these when you need
 structured per-address values you can query back exactly.
 
 ```text
-list_property_maps(program="")                       -> existing maps + types
+list_properties(program="")                          -> existing maps + types (no map given)
 create_property_map(name, type, program="")          -> type: int|long|string|void
-set_property(name, address, value, program="")
-get_property(name, address, program="")
-list_properties(name, program="")                    -> every address carrying it
-remove_property(name, address, program="")
+set_property(map, address, value, program="")
+get_property(map, address, program="")
+list_properties(map, program="")                     -> every address carrying it
+remove_property(map, address, program="")
 delete_property_map(name, program="")
 ```
 
@@ -289,8 +289,8 @@ Passing an empty `comment` clears that comment type at the address.
 ## Flow Repair (v5.17.0+)
 
 ```text
-set_function_no_return(address, no_return, program="")
-clear_flow_and_repair(address, program="")
+set_function_no_return(function_address, no_return, program="")
+clear_flow_and_repair(start_address, end_address="", program="")
 ```
 
 `set_function_no_return` synchronizes the flag across every thunk hop and the
@@ -299,7 +299,7 @@ terminal target, and its response reports the verified `function_no_return` /
 
 When a function was *wrongly* marked no-return, clearing the flag alone does
 not restore the call fallthrough that Ghidra already deleted. Run
-`clear_flow_and_repair(address)` afterwards to rebuild the damaged flow
+`clear_flow_and_repair(start_address)` afterwards to rebuild the damaged flow
 without a full re-analysis.
 
 ## Cross-Binary Documentation Propagation (v1.9.4+)
@@ -314,8 +314,8 @@ hash_info = get_function_hash("0x6FAB1234")
 # Returns: {"hash": "abc123...", "instruction_count": 63, "has_custom_name": true}
 
 # Get hashes for many functions (paginated)
-result = get_bulk_function_hashes(offset=0, limit=500, filter="documented")
-# filter options: "documented", "undocumented", "all"
+result = get_function_hash(offset=0, limit=500, filter="documented")  # omit `function` for bulk mode
+# filter options: "documented", "undocumented"; omit for all
 ```
 
 ### Documentation Export/Import
@@ -323,40 +323,45 @@ result = get_bulk_function_hashes(offset=0, limit=500, filter="documented")
 ```python
 # Export complete documentation from a well-documented function
 docs = get_function_documentation("0x6FAB1234")
-# Returns: name, prototype, plate_comment, parameters, locals, comments, labels
+# Returns: hash, function_name, return_type, calling_convention, plate_comment,
+# parameters, local_variables, comments, labels
 
 # Apply documentation to another function with matching hash
-apply_function_documentation(
-    target_address="0x6FAC0000",
-    function_name="ProcessPlayerData",
+apply_documentation(
+    address="0x6FAC0000",
+    name="ProcessPlayerData",
     return_type="int",
     calling_convention="__fastcall",
     plate_comment="Processes player data structures.",
     parameters=[{"ordinal": 0, "name": "pPlayer", "type": "Player *"}]
 )
+# Or pass the export straight back: apply_documentation(**docs, target_address="0x6FAC0000")
+# Many functions at once: apply_documentation(entries=[{"address": ..., "name": ...}, ...])
 ```
 
-### Index Management (High-Level Workflow)
+### Matching Across Programs
+
+There is no persistent hash index and no reverse hash lookup. Hash both programs
+in bulk, join the two listings on `hash`, and copy documentation one function at
+a time:
 
 ```python
-# Build index from documented functions across programs
-build_function_hash_index(
-    programs=["D2Client.dll 1.07", "D2Client.dll 1.08"],
-    filter="documented",
-    index_file="function_hash_index.json"
-)
+# Hash the documented functions in the source and everything in the target
+src = get_function_hash(filter="documented", limit=500, program="example.dll 1.0")
+dst = get_function_hash(limit=500, program="example.dll 1.1")
+# Page with offset= until each listing is exhausted, then pair entries whose
+# "hash" values are equal.
 
-# Find functions matching a hash
-matches = lookup_function_by_hash(hash="abc123...")
-# Returns all programs/addresses with matching functions
-
-# Propagate documentation to all matching functions
-propagate_documentation(
-    source_address="0x6FAB1234",
-    target_programs=["D2Client.dll 1.08", "D2Client.dll 1.09"],
-    dry_run=True  # Preview changes without applying
-)
+# For each pair, export from the source and apply to the target
+doc = get_function_documentation(function="0x10001234", program="example.dll 1.0")
+apply_documentation(**doc, target_address="0x10002000", program="example.dll 1.1")
 ```
+
+When the two programs share addresses (a rescued copy of the same image),
+`merge_program_documentation(source, target, dry_run=true)` copies everything
+in one transaction instead. For functions that changed between versions, so
+their hashes differ, `bulk_fuzzy_match(source_program, target_program)` pairs
+them by similarity.
 
 ### Hash Normalization Details
 
@@ -412,7 +417,7 @@ Brute-force API-hash resolution. Iterates a candidate list through a hash functi
 - Returns `{function, target_hash, total_candidates, tested, matches: [{api_name, computed_hash, iteration}], resolved, best_match}`
 - `matches` lists **all** collisions. When two or more names hash to the target, check the full array; `best_match` is only the first in iteration order.
 
-Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `search_functions`), identify input/output registers (`get_function_variables` or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
+Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `find_functions`), identify input/output registers (`get_functions` with `fields=parameters,locals`, or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
 
 ### `debugger_*` families (GUI-only)
 
@@ -428,7 +433,8 @@ launch time selects the backend:
 - Linux ELF: `gdb`  ·  macOS Mach-O: `lldb`  ·  Windows PE: `dbgeng`
 
 Tools: `debugger_launch`, `debugger_launch_offers`, `debugger_status`, `debugger_resume`,
-`debugger_interrupt`, `debugger_step_{into,over,out}`, `debugger_{set,remove,list}_breakpoints`,
+`debugger_interrupt`, `debugger_step` (`kind="into"|"over"|"out"`), `debugger_set_breakpoint`,
+`debugger_remove_breakpoint`, `debugger_list_breakpoints`,
 `debugger_registers`, `debugger_read_memory`, `debugger_stack_trace`, `debugger_modules`,
 `debugger_traces`, `debugger_static_to_dynamic`, `debugger_dynamic_to_static`.
 
@@ -442,7 +448,7 @@ on every platform.
 2. debugger_launch_offers()                  # lists gdb local/remote/ssh launchers
 3. debugger_launch(executable_path="...")    # starts the target under gdb
 4. debugger_set_breakpoint(...) / debugger_registers() / debugger_read_memory(...)
-5. debugger_step_into() / debugger_resume() / debugger_interrupt()
+5. debugger_step(kind="into") / debugger_resume() / debugger_interrupt()
 6. debugger_static_to_dynamic(...) maps a Ghidra (static) address to the live
    process; debugger_dynamic_to_static(...) goes the other way.
 ```
@@ -450,7 +456,7 @@ on every platform.
 #### B. WinDbg proxy family — standalone dbgeng server (Windows only)
 
 22 static bridge tools proxied to a standalone Python server via `GHIDRA_DEBUGGER_URL`
-(default `http://127.0.0.1:8099`), which wraps **dbgeng/WinDbg via `pybag`** —
+(default `http://127.0.0.1:8099`). That server is not part of this repository. It wraps **dbgeng/WinDbg via `pybag`** —
 **Windows-only** (`pybag` requires `pywin32`). Adds dbgeng-specific capabilities the
 TraceRmi family doesn't have: attach-by-process-name, ordinal resolution, argument
 reads, and the trace/watch loops.
@@ -460,16 +466,16 @@ Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
 `debugger_watch_{memory,stop,log}` (plus dbgeng versions of status/step/breakpoint/
 registers/memory/stack/modules).
 
-**Registration is platform-gated** (`_debugger_enabled()` in the bridge): on non-Windows
-hosts with a local `GHIDRA_DEBUGGER_URL` these tools are **not registered** (they could
-never work), which also frees the shared `debugger_*` names for the TraceRmi family above.
-They register when: running on Windows, `GHIDRA_DEBUGGER_URL` points at a remote
-(Windows) host running the server, or `GHIDRA_DEBUGGER_TOOLS=1` forces them on.
+**These tools are off by default** (`_debugger_enabled()` in the bridge). They register
+only when `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS=1`;
+`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
+loopback, so reach a server on another machine through a forwarded port.
 
-> Naming note: where the two families share a name (e.g. `debugger_status`), only one
-> can hold the clean name. On non-Windows the TraceRmi tool wins; on Windows (both
-> active) the dbgeng proxy holds the clean name and the TraceRmi endpoint is suffixed
-> `_2` (e.g. `debugger_status_2`).
+> Naming note: where the two families share a name (e.g. `debugger_status`), both stay
+> reachable. With the proxies off, the TraceRmi tool holds the clean name. With them on,
+> the dbgeng proxy holds it and the TraceRmi tool is registered as `debugger_status_2`.
+> The two families drive separate debuggers, so pick one per target: a process the
+> TraceRmi debugger launched cannot also be attached by the dbgeng server.
 
 Use either family for: ground-truth validation after static analysis. After emulation
 resolves a hash, set a breakpoint on the resolved API and confirm the process calls it.
@@ -480,8 +486,8 @@ Lightweight per-function labels (program-wide tag definitions, attached to any f
 
 Two layers:
 
-- **Tag definitions** (program-wide): `create_function_tag`, `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`.
-- **Per-function attachment**: `add_function_tag`, `remove_function_tag`, `get_function_tags`, `search_functions_by_tag`. Attaching a tag by name auto-creates the definition if it doesn't already exist.
+- **Tag definitions** (program-wide): `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`. There is no create call: attaching a tag creates its definition, and `tag_comments={"crypto": "..."}` on `add_function_tag` or `apply_documentation` gives a new one a description.
+- **Per-function attachment**: `add_function_tag`, `remove_function_tag`, and `apply_documentation(tags=...)`, which adds tags alongside everything else you write about a function. Read them back with `get_functions(fields=tags)`, and find functions by tag with `find_functions(tag=...)`; every `find_functions` result lists its tags.
 
 Batch variants: `add_function_tag` / `remove_function_tag` take an array of `{function, tags}` objects and run the whole set in one transaction. Use these when tagging a sweep result — single-call instead of N round-trips.
 
@@ -497,11 +503,11 @@ add_function_tag(assignments=[
 ])
 
 # Later, recall the curated list:
-search_functions_by_tag(tag="crypto")
-# → returns {tag, total, functions: [{name, address}, ...]}
+find_functions(tag="crypto")            # any of several: tag="crypto,parser"
+# → returns {functions: [{name, address, tags, ...}, ...], total, ...}
 ```
 
-Tags are case-sensitive; `search_functions_by_tag` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
+Tags are case-sensitive; `find_functions(tag=...)` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
 
 ## Security Environment Variables (v5.4.1+)
 
@@ -509,9 +515,9 @@ GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev bo
 
 | Env var | Effect |
 | --- | --- |
-| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are always exempt. |
+| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are always exempt. |
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** (breaking change — these endpoints execute arbitrary Java against the Ghidra process). |
-| `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/load_program`, `/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |
+| `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |
 
 The headless server refuses to start on a non-loopback bind address (`0.0.0.0`, explicit external IP) unless `GHIDRA_MCP_AUTH_TOKEN` is set.
 
@@ -524,7 +530,9 @@ export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
 export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
 
-java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
+# The jar does not bundle Ghidra; put both on the classpath, as docker/entrypoint.sh does
+java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadlessServer \r
+    --bind 0.0.0.0 --port 8089
 ```
 
 ---
@@ -533,6 +541,6 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 
 `analyze_function_completeness` is a **hygiene** score: it verifies documentation is *present and well-formed* (name quality, plate sections, typed params). It is computed entirely from the documentation, so it cannot detect a claim that is confidently wrong — a plate describing an algorithm the code does not implement still scores 100.
 
-The **truth** axis is falsifiability (`fun-doc/falsify.py`): mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. Tier-1 (mechanically certain) findings mark the function `DOC_REFUTED`, stamp an idempotent `[AUDIT falsify:*]` plate flag, force an audit pass seeded with the contradiction, and keep the function in the work queue regardless of its score.
+The **truth** axis is falsifiability: mechanical, model-free checks that compare documentation claims against disassembly facts — declared calling convention vs the callee's actual `RET n`, plate-documented parameters vs the live signature, reader-verb names (`Get*`/`Is*`) on functions that write globals, plate/prototype return contradictions. These checks are not part of this server; an external documentation orchestrator can run them. When one does, a mechanically certain finding stamps an idempotent `[AUDIT falsify:*]` plate flag and keeps the function in its work queue regardless of its score.
 
 Operationally: treat a high completeness score as "the form is filled in", never as "the content is verified". When a plate carries an `[AUDIT falsify:*]` flag, resolving that contradiction — by correcting the documentation to match the disassembly, never the reverse — takes priority over any score-driven work.

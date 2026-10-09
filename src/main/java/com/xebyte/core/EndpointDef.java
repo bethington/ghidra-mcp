@@ -5,7 +5,7 @@ import java.util.*;
 /**
  * Declarative endpoint definition for shared registration between GUI and headless modes.
  *
- * @param path        HTTP path (e.g., "/list_functions")
+ * @param path        HTTP path (e.g., "/find_functions")
  * @param method      HTTP method ("GET" or "POST")
  * @param handler     Lambda that processes the request and returns a Response
  * @param description Human-readable description (for schema generation)

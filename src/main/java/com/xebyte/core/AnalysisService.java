@@ -37,7 +37,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
 import javax.swing.SwingUtilities;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -196,7 +195,7 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis")
+    @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response listAnalyzers(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -222,9 +221,56 @@ public class AnalysisService {
     }
 
     /**
+     * Enable or disable one analyzer on a program.
+     *
+     * <p>Headless-only until 7.0, where it swallowed its own result and answered
+     * {@code success: true} for an analyzer that does not exist. It is plain
+     * program-options code, so both servers serve it now.
+     */
+    @McpTool(path = "/configure_analyzer", method = "POST",
+            description = "Enable or disable one analyzer (a name exactly as list_analyzers reports it) on a program.",
+            category = "analysis", access = ToolAccess.WRITE)
+    public Response configureAnalyzer(
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.") String analyzerName,
+            @Param(value = "enabled", source = ParamSource.BODY, defaultValue = "",
+                   description = "True enables the analyzer, false disables it. Omitting it leaves the current setting alone and only reports it.") Boolean enabled,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit to use the active program — always specify "
+                               + "when multiple programs are open)") String programName) {
+        if (analyzerName == null || analyzerName.isBlank()) {
+            return Response.err("name is required");
+        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+        if (!options.contains(analyzerName)) {
+            return Response.err("Analyzer not found: " + analyzerName
+                + " (list_analyzers shows the exact names)");
+        }
+        try {
+            if (enabled != null) {
+                threadingStrategy.executeWrite(program, "Configure Analyzer", () -> {
+                    options.setBoolean(analyzerName, enabled);
+                    return null;
+                });
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "analyzer", analyzerName,
+                "enabled", options.getBoolean(analyzerName, false),
+                "changed", enabled != null));
+        } catch (Exception e) {
+            return Response.err("Failed to configure analyzer: " + e.getMessage());
+        }
+    }
+
+    /**
      * Trigger auto-analysis on the current or named program.
      */
-    @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis")
+    @McpTool(path = "/run_analysis", dryRun = false, method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
     public Response runAnalysis(
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
@@ -269,7 +315,7 @@ public class AnalysisService {
         return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
     }
 
-    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response analyzeDataRegion(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -454,7 +500,7 @@ public class AnalysisService {
         return detectArrayBounds(addressStr, maxScanRange, null);
     }
 
-    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response detectArrayBounds(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -521,7 +567,7 @@ public class AnalysisService {
         return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
     }
 
-    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFieldAccessContext(
             @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -556,7 +602,7 @@ public class AnalysisService {
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Program program = resolvedProgram;
 
@@ -613,7 +659,7 @@ public class AnalysisService {
                     result.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             Msg.error(this, "Thread synchronization error in getFieldAccessContext", e);
             return Response.err("Thread synchronization error: " + e.getMessage());
         }
@@ -628,7 +674,7 @@ public class AnalysisService {
         return inspectMemoryContent(addressStr, length, detectStrings, null);
     }
 
-    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response inspectMemoryContent(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -758,7 +804,7 @@ public class AnalysisService {
         return detectCryptoConstants(null);
     }
 
-    @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware")
+    @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware", access = ToolAccess.READ_ONLY)
     public Response detectCryptoConstants(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -785,7 +831,7 @@ public class AnalysisService {
         return searchBytePatterns(pattern, mask, null);
     }
 
-    @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis")
+    @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
             @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
@@ -892,7 +938,7 @@ public class AnalysisService {
             + "has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without "
             + "knowing the encoding. Case-insensitive substring match on both fields. Returns "
             + "{address, function, mnemonic, operands, bytes} per match.",
-        category = "analysis")
+        category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchInstructions(
             @Param(value = "mnemonic", defaultValue = "",
                 description = "Case-insensitive mnemonic match (exact, not substring — 'mov' matches 'MOV' but not 'movsd'). Omit to match any mnemonic.") String mnemonic,
@@ -924,11 +970,8 @@ public class AnalysisService {
             // Build the address set we'll iterate.
             AddressSetView searchSet;
             if (functionScope != null && !functionScope.trim().isEmpty()) {
-                FunctionRef.Result resolved =
-                    FunctionRef.ofNameOrAddress(functionScope, "").tryResolve(program);
-                if (!resolved.isSuccess()) {
-                    return Response.err("Function not found: " + functionScope);
-                }
+                ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionScope);
+                if (resolved.hasError()) return resolved.error();
                 Function f = resolved.function();
                 searchSet = f.getBody();
             } else {
@@ -1026,7 +1069,7 @@ public class AnalysisService {
         return findSimilarFunctions(targetFunction, threshold, null);
     }
 
-    @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis")
+    @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findSimilarFunctions(
             @Param(value = "target_function", description = "Function name") String targetFunction,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
@@ -1043,10 +1086,8 @@ public class AnalysisService {
             FunctionManager functionManager = program.getFunctionManager();
 
             // Find the target function by name or address
-            FunctionRef.Result resolved = FunctionRef.of(targetFunction).tryResolve(program);
-            if (!resolved.isSuccess()) {
-                return Response.err("Function not found: " + targetFunction);
-            }
+            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, targetFunction);
+            if (resolved.hasError()) return resolved.error();
             Function targetFunc = resolved.function();
 
             // Calculate metrics for target function
@@ -1109,7 +1150,7 @@ public class AnalysisService {
         return analyzeControlFlow(functionName, null);
     }
 
-    @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis")
+    @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeControlFlow(
             @Param(value = "function_name", description = "Function name") String functionName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -1125,10 +1166,8 @@ public class AnalysisService {
             FunctionManager functionManager = program.getFunctionManager();
 
             // Find the function by name or address
-            FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
-            if (!resolved.isSuccess()) {
-                return Response.err("Function not found: " + functionName);
-            }
+            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionName);
+            if (resolved.hasError()) return resolved.error();
             Function func = resolved.function();
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -1276,7 +1315,7 @@ public class AnalysisService {
         return findDeadCode(functionName, null);
     }
 
-    @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis")
+    @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -1321,9 +1360,9 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis")
+    @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionCompleteness(
-            @Param(value = "function_address", paramType = "address", defaultValue = "",
+            @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") String functionAddress,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (single mode)") boolean compact,
             @Param(value = "addresses", defaultValue = "",
@@ -1338,7 +1377,7 @@ public class AnalysisService {
         }
 
         // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
@@ -1931,11 +1970,7 @@ public class AnalysisService {
                 }
             };
 
-            if (SwingUtilities.isEventDispatchThread()) {
-                completenessWork.run();
-            } else {
-                SwingUtilities.invokeAndWait(completenessWork);
-            }
+            threadingStrategy.runOnUi(completenessWork);
 
             if (errorMsg.get() != null) {
                 return Response.err(errorMsg.get());
@@ -2101,7 +2136,7 @@ public class AnalysisService {
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
-    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findNextUndefinedFunction(
             @Param(value = "start_address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2130,7 +2165,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
                     Address start = startAddr;
@@ -2188,9 +2223,9 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis")
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
-            @Param(value = "name", description = "Function reference (name or address)") String name,
+            @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") String name,
             @Param(value = "include_xrefs", defaultValue = "true",
                    description = "True (the default) adds `xrefs` — the sources referencing the entry "
                                + "point — capped at the first 100. `xref_count` counts what was listed, so "
@@ -2221,14 +2256,14 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
-                    Function func = ServiceUtils.resolveFunction(program, name);
-
-                    if (func == null) {
-                        errorMsg.set("Function not found: " + name);
+                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, name);
+                    if (lookup.hasError()) {
+                        errorMsg.set(lookup.message());
                         return;
                     }
+                    Function func = lookup.function();
 
                     // Build structured data for Gson serialization
                     Map<String, Object> data = new LinkedHashMap<>();
@@ -2441,139 +2476,6 @@ public class AnalysisService {
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
-    @McpTool(path = "/search_functions_enhanced", description = "Advanced function search with filtering", category = "analysis")
-    public Response searchFunctionsEnhanced(
-            @Param(value = "name_pattern", description = "Name pattern (omit to match all)", defaultValue = "") String namePattern,
-            @Param(value = "min_xrefs", description = "Minimum xref count filter (omit for no minimum)", defaultValue = "") Integer minXrefs,
-            @Param(value = "max_xrefs", description = "Maximum xref count filter (omit for no maximum)", defaultValue = "") Integer maxXrefs,
-            @Param(value = "calling_convention", description = "Calling convention filter (omit for any)", defaultValue = "") String callingConvention,
-            @Param(value = "has_custom_name", description = "Filter by whether function has a user-defined name (omit for any)", defaultValue = "") Boolean hasCustomName,
-            @Param(value = "is_thunk", description = "Filter by thunk classification (true=only thunks, false=exclude thunks, omit for any)", defaultValue = "") Boolean isThunkFilter,
-            @Param(value = "is_external", description = "Filter by external classification (true=only external, false=exclude external, omit for any)", defaultValue = "") Boolean isExternalFilter,
-            @Param(value = "regex", defaultValue = "false", description = "Use regex matching") boolean regex,
-            @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of matches to skip before this page starts; 0 begins at the "
-                               + "first. Applied after every filter and the sort.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum matches returned in this page (default 100). This endpoint "
-                               + "slices directly, so 0 returns an EMPTY page rather than everything — page "
-                               + "with offset against the `total` the response reports.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-                    List<Map<String, Object>> matches = new ArrayList<>();
-                    Pattern pattern = null;
-                    if (regex && namePattern != null) {
-                        try {
-                            pattern = Pattern.compile(namePattern);
-                        } catch (Exception e) {
-                            errorMsg.set("Invalid regex pattern: " + e.getMessage());
-                            return;
-                        }
-                    }
-
-                    FunctionManager funcMgr = program.getFunctionManager();
-
-                    for (Function func : funcMgr.getFunctions(true)) {
-                        // Filter by name pattern
-                        if (namePattern != null && !namePattern.isEmpty()) {
-                            if (regex) {
-                                if (!pattern.matcher(func.getName()).find()) {
-                                    continue;
-                                }
-                            } else {
-                                if (!func.getName().contains(namePattern)) {
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // Filter by custom name
-                        if (hasCustomName != null) {
-                            boolean isCustom = !ServiceUtils.isAutoGeneratedName(func.getName());
-                            if (hasCustomName != isCustom) {
-                                continue;
-                            }
-                        }
-
-                        // Get xref count for filtering and sorting
-                        int xrefCount = func.getSymbol().getReferenceCount();
-
-                        // Filter by xref count
-                        if (minXrefs != null && xrefCount < minXrefs) {
-                            continue;
-                        }
-                        if (maxXrefs != null && xrefCount > maxXrefs) {
-                            continue;
-                        }
-
-                        // Classify once: classifyFunction walks instructions, so reuse for both filter and output
-                        boolean funcIsThunk = "thunk".equals(AnalysisService.classifyFunction(func, program));
-                        boolean funcIsExternal = func.isExternal();
-
-                        if (isThunkFilter != null && funcIsThunk != isThunkFilter) {
-                            continue;
-                        }
-                        if (isExternalFilter != null && funcIsExternal != isExternalFilter) {
-                            continue;
-                        }
-
-                        // Create match entry
-                        Map<String, Object> match = new LinkedHashMap<>();
-                        match.put("name", func.getName());
-                        match.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
-                        match.put("xref_count", xrefCount);
-                        match.put("isThunk", funcIsThunk);
-                        match.put("isExternal", funcIsExternal);
-                        matches.add(match);
-                    }
-
-                    // Sort results
-                    if ("name".equals(sortBy)) {
-                        matches.sort((a, b) -> ((String)a.get("name")).compareTo((String)b.get("name")));
-                    } else if ("xref_count".equals(sortBy)) {
-                        matches.sort((a, b) -> Integer.compare((Integer)b.get("xref_count"), (Integer)a.get("xref_count")));
-                    } else {
-                        // Default: sort by address
-                        matches.sort((a, b) -> ((String)a.get("address")).compareTo((String)b.get("address")));
-                    }
-
-                    // Apply pagination
-                    int total = matches.size();
-                    int endIndex = Math.min(offset + limit, total);
-                    List<Map<String, Object>> page = matches.subList(Math.min(offset, total), endIndex);
-
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "total", total,
-                        "offset", offset,
-                        "limit", limit,
-                        "results", page
-                    )));
-
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        return responseRef.get();
-    }
-
     // ========================================================================
     // Private helper methods
     // ========================================================================
@@ -3064,7 +2966,7 @@ public class AnalysisService {
         if (!undocumentedOrdinals.isEmpty()) {
             recommendations.add("UNDOCUMENTED ORDINAL CALLS - Add inline comments for each:");
             recommendations.add("1. Found " + undocumentedOrdinals.size() + " Ordinal call(s) without comments: " + String.join(", ", undocumentedOrdinals.subList(0, Math.min(5, undocumentedOrdinals.size()))));
-            recommendations.add("2. Resolve the Ordinal via get_external_location() or list_external_locations() on the importing module");
+            recommendations.add("2. Resolve the Ordinal via get_external_location() or list_program_items(kind=external_locations) on the importing module");
             recommendations.add("3. Use set_comment(type='pre') or batch_set_comments() to add inline comment explaining the call");
             recommendations.add("4. Format: /* Ordinal_123 = StorageFunctionName - brief description */");
         }
@@ -3083,7 +2985,7 @@ public class AnalysisService {
             recommendations.add("UNRESOLVED STRUCT FIELD ACCESSES - Apply struct types to eliminate raw offsets:");
             recommendations.add("1. Found " + unresolvedStructAccesses.size() + " raw pointer+offset dereference(s): "
                     + String.join(", ", unresolvedStructAccesses.subList(0, Math.min(5, unresolvedStructAccesses.size()))));
-            recommendations.add("2. Use search_data_types() to find existing struct definitions");
+            recommendations.add("2. Use find_data_types() to find existing struct definitions");
             recommendations.add("3. If no struct exists, use create_struct() with fields matching the observed offsets");
             recommendations.add("4. Apply struct type to variables with set_variable_type() or set_function_prototype()");
         }
@@ -3099,7 +3001,7 @@ public class AnalysisService {
             recommendations.add("   - undefined1[N] -> byte[N] (byte array for XMM spills, buffers)");
             recommendations.add("2. Use set_variable_type() with lowercase builtin types (uint, ushort, byte) NOT uppercase Windows types (UINT, USHORT, BYTE)");
             recommendations.add("3. CRITICAL: Check disassembly with disassemble_function() for assembly-only undefined types:");
-            recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_function_variables()");
+            recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_functions(fields=locals)");
             recommendations.add("   - XMM register spills: undefined1[16] at stack locations");
             recommendations.add("   - Intermediate calculation results not appearing in decompiled view");
             recommendations.add("4. After resolving ALL undefined types, rename variables with Hungarian notation using rename_variables()");
@@ -3141,7 +3043,7 @@ public class AnalysisService {
             recommendations.add("   - byte -> b/by | char -> c/ch | bool -> f | short -> n/s | ushort -> w");
             recommendations.add("   - int -> n/i | uint -> dw | long -> l | ulong -> dw");
             recommendations.add("   - longlong -> ll | ulonglong -> qw | float -> fl | double -> d");
-            recommendations.add("   - void* -> p | typed pointers -> p+StructName (pUnitAny)");
+            recommendations.add("   - void* -> p | typed pointers -> p+StructName (pConfig)");
             recommendations.add("   - byte[N] -> ab | ushort[N] -> aw | uint[N] -> ad");
             recommendations.add("   - char* -> sz/lpsz | wchar_t* -> wsz");
             recommendations.add("2. First set correct type with set_variable_type() using lowercase builtin");
@@ -3170,7 +3072,7 @@ public class AnalysisService {
                     recommendations.add("2. Either fix the type with set_function_prototype() to match plate, or correct plate comment");
                 } else if (issue.contains("Generic void*")) {
                     recommendations.add("1. Replace generic void* parameters with specific structure types using set_function_prototype()");
-                    recommendations.add("   Example: void ProcessData(void* pData) -> void ProcessData(UnitAny* pUnit)");
+                    recommendations.add("   Example: void ProcessData(void* pData) -> void ProcessData(Config* pConfig)");
                 } else if (issue.contains("Generic int* parameter")) {
                     recommendations.add("GENERIC INT* PARAMETER - p-prefix parameter typed as int* instead of struct pointer:");
                     recommendations.add("1. " + issue);
@@ -3235,12 +3137,12 @@ public class AnalysisService {
                 recommendations.add("4. Re-score and stop when only structural deductions remain.");
             } else {
                 recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V5.md):");
-                recommendations.add("1. Initialize: get_current_selection() + analyze_function_complete() -- gather decompiled code, xrefs, callees, callers, disassembly, variables");
+                recommendations.add("1. Initialize: get_ui_cursor(type=selection) + analyze_function_complete() -- gather decompiled code, xrefs, callees, callers, disassembly, variables");
                 recommendations.add("2. Classify: Leaf/Worker/Thunk/Init/Callback/Public API/Internal utility");
                 recommendations.add("3. Mandatory Undefined Type Audit: examine BOTH decompiled code and disassembly for undefined types");
                 recommendations.add("4. Verify Decompiler vs Assembly: loops, type casts, pointer arithmetic, conditionals, early exits");
                 recommendations.add("5. Control Flow + Loop Mapping: return points, loop headers/bounds/stride, error paths");
-                recommendations.add("6. Structure Identification: search_data_types() or create_struct(), memory model docs");
+                recommendations.add("6. Structure Identification: find_data_types() or create_struct(), memory model docs");
                 recommendations.add("7. Rename + Prototype: rename_function() (PascalCase) + set_function_prototype()");
                 recommendations.add("8. Local Variable Renaming: set_variable_type() then rename_variables() with Hungarian notation");
                 recommendations.add("9. Global Data: rename_symbol() with g_ prefix for DAT_*/s_* references");
@@ -3576,7 +3478,6 @@ public class AnalysisService {
         // Try exact name and common suffixed variants in root category
         String[] candidates = {
             baseName,            // Unit
-            baseName + "Any",    // UnitAny (Diablo 2 convention)
             baseName + "Data",   // UnitData
             baseName + "Info",   // UnitInfo
             baseName + "Rec",    // UnitRec
@@ -3599,7 +3500,7 @@ public class AnalysisService {
         }
 
         // Fallback: search ALL categories for structs matching candidate names
-        // This catches structs in subcategories like /windows/UnitAny
+        // This catches structs in subcategories like /MyTypes/UnitData
         for (String candidate : candidates) {
             DataType dt = ServiceUtils.findDataTypeByNameInAllCategories(dtm, candidate);
             if (dt != null && (dt instanceof ghidra.program.model.data.Structure ||
@@ -3846,7 +3747,7 @@ public class AnalysisService {
             }
 
             // Check 1a: Generic int* pointers with p-prefix names (should be struct pointers)
-            // e.g., pUnit typed as int* but plate says "Unit receiving drops" → should be UnitAny*
+            // e.g., pUnit typed as int* but plate says "Unit receiving drops" → should be a struct pointer (e.g. UnitData*)
             if (paramType instanceof Pointer) {
                 Pointer ptrType = (Pointer) paramType;
                 DataType pointedTo = ptrType.getDataType();
@@ -4101,7 +4002,6 @@ public class AnalysisService {
         boolean hasAlgorithm = false;
         boolean hasParameters = false;
         boolean hasReturns = false;
-        boolean hasSource = false;
         boolean hasNumberedSteps = false;
         int algorithmLineIdx = -1;
         int parametersLineIdx = -1;
@@ -4134,8 +4034,10 @@ public class AnalysisService {
                 if (algorithmLineIdx >= 0 && nextSectionAfterAlgo < 0) nextSectionAfterAlgo = i;
                 if (parametersLineIdx >= 0 && nextSectionAfterParams < 0) nextSectionAfterParams = i;
             }
+            // An optional "Source:" section is recognised only so that it ends
+            // the section before it. It is not required: most binaries carry no
+            // source-path strings to cite.
             if (trimmed.startsWith("Source:") || trimmed.startsWith("Source file:")) {
-                hasSource = true;
                 if (algorithmLineIdx >= 0 && nextSectionAfterAlgo < 0) nextSectionAfterAlgo = i;
                 if (parametersLineIdx >= 0 && nextSectionAfterParams < 0) nextSectionAfterParams = i;
                 if (returnsLineIdx >= 0 && nextSectionAfterReturns < 0) nextSectionAfterReturns = i;
@@ -4239,11 +4141,6 @@ public class AnalysisService {
                 issues.add("Returns section says void/nothing but function return type is " + returnType);
             }
         }
-
-        // --- High-value check 4: Source file reference ---
-        if (!hasSource) {
-            issues.add("Missing Source file reference (e.g., Source: ..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp)");
-        }
     }
 
     /**
@@ -4251,9 +4148,9 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
+    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeForDocumentation(
-            @Param(value = "function_address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -4265,14 +4162,14 @@ public class AnalysisService {
         Program program = pe.program();
 
         // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     // Resolve function by address
                     Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -4467,7 +4364,7 @@ public class AnalysisService {
                          + "function body. Useful for discovering missed functions in firmware and embedded "
                          + "binaries. Reports each contiguous uncovered range with its size, content type, "
                          + "and the nearest functions on each side.",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findCodeGaps(
             @Param(value = "min_size", defaultValue = "1",
                    description = "Minimum gap size in addressable units to report (increase to filter alignment padding)") int minSize,
@@ -4487,7 +4384,7 @@ public class AnalysisService {
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
                     Listing listing = program.getListing();
@@ -4593,7 +4490,7 @@ public class AnalysisService {
                          + "(Varnode.getDescendants). Terminates at constants, parameters, call boundaries, or max_steps. "
                          + "Phi (MULTIEQUAL) nodes are summarized rather than recursed. On programs with multiple "
                          + "address spaces, prefix addresses with the space name (mem:1000).",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeDataflow(
             @Param(value = "address", paramType = "address",
                    description = "Address inside the target function where the value is observed. "
@@ -4632,7 +4529,7 @@ public class AnalysisService {
 
         final AtomicReference<Response> result = new AtomicReference<>();
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            threadingStrategy.runOnUi(() -> {
                 try {
                     Program program = resolvedProgram;
                     Function func = program.getFunctionManager().getFunctionContaining(anchorAddr);
@@ -4690,7 +4587,7 @@ public class AnalysisService {
                     result.set(Response.err(e.getMessage()));
                 }
             });
-        } catch (InvocationTargetException | InterruptedException e) {
+        } catch (Exception e) {
             return Response.err("Thread synchronization error: " + e.getMessage());
         }
 
@@ -5022,9 +4919,9 @@ public class AnalysisService {
 
     @McpTool(path = "/get_function_pcode",
              description = "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
-             category = "analysis")
+             category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFunctionPcode(
-            @Param(value = "function_address", paramType = "address",
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
             @Param(value = "granularity", defaultValue = "high",
                    description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
@@ -5034,7 +4931,7 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -5103,7 +5000,7 @@ public class AnalysisService {
 
     @McpTool(path = "/get_language_metadata",
              description = "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
-             category = "program")
+             category = "program", access = ToolAccess.READ_ONLY)
     public Response getLanguageMetadata(
             @Param(value = "include_registers", defaultValue = "true",
                    description = "Include the full register list (can be hundreds of entries on x86).") boolean includeRegisters,

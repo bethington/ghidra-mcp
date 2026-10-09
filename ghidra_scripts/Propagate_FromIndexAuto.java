@@ -6,9 +6,9 @@
 // Output: Applies documentation to matched functions in the current program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Propagate documentation from hash index automatically
-// @menupath Diablo 2.Propagation.From Index Auto
+// @menupath GhidraMCP.Propagation.From Index Auto
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

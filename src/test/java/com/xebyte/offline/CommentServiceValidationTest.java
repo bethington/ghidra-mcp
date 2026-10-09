@@ -53,6 +53,6 @@ public class CommentServiceValidationTest extends TestCase {
     }
 
     public void testGetPlateCommentDegradesGracefully() {
-        assertNoProgram(comments.getComment("0x401000", ""));
+        assertNoProgram(comments.getComment("0x401000", "", false, ""));
     }
 }

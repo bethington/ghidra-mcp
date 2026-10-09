@@ -34,6 +34,25 @@ public class GhidraMCPAuthenticator implements ClientAuthenticator {
     private volatile String username;
     private volatile char[] password;
 
+    /** The process's authenticator: Ghidra's client accepts exactly one. */
+    private static GhidraMCPAuthenticator registered;
+
+    /**
+     * Give this process its server credentials: register the authenticator the first time,
+     * update it after. The one entry point, for the credentials found in the environment
+     * (GUI startup, headless) and for {@code /server/authenticate}, which had its own copy
+     * of this on the GUI and left headless unable to take credentials at runtime.
+     */
+    public static synchronized GhidraMCPAuthenticator register(String username, char[] password) {
+        if (registered != null) {
+            registered.updateCredentials(username, password);
+        } else {
+            registered = new GhidraMCPAuthenticator(username, password);
+            ghidra.framework.client.ClientUtil.setClientAuthenticator(registered);
+        }
+        return registered;
+    }
+
     public GhidraMCPAuthenticator(String username, char[] password) {
         this.username = username;
         this.password = password;

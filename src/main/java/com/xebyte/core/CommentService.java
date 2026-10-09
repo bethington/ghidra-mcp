@@ -66,16 +66,22 @@ public class CommentService {
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction(transactionName);
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, transactionName);
                 try {
-                    program.getListing().setComment(addr, commentType, comment);
+                    // Empty means REMOVE, which is what a caller passing "" is asking for and
+                    // what batch_set_comments already does. Storing "" instead leaves a comment
+                    // record that reads as "no comment" through get_comment (has_comment:false)
+                    // but is very much present: the decompiler renders it as a bare `//` line,
+                    // so every "clear" left a blank comment in the pseudocode.
+                    program.getListing().setComment(addr, commentType,
+                        comment == null || comment.isEmpty() ? null : comment);
                     success.set(true);
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    tx.end(success.get());
                 }
             });
         } catch (Exception e) {
@@ -112,74 +118,47 @@ public class CommentService {
 
     /**
      * Get listing comments at ANY address (plate/pre/eol/post/repeatable), including data
-     * addresses. Unlike get_plate_comment, this does not require a function at the address --
-     * so it can read the plate/EOL comment attached to a global/data symbol.
+     * addresses, for one address or for many in one call. Unlike get_plate_comment, this does
+     * not require a function at the address -- so it can read the plate/EOL comment attached
+     * to a global/data symbol. The bulk form exists because whole-program contamination and
+     * quality sweeps (auditing every function's plate for stale cross-version content) cost one
+     * HTTP round trip per function otherwise -- thousands of calls for a mid-size DLL.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.", category = "comment", access = ToolAccess.READ_ONLY)
     public Response getComment(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
-                               + "Works for data addresses, not just functions.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("address parameter is required");
-        }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
-        Listing listing = program.getListing();
-        String plate = listing.getComment(CodeUnit.PLATE_COMMENT, addr);
-        String pre = listing.getComment(CodeUnit.PRE_COMMENT, addr);
-        String eol = listing.getComment(CodeUnit.EOL_COMMENT, addr);
-        String post = listing.getComment(CodeUnit.POST_COMMENT, addr);
-        String repeatable = listing.getComment(CodeUnit.REPEATABLE_COMMENT, addr);
-
-        String best = firstNonEmpty(plate, pre, eol, post, repeatable);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.putAll(ServiceUtils.addressToJson(addr, program));
-        // Explicit nulls for kinds never set, distinct from "" for kinds
-        // explicitly cleared. The shared Gson instance drops null map values
-        // (see JsonHelper), so this response is serialized with a local
-        // Gson configured to keep them, via Response.text -- the sanctioned
-        // pre-serialized-JSON escape hatch, not a prose report.
-        result.put("plate", plate);
-        result.put("pre", pre);
-        result.put("eol", eol);
-        result.put("post", post);
-        result.put("repeatable", repeatable);
-        result.put("comment", best);
-        result.put("has_comment", best != null && !best.trim().isEmpty());
-        return Response.text(GSON_WITH_NULLS.toJson(result));
-    }
-
-    /**
-     * Bulk reader for get_comment: fetch listing comments at MANY addresses in one call.
-     * get_comment is one-address-per-call, which made whole-program contamination/quality
-     * sweeps (e.g. auditing every function's plate for stale cross-version content) cost one
-     * HTTP round trip per function -- thousands of calls for a mid-size DLL. This collapses
-     * that to one call per batch, mirroring batch_set_comments' existence for the write side.
-     */
-    @McpTool(path = "/batch_get_comments", description = "Get listing comments (plate/pre/eol/post/repeatable) at MANY addresses in one call. Same per-address shape as get_comment. Pass only_with_comments=true to omit addresses with no comment at all -- the common case for corpus-wide sweeps, where most functions are undocumented and only the documented subset is interesting. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
-    public Response batchGetComments(
-            @Param(value = "addresses", description = "Comma-separated addresses, each 0x<hex> (default space) or <space>:<hex>.") String addressesStr,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                   description = "Address in the program (single mode). Accepts 0x<hex> (default space) or "
+                               + "<space>:<hex>. Works for data addresses, not just functions. Omit when "
+                               + "using addresses.") String addressStr,
+            @Param(value = "addresses", defaultValue = "",
+                   description = "Bulk mode: comma-separated addresses, each 0x<hex> (default space) or "
+                               + "<space>:<hex>. When non-empty, address is ignored.") String addressesStr,
             @Param(value = "only_with_comments", defaultValue = "false",
-                   description = "If true, omit addresses where has_comment is false -- keeps sweep responses to just the interesting subset.") boolean onlyWithComments,
+                   description = "Bulk mode: omit addresses where has_comment is false, so a sweep "
+                               + "response holds only the interesting subset.") boolean onlyWithComments,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (addressesStr == null || addressesStr.trim().isEmpty()) {
-            return Response.err("addresses parameter is required (comma-separated)");
+        if (addressesStr != null && !addressesStr.trim().isEmpty()) {
+            return getCommentsBulk(program, addressesStr, onlyWithComments);
         }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address parameter is required (or pass addresses for bulk)");
+        }
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+        // Explicit nulls for kinds never set, distinct from "" for kinds explicitly cleared.
+        // The shared Gson instance drops null map values (see JsonHelper), so the response is
+        // serialized with a local Gson configured to keep them, via Response.text -- the
+        // sanctioned pre-serialized-JSON escape hatch, not a prose report.
+        return Response.text(GSON_WITH_NULLS.toJson(commentsAt(program, addr)));
+    }
 
-        Listing listing = program.getListing();
+    private Response getCommentsBulk(Program program, String addressesStr, boolean onlyWithComments) {
         List<Map<String, Object>> results = new java.util.ArrayList<>();
         List<String> addressErrors = new java.util.ArrayList<>();
         int requested = 0;
@@ -195,26 +174,10 @@ public class CommentService {
                 addressErrors.add(token + ": " + ServiceUtils.getLastParseError());
                 continue;
             }
-
-            String plate = listing.getComment(CodeUnit.PLATE_COMMENT, addr);
-            String pre = listing.getComment(CodeUnit.PRE_COMMENT, addr);
-            String eol = listing.getComment(CodeUnit.EOL_COMMENT, addr);
-            String post = listing.getComment(CodeUnit.POST_COMMENT, addr);
-            String repeatable = listing.getComment(CodeUnit.REPEATABLE_COMMENT, addr);
-            String best = firstNonEmpty(plate, pre, eol, post, repeatable);
-            boolean hasComment = best != null && !best.trim().isEmpty();
+            Map<String, Object> entry = commentsAt(program, addr);
+            boolean hasComment = Boolean.TRUE.equals(entry.get("has_comment"));
             if (hasComment) withComments++;
             if (onlyWithComments && !hasComment) continue;
-
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.putAll(ServiceUtils.addressToJson(addr, program));
-            entry.put("plate", plate);
-            entry.put("pre", pre);
-            entry.put("eol", eol);
-            entry.put("post", post);
-            entry.put("repeatable", repeatable);
-            entry.put("comment", best);
-            entry.put("has_comment", hasComment);
             results.add(entry);
         }
 
@@ -224,10 +187,27 @@ public class CommentService {
         out.put("with_comments", withComments);
         out.put("results", results);
         if (!addressErrors.isEmpty()) out.put("address_errors", addressErrors);
-        // Same null-preserving Gson as get_comment: absent-means-null is the shared
-        // convention elsewhere, but plate/pre/eol/post/repeatable need null (never set)
-        // distinguishable from "" (explicitly cleared) per-entry, same as the single-address form.
         return Response.text(GSON_WITH_NULLS.toJson(out));
+    }
+
+    /** All five comment kinds at an address, plus the first non-empty one; unset kinds stay null. */
+    private static Map<String, Object> commentsAt(Program program, Address addr) {
+        Listing listing = program.getListing();
+        String plate = listing.getComment(CodeUnit.PLATE_COMMENT, addr);
+        String pre = listing.getComment(CodeUnit.PRE_COMMENT, addr);
+        String eol = listing.getComment(CodeUnit.EOL_COMMENT, addr);
+        String post = listing.getComment(CodeUnit.POST_COMMENT, addr);
+        String repeatable = listing.getComment(CodeUnit.REPEATABLE_COMMENT, addr);
+        String best = firstNonEmpty(plate, pre, eol, post, repeatable);
+        Map<String, Object> entry = new LinkedHashMap<>(ServiceUtils.addressToJson(addr, program));
+        entry.put("plate", plate);
+        entry.put("pre", pre);
+        entry.put("eol", eol);
+        entry.put("post", post);
+        entry.put("repeatable", repeatable);
+        entry.put("comment", best);
+        entry.put("has_comment", best != null && !best.trim().isEmpty());
+        return entry;
     }
 
     /**
@@ -235,7 +215,7 @@ public class CommentService {
      * including data globals. Unlike set_plate_comment (function-only), this can set a PLATE
      * comment on a data global via Listing.setComment.
      */
-    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment")
+    @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment", access = ToolAccess.WRITE)
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
@@ -261,7 +241,7 @@ public class CommentService {
     /**
      * Batch set multiple comments (decompiler, disassembly, and plate) in a single operation.
      */
-    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.WRITE)
     public Response batchSetComments(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -338,8 +318,8 @@ public class CommentService {
         final AtomicInteger overwrittenCount = new AtomicInteger(0);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Set Comments");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Batch Set Comments");
                 try {
                     // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
                     // - Function target → use Function.setComment (existing behavior).
@@ -427,7 +407,7 @@ public class CommentService {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Error in batch set comments", e);
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    tx.end(success.get());
                 }
             });
 
@@ -470,9 +450,9 @@ public class CommentService {
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
      */
-    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
+    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.DESTRUCTIVE)
     public Response clearFunctionComments(
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -497,7 +477,7 @@ public class CommentService {
         }
 
         // Resolve address before entering SwingUtilities lambda
-        Address resolvedAddr = ServiceUtils.parseAddress(program, functionAddress);
+        Address resolvedAddr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -507,8 +487,8 @@ public class CommentService {
         final AtomicBoolean plateCleared = new AtomicBoolean(false);
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Clear Function Comments");
+            threadingStrategy.runOnUi(() -> {
+                WriteTx tx = WriteTx.begin(program, "Clear Function Comments");
                 try {
                     Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
                     if (func == null) {
@@ -551,7 +531,7 @@ public class CommentService {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Error clearing function comments", e);
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    tx.end(success.get());
                 }
             });
         } catch (Exception e) {

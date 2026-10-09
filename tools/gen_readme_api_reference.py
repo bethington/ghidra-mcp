@@ -54,9 +54,10 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
     "server": ("Ghidra Server & Version Control", ""),
     "debugger": (
         "Debugger (Ghidra TraceRmi)",
-        "On Windows hosts where the bridge's WinDbg debugger proxy is active"
-        " (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix"
-        " (e.g. `debugger_status_2`).",
+        "When the bridge's opt-in WinDbg debugger proxies are enabled"
+        " (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a TraceRmi tool"
+        " below that shares a proxy's name gets a `_2` suffix"
+        " (e.g. `debugger_status_2`), so both stay reachable.",
     ),
     "system": ("System", ""),
 }
@@ -160,8 +161,9 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
         "",
         "Defined in the Python bridge itself (instance discovery, tool-group "
         "management); always available even before a Ghidra connection. The "
-        "bridge also proxies 22 `debugger_*` WinDbg tools when "
-        "`GHIDRA_DEBUGGER_URL` points at the standalone debugger server.",
+        "bridge can also proxy 22 `debugger_*` WinDbg tools to an external "
+        "debugger server; they are off by default and register only when "
+        "`GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.",
         "",
     ]
     for name in static_names:

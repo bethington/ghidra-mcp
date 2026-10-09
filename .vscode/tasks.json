@@ -9,7 +9,7 @@
 		},
 		{
 			"id": "autoOpen",
-			"description": "AutoOpen path (e.g. F:\\GhidraProjects\\diablo2|/Vanilla/1.00/D2Common.dll)",
+			"description": "AutoOpen path (e.g. F:\\GhidraProjects\\MyProject|/MyProduct/v1.0/engine.dll)",
 			"default": "",
 			"type": "promptString"
 		}
@@ -18,11 +18,10 @@
 		{
 			"label": "Build Ghidra Plugin",
 			"type": "shell",
-			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"command": "${workspaceFolder}\\gradlew.bat",
 			"args": [
-				"clean",
-				"package",
-				"assembly:single"
+				"buildExtension",
+				"-PGHIDRA_INSTALL_DIR=${input:ghidraPath}"
 			],
 			"group": {
 				"kind": "build",
@@ -43,7 +42,7 @@
 		{
 			"label": "Clean Build",
 			"type": "shell",
-			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"command": "${workspaceFolder}\\gradlew.bat",
 			"args": [
 				"clean"
 			],
@@ -63,10 +62,12 @@
 		{
 			"label": "Run Offline Tests (Java)",
 			"type": "shell",
-			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"command": "${workspaceFolder}\\gradlew.bat",
 			"args": [
 				"test",
-				"-Dtest=com.xebyte.offline.*Test"
+				"--tests",
+				"com.xebyte.offline.*",
+				"-PGHIDRA_INSTALL_DIR=${input:ghidraPath}"
 			],
 			"group": "test",
 			"presentation": {
@@ -84,9 +85,10 @@
 		{
 			"label": "Run All Java Tests",
 			"type": "shell",
-			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"command": "${workspaceFolder}\\gradlew.bat",
 			"args": [
-				"test"
+				"test",
+				"-PGHIDRA_INSTALL_DIR=${input:ghidraPath}"
 			],
 			"group": "test",
 			"presentation": {
@@ -197,9 +199,7 @@
 				"--mcp-host",
 				"127.0.0.1",
 				"--mcp-port",
-				"8081",
-				"--ghidra-server",
-				"http://127.0.0.1:8089/"
+				"8081"
 			],
 			"group": "test",
 			"isBackground": true,
@@ -303,12 +303,11 @@
 		{
 			"label": "Install Python Dependencies",
 			"type": "shell",
-			"command": "powershell",
+			"command": "python",
 			"args": [
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				"${workspaceFolder}\\scripts\\install-python-dependencies.ps1"
+				"-m",
+				"tools.setup",
+				"install-python-deps"
 			],
 			"group": "build",
 			"presentation": {
@@ -365,11 +364,12 @@
 		{
 			"label": "Release Compile Check",
 			"type": "shell",
-			"command": "C:\\Users\\benam\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"command": "${workspaceFolder}\\gradlew.bat",
 			"args": [
 				"clean",
-				"compile",
-				"-q"
+				"compileJava",
+				"-q",
+				"-PGHIDRA_INSTALL_DIR=${input:ghidraPath}"
 			],
 			"isBackground": false,
 			"group": "build"
@@ -379,7 +379,7 @@
 			"type": "shell",
 			"command": "python",
 			"args": [
-				"scripts\\ghidra_server_health_check.py"
+				"tools\\ghidra_server_health_check.py"
 			],
 			"isBackground": false,
 			"group": "test"
@@ -441,44 +441,6 @@
 			],
 			"isBackground": false,
 			"group": "build"
-		},
-		{
-			"label": "Run provider selection tests",
-			"type": "shell",
-			"command": ".\\.venv\\Scripts\\python.exe",
-			"args": [
-				"-m",
-				"pytest",
-				"tests/performance/test_provider_selection.py",
-				"-q"
-			],
-			"isBackground": false,
-			"group": "test"
-		},
-		{
-			"label": "Run provider selection tests",
-			"type": "shell",
-			"command": ".\\.venv\\Scripts\\python.exe",
-			"args": [
-				"-m",
-				"pytest",
-				"tests/performance/test_provider_selection.py",
-				"-q"
-			],
-			"isBackground": false
-		},
-		{
-			"label": "Focused provider selection pytest",
-			"type": "shell",
-			"command": ".\\.venv\\Scripts\\python.exe",
-			"args": [
-				"-m",
-				"pytest",
-				"tests/performance/test_provider_selection.py",
-				"-q"
-			],
-			"isBackground": false,
-			"group": "test"
 		}
 	]
 }

@@ -885,6 +885,56 @@ def test_selected_endpoint_contract_checks_schema_against_catalog(
     run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
 
 
+def _contract_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, catalog_params, schema_params):
+    """Every selected tool gets the same catalog params and schema params."""
+    from tools.setup import ghidra
+
+    selected = sorted(ghidra.RELEASE_CONTRACT_TOOLS)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "endpoints.json").write_text(
+        json.dumps({"endpoints": [
+            {"path": f"/{n}", "method": "GET", "params": list(catalog_params)} for n in selected
+        ]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (200, {"tools": [
+            {"path": f"/{n}", "method": "GET", "params": schema_params} for n in selected
+        ]}),
+    )
+
+
+def test_selected_endpoint_contract_accepts_catalog_aliases_the_schema_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Since #576 the catalog lists @Param aliases (address, name, ...) next to
+    the canonical name; /mcp/schema lists only the canonical name and carries the
+    aliases on it. A name the schema declares as an alias is present, not missing
+    -- the rc.2 release tier failed on exactly this for 6 tools."""
+    _contract_fixture(
+        tmp_path, monkeypatch,
+        catalog_params=["function", "address", "function_address", "program"],
+        schema_params=[{"name": "function", "aliases": ["address", "function_address"]}, {"name": "program"}],
+    )
+    run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_selected_endpoint_contract_still_reports_an_undeclared_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Alias-awareness must not turn the check into a no-op: a catalog name that
+    is neither a schema param nor a declared alias is still a contract break."""
+    _contract_fixture(
+        tmp_path, monkeypatch,
+        catalog_params=["function", "address", "bogus", "program"],
+        schema_params=[{"name": "function", "aliases": ["address"]}, {"name": "program"}],
+    )
+    with pytest.raises(RuntimeError, match=r"schema missing catalog params \['bogus'\]"):
+        run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
 def test_selected_endpoint_contract_reports_missing_selected_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1750,3 +1800,30 @@ def test_run_release_regression_catches_debugger_skip(
     out = capsys.readouterr().out
     assert "SKIPPED debugger live test: test reason here" in out
     assert "Release regression tier passed." in out
+
+
+def _targeting_fixture(monkeypatch, get_functions_payload):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra, "_find_benchmark_function", lambda repo, url: "10001000")
+    def fake(repo, url, path, **kwargs):
+        if path == "/list_open_programs":
+            return 200, {"programs": [{"path": ghidra.DEFAULT_BENCHMARK_PROGRAM}]}
+        if path == "/get_functions":
+            return 200, get_functions_payload
+        return 200, {"status": "ok"}
+    monkeypatch.setattr(ghidra, "_mcp_request", fake)
+    return ghidra
+
+
+def test_multi_program_targeting_reads_get_functions_address(monkeypatch):
+    """/get_functions reports `address`, not the 6.x `function_address`; the rc.2
+    release tier failed on that rename even though targeting worked."""
+    ghidra = _targeting_fixture(monkeypatch, {"name": "calc_crc16", "address": "10001000"})
+    ghidra.run_multi_program_targeting_test(Path("."), "http://127.0.0.1:8089")
+
+
+def test_multi_program_targeting_still_fails_on_the_wrong_function(monkeypatch):
+    ghidra = _targeting_fixture(monkeypatch, {"name": "other", "address": "0x10002000"})
+    with pytest.raises(RuntimeError, match="expected 10001000"):
+        ghidra.run_multi_program_targeting_test(Path("."), "http://127.0.0.1:8089")

@@ -1050,6 +1050,21 @@ class TestListInstancesPayloadSize(unittest.TestCase):
         self.assertEqual(summarized["program_count"], 2)
         self.assertEqual(summarized["open_programs"], ["A.dll", "B.dll"])
 
+    def test_list_open_programs_dicts_are_treated_as_open(self):
+        """#565: the /list_open_programs fallback returns dicts with no `open`
+        key — every entry is open by definition, so none may be dropped. An
+        explicit open=False (from /mcp/instance_info) still filters."""
+        inst = self._big_instance()
+        inst["programs"] = [
+            {"name": "A.dll", "path": "/proj/A.dll", "is_current": True},
+            {"name": "B.dll", "path": "/proj/B.dll", "is_current": False},
+            {"name": "C.dll", "path": "/proj/C.dll", "open": False},
+        ]
+        _, summarized = self._run(inst)
+
+        self.assertEqual(summarized["program_count"], 3)
+        self.assertEqual(summarized["open_programs"], ["/proj/A.dll", "/proj/B.dll"])
+
     def test_instance_without_programs_key_is_untouched(self):
         inst = {"socket": "/tmp/s", "pid": 1, "project": "p"}
         _, summarized = self._run(inst)

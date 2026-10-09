@@ -48,7 +48,7 @@ def repair(http_client, start, end=None):
 
 def function_body(http_client, address):
     """Return (body_min, body_max) parsed from /get_function_by_address, prefixes preserved."""
-    r = http_client.get("/get_function_by_address", params={"address": address})
+    r = http_client.get("/get_functions", params={"function": address})
     m = re.search(r"Body:\s*(\S+)\s*-\s*(\S+)", r.text)
     if not m:
         pytest.skip(f"Cannot parse function body from: {r.text[:200]}")
@@ -57,7 +57,7 @@ def function_body(http_client, address):
 
 def find_function_by_name(http_client, name):
     """Entry address of a named function from /list_functions, or None."""
-    r = http_client.get("/list_functions")
+    r = http_client.get("/find_functions")
     if r.status_code != 200:
         return None
     m = re.search(rf"\b{re.escape(name)}\b\s+at\s+((?:\w+:)?(?:0x)?[0-9a-fA-F]+)", r.text)
@@ -88,7 +88,7 @@ def _addr_value(addr):
 @pytest.fixture
 def any_function(http_client):
     """Entry address of any function, prefix preserved."""
-    r = http_client.get("/list_functions")
+    r = http_client.get("/find_functions")
     if r.status_code != 200:
         pytest.skip("Cannot list functions")
     m = re.search(r"at\s+((?:\w+:)?(?:0x)?[0-9a-fA-F]{4,})", r.text)

@@ -1,7 +1,11 @@
 # MCP Response Contract
 
-**Status:** normative. This is what the Java-native `/mcp` endpoint implements,
-and what `tests/conformance/` verifies.
+**Status:** normative. It governs the JSON every tool returns from the plugin's
+HTTP routes, which the Python bridge hands on to MCP clients, and
+`tests/conformance/` verifies it by calling the tools over MCP through that
+bridge. There is no Java-native `/mcp` endpoint; an earlier version of this
+line said there was, and that proposal is still the draft
+[NATIVE_MCP_RUNTIME_RFC.md](NATIVE_MCP_RUNTIME_RFC.md).
 
 Every tool returns JSON. No exceptions.
 

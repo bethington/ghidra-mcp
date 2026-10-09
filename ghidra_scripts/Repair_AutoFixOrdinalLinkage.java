@@ -6,9 +6,9 @@
 // Output: Renames ordinal symbols to real function names.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Auto-fix external ordinal pointers to real names
-// @menupath Diablo 2.Repair.Auto Fix Ordinal Linkage
+// @menupath GhidraMCP.Repair.Auto Fix Ordinal Linkage
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.symbol.*;
@@ -99,7 +99,7 @@ public class Repair_AutoFixOrdinalLinkage extends GhidraScript {
         List<Map<String, Object>> pointers = new ArrayList<>();
 
         ExternalManager externalManager = currentProgram.getExternalManager();
-        Collection<String> externalNames = externalManager.getExternalLibraryNames();
+        String[] externalNames = externalManager.getExternalLibraryNames();
 
         println("Scanning external libraries for ordinal pointers...");
         println("");
