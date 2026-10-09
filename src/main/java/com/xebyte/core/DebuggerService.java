@@ -155,6 +155,7 @@ public class DebuggerService {
                 if (template == null) {
                     continue;
                 }
+                // runTool opens a Debugger window — must hop to the Swing thread.
                 AtomicReference<PluginTool> launched = new AtomicReference<>();
                 AtomicReference<Exception> launchError = new AtomicReference<>();
                 Runnable launcher = () -> {

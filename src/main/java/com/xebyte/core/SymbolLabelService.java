@@ -7,14 +7,10 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import ghidra.util.Msg;
 
-import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for symbol and label operations: create, rename, delete, batch operations.
@@ -727,7 +723,6 @@ public class SymbolLabelService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -1020,59 +1015,46 @@ public class SymbolLabelService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func != null) {
-                        resultData.set(JsonHelper.mapOf(
-                                "can_rename", true,
-                                "type", "function",
-                                "suggested_operation", "rename_function",
-                                "current_name", func.getName()
-                        ));
-                        return;
-                    }
-
-                    Data data = program.getListing().getDefinedDataAt(addr);
-                    if (data != null) {
-                        Map<String, Object> map = JsonHelper.mapOf(
-                                "can_rename", true,
-                                "type", "defined_data",
-                                "suggested_operation", "rename_symbol"
-                        );
-                        Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
-                        if (symbol != null) {
-                            map.put("current_name", symbol.getName());
-                        }
-                        resultData.set(map);
-                        return;
-                    }
-
-                    resultData.set(JsonHelper.mapOf(
-                            "can_rename", true,
-                            "type", "undefined",
-                            "suggested_operation", "create_label"
-                    ));
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(renameInfoAtAddress(program, addr));
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
+    }
 
-        return Response.ok(resultData.get());
+    /** What a rename tool would target at {@code addr}: function, defined data, or a fresh label. */
+    private static Map<String, Object> renameInfoAtAddress(Program program, Address addr) {
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func != null) {
+            return JsonHelper.mapOf(
+                    "can_rename", true,
+                    "type", "function",
+                    "suggested_operation", "rename_function",
+                    "current_name", func.getName()
+            );
+        }
+
+        Data data = program.getListing().getDefinedDataAt(addr);
+        if (data != null) {
+            Map<String, Object> map = JsonHelper.mapOf(
+                    "can_rename", true,
+                    "type", "defined_data",
+                    "suggested_operation", "rename_symbol"
+            );
+            Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
+            if (symbol != null) {
+                map.put("current_name", symbol.getName());
+            }
+            return map;
+        }
+
+        return JsonHelper.mapOf(
+                "can_rename", true,
+                "type", "undefined",
+                "suggested_operation", "create_label"
+        );
     }
 }

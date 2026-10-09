@@ -40,8 +40,7 @@ public class AnnotationScanner {
     /**
      * Fallback used only by the constructors that predate {@link ThreadingStrategy}
      * support (kept so existing callers and offline test fixtures compile
-     * unchanged). Runs directly on the calling thread with no EDT dispatch and
-     * no locking -- adequate for single-threaded offline scanning, never used
+     * unchanged). Runs directly on the calling thread with no locking -- adequate for single-threaded offline scanning, never used
      * by the real plugin or headless server, both of which always pass their
      * own strategy through the three-argument constructor below.
      */
@@ -97,10 +96,9 @@ public class AnnotationScanner {
      *
      * @param programProvider  provider for resolving programs (enables dry-run support)
      * @param threadingStrategy strategy the dry-run wrapper uses to run the wrapped
-     *                          write on the same thread Ghidra's own threading model
-     *                          requires (the Swing EDT in GUI mode); pass the same
-     *                          instance the scanned services themselves were built
-     *                          with, e.g. {@link SwingThreadingStrategy}
+     *                          write under the same locking rules as a real write
+     *                          ({@code executeWrite}); pass the same instance the
+     *                          scanned services themselves were built with
      * @param services          service objects to scan
      */
     public AnnotationScanner(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
@@ -279,20 +277,10 @@ public class AnnotationScanner {
                                 + "rollback would abort that transaction too. Retry once the "
                                 + "in-progress operation finishes.");
                         }
-                        // The transaction must be opened on the same thread Ghidra's
-                        // threading model actually runs the write on -- the Swing EDT
-                        // in GUI mode. Opening it directly here left it on the calling
-                        // HTTP thread, while the wrapped service method's own
-                        // threadingStrategy.executeWrite dispatched the real work to
-                        // the EDT through a SEPARATE SwingUtilities.invokeAndWait,
-                        // nesting a transaction opened by one thread inside one opened
-                        // by another. That mismatched-thread nesting threw its own
-                        // ConcurrentModificationException on every dry run, independent
-                        // of any bug in the wrapped method itself. Routing the whole
-                        // thing through executeWrite keeps every transaction on one
-                        // thread: the service method's own executeWrite call sees it is
-                        // already on the EDT and just nests its transaction in place,
-                        // no second dispatch.
+                        // Opened inside executeWrite so the dry run holds the write lock
+                        // like the write it previews; the wrapped method's own
+                        // executeWrite re-enters that lock on this thread and nests its
+                        // transaction in this one, which the rollback then discards.
                         return threadingStrategy.executeWrite(program, "[DRY RUN] " + tool.path(), () -> {
                             int tx = program.startTransaction("[DRY RUN] " + tool.path());
                             try {

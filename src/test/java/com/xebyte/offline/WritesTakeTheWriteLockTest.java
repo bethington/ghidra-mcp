@@ -13,7 +13,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * A program write goes through {@code threadingStrategy.executeWrite}. On the headless server
- * that is what takes the global write lock; a transaction opened inside {@code runOnUi} or
+ * that is what takes the global write lock; a transaction opened inside
  * {@code executeRead} skips it, so the write is not serialized with any other. Found
  * 2026-10-07 in 21 tools (comments, labels, bookmarks, memory blocks, image base, variable
  * renames and types, prototypes, documentation merge). This catches the direct form, a
@@ -22,10 +22,10 @@ import static org.junit.Assert.assertEquals;
  */
 public class WritesTakeTheWriteLockTest {
 
-    private static final List<String> OPENERS = List.of("runOnUi(", "executeRead(");
+    private static final List<String> OPENERS = List.of("executeRead(");
 
     @Test
-    public void noTransactionIsOpenedInsideRunOnUiOrExecuteRead() throws IOException {
+    public void noTransactionIsOpenedInsideExecuteRead() throws IOException {
         List<String> found = new ArrayList<>();
         try (Stream<Path> files = Files.walk(ProjectSource.mainSourceRoot())) {
             for (Path p : files.filter(f -> f.toString().endsWith(".java")).toList()) {
