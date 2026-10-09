@@ -24,6 +24,14 @@ as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shape
 already treats as tool errors — were ignored, so a tier could exit green after a refused
 write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
 
+### Changed — list paging: `limit <= 0` means no limit on four more tools
+
+`/list_function_tags`, `/list_class_members`, `/find_code_gaps`, and `/list_properties`
+now page through `ServiceUtils.paged` (property maps via `pagedWindow` so the iterator
+still skips/takes). Explicit `limit <= 0` is unbounded (the `@Param` default stays each
+tool's own, e.g. 100 for property maps). Responses gain `count`; `/list_class_members`
+reports `total` instead of `total_members`. Documented REJECT limits elsewhere are unchanged.
+
 ### Changed — exception error texts no longer read `"null"`
 
 Tool catch tails go through `ServiceUtils.fail` / `failureMessage`: when an exception has no

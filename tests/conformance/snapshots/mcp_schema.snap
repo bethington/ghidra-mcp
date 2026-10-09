@@ -3070,7 +3070,7 @@
         },
         {
           "default": "100",
-          "description": "Maximum gaps returned in this page (default 100). This endpoint slices directly, so 0 returns an EMPTY page rather than everything — page with offset against the `total` the response reports.",
+          "description": "Maximum gaps returned in this page (default 100). 0 or less: no limit.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4622,7 +4622,7 @@
         },
         {
           "default": "200",
-          "description": "Maximum members returned in this page (default 200). It is clamped to a MINIMUM of 1, so 0 returns one member rather than everything — page with offset against total_members instead.",
+          "description": "Maximum members returned in this page (default 200). 0 or less: no limit.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4732,7 +4732,7 @@
         },
         {
           "default": "500",
-          "description": "Maximum number of tags to return (default 500, which covers most programs in full)",
+          "description": "Maximum number of tags to return (default 500, which covers most programs in full). 0 or less: no limit.",
           "name": "limit",
           "required": false,
           "source": "query",
@@ -4937,7 +4937,7 @@
         },
         {
           "default": "100",
-          "description": "Maximum number of entries to return.",
+          "description": "Maximum number of entries to return (default 100). 0 or less: no limit.",
           "name": "limit",
           "required": false,
           "source": "query",

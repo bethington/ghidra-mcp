@@ -635,11 +635,12 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         AddressIterator it = mock(AddressIterator.class);
         when(it.hasNext()).thenReturn(false);
         when(strMap.getPropertyIterator()).thenReturn(it);
+        when(strMap.getSize()).thenReturn(0);
         stubMap("m", strMap);
 
         Map<String, Object> data = okOf(svc.listProperties("m", null, null, -5, 0, program));
         assertEquals("negative offset must clamp to 0", 0, data.get("offset"));
-        assertEquals("non-positive limit must fall back to the 100 default", 100, data.get("limit"));
+        assertFalse("explicit 0 means no limit, so limit is omitted", data.containsKey("limit"));
     }
 
     private static Address mockAddress(String rendered) {

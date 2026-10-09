@@ -44,14 +44,38 @@ public final class ServiceUtils {
      *
      * @param key   plural name for the collection ("segments", "functions")
      * @param all   the full result set, before paging
-     * @param offset first item to return
+     * @param offset first item to return; negative values clamp to 0
      * @param limit  maximum items to return; {@code <= 0} means "no limit"
+     *               (the key is omitted from the response when unbounded)
      */
     public static Response paged(String key, List<?> all, int offset, int limit) {
+        return paged(key, all, offset, limit, null);
+    }
+
+    /**
+     * As {@link #paged(String, List, int, int)}, with extra fields merged after
+     * the standard keys (map name, class_name, note, …).
+     */
+    public static Response paged(String key, List<?> all, int offset, int limit,
+            Map<String, ?> extras) {
         int start = Math.max(0, offset);
         int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
         List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+        return pagedEnvelope(key, page, start, limit, all.size(), extras);
+    }
 
+    /**
+     * Paged envelope when the page was already sliced from a streaming source
+     * (property-map iterators) and {@code total} is known without materializing
+     * every item. Same keys and limit policy as {@link #paged}.
+     */
+    public static Response pagedWindow(String key, List<?> page, int offset, int limit,
+            int total, Map<String, ?> extras) {
+        return pagedEnvelope(key, page, Math.max(0, offset), limit, total, extras);
+    }
+
+    private static Response pagedEnvelope(String key, List<?> page, int start, int limit,
+            int total, Map<String, ?> extras) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put(key, page);
         out.put("count", page.size());
@@ -59,7 +83,12 @@ public final class ServiceUtils {
         if (limit > 0) {
             out.put("limit", limit);
         }
-        out.put("total", all.size());
+        out.put("total", total);
+        if (extras != null) {
+            for (Map.Entry<String, ?> e : extras.entrySet()) {
+                out.put(e.getKey(), e.getValue());
+            }
+        }
         return Response.ok(out);
     }
 
