@@ -1601,9 +1601,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Number of members to skip before this page starts; 0 begins at the "
                                + "first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "200",
-                   description = "Maximum members returned in this page (default 200). It is clamped to a "
-                               + "MINIMUM of 1, so 0 returns one member rather than everything — page with "
-                               + "offset against total_members instead.") int limit,
+                   description = "Maximum members returned in this page (default 200). 0 or less: no limit.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
         if (className == null || className.trim().isEmpty()) {
             return Response.err("class_name is required");
@@ -1650,26 +1648,15 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
 
-                int total = members.size();
-                int from = Math.max(0, offset);
-                int pageLimit = Math.max(1, limit);
-                int to = Math.min(total, from + pageLimit);
-                List<Map<String, Object>> page = from < to
-                        ? new ArrayList<>(members.subList(from, to)) : new ArrayList<>();
-
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("class_name", cls);
-                result.put("class_namespace_exists", isGhidraClass);
-                result.put("total_members", total);
-                result.put("offset", from);
-                result.put("limit", pageLimit);
-                result.put("members", page);
-                if (total == 0) {
-                    result.put("note", "No members found. A function matches if it is in the '" + cls
+                Map<String, Object> extras = new LinkedHashMap<>();
+                extras.put("class_name", cls);
+                extras.put("class_namespace_exists", isGhidraClass);
+                if (members.isEmpty()) {
+                    extras.put("note", "No members found. A function matches if it is in the '" + cls
                             + "' namespace or its 'this' parameter types as '" + cls + " *'. Create the "
                             + "struct (create_struct) and associate functions with set_function_this_type.");
                 }
-                return Response.ok(result);
+                return ServiceUtils.paged("members", members, offset, limit, extras);
             });
         } catch (Exception e) {
             return ServiceUtils.fail("list_class_members", e);
@@ -3948,7 +3935,8 @@ Set<String> currentBefore = new HashSet<>();
                    description = "Number of tag definitions to skip before this page starts; 0 begins at "
                                + "the first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "500",
-                   description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
+                   description = "Maximum number of tags to return (default 500, which covers most programs in full). "
+                               + "0 or less: no limit.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
         FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
         List<? extends FunctionTag> all = mgr.getAllFunctionTags();
@@ -3957,16 +3945,7 @@ Set<String> currentBefore = new HashSet<>();
             rows.add(serializeTag(tag, mgr.getUseCount(tag)));
         }
         rows.sort(Comparator.comparing(m -> ((String) m.get("name"))));
-
-        int total = rows.size();
-        int from = Math.max(0, offset);
-        int to = Math.min(total, from + Math.max(0, limit));
-        List<Map<String, Object>> page = from < to ? rows.subList(from, to) : List.of();
-        return Response.ok(JsonHelper.mapOf(
-                "total", total,
-                "offset", from,
-                "limit", limit,
-                "tags", page));
+        return ServiceUtils.paged("tags", rows, offset, limit);
     }
 
     @McpTool(path = "/delete_function_tag", method = "POST",

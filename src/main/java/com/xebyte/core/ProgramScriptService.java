@@ -692,7 +692,8 @@ if (map instanceof ObjectPropertyMap) {
             @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") Address start,
             @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") Address end,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
-            @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum number of entries to return (default 100). 0 or less: no limit.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
 
         if (mapName == null || mapName.isEmpty()) return propertyMaps(program);
@@ -701,7 +702,6 @@ if (map instanceof ObjectPropertyMap) {
             return Response.err("No property map named '" + mapName + "'.");
         }
         if (offset < 0) offset = 0;
-        if (limit <= 0) limit = 100;
 
         try {
             AddressIterator it;
@@ -711,11 +711,12 @@ if (map instanceof ObjectPropertyMap) {
                 return Response.err("Provide both start and end to filter by range, or neither.");
             }
             if (hasStart) {
-it = map.getPropertyIterator(start, end);
+                it = map.getPropertyIterator(start, end);
             } else {
                 it = map.getPropertyIterator();
             }
 
+            // Skip/take from the iterator — do not materialize the whole map when limited.
             List<Map<String, Object>> entries = new ArrayList<>();
             int skipped = 0;
             while (it.hasNext()) {
@@ -724,20 +725,16 @@ it = map.getPropertyIterator(start, end);
                     skipped++;
                     continue;
                 }
-                if (entries.size() >= limit) break;
+                if (limit > 0 && entries.size() >= limit) break;
                 entries.add(JsonHelper.mapOf(
                     "address", addr.toString(),
                     "value", renderPropertyValue(map.get(addr))));
             }
-            return Response.ok(JsonHelper.mapOf(
-                "map", mapName,
-                "value_type", propertyMapValueType(map),
-                "entries", entries,
-                "count", entries.size(),
-                "total", map.getSize(),
-                "offset", offset,
-                "limit", limit,
-                "program", program.getName()));
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("map", mapName);
+            extras.put("value_type", propertyMapValueType(map));
+            extras.put("program", program.getName());
+            return ServiceUtils.pagedWindow("entries", entries, offset, limit, map.getSize(), extras);
         } catch (Exception e) {
             return ServiceUtils.fail(e);
         }

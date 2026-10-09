@@ -4003,9 +4003,7 @@ public class AnalysisService {
                    description = "Number of gaps to skip before this page starts; 0 begins at the first. "
                                + "Applied after the min_size filter.") int offset,
             @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum gaps returned in this page (default 100). This endpoint slices "
-                               + "directly, so 0 returns an EMPTY page rather than everything — page with "
-                               + "offset against the `total` the response reports.") int limit,
+                   description = "Maximum gaps returned in this page (default 100). 0 or less: no limit.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
         return findCodeGapsBody(program, minSize, offset, limit);
     }
@@ -4077,16 +4075,7 @@ public class AnalysisService {
                 gaps.add(gap);
             }
 
-            int total    = gaps.size();
-            int endIndex = Math.min(offset + limit, total);
-            List<Map<String, Object>> page = gaps.subList(Math.min(offset, total), endIndex);
-
-            return Response.ok(JsonHelper.mapOf(
-                "total",  total,
-                "offset", offset,
-                "limit",  limit,
-                "gaps",   page
-            ));
+            return ServiceUtils.paged("gaps", gaps, offset, limit);
         } catch (Exception e) {
             return ServiceUtils.fail(e);
         }
