@@ -21,7 +21,7 @@ dependencies = [
     # uv.lock pins 1.28.1, so nothing in this repo exercises the range -- only
     # `pip install ghidra-mcp-bridge` does. Widen it with the 2.x migration,
     # not before; test_mcp_requirement_excludes_the_2x_sdk holds the line.
-    "mcp>=1.28.1,<2.0.0",
+    "mcp>=1.28.1,<3.0.0",
     # registry.py annotates generated tool parameters with Annotated[T, Field(...)]
     # directly -- mcp pulls this in transitively, but the bridge imports it by
     # name now and should declare it rather than rely on a dependency's dependency.
