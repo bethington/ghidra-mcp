@@ -2762,9 +2762,9 @@ public class ProgramScriptService {
     /**
      * Upper bound on the length of an <em>initialized</em> block.
      *
-     * <p>Initialized bytes are real database storage written on the Swing thread,
-     * so an unbounded {@code size} with {@code initialized=true} is an EDT freeze
-     * (and a project bloat) waiting to happen. Uninitialized blocks cost nothing
+     * <p>Initialized bytes are real database storage written under the server's write
+     * lock, so an unbounded {@code size} with {@code initialized=true} stalls every other
+     * request (and bloats the project). Uninitialized blocks cost nothing
      * per byte and are deliberately left uncapped here — that is the pre-existing
      * behavior, and mapping a multi-gigabyte MMIO aperture is a legitimate use.
      */
@@ -3170,7 +3170,7 @@ public class ProgramScriptService {
             return Response.err(e.getMessage());
         }
 
-        // Resolve address before entering EDT lambda
+        // Resolve address before entering the write
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) {
             return Response.err(ServiceUtils.getLastParseError());
