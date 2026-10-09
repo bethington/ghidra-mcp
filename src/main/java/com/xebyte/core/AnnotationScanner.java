@@ -310,12 +310,14 @@ public class AnnotationScanner {
                 if (cause instanceof Refusal refusal) {
                     return Response.err(refusal.getMessage());
                 }
-                String msg = cause != null ? cause.getMessage() : e.getMessage();
-                LOG.log(Level.WARNING, "Error in " + tool.path() + ": " + msg, cause != null ? cause : e);
+                Throwable fault = cause != null ? cause : e;
+                String msg = ServiceUtils.failureMessage(fault);
+                LOG.log(Level.WARNING, "Error in " + tool.path() + ": " + msg, fault);
                 return Response.err("Error in " + tool.path() + ": " + msg);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Invocation error for " + tool.path() + ": " + e.getMessage(), e);
-                return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
+                String msg = ServiceUtils.failureMessage(e);
+                LOG.log(Level.WARNING, "Invocation error for " + tool.path() + ": " + msg, e);
+                return Response.err("Error invoking " + tool.path() + ": " + msg);
             } finally {
                 ServiceUtils.clearResolvedProgramName();
             }

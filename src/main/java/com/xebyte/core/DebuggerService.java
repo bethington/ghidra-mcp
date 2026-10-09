@@ -662,7 +662,7 @@ public class DebuggerService {
             response.put("program", program != null ? program.getName() : null);
             return Response.ok(response);
         } catch (Exception e) {
-            return Response.err("Debugger launch failed: " + e.getMessage());
+            return ServiceUtils.fail("Debugger launch", e);
         }
     }
 
@@ -781,7 +781,7 @@ public class DebuggerService {
             invokeTargetAction(action);
             return Response.ok(Map.of("status", "resumed"));
         } catch (Exception e) {
-            return Response.err("Resume failed: " + e.getMessage());
+            return ServiceUtils.fail("Resume", e);
         }
     }
 
@@ -803,7 +803,7 @@ public class DebuggerService {
             invokeTargetAction(action);
             return Response.ok(Map.of("status", "interrupted"));
         } catch (Exception e) {
-            return Response.err("Interrupt failed: " + e.getMessage());
+            return ServiceUtils.fail("Interrupt", e);
         }
     }
 
@@ -837,7 +837,7 @@ public class DebuggerService {
             invokeStepAction(ctx, target, action);
             return Response.ok(Map.of("status", how.equals("out") ? "stepped_out" : "stepped"));
         } catch (Exception e) {
-            return Response.err("Step " + how + " failed: " + e.getMessage());
+            return ServiceUtils.fail("Step " + how, e);
         }
     }
 
@@ -870,7 +870,7 @@ public class DebuggerService {
                     "type", "SW_EXECUTE",
                     "status", "set"));
         } catch (Exception e) {
-            return Response.err("Failed to set breakpoint: " + e.getMessage());
+            return ServiceUtils.fail("set breakpoint", e);
         }
     }
 
@@ -913,7 +913,7 @@ public class DebuggerService {
             future.get(ACTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             return Response.ok(Map.of("address", addr.toString(), "status", "removed"));
         } catch (Exception e) {
-            return Response.err("Failed to remove breakpoint: " + e.getMessage());
+            return ServiceUtils.fail("remove breakpoint", e);
         }
     }
 
@@ -947,7 +947,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list breakpoints: " + e.getMessage());
+            return ServiceUtils.fail("list breakpoints", e);
         }
     }
 
@@ -1011,7 +1011,7 @@ public class DebuggerService {
             }
             return Response.ok(regs);
         } catch (Exception e) {
-            return Response.err("Failed to read registers: " + e.getMessage());
+            return ServiceUtils.fail("read registers", e);
         }
     }
 
@@ -1072,7 +1072,7 @@ public class DebuggerService {
             result.put("dwords", dwords);
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to read memory: " + e.getMessage());
+            return ServiceUtils.fail("read memory", e);
         }
     }
 
@@ -1127,7 +1127,7 @@ public class DebuggerService {
             }
             return Response.ok(frames);
         } catch (Exception e) {
-            return Response.err("Failed to get stack trace: " + e.getMessage());
+            return ServiceUtils.fail("get stack trace", e);
         }
     }
 
@@ -1162,7 +1162,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list modules: " + e.getMessage());
+            return ServiceUtils.fail("list modules", e);
         }
     }
 
@@ -1218,7 +1218,7 @@ public class DebuggerService {
                     "dynamic_address", dynLoc.getAddress().toString(),
                     "program", program.getName()));
         } catch (Exception e) {
-            return Response.err("Address translation failed: " + e.getMessage());
+            return ServiceUtils.fail("Address translation", e);
         }
     }
 
@@ -1268,7 +1268,7 @@ public class DebuggerService {
                     "note", "Use the module name and offset to find the " +
                             "corresponding address in the Ghidra program"));
         } catch (Exception e) {
-            return Response.err("Address translation failed: " + e.getMessage());
+            return ServiceUtils.fail("Address translation", e);
         }
     }
 
@@ -1307,7 +1307,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list launch offers: " + e.getMessage());
+            return ServiceUtils.fail("list launch offers", e);
         }
     }
 }

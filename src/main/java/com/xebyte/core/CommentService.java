@@ -61,7 +61,7 @@ public class CommentService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
 
         // Parity with the former set_plate_comment: plate writes propagate to the
@@ -353,7 +353,7 @@ public class CommentService {
             program.flushEvents();
             try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
 
         // Validate plate comment structure (apply + warn)
@@ -449,7 +449,7 @@ public class CommentService {
                     "eol_comments_cleared", cleared.eolCleared()
             ));
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
     }
 

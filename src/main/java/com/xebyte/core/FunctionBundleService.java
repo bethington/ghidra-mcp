@@ -119,7 +119,7 @@ public class FunctionBundleService {
                 fields = null;
             }
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
         final int ctxLimit = Math.max(0, callContextLimit);

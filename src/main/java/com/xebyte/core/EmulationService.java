@@ -301,7 +301,7 @@ public class EmulationService {
                 emu.dispose();
             }
         } catch (Exception e) {
-            return Response.err("Emulation failed: " + e.getMessage());
+            return ServiceUtils.fail("Emulation", e);
         }
     }
 
@@ -467,7 +467,7 @@ public class EmulationService {
 
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Batch emulation failed: " + e.getMessage());
+            return ServiceUtils.fail("Batch emulation", e);
         }
     }
 

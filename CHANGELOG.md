@@ -24,6 +24,11 @@ as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shape
 already treats as tool errors — were ignored, so a tier could exit green after a refused
 write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
 
+### Changed — exception error texts no longer read `"null"`
+
+Tool catch tails go through `ServiceUtils.fail` / `failureMessage`: when an exception has no
+message, the response names the exception class instead of the literal `"null"`.
+
 ### Changed — write success envelopes go through `Response.success` (+ extras)
 
 Hand-built `{status:"success", message:…}` maps now use `Response.success` /

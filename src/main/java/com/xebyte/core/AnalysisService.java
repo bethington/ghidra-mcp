@@ -210,7 +210,7 @@ public class AnalysisService {
             }
             return ServiceUtils.listed("analyzers", entries);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -251,7 +251,7 @@ public class AnalysisService {
                 "enabled", options.getBoolean(analyzerName, false),
                 "changed", enabled != null));
         } catch (Exception e) {
-            return Response.err("Failed to configure analyzer: " + e.getMessage());
+            return ServiceUtils.fail("configure analyzer", e);
         }
     }
 
@@ -287,7 +287,7 @@ public class AnalysisService {
                 "program", program.getName()
             ));
         } catch (Exception e) {
-            return Response.err("Analysis failed: " + e.getMessage());
+            return ServiceUtils.fail("Analysis", e);
         }
     }
 
@@ -459,7 +459,7 @@ public class AnalysisService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -516,7 +516,7 @@ public class AnalysisService {
             arrayResult.put("detection_method", "xref_analysis");
             return Response.ok(arrayResult);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -602,7 +602,7 @@ public class AnalysisService {
 
         } catch (Exception e) {
             Msg.error(this, "Error in getFieldAccessContext", e);
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -722,7 +722,7 @@ public class AnalysisService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -742,7 +742,7 @@ public class AnalysisService {
             ));
             return Response.ok(results);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -831,7 +831,7 @@ public class AnalysisService {
 
             return Response.ok(matches);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -964,7 +964,7 @@ public class AnalysisService {
             result.put("operand_filter", wantOperand);
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("search_instructions failed: " + e.getMessage());
+            return ServiceUtils.fail("search_instructions", e);
         }
     }
 
@@ -1027,7 +1027,7 @@ public class AnalysisService {
                 "similar_functions", similarFunctions
             ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1175,7 +1175,7 @@ public class AnalysisService {
             cfResult.put("basic_block_details", blockDetails);
             return Response.ok(cfResult);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1200,7 +1200,7 @@ public class AnalysisService {
             ));
             return Response.ok(results);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1803,7 +1803,7 @@ public class AnalysisService {
 
             return Response.ok(data);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1835,7 +1835,7 @@ public class AnalysisService {
                 if (resolved.hasError()) { r = resolved.error(); }
                 else { r = analyzeFunctionCompleteness(resolved.function(), false, "", program); }
             } catch (Exception e) {
-                r = Response.err(e.getMessage());
+                r = ServiceUtils.fail(e);
             }
             if (r instanceof Response.Ok ok) {
                 results.add(ok.data());
@@ -1899,7 +1899,7 @@ public class AnalysisService {
             }
             return Response.ok(JsonHelper.mapOf("found", false));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -2123,7 +2123,7 @@ public class AnalysisService {
 
             return Response.ok(data);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3983,7 +3983,7 @@ public class AnalysisService {
 
             return Response.ok(data);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -4088,7 +4088,7 @@ public class AnalysisService {
                 "gaps",   page
             ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -4192,7 +4192,7 @@ public class AnalysisService {
             return Response.ok(data);
         } catch (Exception e) {
             Msg.error(this, "Error in analyzeDataflow", e);
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 

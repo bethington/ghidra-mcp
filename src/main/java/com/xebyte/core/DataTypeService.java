@@ -319,7 +319,7 @@ public class DataTypeService {
                 "windows_types", windowsTypes
             ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -541,11 +541,11 @@ public class DataTypeService {
                             enumWarnings);
                 });
             } catch (Exception e) {
-                return Response.err("Error creating enumeration: " + e.getMessage());
+                return Response.err("Error creating enumeration: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error parsing values JSON: " + e.getMessage());
+            return Response.err("Error parsing values JSON: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -614,7 +614,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error creating union: " + e.getMessage());
+            return Response.err("Error creating union: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -654,7 +654,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error cloning data type: " + e.getMessage());
+            return Response.err("Error cloning data type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -721,7 +721,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error creating " + derived + " type: " + e.getMessage());
+            return Response.err("Error creating " + derived + " type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -810,7 +810,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error creating function signature: " + e.getMessage());
+            return Response.err("Error creating function signature: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -979,11 +979,11 @@ public class DataTypeService {
                             extras);
                 });
             } catch (Exception e) {
-                return Response.err("Error applying data type: " + e.getMessage());
+                return Response.err("Error applying data type: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1034,7 +1034,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             errorMessage = r.getMessage();
         } catch (Exception e) {
-            errorMessage = "Error deleting data type: " + e.getMessage();
+            errorMessage = "Error deleting data type: " + ServiceUtils.failureMessage(e);
         }
 
         if (resolveDemanglerDuplicate) {
@@ -1139,7 +1139,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error modifying struct field: " + e.getMessage());
+            return Response.err("Error modifying struct field: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1198,10 +1198,10 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (IllegalArgumentException e) {
-            return Response.err("Resize failed: " + e.getMessage()
+            return Response.err("Resize failed: " + ServiceUtils.failureMessage(e)
                     + ". Use force=true or recreate_struct with an explicit fields array.");
         } catch (Exception e) {
-            return Response.err("Error resizing structure: " + e.getMessage());
+            return Response.err("Error resizing structure: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1269,7 +1269,7 @@ public class DataTypeService {
                 } catch (Refusal r) {
                     return Response.err(r.getMessage());
                 } catch (Exception e) {
-                    return Response.err("Delete before recreate failed: " + e.getMessage());
+                    return ServiceUtils.fail("Delete before recreate", e);
                 }
                 deletedOriginal = true;
             } else {
@@ -1600,7 +1600,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error adding struct field: " + e.getMessage());
+            return Response.err("Error adding struct field: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1670,7 +1670,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error removing struct field: " + e.getMessage());
+            return Response.err("Error removing struct field: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1712,7 +1712,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error moving data type: " + e.getMessage());
+            return Response.err("Error moving data type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1782,7 +1782,7 @@ public class DataTypeService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Error renaming data type: " + e.getMessage());
+            return Response.err("Error renaming data type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1873,7 +1873,7 @@ public class DataTypeService {
             out.put("warnings", warnings);
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Error validating data type: " + e.getMessage());
+            return Response.err("Error validating data type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1990,7 +1990,7 @@ public class DataTypeService {
                 } catch (ghidra.app.util.cparser.C.ParseException e) {
                     error = e.getMessage();
                 } catch (Exception e) {
-                    error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    error = ServiceUtils.failureMessage(e);
                 }
                 int after = dtm.getDataTypeCount(true);
                 String msgs = parser.getParseMessages();
@@ -2005,7 +2005,7 @@ public class DataTypeService {
                     "messages", msgs));
             });
         } catch (Exception e) {
-            return Response.err("import failed: " + e.getMessage());
+            return ServiceUtils.fail("import", e);
         }
     }
 
@@ -2034,7 +2034,7 @@ public class DataTypeService {
                         "Successfully created category: " + category.getCategoryPathName());
             });
         } catch (Exception e) {
-            return Response.err("Error creating category: " + e.getMessage());
+            return Response.err("Error creating category: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -2200,7 +2200,7 @@ public class DataTypeService {
                 "field_usage", fieldUsage
             ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -2367,7 +2367,7 @@ public class DataTypeService {
             ));
         } catch (Exception e) {
             Msg.error(this, "Error in suggestFieldNames", e);
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -2658,11 +2658,11 @@ public class DataTypeService {
                 // than a bare error string.
                 return e.response;
             } catch (Exception e) {
-                return Response.err(e.getMessage());
+                return ServiceUtils.fail(e);
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 

@@ -198,7 +198,7 @@ public class VersionControlService {
             return Response.ok(Map.of("success", true, "message", "Server credentials registered",
                 "username", user));
         } catch (Exception e) {
-            return Response.err("Failed to register authenticator: " + messageOf(e));
+            return ServiceUtils.fail("register authenticator", e);
         }
     }
 
@@ -229,10 +229,6 @@ public class VersionControlService {
         return repo;
     }
 
-    private static String messageOf(Exception e) {
-        return e.getMessage() != null ? e.getMessage() : e.toString();
-    }
-
     private static String parentOf(String path) {
         int slash = path.lastIndexOf('/');
         return slash > 0 ? path.substring(0, slash) : "/";
@@ -248,7 +244,7 @@ public class VersionControlService {
             String[] names = server.getRepositoryNames();
             return ServiceUtils.listed("repositories", List.of(names));
         } catch (Exception e) {
-            return Response.err("Failed to list repositories: " + messageOf(e));
+            return ServiceUtils.fail("list repositories", e);
         }
     }
 
@@ -283,7 +279,7 @@ public class VersionControlService {
             out.put("total_count", (folders != null ? folders.length : 0) + files.size());
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Failed to list files: " + messageOf(e));
+            return ServiceUtils.fail("list files", e);
         }
     }
 
@@ -305,7 +301,7 @@ public class VersionControlService {
             if (item == null) return Response.err("File not found: " + path);
             return Response.ok(itemRow(item));
         } catch (Exception e) {
-            return Response.err("Failed to get file info: " + messageOf(e));
+            return ServiceUtils.fail("get file info", e);
         }
     }
 
@@ -334,7 +330,7 @@ public class VersionControlService {
             repositories.put(name.trim(), created);
             return Response.ok(Map.of("status", "created", "repository", name.trim()));
         } catch (Exception e) {
-            return Response.err("Failed to create repository: " + messageOf(e));
+            return ServiceUtils.fail("create repository", e);
         }
     }
 
@@ -356,7 +352,7 @@ public class VersionControlService {
             }
             return ServiceUtils.listed("users", users);
         } catch (Exception e) {
-            return Response.err("Failed to list users (admin access required): " + messageOf(e));
+            return ServiceUtils.fail("list users (admin access required)", e);
         }
     }
 
@@ -399,7 +395,7 @@ public class VersionControlService {
             out.put("anonymous_access", anonymous);
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Failed to set permissions (admin access required): " + messageOf(e));
+            return ServiceUtils.fail("set permissions (admin access required)", e);
         }
     }
 
