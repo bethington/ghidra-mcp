@@ -69,13 +69,9 @@ public class CommentService {
         if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
             program.flushEvents();
             List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
-            if (!plateWarnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf("status", "success",
-                        "message", "Set plate comment at " + addr.toString(), "warnings", plateWarnings));
-            }
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addr.toString()));
+            return Response.successWithWarnings("Set plate comment at " + addr.toString(), plateWarnings);
         }
-        return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addr.toString()));
+        return Response.success("Set comment at " + addr.toString());
     }
 
 

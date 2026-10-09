@@ -195,13 +195,9 @@ public class SymbolLabelService {
                 return threadingStrategy.executeWrite(program, "Rename Label", () -> {
                     labelToRename.setName(newName, SourceType.USER_DEFINED);
                     List<String> labelWarnings = NamingConventions.validateLabelName(newName);
-                    if (labelWarnings.isEmpty()) {
-                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                                "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
-                    }
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                    return Response.successWithWarnings(
                             "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr,
-                            "warnings", labelWarnings));
+                            labelWarnings);
                 });
             } catch (Exception e) {
                 return Response.err("Error renaming label: " + ServiceUtils.failureMessage(e));
@@ -260,13 +256,9 @@ public class SymbolLabelService {
                     Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                     if (newSymbol != null) {
                         List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
-                        if (labelWarnings.isEmpty()) {
-                            return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                                    "Created label '" + labelName + "' at address " + addressStr));
-                        }
-                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        return Response.successWithWarnings(
                                 "Created label '" + labelName + "' at address " + addressStr,
-                                "warnings", labelWarnings));
+                                labelWarnings);
                     }
                     return Response.err("Failed to create label '" + labelName + "' at address " + addressStr);
                 });
@@ -688,11 +680,7 @@ public class SymbolLabelService {
                 symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
                 return "Created label '" + newName + "' at " + addressStr;
             });
-            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message", successMsg);
-            if (!enforcementWarnings.isEmpty()) {
-                result.put("warnings", enforcementWarnings);
-            }
-            return Response.ok(result);
+            return Response.successWithWarnings(successMsg, enforcementWarnings);
         } catch (Exception e) {
             return Response.err(ServiceUtils.failureMessage(e));
         }
@@ -764,21 +752,15 @@ public class SymbolLabelService {
                 // a DuplicateNameException. Workers re-running rename_symbol
                 // after a successful prior call hit this; treat as already-applied.
                 if (newName.equals(symbol.getName())) {
-                    Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                            "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)");
-                    if (!enforcementWarnings.isEmpty()) {
-                        result.put("warnings", enforcementWarnings);
-                    }
-                    return Response.ok(result);
+                    return Response.successWithWarnings(
+                            "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)",
+                            enforcementWarnings);
                 }
                 symbol.setName(newName, SourceType.USER_DEFINED);
 
-                Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr);
-                if (!enforcementWarnings.isEmpty()) {
-                    result.put("warnings", enforcementWarnings);
-                }
-                return Response.ok(result);
+                return Response.successWithWarnings(
+                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr,
+                        enforcementWarnings);
             });
         } catch (Exception e) {
             return Response.err(ServiceUtils.failureMessage(e));
