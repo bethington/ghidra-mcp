@@ -56,10 +56,13 @@ public class HardeningWiringTest extends TestCase {
         String src = read("core", "ProgramScriptService.java");
         String delete = body(src, "/delete_file");
         String create = body(src, "/create_folder");
-        assertTrue("deleteFile must call isPathInProjectScope",
-                delete.contains("isPathInProjectScope("));
-        assertTrue("createFolder must call isPathInProjectScope",
-                create.contains("isPathInProjectScope("));
+        // Scope lives in ProjectPaths.file/folder — one check for every site.
+        assertTrue("deleteFile must resolve through ProjectPaths.file or findFile",
+                delete.contains("ProjectPaths.file(") || delete.contains("ProjectPaths.findFile("));
+        assertTrue("createFolder must resolve through ProjectPaths.folder",
+                create.contains("ProjectPaths.folder("));
+        assertTrue("ProjectPaths.file/folder must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
     }
 
     /**
@@ -176,11 +179,12 @@ public class HardeningWiringTest extends TestCase {
         String src = read("core", "ProjectVersionControl.java");
         int lookup = src.indexOf("private FileOrError file(String path)");
         assertTrue("the file lookup must exist", lookup >= 0);
-        int scope = src.indexOf("isPathInProjectScope(", lookup);
-        assertTrue("every operation that names a file goes through file(), which must apply the scope",
-                scope > lookup && scope < src.indexOf("getFile(normalized)", lookup));
+        assertTrue("every operation that names a file goes through file() → ProjectPaths.file",
+                src.indexOf("ProjectPaths.file(", lookup) > lookup);
+        assertTrue("ProjectPaths.file must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
         assertTrue("the folder walks must skip files outside the scope too",
-                src.split("isPathInProjectScope\\(", -1).length >= 4);
+                src.split("isPathInProjectScope\\(", -1).length >= 3);
     }
 
 

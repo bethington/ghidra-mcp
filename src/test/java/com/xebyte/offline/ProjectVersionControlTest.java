@@ -84,7 +84,7 @@ public class ProjectVersionControlTest {
     public void everyOperationNeedsAPathAProjectAndAFile() {
         Fixture f = new Fixture();
         assertEquals("path is required", err(f.vc.checkout("  ", true)));
-        assertEquals("File not found in project: /nope", err(f.vc.checkout("nope", true)));
+        assertEquals("No file at /nope", err(f.vc.checkout("nope", true)));
         when(f.provider.getProject()).thenReturn(null);
         assertEquals("No project open. Call /open_project first.", err(f.vc.checkout("/a", true)));
     }
@@ -456,7 +456,7 @@ public class ProjectVersionControlTest {
     @Test
     public void checkoutsUnderAMissingFolderIsAnError() {
         Fixture f = new Fixture();
-        assertEquals("Folder not found: /nope", err(f.vc.checkouts("/nope")));
+        assertEquals("No folder at /nope", err(f.vc.checkouts("/nope")));
     }
 
     // --------------------------------------------------------------- terminate

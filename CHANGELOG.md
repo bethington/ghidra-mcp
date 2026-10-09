@@ -24,6 +24,19 @@ as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shape
 already treats as tool errors — were ignored, so a tier could exit green after a refused
 write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
 
+### Fixed — one project-path resolver; folder scope and `..` on every site
+
+Caller-supplied project (domain) paths go through `ProjectPaths` (normalize, `file`, `folder`):
+leading-slash policy, rejection of `.`/`..` segments, and `project.folder_scope` no longer
+depend on which tool handled the path. `/list_project_files` listed every folder and file
+whatever the scope; it now lists a folder in the scope or one on the way to it, showing only
+the branch toward the scope. Sites that previously skipped scope (GZF import's target folder,
+`ProjectProgramProvider` import dest / exact-path open) now refuse out-of-scope paths with the
+same text version-control used:
+`Path is outside this server's project-folder scope: /…`. Mutating tools that said
+`Access denied: path is outside the configured project scope.` use that text too. Missing
+files answer `No file at /…` (was `File not found in project: /…` on checkout/checkin).
+
 ### Changed — list paging: `limit <= 0` means no limit on four more tools
 
 `/list_function_tags`, `/list_class_members`, `/find_code_gaps`, and `/list_properties`

@@ -60,23 +60,15 @@ public final class ProjectVersionControl {
 
     /** The project file at {@code path}, if it exists and is inside this server's scope. */
     private FileOrError file(String path) {
-        if (path == null || path.isBlank()) {
-            return new FileOrError(null, "path is required");
-        }
         Project project = project();
         if (project == null) {
             return new FileOrError(null, NO_PROJECT);
         }
-        String normalized = path.trim().startsWith("/") ? path.trim() : "/" + path.trim();
-        if (!SecurityConfig.getInstance().isPathInProjectScope(normalized)) {
-            return new FileOrError(null,
-                "Path is outside this server's project-folder scope: " + normalized);
+        try {
+            return new FileOrError(ProjectPaths.file(project, path), null);
+        } catch (Refusal r) {
+            return new FileOrError(null, r.getMessage());
         }
-        DomainFile file = project.getProjectData().getFile(normalized);
-        if (file == null) {
-            return new FileOrError(null, "File not found in project: " + normalized);
-        }
-        return new FileOrError(file, null);
     }
 
     /** The repository the open project is bound to, or null when it is local-only. */
@@ -85,14 +77,6 @@ public final class ProjectVersionControl {
         return project != null ? project.getProjectData().getRepository() : null;
     }
 
-    private static String parentOf(String path) {
-        int slash = path.lastIndexOf('/');
-        return slash > 0 ? path.substring(0, slash) : "/";
-    }
-
-    private static String nameOf(String path) {
-        return path.substring(path.lastIndexOf('/') + 1);
-    }
 
     // ------------------------------------------------------------------- state
 
@@ -406,21 +390,22 @@ public final class ProjectVersionControl {
     public Response checkouts(String path) {
         Project project = project();
         if (project == null) return Response.err(NO_PROJECT);
-        String at = path == null || path.isBlank() ? "/" : path.trim();
-        ProjectData data = project.getProjectData();
-
+        String at = path == null || path.isBlank() ? "/" : path;
         List<Map<String, Object>> rows = new ArrayList<>();
-        DomainFile single = "/".equals(at) ? null : data.getFile(at);
-        if (single != null) {
-            FileOrError f = file(at);
-            if (f.hasError()) return Response.err(f.error());
-            collect(f.file(), repository(), rows);
-        } else {
-            DomainFolder folder = "/".equals(at) ? data.getRootFolder() : data.getFolder(at);
-            if (folder == null) return Response.err("Folder not found: " + at);
-            collect(folder, repository(), rows);
+        try {
+            String normalized = ProjectPaths.normalize(at);
+            if (!"/".equals(normalized)) {
+                DomainFile single = ProjectPaths.findFile(project, normalized);
+                if (single != null) {
+                    collect(single, repository(), rows);
+                    return ServiceUtils.listed("checkouts", rows);
+                }
+            }
+            collect(ProjectPaths.folder(project, normalized, false), repository(), rows);
+            return ServiceUtils.listed("checkouts", rows);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
-        return ServiceUtils.listed("checkouts", rows);
     }
 
     private static void collect(DomainFolder folder, RepositoryAdapter repo, List<Map<String, Object>> rows) {
@@ -439,7 +424,7 @@ public final class ProjectVersionControl {
         ItemCheckoutStatus[] server = null;
         if (repo != null && f.isVersioned()) {
             try {
-                server = repo.getCheckouts(parentOf(f.getPathname()), f.getName());
+                server = repo.getCheckouts(ProjectPaths.parentOf(f.getPathname()), f.getName());
             } catch (Exception e) {
                 // A file that disappears mid-walk, or a server that rejects the query,
                 // is left out of the report rather than failing it.
@@ -481,7 +466,8 @@ public final class ProjectVersionControl {
                 return Response.err("Cannot terminate checkout: project has no repository connection");
             }
             try {
-                repo.terminateCheckout(parentOf(filePath), nameOf(filePath), checkoutId, false);
+                repo.terminateCheckout(ProjectPaths.parentOf(filePath), ProjectPaths.nameOf(filePath),
+                    checkoutId, false);
                 Map<String, Object> out = new LinkedHashMap<>();
                 out.put("status", "checkout_terminated");
                 out.put("path", filePath);
@@ -505,7 +491,8 @@ public final class ProjectVersionControl {
             return Response.err("Cannot terminate checkout: project has no repository connection");
         }
         try {
-            ItemCheckoutStatus[] held = repo.getCheckouts(parentOf(filePath), nameOf(filePath));
+            ItemCheckoutStatus[] held = repo.getCheckouts(
+                ProjectPaths.parentOf(filePath), ProjectPaths.nameOf(filePath));
             if (held == null || held.length == 0) {
                 return Response.err("No active checkouts found for: " + filePath);
             }
@@ -529,17 +516,22 @@ public final class ProjectVersionControl {
         if (repo == null) {
             return Response.err("Cannot terminate checkouts: project has no repository connection");
         }
-        String at = folderPath == null || folderPath.isBlank() ? "/" : folderPath.trim();
-        ProjectData data = project.getProjectData();
-        DomainFolder folder = "/".equals(at) ? data.getRootFolder() : data.getFolder(at);
-        if (folder == null) return Response.err("Folder not found: " + at);
+        String at = folderPath == null || folderPath.isBlank() ? "/" : folderPath;
+        final String normalized;
+        DomainFolder folder;
+        try {
+            normalized = ProjectPaths.normalize(at);
+            folder = ProjectPaths.folder(project, normalized, false);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        }
 
         List<Map<String, Object>> details = new ArrayList<>();
         int[] totals = {0};
         terminateUnder(folder, repo, details, totals);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "terminated");
-        out.put("folder", at);
+        out.put("folder", normalized);
         out.put("files_with_checkouts", details.size());
         out.put("checkouts_terminated", totals[0]);
         out.put("details", details);
@@ -553,7 +545,8 @@ public final class ProjectVersionControl {
                 continue;
             }
             try {
-                ItemCheckoutStatus[] held = repo.getCheckouts(parentOf(f.getPathname()), f.getName());
+                ItemCheckoutStatus[] held = repo.getCheckouts(
+                    ProjectPaths.parentOf(f.getPathname()), f.getName());
                 if (held == null || held.length == 0) {
                     continue;
                 }
@@ -577,7 +570,8 @@ public final class ProjectVersionControl {
         int terminated = 0;
         for (ItemCheckoutStatus cs : held) {
             try {
-                repo.terminateCheckout(parentOf(filePath), nameOf(filePath), cs.getCheckoutId(), false);
+                repo.terminateCheckout(ProjectPaths.parentOf(filePath), ProjectPaths.nameOf(filePath),
+                    cs.getCheckoutId(), false);
                 terminated++;
             } catch (Exception e) {
                 // keep going: report how many landed

@@ -285,7 +285,12 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
             return null;
         }
         if (s.startsWith("/")) {
-            return data.getFile(s);
+            try {
+                return ProjectPaths.file(project, s);
+            } catch (Refusal r) {
+                // Soft miss: open-by-path treats invalid/out-of-scope/missing the same.
+                return null;
+            }
         }
         List<DomainFile> exactCase = new ArrayList<>();
         List<DomainFile> anyCase = new ArrayList<>();
@@ -483,16 +488,20 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     public Imported importFile(java.io.File file, String folder, String languageId,
             String compilerSpecId) throws Exception {
         Project project = project();
-        String dest = folder == null || folder.isBlank() ? "/" : folder.trim();
+        String dest = folder == null || folder.isBlank() ? "/" : folder;
         String language = languageId == null ? "" : languageId.trim();
         String compiler = compilerSpecId == null ? "" : compilerSpecId.trim();
 
         if (project != null) {
-            ghidra.framework.model.DomainFolder target = project.getProjectData().getFolder(dest);
-            DomainFile existing = target != null ? target.getFile(file.getName()) : null;
+            // Normalize + scope (+ create missing) before the importer sees the path.
+            ghidra.framework.model.DomainFolder target = ProjectPaths.folder(project, dest, true);
+            dest = target.getPathname();
+            DomainFile existing = target.getFile(file.getName());
             if (existing != null) {
                 return new Imported(openDomainFile(existing), true);
             }
+        } else {
+            dest = ProjectPaths.normalize(dest);
         }
 
         ghidra.app.util.importer.MessageLog log = new ghidra.app.util.importer.MessageLog();
