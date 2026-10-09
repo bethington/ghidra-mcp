@@ -39,9 +39,9 @@ public final class McpHttpServer {
      * @param uds       serve on {@code <socket dir>/ghidra-<pid>.sock}
      * @param tcp       serve on {@code bindAddress:port}
      * @param portRange ports to try from {@code port} upward when it is taken (1 = exact)
-     * @param workers   request threads, shared by both listeners. Small in the GUI:
-     *                  most handlers queue on the single Swing thread, and a deeper
-     *                  queue there trips Ghidra's own 20 s Swing.runNow deadlock timeouts.
+     * @param workers   request threads, shared by both listeners. Reads and writes
+     *                  serialize on the server-wide lock, so more workers mostly add
+     *                  queued requests.
      */
     public record Config(boolean uds, boolean tcp, String bindAddress, int port, int portRange,
             int workers) {}

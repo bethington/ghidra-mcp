@@ -55,15 +55,11 @@ public class FunctionService {
     private static final Pattern CALLING_CONV_PATTERN = Pattern.compile(
             "\\b(__cdecl|__stdcall|__thiscall|__fastcall|__vectorcall)\\b");
 
-    // Shorter cap for the no-retry scoring/analysis path. Keeps EDT-holding
-    // decompiles under Ghidra's 20-second Swing deadlock threshold so internal
-    // task-manager jobs (GTreeRestoreTreeStateTask, TableUpdateJob) can run
-    // between calls. Chosen so that handlers with up to 4 sequential no-retry
+    // Shorter cap for the no-retry scoring/analysis path. Chosen so that handlers with up to 4 sequential no-retry
     // decompiles (e.g. /analyze_for_documentation -> nested
     // /analyze_function_completeness -> validateParameterTypeQuality fallback)
     // still finish under the 60s client-side HTTP timeout:
-    //   4 * 12s = 48s < 60s client timeout. 12s also stays under the 20s
-    //   Swing deadlock threshold per decompile. Pathological functions that
+    //   4 * 12s = 48s < 60s client timeout. Pathological functions that
     //   need >12s are treated as "too complex to score" — an acceptable
     //   trade since they also pin the HTTP thread pool under any longer cap.
     private static final int NO_RETRY_DECOMPILE_TIMEOUT_SECONDS = 12;
@@ -300,8 +296,8 @@ public class FunctionService {
             });
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            Msg.error(this, "Failed to execute force decompile on Swing thread", e);
-            outcome = new ForceDecompileOutcome(false, "Failed to execute on Swing thread: " + msg, null, null);
+            Msg.error(this, "Force decompile failed", e);
+            outcome = new ForceDecompileOutcome(false, "Write failed: " + msg, null, null);
         }
 
         if (!outcome.success()) {
@@ -705,7 +701,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 return Response.success("Variable renamed");
             }
         } catch (Exception e) {
-            String errorMsg = "Failed to execute rename on Swing thread: " + e.getMessage();
+            String errorMsg = "Rename failed: " + e.getMessage();
             Msg.error(this, errorMsg, e);
             return Response.err(errorMsg);
         } finally {
@@ -869,8 +865,8 @@ Map<String, Object> out = new LinkedHashMap<>();
             }
             return Response.ok(data);
         } catch (Exception e) {
-            Msg.error(this, "Failed to execute rename function on Swing thread", e);
-            String text = "Error: Failed to execute rename on Swing thread: " + e.getMessage();
+            Msg.error(this, "Rename function failed", e);
+            String text = "Error: Rename failed: " + e.getMessage();
             return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
         }
         } catch (Exception e) {
@@ -1542,8 +1538,8 @@ Map<String, Object> out = new LinkedHashMap<>();
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            Msg.error(this, "Failed to execute set variable type on Swing thread", e);
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            Msg.error(this, "Set variable type failed", e);
+            return Response.err("Write failed: " + e.getMessage());
         }
     }
 
@@ -2050,8 +2046,8 @@ Map<String, Object> out = new LinkedHashMap<>();
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            Msg.error(this, "Failed to execute set no-return on Swing thread", e);
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            Msg.error(this, "Set no-return failed", e);
+            return Response.err("Write failed: " + e.getMessage());
         }
     }
 
@@ -2131,8 +2127,8 @@ Map<String, Object> out = new LinkedHashMap<>();
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Exception e) {
-            Msg.error(this, "Failed to execute clear flow override on Swing thread", e);
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            Msg.error(this, "Clear flow override failed", e);
+            return Response.err("Write failed: " + e.getMessage());
         }
     }
 
@@ -2864,7 +2860,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             return Response.err(r.getMessage());
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return Response.err("Write failed: " + msg);
         }
     }
 
@@ -2971,7 +2967,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             return Response.err(r.getMessage());
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return Response.err("Write failed: " + msg);
         }
     }
 
@@ -3183,7 +3179,6 @@ Map<String, Object> out = new LinkedHashMap<>();
                     throw new Refusal("Disassembly failed: " + cmd.getStatusMsg());
             });
 
-            Msg.debug(this, "disassembleBytes: invokeAndWait completed");
             Msg.debug(this, "disassembleBytes: Returning success response");
             return Response.ok(resultData);
         } catch (Refusal r) {
@@ -3226,7 +3221,7 @@ Map<String, Object> out = new LinkedHashMap<>();
     }
 
     @McpTool(path = "/clear_flow_and_repair", method = "POST",
-             description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
+             description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
              category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response clearFlowAndRepair(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,

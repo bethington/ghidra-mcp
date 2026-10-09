@@ -36,7 +36,6 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
-import javax.swing.SwingUtilities;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -1436,9 +1435,8 @@ public class AnalysisService {
             // Try to use decompilation-based detection (high-level API).
             // Use the no-retry variant: in the scoring path, we cannot
             // afford the 60→120→180s retry escalation (total 360s per
-            // function worst case) because abandoned retries leak
-            // DecompInterface contexts on the EDT and eventually OOM
-            // Ghidra. Single 60s attempt is sufficient for scoring;
+            // function worst case), and abandoned retries leak
+            // DecompInterface contexts and eventually OOM Ghidra. Single 60s attempt is sufficient for scoring;
             // a clean null return lets the caller record a miss.
             DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
             if (decompResults != null && decompResults.decompileCompleted()) {
@@ -1977,121 +1975,23 @@ public class AnalysisService {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }
 
-        // Process one function per invokeAndWait so the EDT is never held for
-        // long stretches. Earlier attempts tried chunks of 5 to amortize the
-        // invokeAndWait overhead, but under concurrent HTTP load (thread pool
-        // allowing multiple callers simultaneously), chunks of 5 held the EDT
-        // 300-2000 ms per call. With 3+ concurrent callers, the EDT queue
-        // depth exceeded Ghidra's 20s Swing.runNow deadlock timeout and
-        // internal flushEvents / auto-analysis tasks started failing with
-        // "Timed-out waiting to run a Swing task--potential deadlock".
-        //
-        // Single-function chunks hold the EDT for ~50-200 ms each and yield
-        // between calls, so Ghidra's internal tasks can always slot in.
-        // Trade-off: slightly more invokeAndWait overhead per address, but
-        // GUI stays responsive and internal deadlocks don't happen.
-        final int CHUNK_SIZE = 1;
+        // On the request thread, like the single-function call: nothing here needs the Swing
+        // thread, and a runaway decompile is bounded by the decompiler's own timeout. One
+        // function's failure is that function's result; the rest of the batch still runs.
         List<Object> results = new ArrayList<>();
-
-        for (int chunkStart = 0; chunkStart < addresses.size(); chunkStart += CHUNK_SIZE) {
-            final int start = chunkStart;
-            final int end = Math.min(chunkStart + CHUNK_SIZE, addresses.size());
-            final List<Object> chunkOut = new ArrayList<>();
-
-            java.util.function.Supplier<String> chunkWork = () -> {
-                try {
-                    for (int i = start; i < end; i++) {
-                        Response r = analyzeFunctionCompleteness(addresses.get(i), false, programName);
-                        if (r instanceof Response.Ok ok) {
-                            chunkOut.add(ok.data());
-                        } else if (r instanceof Response.Err err) {
-                            chunkOut.add(JsonHelper.mapOf("error", err.message()));
-                        } else {
-                            chunkOut.add(JsonHelper.mapOf("error", "Unexpected response shape"));
-                        }
-                    }
-                    return null;
-                } catch (Exception e) {
-                    return e.getMessage();
-                }
-            };
-
-            // Submit the chunk to the EDT non-blockingly and wait on a future
-            // with a hard timeout. If the decompile inside the chunk runs away
-            // (pathological function), we release the HTTP thread and continue
-            // processing the REMAINING addresses in the batch instead of
-            // aborting the whole batch. This is critical: a dense cluster of
-            // pathological functions (e.g. glide3x 0x101e_-0x101f3_) would
-            // otherwise discard every successful function in each batch.
-            //
-            // The runaway work STILL executes on the EDT in the background —
-            // we cannot cancel Swing tasks — but at least our HTTP thread is
-            // freed and the Python scan side records this function as failed
-            // and keeps processing the rest of the batch.
-            // 90s = 60s decompile (DECOMPILE_TIMEOUT_SECONDS, the hard cap
-            // inside DecompInterface.decompileFunction) + 30s buffer for the
-            // rest of analyzeFunctionCompleteness (classification, deduction
-            // analysis, Hungarian checks, etc.). Any function that takes more
-            // than 60s on the decompile itself has failed at the decompiler
-            // level and will return null cleanly — no need to wait longer.
-            final int PER_CHUNK_TIMEOUT_SEC = 90;
-            boolean chunkTimedOut = false;
-            String chunkErr = null;
-            if (SwingUtilities.isEventDispatchThread()) {
-                // Already on EDT (nested call) — run directly, no future needed
-                chunkErr = chunkWork.get();
+        for (String address : addresses) {
+            Response r;
+            try {
+                r = analyzeFunctionCompleteness(address, false, programName);
+            } catch (Exception e) {
+                r = Response.err(e.getMessage());
+            }
+            if (r instanceof Response.Ok ok) {
+                results.add(ok.data());
+            } else if (r instanceof Response.Err err) {
+                results.add(JsonHelper.mapOf("error", err.message()));
             } else {
-                java.util.concurrent.CompletableFuture<String> chunkFuture =
-                    new java.util.concurrent.CompletableFuture<>();
-                SwingUtilities.invokeLater(() -> {
-                    try {
-                        chunkFuture.complete(chunkWork.get());
-                    } catch (Throwable t) {
-                        chunkFuture.completeExceptionally(t);
-                    }
-                });
-                try {
-                    chunkErr = chunkFuture.get(PER_CHUNK_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS);
-                } catch (java.util.concurrent.TimeoutException e) {
-                    chunkTimedOut = true;
-                } catch (Exception e) {
-                    // Other exception — inline as error and continue
-                    results.add(JsonHelper.mapOf("error", "chunk_exception: " + e.getMessage()));
-                    continue;
-                }
-            }
-            if (chunkTimedOut) {
-                // Pathological decompile — log the address, insert an
-                // error placeholder for this ONE function, and continue
-                // with the rest of the batch. The stuck work is still
-                // running on the EDT but we're no longer waiting.
-                String addr = addresses.get(start);
-                Msg.warn(this, String.format(
-                    "analyze_function_completeness: function %s (index %d) exceeded %ds — skipping to next",
-                    addr, start, PER_CHUNK_TIMEOUT_SEC
-                ));
-                results.add(JsonHelper.mapOf("error",
-                    "chunk_timeout: " + addr + " exceeded " + PER_CHUNK_TIMEOUT_SEC + "s on EDT"));
-                continue;
-            }
-            if (chunkErr != null) {
-                results.add(JsonHelper.mapOf("error", "chunk_error: " + chunkErr));
-                continue;
-            }
-
-            results.addAll(chunkOut);
-
-            // Yield between chunks so the EDT can service queued GUI events
-            // (mouse clicks, keyboard input, paint events). Without this pause,
-            // back-to-back invokeLater calls never give the EDT a chance to
-            // process user input and Ghidra appears frozen.
-            if (end < addresses.size()) {
-                try {
-                    Thread.sleep(5);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+                results.add(JsonHelper.mapOf("error", "Unexpected response shape"));
             }
         }
         return Response.ok(JsonHelper.mapOf("results", results, "count", addresses.size()));
