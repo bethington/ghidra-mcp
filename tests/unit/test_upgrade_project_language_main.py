@@ -745,9 +745,11 @@ def test_a_baseline_report_widens_the_release_to_strays_the_census_missed(env, m
 class _Resp:
     def __init__(self, raw: bytes):
         self._raw = raw
+        self.status = 200
+        self.headers = {}
 
-    def read(self):
-        return self._raw
+    def read(self, size=-1):
+        return self._raw if size in (-1, None) else self._raw[:size]
 
     def __enter__(self):
         return self
@@ -757,6 +759,8 @@ class _Resp:
 
 
 def _fake_urlopen(monkeypatch, raw: bytes, sink: dict | None = None):
+    from tools import mcp_http
+
     def opener(url_or_request, timeout=None):
         if sink is not None:
             if hasattr(url_or_request, "full_url"):
@@ -769,7 +773,7 @@ def _fake_urlopen(monkeypatch, raw: bytes, sink: dict | None = None):
             sink["timeout"] = timeout
         return _Resp(raw)
 
-    monkeypatch.setattr(upl.urllib.request, "urlopen", opener)
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", opener)
 
 
 def test_mcp_get_returns_a_non_json_body_verbatim(monkeypatch):
