@@ -463,7 +463,7 @@ public class ListingService {
             }
             return ServiceUtils.listed("calling_conventions", names);
         } catch (Exception e) {
-            return Response.err("Error listing calling conventions: " + e.getMessage());
+            return Response.err("Error listing calling conventions: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1070,7 +1070,7 @@ public class ListingService {
         try {
             return Response.ok(ServiceUtils.convertNumberData(text, size));
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 }

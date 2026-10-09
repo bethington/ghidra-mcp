@@ -217,7 +217,7 @@ public class ProgramScriptService {
                 "count", groups.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -269,7 +269,7 @@ public class ProgramScriptService {
                 "count", options.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -376,7 +376,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to set option: " + e.getMessage());
+            return ServiceUtils.fail("set option", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -421,7 +421,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to remove option: " + e.getMessage());
+            return ServiceUtils.fail("remove option", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -455,7 +455,7 @@ public class ProgramScriptService {
                 "count", maps.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -494,7 +494,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to create property map: " + e.getMessage());
+            return ServiceUtils.fail("create property map", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -528,7 +528,7 @@ public class ProgramScriptService {
             removed = threadingStrategy.executeWrite(program, "Delete Property Map",
                 () -> mgr.removePropertyMap(name));
         } catch (Exception e) {
-            return Response.err("Failed to delete property map: " + e.getMessage());
+            return ServiceUtils.fail("delete property map", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -598,7 +598,7 @@ if (map instanceof ObjectPropertyMap) {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to set property: " + e.getMessage());
+            return ServiceUtils.fail("set property", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -642,7 +642,7 @@ if (map instanceof ObjectPropertyMap) {
                 "value", value,
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -669,7 +669,7 @@ if (map instanceof ObjectPropertyMap) {
             removed = threadingStrategy.executeWrite(program, "Remove Property",
                 () -> map.remove(address));
         } catch (Exception e) {
-            return Response.err("Failed to remove property: " + e.getMessage());
+            return ServiceUtils.fail("remove property", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -739,7 +739,7 @@ it = map.getPropertyIterator(start, end);
                 "limit", limit,
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -966,7 +966,7 @@ it = map.getPropertyIterator(start, end);
             target = ProjectProgramProvider.match(
                 java.util.Arrays.asList(programProvider.getAllOpenPrograms()), search);
         } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
         if (target == null) {
             return Response.ok(JsonHelper.mapOf(
@@ -1481,7 +1481,7 @@ it = map.getPropertyIterator(start, end);
             }
             return Response.ok(JsonHelper.mapOf("success", true, "folder", current.getPathname()));
         } catch (Exception e) {
-            return Response.err("Failed to create folder: " + e.getMessage());
+            return ServiceUtils.fail("create folder", e);
         }
     }
 
@@ -1514,7 +1514,7 @@ it = map.getPropertyIterator(start, end);
             domainFile.delete();
             return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
         } catch (Exception e) {
-            return Response.err("Failed to delete file: " + e.getMessage());
+            return ServiceUtils.fail("delete file", e);
         }
     }
 
@@ -1618,7 +1618,7 @@ it = map.getPropertyIterator(start, end);
                     "from", filePath, "to", newPath,
                     "was_open", wasOpen, "reopened", reopened));
         } catch (Exception e) {
-            return Response.err("Failed to move file: " + e.getMessage());
+            return ServiceUtils.fail("move file", e);
         }
     }
 
@@ -1683,7 +1683,7 @@ it = map.getPropertyIterator(start, end);
                     "success", true, "moved", true,
                     "from", sourcePath, "to", newPath));
         } catch (Exception e) {
-            return Response.err("Failed to move folder: " + e.getMessage());
+            return ServiceUtils.fail("move folder", e);
         }
     }
 
@@ -1719,7 +1719,7 @@ it = map.getPropertyIterator(start, end);
             }
             program = provider.openDomainFile(domainFile);
         } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         } catch (Exception e) {
             return openFailure(provider, path, "Failed to open program: " + describeOpenFailure(e, path), false);
         }
@@ -1978,7 +1978,7 @@ it = map.getPropertyIterator(start, end);
                     : "Auto-analysis failed for " + program.getName()
             ));
         } catch (Exception e) {
-            return Response.err("Failed to start analysis: " + e.getMessage());
+            return ServiceUtils.fail("start analysis", e);
         }
     }
 
@@ -1997,7 +1997,7 @@ it = map.getPropertyIterator(start, end);
             try {
                 only = ProjectProgramProvider.match(java.util.Arrays.asList(allPrograms), programName.trim());
             } catch (AmbiguousProgramException e) {
-                return Response.err(e.getMessage());
+                return ServiceUtils.fail(e);
             }
             if (only == null) {
                 return Response.err("Program not open: " + programName);
@@ -2439,7 +2439,7 @@ it = map.getPropertyIterator(start, end);
             responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, program);
             return responseHolder[0];
         } catch (Exception e) {
-            return Response.err("Failed to create inline script: " + e.getMessage());
+            return ServiceUtils.fail("create inline script", e);
         } finally {
             if (!tempScript.exists()) {
                 // File was never written or was already cleaned up — nothing to do.
@@ -2560,7 +2560,7 @@ it = map.getPropertyIterator(start, end);
             ));
         } catch (Exception e) {
             Msg.error(this, "Error in list scripts handler", e);
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail("Listing scripts", e);
         }
     }
 
@@ -2606,7 +2606,7 @@ it = map.getPropertyIterator(start, end);
             return Response.ok(memResult);
 
         } catch (Exception e) {
-            return Response.err("Failed to read memory: " + e.getMessage());
+            return ServiceUtils.fail("read memory", e);
         }
     }
 
@@ -3005,7 +3005,7 @@ it = map.getPropertyIterator(start, end);
             byte[] content = decodeBlockContent(bytesHex, bytesBase64);
             plan = planBlockContent(content, initialized, size, fillByte);
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
         try {
@@ -3066,7 +3066,7 @@ it = map.getPropertyIterator(start, end);
             });
             return Response.ok(resultData);
         } catch (Throwable e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3130,11 +3130,11 @@ it = map.getPropertyIterator(start, end);
                     return Response.ok(bmResult);
                 });
             } catch (Exception e) {
-                return Response.err(ServiceUtils.failureMessage(e));
+                return ServiceUtils.fail(e);
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3198,7 +3198,7 @@ it = map.getPropertyIterator(start, end);
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3248,11 +3248,11 @@ it = map.getPropertyIterator(start, end);
                     return Response.ok(delResult);
                 });
             } catch (Exception e) {
-                return Response.err(ServiceUtils.failureMessage(e));
+                return ServiceUtils.fail(e);
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3381,7 +3381,7 @@ it = map.getPropertyIterator(start, end);
             return Response.ok(scriptResult);
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3426,7 +3426,7 @@ it = map.getPropertyIterator(start, end);
             });
             return Response.ok(resultData);
         } catch (Throwable e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
     }
 }

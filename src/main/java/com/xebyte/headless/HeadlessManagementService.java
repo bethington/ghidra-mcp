@@ -82,7 +82,7 @@ public class HeadlessManagementService {
             }
             return Response.err("Failed to create project");
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -106,7 +106,7 @@ public class HeadlessManagementService {
             }
             return ServiceUtils.listed("projects", projects);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -124,7 +124,7 @@ public class HeadlessManagementService {
             }
             return Response.err("Failed to delete project");
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 

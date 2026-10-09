@@ -131,7 +131,7 @@ public class XrefCallGraphService {
             // count==0 rather than parsing an English sentence.
             return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
-            return Response.err("Error getting references to address: " + e.getMessage());
+            return Response.err("Error getting references to address: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -188,7 +188,7 @@ public class XrefCallGraphService {
 
             return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
-            return Response.err("Error getting references from address: " + e.getMessage());
+            return Response.err("Error getting references from address: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -253,7 +253,7 @@ public class XrefCallGraphService {
                         "is_primary", ref.isPrimary()));
             });
         } catch (Exception e) {
-            return Response.err("Error adding memory reference: " + e.getMessage());
+            return Response.err("Error adding memory reference: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -319,7 +319,7 @@ public class XrefCallGraphService {
                         "references", details));
             });
         } catch (Exception e) {
-            return Response.err("Error removing reference: " + e.getMessage());
+            return Response.err("Error removing reference: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -1010,7 +1010,7 @@ public class XrefCallGraphService {
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1279,7 +1279,7 @@ public class XrefCallGraphService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 }

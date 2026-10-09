@@ -94,10 +94,6 @@ public final class ProjectVersionControl {
         return path.substring(path.lastIndexOf('/') + 1);
     }
 
-    private static String messageOf(Exception e) {
-        return e.getMessage() != null ? e.getMessage() : e.toString();
-    }
-
     // ------------------------------------------------------------------- state
 
     /**
@@ -127,7 +123,7 @@ public final class ProjectVersionControl {
                     m.put("checkout_version", status.getCheckoutVersion());
                 }
             } catch (Exception e) {
-                m.put("checkout_error", messageOf(e));
+                m.put("checkout_error", ServiceUtils.failureMessage(e));
             }
         }
         return m;
@@ -198,7 +194,7 @@ public final class ProjectVersionControl {
             }
             return report(ok ? "checked_out" : "checkout_failed", ok, file, extras);
         } catch (Exception e) {
-            return Response.err("Checkout failed: " + messageOf(e));
+            return ServiceUtils.fail("Checkout", e);
         }
     }
 
@@ -236,7 +232,7 @@ public final class ProjectVersionControl {
             } catch (Exception e) {
                 out.put("reopen_required", true);
                 out.put("open_copy", "Closed the copy opened before the checkout, but reopening "
-                    + path + " failed: " + messageOf(e));
+                    + path + " failed: " + ServiceUtils.failureMessage(e));
             }
             return out;
         }
@@ -328,7 +324,7 @@ public final class ProjectVersionControl {
             return report("checked_in", true, file, extras);
         } catch (Exception e) {
             Msg.error(this, "Checkin failed for " + filePath, e);
-            return Response.err("Checkin failed (" + e.getClass().getSimpleName() + "): " + messageOf(e));
+            return ServiceUtils.fail("Checkin", e);
         }
     }
 
@@ -343,7 +339,7 @@ public final class ProjectVersionControl {
             f.file().undoCheckout(keep);
             return report("checkout_undone", true, f.file(), Map.of("kept_copy", keep));
         } catch (Exception e) {
-            return Response.err("Undo checkout failed: " + messageOf(e));
+            return ServiceUtils.fail("Undo checkout", e);
         }
     }
 
@@ -372,7 +368,7 @@ public final class ProjectVersionControl {
             extras.put("closed", closed);
             return report("added", true, f.file(), extras);
         } catch (Exception e) {
-            return Response.err("Add to version control failed: " + messageOf(e));
+            return ServiceUtils.fail("Add to version control", e);
         }
     }
 
@@ -399,7 +395,7 @@ public final class ProjectVersionControl {
             out.put("count", versions.size());
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Failed to get version history: " + messageOf(e));
+            return ServiceUtils.fail("get version history", e);
         }
     }
 
@@ -492,7 +488,7 @@ public final class ProjectVersionControl {
                 out.put("checkout_id", checkoutId);
                 return Response.ok(out);
             } catch (Exception e) {
-                return Response.err("Terminate checkout failed: " + messageOf(e));
+                return ServiceUtils.fail("Terminate checkout", e);
             }
         }
 
@@ -521,7 +517,7 @@ public final class ProjectVersionControl {
             out.put("total_checkouts", held.length);
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Terminate checkout failed: " + messageOf(e));
+            return ServiceUtils.fail("Terminate checkout", e);
         }
     }
 

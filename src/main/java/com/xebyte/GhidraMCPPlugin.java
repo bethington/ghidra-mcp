@@ -22,6 +22,7 @@ import docking.ActionContext;
 // Block model for control flow analysis
 
 import com.xebyte.core.VersionInfo;
+import com.xebyte.core.ServiceUtils;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.McpHttpServer;
 import com.xebyte.core.FrontEndProgramProvider;
@@ -859,11 +860,11 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                     AppInfo.setActiveProject(p);
                     opened[0] = p;
                 } catch (Exception e) {
-                    errMsg[0] = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    errMsg[0] = ServiceUtils.failureMessage(e);
                 }
             });
         } catch (Exception e) {
-            return com.xebyte.core.Response.err("EDT invocation failed: " + e.getMessage());
+            return ServiceUtils.fail("EDT invocation", e);
         }
         if (errMsg[0] != null) {
             return com.xebyte.core.Response.err("Failed to open project: " + errMsg[0]);

@@ -51,7 +51,7 @@ public class ServerLifecycleService {
             out.put("save", save);
             return Response.ok(out);
         } catch (Throwable e) {
-            return Response.err(e.getMessage() != null ? e.getMessage() : e.toString());
+            return ServiceUtils.fail(e);
         }
     }
 }

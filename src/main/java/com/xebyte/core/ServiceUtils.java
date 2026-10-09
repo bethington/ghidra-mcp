@@ -652,7 +652,7 @@ public final class ServiceUtils {
             try {
                 program = provider.getProgram(programName);
             } catch (AmbiguousProgramException e) {
-                return new ProgramOrError(null, Response.err(e.getMessage()));
+                return new ProgramOrError(null, ServiceUtils.fail(e));
             }
             if (program == null) {
                 return new ProgramOrError(null, Response.err(
@@ -735,6 +735,16 @@ public final class ServiceUtils {
     public static String failureMessage(Throwable e) {
         Throwable t = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
         return t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+    }
+
+    /** {@link Response#err} whose text is {@link #failureMessage(Throwable)}. */
+    public static Response fail(Throwable e) {
+        return Response.err(failureMessage(e));
+    }
+
+    /** {@link Response#err} shaped {@code what + " failed: " + failureMessage(e)}. */
+    public static Response fail(String what, Throwable e) {
+        return Response.err(what + " failed: " + failureMessage(e));
     }
 
     /**

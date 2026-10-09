@@ -129,7 +129,7 @@ public class SymbolLabelService {
         try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
             return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, program);
         } catch (Exception e) {
-            return Response.err("rename_symbol failed: " + e.getMessage());
+            return ServiceUtils.fail("rename_symbol", e);
         }
     }
 
@@ -204,7 +204,7 @@ public class SymbolLabelService {
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -267,7 +267,7 @@ public class SymbolLabelService {
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -353,7 +353,7 @@ public class SymbolLabelService {
             skipCount = tallies.skipCount();
             errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
@@ -425,7 +425,7 @@ public class SymbolLabelService {
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -489,7 +489,7 @@ public class SymbolLabelService {
                     return new DeleteLabelResult(deletedCount > 0, deletedCount, List.copyOf(deletedNames), List.copyOf(errors));
                 });
             } catch (Exception e) {
-                return Response.err(ServiceUtils.failureMessage(e));
+                return ServiceUtils.fail(e);
             }
 
             Map<String, Object> result = JsonHelper.mapOf(
@@ -503,7 +503,7 @@ public class SymbolLabelService {
             return Response.ok(result);
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -581,7 +581,7 @@ public class SymbolLabelService {
             skippedCount = tallies.skippedCount();
             errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
@@ -682,7 +682,7 @@ public class SymbolLabelService {
             });
             return Response.successWithWarnings(successMsg, enforcementWarnings);
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -763,7 +763,7 @@ public class SymbolLabelService {
                         enforcementWarnings);
             });
         } catch (Exception e) {
-            return Response.err(ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
         } catch (Exception e) {
             // try-with-resources close() can throw Exception (checked).
@@ -834,7 +834,7 @@ public class SymbolLabelService {
                                     "dll", finalLibName
                             ));
                         } catch (Exception e) {
-                            return Response.err(ServiceUtils.failureMessage(e));
+                            return ServiceUtils.fail(e);
                         }
                     }
                 }
@@ -843,7 +843,7 @@ public class SymbolLabelService {
             return Response.err("External location not found at address " + address);
         } catch (Exception e) {
             Msg.error(this, "Exception in renameExternalLocation: " + ServiceUtils.failureMessage(e));
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -867,7 +867,7 @@ public class SymbolLabelService {
         try {
             return Response.ok(renameInfoAtAddress(program, addr));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 

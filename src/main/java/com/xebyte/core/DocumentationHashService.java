@@ -100,7 +100,7 @@ public class DocumentationHashService {
             hashResult.put("program", program.getName());
             return Response.ok(hashResult);
         } catch (Exception e) {
-            return Response.err("Failed to compute hash: " + e.getMessage());
+            return ServiceUtils.fail("compute hash", e);
         }
     }
 
@@ -277,7 +277,7 @@ public class DocumentationHashService {
                 "total_matching", total
             ));
         } catch (Exception e) {
-            return Response.err("Failed to get bulk hashes: " + e.getMessage());
+            return ServiceUtils.fail("get bulk hashes", e);
         }
     }
 
@@ -407,7 +407,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err("Failed to export documentation: " + e.getMessage());
+            return ServiceUtils.fail("export documentation", e);
         }
     }
 
@@ -489,7 +489,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -560,7 +560,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -653,7 +653,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -689,7 +689,7 @@ public class DocumentationHashService {
             return BinaryComparisonService.findSimilarFunctionsJson(
                 srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -715,7 +715,7 @@ public class DocumentationHashService {
             return BinaryComparisonService.bulkFuzzyMatchJson(
                 srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -753,7 +753,7 @@ public class DocumentationHashService {
 
             return BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1159,7 +1159,7 @@ public class DocumentationHashService {
                 }
 
             } catch (Throwable t) {
-                errorMsg = t.getClass().getSimpleName() + ": " + t.getMessage();
+                errorMsg = ServiceUtils.failureMessage(t);
             }
             return new MergeOutcome(errors, errorMsg);
         };
@@ -1180,7 +1180,7 @@ public class DocumentationHashService {
         } catch (Refusal r) {
             return Response.err(r.getMessage());
         } catch (Throwable t) {
-            return Response.err("Merge invocation failed: " + t.getMessage());
+            return ServiceUtils.fail("Merge invocation", t);
         }
         if (outcome.errorMsg() != null) return Response.err(outcome.errorMsg());
 
@@ -1325,7 +1325,7 @@ public class DocumentationHashService {
             result.put("address", payload.get("address"));
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("archive POST failed: " + e.getMessage());
+            return ServiceUtils.fail("archive POST", e);
         }
     }
 

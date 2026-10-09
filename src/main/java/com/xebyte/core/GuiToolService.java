@@ -84,7 +84,7 @@ public class GuiToolService {
             }
             return ServiceUtils.listed("tools", tools);
         } catch (Exception e) {
-            return Response.err("Failed to list tools: " + messageOf(e));
+            return ServiceUtils.fail("list tools", e);
         }
     }
 
@@ -140,11 +140,7 @@ public class GuiToolService {
             }
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Failed to navigate: " + messageOf(e));
+            return ServiceUtils.fail("navigate", e);
         }
-    }
-
-    private static String messageOf(Exception e) {
-        return e.getMessage() != null ? e.getMessage() : e.toString();
     }
 }
