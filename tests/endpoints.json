@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 216,
+  "total_endpoints": 217,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -80,6 +80,24 @@
         "headless"
       ],
       "description": "Add struct field"
+    },
+    {
+      "path": "/adjust_pointer_offset",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "variable_name",
+        "base_type",
+        "component_offset",
+        "name",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Apply Ghidra's Adjust Pointer Offset using a pointer typedef with a component offset, enabling ADJ() decompilation. Supports pointer locals, parameters and implicit this; preserves pointer width and storage."
     },
     {
       "path": "/analysis_status",

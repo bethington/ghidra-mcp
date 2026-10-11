@@ -1,5 +1,41 @@
 # Ghidra MCP Tool Usage Guide
 
+## Shifted pointers: Adjust Pointer Offset
+
+Load the `function` tool group and call `adjust_pointer_offset` to perform the
+decompiler UI's **Adjust Pointer Offset** operation. This creates a reusable pointer
+typedef with Ghidra's component-offset setting and applies it to the named variable.
+An ordinary pointer or a renamed typedef alone does not encode the shift.
+
+For `UnifiedDevice::scalar_deleting_destructor_adjustor_36`, where the incoming
+`this` points 36 bytes into the complete `UnifiedDevice` object:
+
+```python
+adjust_pointer_offset(
+    function_address="<adjustor entry address>",
+    variable_name="this",
+    base_type="UnifiedDevice",
+    component_offset="36",
+    name="UnifiedDevice_shifted_this_36",
+)
+```
+
+Pass **positive 36** for an instruction that subtracts 36: the offset describes
+where the pointer lies inside the containing object, not the instruction's delta.
+Signed decimal and hex offsets are accepted. Use the containing type's full category
+path if its name is ambiguous. Omit `name` for a generated name. Zero applies an
+unshifted pointer typedef. Re-decompile afterward; accesses to the containing object
+can then render as `ADJ(this)` (the exact output depends on the function's operations).
+
+Pointer locals and explicit parameters retain their storage mode. For an immutable
+auto-`this`, the tool materializes the existing parameters using custom storage so
+the shifted type persists; the response reports `custom_storage_enabled=true`.
+The function's parameter locations and pointer width are preserved. Existing typedefs
+are reused only when their pointee, width and pointer settings match; conflicts fail
+without overwriting types used elsewhere. Type creation and application are atomic.
+The response includes `type_path`, `offset` and `pointer_size` read back from the
+persisted type. This tool is available in both GUI and headless mode.
+
 ## Summary of Fixed Issues
 
 The enhanced analysis prompt has been updated to use the **correct and reliable tool patterns** that work without retry loops.

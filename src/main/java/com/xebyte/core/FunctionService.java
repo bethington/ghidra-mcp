@@ -14,6 +14,12 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.TypeDef;
+import ghidra.program.model.data.TypedefDataType;
+import ghidra.program.model.data.PointerDataType;
+import ghidra.program.model.data.PointerType;
+import ghidra.program.model.data.ComponentOffsetSettingsDefinition;
+import ghidra.program.database.data.PointerTypedefInspector;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.lang.InjectPayload;
@@ -1592,6 +1598,115 @@ Map<String, Object> out = new LinkedHashMap<>();
             return setFunctionThisType(func, newType, program);
         }
         return setLocalVariableType(func, variableName, newType, program);
+    }
+
+    @McpTool(path = "/adjust_pointer_offset", method = "POST",
+            description = "Apply Ghidra's Adjust Pointer Offset to a pointer variable, including 'this'. Creates a pointer typedef with a component offset so decompilation can render ADJ(pointer). The offset is the pointer's signed byte displacement from the start of base_type, NOT the adjustment instruction's delta. Preserves pointer width and storage. An implicit auto-parameter requires custom storage; this function-wide change is reported. Existing typedefs with different settings are rejected, not overwritten.",
+            category = "function", access = ToolAccess.WRITE)
+    public Response adjustPointerOffset(
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
+            @Param(value = "variable_name", source = ParamSource.BODY,
+                    description = "Pointer local or parameter name exactly as shown by the decompiler, including 'this'.") String variableName,
+            @Param(value = "base_type", source = ParamSource.BODY,
+                    description = "Containing data type, not a pointer; use a full category path to disambiguate. For a secondary base at byte 36, use the complete object type.") String baseType,
+            @Param(value = "component_offset", source = ParamSource.BODY,
+                    description = "Signed byte displacement from the containing object start, decimal or hex (36 or 0x24). For this -= 36, pass positive 36. Zero creates an unshifted pointer typedef.") String offsetText,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
+                    description = "Reusable pointer typedef name. Omit for a name derived from the containing type, offset and pointer width. Created in base_type's category.") String name,
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (functionAddress == null || functionAddress.isBlank()) return Response.err("Function address is required");
+        if (variableName == null || variableName.isBlank()) return Response.err("Variable name is required");
+        if (baseType == null || baseType.isBlank()) return Response.err("Base type is required");
+        final int offset;
+        try {
+            offset = Math.toIntExact(Long.decode(offsetText == null ? "" : offsetText.trim()));
+        } catch (Exception e) {
+            return Response.err("Invalid pointer offset: " + offsetText);
+        }
+        Address address = ServiceUtils.parseAddress(program, functionAddress);
+        if (address == null) return Response.err(ServiceUtils.getLastParseError());
+        try {
+            return threadingStrategy.executeRead(() -> {
+                Function function = ServiceUtils.getFunctionForAddress(program, address);
+                if (function == null) return Response.err("No function at address: " + functionAddress);
+                DecompileResults results = decompileFunction(function, program);
+                if (results == null || !results.decompileCompleted() || results.getHighFunction() == null) {
+                    return Response.err("Decompilation failed for function at " + functionAddress);
+                }
+                HighSymbol symbol = findSymbolByName(results.getHighFunction(), variableName);
+                if (symbol == null || symbol.isGlobal()) return Response.err("Pointer variable not found: " + variableName);
+                DataType current = symbol.getDataType();
+                if (current instanceof TypeDef typedef) current = typedef.getBaseDataType();
+                if (!(current instanceof Pointer)) return Response.err("Variable is not a pointer: " + variableName);
+                final int pointerSize = current.getLength();
+                return threadingStrategy.executeWrite(program, "Adjust pointer offset", () -> {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType parent = ServiceUtils.resolveDataType(dtm, baseType);
+                    if (parent == null) throw new IllegalArgumentException("Could not resolve base type: " + baseType);
+                    DataType unwrapped = parent instanceof TypeDef typedef ? typedef.getBaseDataType() : parent;
+                    if (unwrapped instanceof Pointer || parent.getLength() <= 0) {
+                        throw new IllegalArgumentException("base_type must be a fixed-length containing type, not a pointer");
+                    }
+                    String typeName = name == null || name.isBlank()
+                        ? parent.getName() + (offset < 0 ? "_ptrminus_" : "_ptr_")
+                            + Math.abs((long) offset) + "_" + pointerSize : name;
+                    DataType existing = dtm.getDataType(parent.getCategoryPath(), typeName);
+                    TypeDef shifted;
+                    if (existing != null) {
+                        if (!(existing instanceof TypeDef typedef)
+                                || !(typedef.getDataType() instanceof Pointer pointer)
+                                || pointer.getLength() != pointerSize || pointer.getDataType() == null
+                                || !pointer.getDataType().equals(parent)
+                                || PointerTypedefInspector.hasPointerBitShift(typedef)
+                                || PointerTypedefInspector.hasPointerBitMask(typedef)
+                                || PointerTypedefInspector.getPointerType(typedef) != PointerType.DEFAULT
+                                || PointerTypedefInspector.getPointerAddressSpace(typedef, program.getAddressFactory()) != null
+                                || PointerTypedefInspector.getPointerComponentOffset(typedef) != offset) {
+                            throw new IllegalArgumentException("Data type already exists with different pointer settings: " + existing.getPathName());
+                        }
+                        shifted = (TypeDef) existing;
+                    } else {
+                        shifted = (TypeDef) dtm.resolve(new TypedefDataType(parent.getCategoryPath(), typeName,
+                            new PointerDataType(parent, pointerSize)), null);
+                        ComponentOffsetSettingsDefinition.DEF.setValue(shifted.getDefaultSettings(), offset);
+                    }
+                    boolean customStorageEnabled = false;
+                    boolean parameterUpdated = false;
+                    if (symbol.isParameter()) {
+                        Parameter parameter = function.getParameter(symbol.getCategoryIndex());
+                        if (parameter != null && parameter.isAutoParameter()) {
+                            // Auto-'this' derives its type from the class. Materialize it before
+                            // retyping, otherwise Ghidra rejects or regenerates the shifted type.
+                            function.setCustomVariableStorage(true);
+                            customStorageEnabled = true;
+                            parameter = function.getParameter(symbol.getCategoryIndex());
+                        }
+                        if (parameter != null && parameter.getVariableStorage().compareTo(symbol.getStorage()) == 0) {
+                            parameter.setDataType(shifted, SourceType.USER_DEFINED);
+                            parameterUpdated = true;
+                        }
+                    }
+                    if (!parameterUpdated) {
+                        HighFunctionDBUtil.updateDBVariable(symbol, null, shifted, SourceType.USER_DEFINED);
+                    }
+                    Variable persisted = HighFunctionDBUtil.getFunctionVariable(symbol);
+                    if (persisted == null || !(persisted.getDataType() instanceof TypeDef actual)
+                            || PointerTypedefInspector.getPointerComponentOffset(actual) != offset
+                            || !actual.equals(shifted)) {
+                        throw new IllegalStateException("Shifted pointer could not be read back after the write");
+                    }
+                    return Response.ok(JsonHelper.mapOf("status", "success", "variable_name", variableName,
+                        "type_name", shifted.getName(), "type_path", shifted.getPathName(),
+                        "base_type", parent.getPathName(), "offset",
+                        PointerTypedefInspector.getPointerComponentOffset(actual),
+                        "pointer_size", actual.getLength(), "custom_storage_enabled", customStorageEnabled,
+                        "message", "Applied relative pointer type; re-decompile to see ADJ() where the containing object is accessed."));
+                });
+            });
+        } catch (Exception e) {
+            return Response.err("adjust_pointer_offset failed: " + e.getMessage());
+        }
     }
 
     static DataType resolveThisPointerType(DataTypeManager dtm, String thisType) {

@@ -160,6 +160,14 @@ every one named in
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
 
+### Added — shifted pointers / Adjust Pointer Offset
+
+- `adjust_pointer_offset` applies Ghidra's relative-pointer typedef and component
+  offset to pointer locals or parameters, including implicit `this`, in GUI and
+  headless mode. Enables the decompiler's `ADJ()` form and preserves pointer width
+  and storage. Reports when an auto-parameter requires function-wide custom storage;
+  rejects conflicting typedefs rather than changing their other uses.
+
 ### Fixed — similar function names no longer block renames
 
 - `rename_function` treats token-subset similarity as an advisory warning even in

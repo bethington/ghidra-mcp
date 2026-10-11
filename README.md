@@ -1047,6 +1047,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 ### Functions: Decompile, Rename, Prototypes & Variables
 
 - `add_function_tag` - Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...])
+- `adjust_pointer_offset` - Apply Ghidra's Adjust Pointer Offset using a pointer typedef with a component offset, enabling ADJ() decompilation
 - `batch_rename_function_components` - Batch rename function components
 - `clear_flow_and_repair` - Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true)
 - `clear_instruction_flow_override` - Clear flow override
