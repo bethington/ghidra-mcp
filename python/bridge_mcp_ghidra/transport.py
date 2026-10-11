@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlparse
 
 from . import state
 from .config import AUTH_TOKEN, logger
+from .protocol_safety import MAX_HTTP_RESPONSE_BYTES, OVERSIZED_RESULT_MESSAGE
 
 
 def _auth_headers() -> dict[str, str]:
@@ -26,6 +27,10 @@ class RequestNotSentError(ConnectionError):
 
 class RequestOutcomeUnknownError(ConnectionError):
     """The request may have reached Ghidra, but no complete response arrived."""
+
+
+class ResponseTooLargeError(ValueError):
+    """The response cannot safely be buffered or returned to an MCP client."""
 
 
 def _request_over_connection(
@@ -58,8 +63,18 @@ def _request_over_connection(
         else:
             conn.request(method, path, body=body, headers=headers)
         response = conn.getresponse()
-        result = response.read().decode("utf-8")
+        expected_length = response.length
+        if expected_length is not None and expected_length > MAX_HTTP_RESPONSE_BYTES:
+            raise ResponseTooLargeError(OVERSIZED_RESULT_MESSAGE)
+        raw = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_HTTP_RESPONSE_BYTES:
+            raise ResponseTooLargeError(OVERSIZED_RESULT_MESSAGE)
+        if expected_length is not None and len(raw) < expected_length:
+            raise http.client.IncompleteRead(raw, expected_length - len(raw))
+        result = raw.decode("utf-8")
         return result, response.status
+    except ResponseTooLargeError:
+        raise
     except Exception as exc:
         raise RequestOutcomeUnknownError(f"No complete response for {method} {path}: {exc}") from exc
     finally:
