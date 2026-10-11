@@ -6,10 +6,12 @@ from mcp.server.lowlevel.server import NotificationOptions
 
 # `state` imports only from `config`, so this cannot cycle back through here.
 from . import state as _state
+from .protocol_safety import install_protocol_guards
 
 # The MCP server singleton. All static and dynamically registered tools attach
 # to this object.
 mcp = FastMCP("ghidra-mcp")
+install_protocol_guards(mcp._mcp_server)
 
 # Enable tools/list_changed notifications so clients re-fetch tools after
 # dynamic registration.
