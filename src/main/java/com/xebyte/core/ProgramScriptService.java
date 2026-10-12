@@ -2229,11 +2229,16 @@ public class ProgramScriptService {
         ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         PrintStream originalErr = System.err;
+        // Track whether we copied the script (for cleanup)
         File copiedScript = null;
         StringWriter capturedWriter = null;
         PrintWriter capturedPrintWriter = null;
         TimeoutTaskMonitor activeMonitor = null;
 
+        // Locals so the catch block can surface OSGi build/activate output
+        // captured into scriptWriter before a failure. The PrintWriter
+        // lets the failure path flush buffered output into the StringWriter
+        // before reading it, otherwise the captured text can be truncated.
         StringWriter scriptWriter = new StringWriter();
         try {
             // Capture console output

@@ -1129,6 +1129,7 @@ Map<String, Object> out = new LinkedHashMap<>();
     /**
      * Helper method that applies the function prototype within a transaction.
      * v3.0.1: Preserves existing plate comment across prototype changes.
+     * @return true when the signature (and optional convention) applied
      */
     boolean applyFunctionPrototype(Program program, String functionAddrStr, String prototype,
                                        String callingConvention, StringBuilder errorMessage) {
@@ -1184,6 +1185,7 @@ Map<String, Object> out = new LinkedHashMap<>();
 
     /**
      * Parse and apply the function signature with error handling.
+     * @return true when the signature (and optional convention) applied
      */
     boolean parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
                                               String callingConvention, StringBuilder errorMessage) {
@@ -2093,7 +2095,6 @@ Map<String, Object> out = new LinkedHashMap<>();
             return Response.err("Instruction address is required");
         }
 
-        // Resolve address before entering threading lambda
         Address addr = ServiceUtils.parseAddress(program, instructionAddrStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -2899,7 +2900,6 @@ Map<String, Object> out = new LinkedHashMap<>();
             return Response.err("address parameter required");
         }
 
-        // Resolve address before entering threading lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 

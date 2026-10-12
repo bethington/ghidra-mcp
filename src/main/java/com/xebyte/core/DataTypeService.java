@@ -2142,7 +2142,6 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -2365,7 +2364,6 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -2597,7 +2595,6 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, structAddressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 

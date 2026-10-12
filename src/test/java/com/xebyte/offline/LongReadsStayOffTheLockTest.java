@@ -6,12 +6,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Long script runs must not go through {@code executeRead}/{@code executeWrite}: under the
- * server-wide lock a script can hold every other request for up to its 30-minute timeout,
- * and a script that calls back into the server over HTTP would deadlock against itself.
+ * Long script runs must not go through
+ * {@code executeRead}/{@code executeWrite}: under the server-wide lock a script
+ * can hold every other request for up to its 30-minute timeout, and a script
+ * that calls back into the server over HTTP would deadlock against itself.
  *
- * <p>Pinned by source inspection, in the style of {@link WritesTakeTheWriteLockTest}, on
- * {@code runGhidraScript} and on the method that runs the script for it.
+ * <p>Pinned on {@code ProgramScriptService.runGhidraScript} by source inspection
+ * (same style as {@link WritesTakeTheWriteLockTest}).
  */
 public class LongReadsStayOffTheLockTest {
 
@@ -23,6 +24,8 @@ public class LongReadsStayOffTheLockTest {
                         + "String programName, int timeoutSeconds)",
                 "private ScriptRunOutcome executeGhidraScriptBody("}) {
             String body = methodBody(src, signature);
+            // Lock held for up to the 30-minute script timeout; a script calling back
+            // over HTTP would deadlock.
             assertFalse(signature + " must not call executeRead", body.contains("executeRead("));
             assertFalse(signature + " must not call executeWrite", body.contains("executeWrite("));
         }

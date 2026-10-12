@@ -894,6 +894,7 @@ public class DocumentationHashService {
         record MergeOutcome(int errors, String errorMsg) {}
 
         java.util.concurrent.Callable<MergeOutcome> mergeTask = () -> {
+            // Soft per-item merge failures accumulate here and are returned in MergeOutcome.
             int errors = 0;
             String errorMsg = null;
             try {
